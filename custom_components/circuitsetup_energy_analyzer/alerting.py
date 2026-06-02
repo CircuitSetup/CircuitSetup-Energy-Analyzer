@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 from typing import Self
 
 from .models import AlertEvidence, Severity
@@ -19,6 +21,11 @@ class Observation:
     observed_at: datetime
     observed_value: float = 0.0
     baseline_value: float = 0.0
+    message: str = ""
+    features: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
 
 
 class ConservativeAlertPolicy:
@@ -63,16 +70,18 @@ class ConservativeAlertPolicy:
         last = observations[-1]
         change_ratio = self._change_ratio(last.observed_value, last.baseline_value)
         feature_words = observation.feature.replace("_", " ")
+        message = last.message or (
+            f"Possible issue: {feature_words} shows evidence of a "
+            f"learned-baseline change across {len(observations)} recent "
+            "observations."
+        )
+        features = dict(last.features) if last.features else {last.feature: last.score}
 
         return AlertEvidence(
             timestamp=last.observed_at,
             circuit_id=last.circuit_id,
             severity=Severity.WARNING,
-            message=(
-                f"Possible issue: {feature_words} shows evidence of a "
-                f"learned-baseline change across {len(observations)} recent "
-                "observations."
-            ),
+            message=message,
             feature=last.feature,
             observed_value=last.observed_value,
             baseline_value=last.baseline_value,
@@ -80,7 +89,7 @@ class ConservativeAlertPolicy:
             repeated_count=len(observations),
             first_seen=first.observed_at,
             last_seen=last.observed_at,
-            features={last.feature: last.score},
+            features=features,
         )
 
     @staticmethod
