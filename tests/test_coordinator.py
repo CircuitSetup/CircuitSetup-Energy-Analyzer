@@ -1144,6 +1144,257 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
 
 
 @pytest.mark.asyncio
+async def test_relearn_baseline_clears_power_quality_runtime_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+                )
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.power_quality_score_by_circuit["fridge"] = 4.5
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
+        "Possible issue"
+    )
+    coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
+    coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
+    coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
+
+    await coordinator.async_relearn_baseline("fridge")
+
+    assert "fridge" not in coordinator.state.power_quality_score_by_circuit
+    assert "fridge" not in coordinator.state.power_quality_evidence_by_circuit
+    assert "fridge" not in coordinator.state.reactive_power_drift_by_circuit
+    assert "fridge" not in coordinator.state.apparent_power_drift_by_circuit
+    assert "fridge" not in coordinator.state.power_factor_drift_by_circuit
+
+
+@pytest.mark.asyncio
+async def test_runtime_no_feature_sample_clears_power_quality_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="unknown",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["fridge"] = False
+    coordinator.state.power_quality_score_by_circuit["fridge"] = 4.5
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
+        "Possible issue"
+    )
+    coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
+    coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
+    coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.learning_by_circuit["fridge"] is True
+    assert "fridge" not in coordinator.state.power_quality_score_by_circuit
+    assert "fridge" not in coordinator.state.power_quality_evidence_by_circuit
+    assert "fridge" not in coordinator.state.reactive_power_drift_by_circuit
+    assert "fridge" not in coordinator.state.apparent_power_drift_by_circuit
+    assert "fridge" not in coordinator.state.power_factor_drift_by_circuit
+
+
+@pytest.mark.asyncio
+async def test_runtime_real_power_fallback_preserves_policy_window(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"time": now, "power": 108.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state=str(holder["power"]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        options={CONF_SENSITIVITY: "high"},
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+                )
+            },
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset, power in enumerate((108.0, 110.0, 110.0)):
+        holder["time"] = now + timedelta(minutes=offset)
+        holder["power"] = power
+        await coordinator.async_process_update()
+
+    assert notifications
+    assert notifications[0].feature == "real_power"
+
+
+@pytest.mark.asyncio
+async def test_runtime_reactive_drift_uses_ratio_when_raw_baseline_is_zero() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.fridge_power": "100",
+                "sensor.fridge_var": "20",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_var", "role": "reactive_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+                ),
+                "fridge:reactive_power": BaselineStats(
+                    "reactive_power", 20, 0.0, 1.0, 0.0, 0.0, 1.0
+                ),
+                "fridge:reactive_to_real_ratio": BaselineStats(
+                    "reactive_to_real_ratio", 20, 0.05, 0.01, 0.04, 0.06, 1.0
+                ),
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.reactive_power_drift_by_circuit["fridge"] > 2.0
+
+
+@pytest.mark.asyncio
+async def test_export_diagnostics_includes_power_quality_runtime_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    coordinator.state.power_quality_score_by_circuit["fridge"] = 3.5
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
+        "Possible issue"
+    )
+    coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
+    coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
+    coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
+
+    await coordinator.async_export_diagnostics("fridge")
+
+    assert coordinator.last_exported_diagnostics["power_quality_score"] == 3.5
+    assert (
+        coordinator.last_exported_diagnostics["power_quality_evidence"]
+        == "Possible issue"
+    )
+    assert coordinator.last_exported_diagnostics["reactive_power_drift"] == 1.5
+    assert coordinator.last_exported_diagnostics["apparent_power_drift"] == 1.2
+    assert coordinator.last_exported_diagnostics["power_factor_drift"] == 0.8
+
+
+@pytest.mark.asyncio
 async def test_runtime_learns_power_quality_baselines_for_optional_metrics() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

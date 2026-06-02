@@ -289,6 +289,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.active_alerts_by_circuit.pop(circuit_id, None)
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
+        self._clear_power_quality_state(circuit_id)
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
 
@@ -339,6 +340,26 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "anomaly_score": self.state.anomaly_score_by_circuit.get(circuit_id, 0.0),
             "data_quality": self.state.data_quality_by_circuit.get(circuit_id),
             "learning": self.state.learning_by_circuit.get(circuit_id, True),
+            "power_quality_score": self.state.power_quality_score_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "power_quality_evidence": self.state.power_quality_evidence_by_circuit.get(
+                circuit_id,
+                "",
+            ),
+            "reactive_power_drift": self.state.reactive_power_drift_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "apparent_power_drift": self.state.apparent_power_drift_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "power_factor_drift": self.state.power_factor_drift_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
         }
         self.async_set_updated_data(self.state)
 
@@ -705,7 +726,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AlertEvidence | None:
         features = extract_power_quality_features(sample)
         if not features:
-            self.state.learning_by_circuit.setdefault(config.circuit_id, True)
+            self.state.learning_by_circuit[config.circuit_id] = True
+            self._clear_power_quality_state(config.circuit_id)
             return None
 
         baselines: dict[str, Any] = {}
@@ -730,6 +752,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             scores,
             min_relationship_score=self._alert_policy.min_average_score,
         )
+        if evidence is None:
+            evidence = self._real_power_fallback_evidence(scores)
         self._update_power_quality_state(config.circuit_id, scores, evidence)
 
         mature = self._learning_mature(config, now)
@@ -756,6 +780,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _real_power_fallback_evidence(
+        self: Self,
+        scores: Iterable[Any],
+    ) -> PowerQualityEvidence | None:
+        for score in scores:
+            if (
+                score.feature == "real_power"
+                and score.baseline_confidence
+                >= self._alert_policy.min_baseline_confidence
+            ):
+                return PowerQualityEvidence(
+                    feature="real_power",
+                    message="",
+                    observed_value=score.observed_value,
+                    baseline_value=score.baseline_value,
+                    change_ratio=score.change_ratio,
+                    score=score.score,
+                    baseline_confidence=score.baseline_confidence,
+                    features={"real_power": score.score},
+                )
+        return None
+
+    def _clear_power_quality_state(self: Self, circuit_id: str) -> None:
+        self.state.power_quality_score_by_circuit.pop(circuit_id, None)
+        self.state.power_quality_evidence_by_circuit.pop(circuit_id, None)
+        self.state.reactive_power_drift_by_circuit.pop(circuit_id, None)
+        self.state.apparent_power_drift_by_circuit.pop(circuit_id, None)
+        self.state.power_factor_drift_by_circuit.pop(circuit_id, None)
+
     def _update_power_quality_state(
         self: Self,
         circuit_id: str,
@@ -763,8 +816,21 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         evidence: PowerQualityEvidence | None,
     ) -> None:
         def _drift(primary: str, fallback: str) -> float:
-            score = by_feature.get(primary, by_feature.get(fallback))
-            return abs(score.change_ratio) if score is not None else 0.0
+            candidates = [
+                score
+                for feature in (primary, fallback)
+                if (score := by_feature.get(feature)) is not None
+            ]
+            if not candidates:
+                return 0.0
+            score = max(
+                candidates,
+                key=lambda candidate: (
+                    abs(candidate.change_ratio),
+                    candidate.score,
+                ),
+            )
+            return abs(score.change_ratio)
 
         scores = list(scores)
         by_feature = {score.feature: score for score in scores}
