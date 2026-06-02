@@ -10,6 +10,7 @@ sections:
           - entity: sensor.refrigerator_power_quality_score
           - entity: sensor.refrigerator_power_quality_evidence
           - entity: sensor.refrigerator_reactive_power_drift
+          - entity: sensor.refrigerator_apparent_power_drift
           - entity: sensor.refrigerator_power_factor_drift
           - entity: sensor.refrigerator_last_event
           - entity: binary_sensor.refrigerator_learning
@@ -21,6 +22,7 @@ sections:
           - entity: sensor.hvac_power_quality_score
           - entity: sensor.hvac_power_quality_evidence
           - entity: sensor.hvac_reactive_power_drift
+          - entity: sensor.hvac_apparent_power_drift
           - entity: sensor.hvac_power_factor_drift
           - entity: sensor.hvac_last_event
           - entity: binary_sensor.hvac_learning

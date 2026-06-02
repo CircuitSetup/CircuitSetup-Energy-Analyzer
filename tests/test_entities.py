@@ -71,6 +71,9 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert last_event_value(state, "unknown") is None
     assert power_quality_score_value(state, "unknown") == 0.0
     assert power_quality_evidence_value(state, "unknown") == ""
+    assert reactive_power_drift_value(state, "unknown") == 0.0
+    assert apparent_power_drift_value(state, "unknown") == 0.0
+    assert power_factor_drift_value(state, "unknown") == 0.0
     assert nilm_signature_count_value(state, "unknown") == 0
     assert nilm_unmatched_load_percentage_value(state, "unknown") == 0.0
 
