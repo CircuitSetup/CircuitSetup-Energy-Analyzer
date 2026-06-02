@@ -737,7 +737,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.learning_by_circuit[config.circuit_id] = (
             learning_new_features or not mature or not has_confident_scores
         )
-        if learning_new_features or not mature or not has_confident_scores:
+        if not mature or not has_confident_scores:
             return None
         if evidence is None:
             return None
