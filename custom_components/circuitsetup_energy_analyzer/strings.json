@@ -68,5 +68,27 @@
         "name": "Data quality problem"
       }
     }
+  },
+  "issues": {
+    "missing_required_sensor": {
+      "title": "Energy Analyzer source sensor is missing",
+      "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue."
+    },
+    "phase_mismatch": {
+      "title": "Energy Analyzer phase pairing looks suspicious",
+      "description": "A dual-phase circuit has source data that does not look like a valid paired load. Review the selected channels and CT orientation."
+    },
+    "stale_source_sensor": {
+      "title": "Energy Analyzer source sensor is stale",
+      "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit."
+    },
+    "missing_mains_nilm_sensor": {
+      "title": "Energy Analyzer mains NILM sensor is missing",
+      "description": "Experimental NILM is enabled but a configured mains source sensor is missing or unavailable. Per-circuit analysis can continue, but NILM discovery is paused."
+    },
+    "low_nilm_confidence": {
+      "title": "Energy Analyzer NILM confidence is low",
+      "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications."
+    }
   }
 }

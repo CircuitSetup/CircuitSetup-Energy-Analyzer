@@ -1,0 +1,28 @@
+type: sections
+title: Energy Analyzer
+sections:
+  - type: grid
+    cards:
+      - type: entities
+        title: Refrigerator
+        entities:
+          - entity: sensor.refrigerator_anomaly_score
+          - entity: sensor.refrigerator_last_event
+          - entity: binary_sensor.refrigerator_learning
+          - entity: binary_sensor.refrigerator_data_quality_problem
+      - type: entities
+        title: HVAC
+        entities:
+          - entity: sensor.hvac_anomaly_score
+          - entity: sensor.hvac_last_event
+          - entity: binary_sensor.hvac_learning
+          - entity: binary_sensor.hvac_data_quality_problem
+      - type: entities
+        title: Mains NILM
+        entities:
+          - entity: sensor.mains_anomaly_score
+          - entity: sensor.mains_last_event
+          - entity: binary_sensor.mains_learning
+          - entity: binary_sensor.mains_data_quality_problem
+          - entity: sensor.mains_nilm_discovered_signatures
+          - entity: sensor.mains_nilm_unmatched_load_percentage
