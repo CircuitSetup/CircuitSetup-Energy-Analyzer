@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .const import DOMAIN
+from .models import Severity
+
+
+def issue_id_for_circuit_problem(circuit_id: str, problem: str) -> str:
+    """Return a stable Repairs issue id for a circuit setup/data-quality problem."""
+    return f"{DOMAIN}_{circuit_id}_{problem}"
+
+
+async def async_create_data_quality_issue(
+    hass: Any,
+    circuit_id: str,
+    problem: str,
+    severity: Severity | str = Severity.WARNING,
+) -> None:
+    """Create a Home Assistant Repairs issue for data quality/config problems."""
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except ModuleNotFoundError:
+        return
+
+    create_issue = getattr(ir, "async_create_issue", None)
+    if create_issue is None:
+        return
+
+    issue_severity = _ha_issue_severity(ir, severity)
+    create_issue(
+        hass,
+        DOMAIN,
+        issue_id_for_circuit_problem(circuit_id, problem),
+        is_fixable=False,
+        is_persistent=True,
+        severity=issue_severity,
+        translation_key=problem,
+        data={"circuit_id": circuit_id},
+    )
+
+
+def _ha_issue_severity(issue_registry: Any, severity: Severity | str) -> Any:
+    issue_severity = getattr(issue_registry, "IssueSeverity", None)
+    value = severity.value if isinstance(severity, Severity) else str(severity)
+    if issue_severity is None:
+        return value
+
+    return getattr(issue_severity, value.upper(), value)

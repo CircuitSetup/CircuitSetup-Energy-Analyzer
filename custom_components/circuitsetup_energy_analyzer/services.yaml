@@ -1,0 +1,78 @@
+relearn_baseline:
+  name: Relearn baseline
+  description: Relearn the baseline for a configured circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: fridge
+      selector:
+        text:
+pause_alerts:
+  name: Pause alerts
+  description: Pause alert notifications for a configured circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: fridge
+      selector:
+        text:
+    duration:
+      required: false
+      example: "01:00:00"
+      selector:
+        text:
+acknowledge_alert:
+  name: Acknowledge alert
+  description: Acknowledge an alert evidence notification.
+  fields:
+    alert_id:
+      required: true
+      example: circuitsetup_energy_analyzer_alert_fridge_cycle_duration_s
+      selector:
+        text:
+export_diagnostics:
+  name: Export diagnostics
+  description: Export diagnostics for a configured circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: mains
+      selector:
+        text:
+run_mapping_checks:
+  name: Run mapping checks
+  description: Run configured source-entity mapping checks.
+  fields: {}
+label_nilm_signature:
+  name: Label NILM signature
+  description: Label a detected NILM signature for a mains circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: mains
+      selector:
+        text:
+    signature_id:
+      required: true
+      example: signature_1
+      selector:
+        text:
+    label:
+      required: true
+      example: Microwave
+      selector:
+        text:
+ignore_nilm_signature:
+  name: Ignore NILM signature
+  description: Ignore a detected NILM signature for a mains circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: mains
+      selector:
+        text:
+    signature_id:
+      required: true
+      example: signature_1
+      selector:
+        text:
