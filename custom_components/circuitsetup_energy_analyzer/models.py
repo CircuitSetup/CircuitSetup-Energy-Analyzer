@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Mapping
 
 
 class ApplianceProfile(StrEnum):
@@ -145,7 +147,10 @@ class CircuitEvent:
     circuit_id: str
     event_type: EventType
     severity: Severity = Severity.INFO
-    features: dict[str, float] = field(default_factory=dict)
+    features: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
 
 
 @dataclass(frozen=True, slots=True)

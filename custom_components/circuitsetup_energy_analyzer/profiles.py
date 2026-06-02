@@ -11,35 +11,35 @@ class ProfileDefinition:
     """Static analysis requirements for an appliance profile."""
 
     appliance_profile: ApplianceProfile
-    supported_modes: set[CircuitMode]
-    required_roles: set[SensorRole]
-    recommended_roles: set[SensorRole]
-    features: set[str]
+    supported_modes: frozenset[CircuitMode]
+    required_roles: frozenset[SensorRole]
+    recommended_roles: frozenset[SensorRole]
+    features: frozenset[str]
     minimum_cycles: int = 0
     minimum_learning_days: int = MIN_LEARNING_DAYS
     experimental: bool = False
 
 
-_SINGLE_PHASE_POWER = {CircuitMode.SINGLE_PHASE}
-_BASIC_POWER_ROLES = {SensorRole.REAL_POWER, SensorRole.CURRENT}
-_POWER_CONTEXT = {
+_SINGLE_PHASE_POWER = frozenset({CircuitMode.SINGLE_PHASE})
+_BASIC_POWER_ROLES = frozenset({SensorRole.REAL_POWER, SensorRole.CURRENT})
+_POWER_CONTEXT = frozenset({
     SensorRole.VOLTAGE,
     SensorRole.REACTIVE_POWER,
     SensorRole.APPARENT_POWER,
     SensorRole.POWER_FACTOR,
     SensorRole.ENERGY,
-}
-_MOTOR_FEATURES = {
+})
+_MOTOR_FEATURES = frozenset({
     "start_signature",
     "stop_signature",
     "steady_window",
     "duty_cycle",
-}
-_RESISTIVE_FEATURES = {
+})
+_RESISTIVE_FEATURES = frozenset({
     "thermal_cycle",
     "steady_window",
     "large_persistent_change",
-}
+})
 
 
 _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
@@ -47,72 +47,78 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         supported_modes=_SINGLE_PHASE_POWER,
         required_roles=_BASIC_POWER_ROLES,
-        recommended_roles={
+        recommended_roles=frozenset({
             SensorRole.REACTIVE_POWER,
             SensorRole.APPARENT_POWER,
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
-        },
-        features={"compressor_cycle", "defrost_cycle", "door_open_hint"},
+        }),
+        features=frozenset({"compressor_cycle", "defrost_cycle", "door_open_hint"}),
         minimum_cycles=20,
     ),
     ApplianceProfile.FREEZER: ProfileDefinition(
         appliance_profile=ApplianceProfile.FREEZER,
         supported_modes=_SINGLE_PHASE_POWER,
         required_roles=_BASIC_POWER_ROLES,
-        recommended_roles={
+        recommended_roles=frozenset({
             SensorRole.REACTIVE_POWER,
             SensorRole.APPARENT_POWER,
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
-        },
-        features={"compressor_cycle", "defrost_cycle", "temperature_drift_hint"},
+        }),
+        features=frozenset(
+            {"compressor_cycle", "defrost_cycle", "temperature_drift_hint"}
+        ),
         minimum_cycles=20,
     ),
     ApplianceProfile.HVAC: ProfileDefinition(
         appliance_profile=ApplianceProfile.HVAC,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
         recommended_roles=_POWER_CONTEXT,
-        features={
+        features=frozenset({
             "compressor_start",
             "aux_heat_stage",
             "fan_only",
             "leg_imbalance",
             "short_cycle",
-        },
+        }),
         minimum_cycles=12,
     ),
     ApplianceProfile.WATER_HEATER: ProfileDefinition(
         appliance_profile=ApplianceProfile.WATER_HEATER,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={SensorRole.VOLTAGE, SensorRole.ENERGY},
-        features={"element_cycle", "recovery_window", "large_persistent_change"},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({SensorRole.VOLTAGE, SensorRole.ENERGY}),
+        features=frozenset(
+            {"element_cycle", "recovery_window", "large_persistent_change"}
+        ),
         minimum_cycles=10,
     ),
     ApplianceProfile.OVEN: ProfileDefinition(
         appliance_profile=ApplianceProfile.OVEN,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={SensorRole.VOLTAGE, SensorRole.ENERGY},
-        features={"preheat", "temperature_hold", "element_cycle"},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({SensorRole.VOLTAGE, SensorRole.ENERGY}),
+        features=frozenset({"preheat", "temperature_hold", "element_cycle"}),
         minimum_cycles=8,
     ),
     ApplianceProfile.DRYER: ProfileDefinition(
         appliance_profile=ApplianceProfile.DRYER,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={SensorRole.CURRENT, SensorRole.VOLTAGE, SensorRole.ENERGY},
-        features={"heat_cycle", "motor_signature", "end_of_cycle"},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset(
+            {SensorRole.CURRENT, SensorRole.VOLTAGE, SensorRole.ENERGY}
+        ),
+        features=frozenset({"heat_cycle", "motor_signature", "end_of_cycle"}),
         minimum_cycles=8,
     ),
     ApplianceProfile.POOL_PUMP: ProfileDefinition(
         appliance_profile=ApplianceProfile.POOL_PUMP,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
-        features=_MOTOR_FEATURES | {"schedule_adherence"},
+        features=_MOTOR_FEATURES | frozenset({"schedule_adherence"}),
         minimum_cycles=12,
     ),
     ApplianceProfile.WELL_PUMP: ProfileDefinition(
@@ -120,7 +126,7 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         supported_modes=_SINGLE_PHASE_POWER,
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
-        features=_MOTOR_FEATURES | {"pressure_cycle_hint"},
+        features=_MOTOR_FEATURES | frozenset({"pressure_cycle_hint"}),
         minimum_cycles=12,
     ),
     ApplianceProfile.SUMP_PUMP: ProfileDefinition(
@@ -128,20 +134,22 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         supported_modes=_SINGLE_PHASE_POWER,
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
-        features=_MOTOR_FEATURES | {"storm_frequency_hint"},
+        features=_MOTOR_FEATURES | frozenset({"storm_frequency_hint"}),
         minimum_cycles=12,
     ),
     ApplianceProfile.EV_CHARGER: ProfileDefinition(
         appliance_profile=ApplianceProfile.EV_CHARGER,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={SensorRole.CURRENT, SensorRole.VOLTAGE, SensorRole.ENERGY},
-        features={"charge_session", "ramp_rate", "leg_imbalance"},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset(
+            {SensorRole.CURRENT, SensorRole.VOLTAGE, SensorRole.ENERGY}
+        ),
+        features=frozenset({"charge_session", "ramp_rate", "leg_imbalance"}),
         minimum_cycles=5,
     ),
     ApplianceProfile.MOTOR_LOAD: ProfileDefinition(
         appliance_profile=ApplianceProfile.MOTOR_LOAD,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
         features=_MOTOR_FEATURES,
@@ -149,51 +157,53 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
     ),
     ApplianceProfile.RESISTIVE_LOAD: ProfileDefinition(
         appliance_profile=ApplianceProfile.RESISTIVE_LOAD,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={SensorRole.VOLTAGE, SensorRole.ENERGY},
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({SensorRole.VOLTAGE, SensorRole.ENERGY}),
         features=_RESISTIVE_FEATURES,
         minimum_cycles=8,
     ),
     ApplianceProfile.MIXED: ProfileDefinition(
         appliance_profile=ApplianceProfile.MIXED,
-        supported_modes={CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE, CircuitMode.MIXED},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={
+        supported_modes=frozenset(
+            {CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE, CircuitMode.MIXED}
+        ),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({
             SensorRole.CURRENT,
             SensorRole.VOLTAGE,
             SensorRole.REACTIVE_POWER,
             SensorRole.APPARENT_POWER,
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
-        },
-        features={
+        }),
+        features=frozenset({
             "large_persistent_change",
             "feed_quality",
             "recurring_signature_hint",
             "unknown_load_cluster",
-        },
+        }),
         minimum_cycles=20,
     ),
     ApplianceProfile.MAINS_NILM: ProfileDefinition(
         appliance_profile=ApplianceProfile.MAINS_NILM,
-        supported_modes={CircuitMode.MAINS_NILM},
-        required_roles={SensorRole.REAL_POWER},
-        recommended_roles={
+        supported_modes=frozenset({CircuitMode.MAINS_NILM}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({
             SensorRole.CURRENT,
             SensorRole.VOLTAGE,
             SensorRole.REACTIVE_POWER,
             SensorRole.APPARENT_POWER,
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
-        },
-        features={
+        }),
+        features=frozenset({
             "aggregate_edge",
             "known_load_match",
             "unmatched_event",
             "recurring_signature",
             "possible_load_class",
-        },
+        }),
         minimum_cycles=30,
         minimum_learning_days=max(MIN_LEARNING_DAYS, 7),
         experimental=True,

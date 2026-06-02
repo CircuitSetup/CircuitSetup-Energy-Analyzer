@@ -1,7 +1,13 @@
+from datetime import UTC, datetime
+
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
+    CircuitEvent,
     CircuitMode,
+    EventType,
     RetentionMode,
     SensorRole,
 )
@@ -25,6 +31,16 @@ def test_refrigerator_profile_requires_single_phase_power_roles() -> None:
     assert definition.minimum_cycles >= 20
 
 
+def test_profile_definition_collections_cannot_be_mutated() -> None:
+    definition = get_profile_definition(ApplianceProfile.REFRIGERATOR)
+
+    with pytest.raises(AttributeError):
+        definition.supported_modes.add(CircuitMode.DUAL_PHASE)
+
+    with pytest.raises(AttributeError):
+        definition.features.add("unexpected_feature")
+
+
 def test_hvac_profile_supports_dual_phase_and_voltage_context() -> None:
     definition = get_profile_definition(ApplianceProfile.HVAC)
 
@@ -40,6 +56,21 @@ def test_mains_nilm_profile_is_experimental_aggregate_mode() -> None:
     assert SensorRole.REAL_POWER in definition.required_roles
     assert "recurring_signature" in definition.features
     assert definition.minimum_learning_days >= 7
+
+
+def test_circuit_event_features_are_readable_but_immutable() -> None:
+    event = CircuitEvent(
+        timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+        circuit_id="kitchen_refrigerator",
+        event_type=EventType.START,
+        features={"startup_power_w": 725.0},
+    )
+
+    assert event.features["startup_power_w"] == 725.0
+    assert event.features.get("startup_power_w") == 725.0
+
+    with pytest.raises(TypeError):
+        event.features["startup_power_w"] = 800.0
 
 
 def test_retention_mode_values_are_stable() -> None:
