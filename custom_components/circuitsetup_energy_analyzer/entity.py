@@ -91,7 +91,7 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
     def device_info(self) -> dict[str, Any]:
         """Group diagnostic entities by analyzed circuit in Home Assistant."""
         return {
-            "identifiers": {(DOMAIN, self._entry_id, self._circuit_id)},
+            "identifiers": {(DOMAIN, f"{self._entry_id}_{self._circuit_id}")},
             "name": self._circuit_name,
             "manufacturer": "CircuitSetup",
         }

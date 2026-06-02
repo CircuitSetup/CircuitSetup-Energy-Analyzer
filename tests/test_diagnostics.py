@@ -4,12 +4,21 @@ import builtins
 import importlib
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
+    BaselineStats,
+    CircuitEvent,
+    EventType,
+    Severity,
+)
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
 @pytest.mark.asyncio
@@ -64,6 +73,71 @@ async def test_diagnostics_reports_runtime_loaded_without_ha() -> None:
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["runtime_loaded"] is True
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_includes_redacted_runtime_summaries_without_ha() -> None:
+    from custom_components.circuitsetup_energy_analyzer.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+            ],
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power",
+                    20,
+                    100.0,
+                    5.0,
+                    90.0,
+                    110.0,
+                    1.0,
+                )
+            },
+            alerts=[
+                AlertEvidence(
+                    timestamp=datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+                    circuit_id="fridge",
+                    severity=Severity.WARNING,
+                    message="Possible issue: real power changed",
+                    feature="real_power",
+                )
+            ],
+            nilm_signatures={"mains": [{"signature_id": "on-1"}]},
+        ),
+        last_exported_diagnostics={
+            "circuit_id": "fridge",
+            "anomaly_score": 0.42,
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="Panel Analyzer",
+        data={"source_entities": ["sensor.secret_panel_power"]},
+        options={},
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["runtime"] == {
+        "events": {"count": 1, "by_circuit": {"fridge": 1}},
+        "baselines": {"count": 1, "features": {"fridge": ["real_power"]}},
+        "alerts": {"count": 1, "by_circuit": {"fridge": 1}},
+        "nilm_signatures": {"mains": 1},
+        "last_exported_diagnostics": {
+            "circuit_id": "fridge",
+            "anomaly_score": 0.42,
+        },
+    }
+    assert "sensor.secret_panel_power" not in repr(diagnostics)
 
 
 def test_diagnostics_reraises_nested_homeassistant_import_failures(

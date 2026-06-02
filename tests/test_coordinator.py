@@ -6,6 +6,9 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
+    CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
     DOMAIN,
 )
@@ -260,6 +263,14 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
 
     hass = SimpleNamespace(states=FakeStates(), data={DOMAIN: {}})
     store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(hours=cycle_index + 1),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            )
+            for cycle_index in range(20)
+        ],
         baselines={
             "fridge:real_power": BaselineStats(
                 feature="real_power",
@@ -313,6 +324,78 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     assert coordinator.state.active_alerts_by_circuit["fridge"]
     assert notifications
     assert notifications[0].message.startswith("Possible issue")
+
+
+@pytest.mark.asyncio
+async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="170",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power",
+                    20,
+                    100.0,
+                    5.0,
+                    90.0,
+                    110.0,
+                    1.0,
+                )
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications == []
+    assert coordinator.state.active_alerts_by_circuit == {}
+    assert coordinator.state.learning_by_circuit["fridge"] is True
 
 
 @pytest.mark.asyncio
@@ -398,6 +481,139 @@ async def test_setup_entry_loads_feature_store_and_runtime_saves(monkeypatch) ->
 
     assert saved
     assert "fridge:real_power" not in saved[-1].baselines
+
+
+@pytest.mark.asyncio
+async def test_runtime_applies_retention_before_persisting_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    old_event = CircuitEvent(
+        timestamp=now - timedelta(days=30),
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    recent_event = CircuitEvent(
+        timestamp=now - timedelta(days=2),
+        circuit_id="fridge",
+        event_type=EventType.STOP,
+    )
+    store_data = FeatureStoreData(events=[old_event, recent_event])
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.data = store_data
+            self.saved_events: list[list[CircuitEvent]] = []
+
+        async def async_save(self) -> None:
+            self.saved_events.append(list(self.data.events))
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="170",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    fake_store = FakeStore()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+        store=fake_store,
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert fake_store.saved_events
+    assert old_event not in fake_store.saved_events[-1]
+    assert recent_event in fake_store.saved_events[-1]
+
+
+@pytest.mark.asyncio
+async def test_runtime_skips_store_write_when_update_has_no_persisted_changes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.data = FeatureStoreData()
+            self.save_count = 0
+
+        async def async_save(self) -> None:
+            self.save_count += 1
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="0",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    fake_store = FakeStore()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+        store=fake_store,
+        store_data=FeatureStoreData(
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power",
+                    20,
+                    0.0,
+                    1.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                )
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+    await coordinator.async_process_update()
+
+    assert fake_store.save_count == 0
 
 
 @pytest.mark.asyncio
@@ -544,3 +760,176 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     await coordinator.async_process_update()
 
     assert issues == [("fridge", "missing_required_sensor")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.mains_power"],
+        },
+    )
+
+    assert len(coordinator.circuit_configs) == 1
+    assert coordinator.circuit_configs[0].circuit_id == "mains"
+    assert coordinator.circuit_configs[0].mode is CircuitMode.MAINS_NILM
+    assert (
+        coordinator.circuit_configs[0].appliance_profile
+        is ApplianceProfile.MAINS_NILM
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_known_load_option_controls_nilm_masking() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def __init__(self, watts: float) -> None:
+            self.watts = watts
+
+        def get(self, entity_id: str):
+            value = self.watts if "mains" in entity_id else max(self.watts - 100, 0)
+            return SimpleNamespace(
+                state=str(value),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    async def unmatched_percentage_for(known_load_circuits: list[str]) -> float:
+        states = FakeStates(100)
+        coordinator = EnergyAnalyzerCoordinator(
+            SimpleNamespace(states=states, data={}),
+            entry_data={
+                CONF_ENABLE_EXPERIMENTAL_NILM: True,
+                CONF_KNOWN_LOAD_CIRCUITS: known_load_circuits,
+                CONF_CIRCUITS: [
+                    {
+                        "circuit_id": "mains",
+                        "name": "Mains",
+                        "mode": "mains_nilm",
+                        "appliance_profile": "mains_nilm",
+                        "sensors": [
+                            {
+                                "entity_id": "sensor.mains_power",
+                                "role": "real_power",
+                            }
+                        ],
+                    },
+                    {
+                        "circuit_id": "fridge",
+                        "name": "Fridge",
+                        "mode": "single_phase",
+                        "appliance_profile": "refrigerator",
+                        "sensors": [
+                            {
+                                "entity_id": "sensor.fridge_power",
+                                "role": "real_power",
+                            }
+                        ],
+                    },
+                ],
+            },
+            options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+            now_fn=lambda: now,
+        )
+        await coordinator.async_process_update()
+        states.watts = 420
+        await coordinator.async_process_update()
+        return coordinator.state.nilm_unmatched_load_percentage_by_circuit["mains"]
+
+    assert await unmatched_percentage_for(["fridge"]) == 0.0
+    assert await unmatched_percentage_for(["hvac"]) == 100.0
+
+
+@pytest.mark.asyncio
+async def test_runtime_sensitivity_option_changes_alert_thresholds(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="110",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    async def alert_count_for_sensitivity(sensitivity: str) -> int:
+        notifications: list[AlertEvidence] = []
+
+        async def fake_notification(hass, alert) -> None:
+            notifications.append(alert)
+
+        monkeypatch.setattr(
+            coordinator_module.notifications,
+            "async_create_alert_notification",
+            fake_notification,
+        )
+        coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+            SimpleNamespace(states=FakeStates(), data={}),
+            entry_data={
+                CONF_CIRCUITS: [
+                    {
+                        "circuit_id": "fridge",
+                        "name": "Fridge",
+                        "mode": "single_phase",
+                        "appliance_profile": "refrigerator",
+                        "sensors": [
+                            {
+                                "entity_id": "sensor.fridge_power",
+                                "role": "real_power",
+                            }
+                        ],
+                    }
+                ],
+            },
+            options={CONF_SENSITIVITY: sensitivity},
+            store_data=FeatureStoreData(
+                events=[
+                    CircuitEvent(
+                        timestamp=now - timedelta(hours=index + 1),
+                        circuit_id="fridge",
+                        event_type=EventType.START,
+                    )
+                    for index in range(20)
+                ],
+                baselines={
+                    "fridge:real_power": BaselineStats(
+                        "real_power",
+                        20,
+                        100.0,
+                        5.0,
+                        90.0,
+                        110.0,
+                        1.0,
+                    )
+                },
+            ),
+            now_fn=lambda: now,
+        )
+        for _ in range(3):
+            await coordinator.async_process_update()
+        return len(notifications)
+
+    assert await alert_count_for_sensitivity("standard") == 0
+    assert await alert_count_for_sensitivity("high") == 1

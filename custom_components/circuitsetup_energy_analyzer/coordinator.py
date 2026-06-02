@@ -4,14 +4,24 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
 from . import notifications, repairs
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .baseline import build_baseline, score_deviation
-from .const import CONF_CIRCUITS, CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
+from .const import (
+    CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
+    CONF_RETENTION_MODE,
+    CONF_SENSITIVITY,
+    DEFAULT_RETENTION_MODE,
+    DEFAULT_SENSITIVITY,
+    DOMAIN,
+)
 from .events import CircuitEventDetector
 from .models import (
     AlertEvidence,
@@ -19,6 +29,7 @@ from .models import (
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
+    EventType,
     RetentionMode,
     SensorRef,
     SensorRole,
@@ -32,7 +43,8 @@ from .nilm import (
     unmatched_load_percentage,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
-from .storage import FeatureStoreData
+from .profiles import get_profile_definition
+from .storage import RETENTION_WINDOWS, FeatureStoreData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,19 +148,40 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.options = options or {}
         self._store = store
         self.store_data = store_data or FeatureStoreData()
-        self.circuit_configs = _circuit_configs_from_entry_data(self.entry_data)
+        self.circuit_configs = _circuit_configs_from_entry_data(
+            self.entry_data,
+            self.options,
+        )
         self._now_fn = now_fn or (lambda: datetime.now(UTC))
+        self._entry_retention_mode = _retention_mode_from_sources(
+            self.entry_data,
+            self.options,
+        )
+        self._known_load_circuit_ids = frozenset(
+            _string_list_from_sources(
+                self.entry_data,
+                self.options,
+                CONF_KNOWN_LOAD_CIRCUITS,
+            )
+        )
+        self._sensitivity = str(
+            self.options.get(
+                CONF_SENSITIVITY,
+                self.entry_data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+            )
+        )
         self._detectors = {
             config.circuit_id: CircuitEventDetector()
             for config in self.circuit_configs
         }
-        self._alert_policy = ConservativeAlertPolicy()
+        self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
         self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
         self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
         self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
+        self._store_dirty = False
         self.paused_circuits: set[str] = set()
         self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
@@ -207,12 +240,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             new_events = detector.process(sample)
             events.extend(new_events)
-            self.store_data.events.extend(new_events)
+            if new_events:
+                self.store_data.events.extend(new_events)
+                self._mark_store_dirty()
 
             alert = self._observe_real_power(config, sample, now)
             if alert is not None:
                 alerts.append(alert)
                 self.store_data.alerts.append(alert)
+                self._mark_store_dirty()
                 await self._notify_alert(alert)
 
         for config, sample in samples:
@@ -220,7 +256,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         process_events_into_state(self.state, events, alerts)
         self.async_set_updated_data(self.state)
-        await self._async_save_store()
+        await self._async_save_store(now)
         return self.state
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
@@ -237,11 +273,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.alerts = [
             alert for alert in self.store_data.alerts if alert.circuit_id != circuit_id
         ]
+        self._mark_store_dirty()
         self.state.active_alerts_by_circuit.pop(circuit_id, None)
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
         self.async_set_updated_data(self.state)
-        await self._async_save_store()
+        await self._async_save_store(self._now_fn())
 
     async def async_pause_alerts(
         self: Self,
@@ -258,6 +295,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for alert in self.store_data.alerts
             if notifications.notification_id_for_alert(alert) != alert_id
         ]
+        self._mark_store_dirty()
         self.state.active_alerts_by_circuit = {
             circuit_id: [
                 alert
@@ -280,7 +318,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
         }
         self.async_set_updated_data(self.state)
-        await self._async_save_store()
+        await self._async_save_store(self._now_fn())
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
@@ -290,7 +328,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "data_quality": self.state.data_quality_by_circuit.get(circuit_id),
             "learning": self.state.learning_by_circuit.get(circuit_id, True),
         }
-        await self._async_save_store()
+        self.async_set_updated_data(self.state)
 
     async def async_run_mapping_checks(self: Self) -> None:
         """Run lightweight source mapping checks."""
@@ -305,7 +343,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     "missing_required_sensor",
                 )
         self.async_set_updated_data(self.state)
-        await self._async_save_store()
 
     async def async_label_nilm_signature(
         self: Self,
@@ -318,10 +355,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["user_label"] = label
-                await self._async_save_store()
+                self._mark_store_dirty()
+                await self._async_save_store(self._now_fn())
                 return
         signatures.append({"signature_id": signature_id, "user_label": label})
-        await self._async_save_store()
+        self._mark_store_dirty()
+        await self._async_save_store(self._now_fn())
 
     async def async_ignore_nilm_signature(
         self: Self,
@@ -334,10 +373,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["ignored"] = True
-                await self._async_save_store()
+                self._mark_store_dirty()
+                await self._async_save_store(self._now_fn())
                 return
         signatures.append({"signature_id": signature_id, "ignored": True})
-        await self._async_save_store()
+        self._mark_store_dirty()
+        await self._async_save_store(self._now_fn())
 
     def has_circuit(self: Self, circuit_id: str) -> bool:
         """Return whether this coordinator owns a circuit id."""
@@ -452,13 +493,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         detector = self._nilm_detectors.setdefault(
             config.circuit_id,
-            NilmEdgeDetector(),
+            NilmEdgeDetector(min_delta_w=_nilm_min_delta_w(self._sensitivity)),
         )
         edges = detector.process(sample)
         if edges:
-            known_events = (
-                event for event in events if event.circuit_id != config.circuit_id
-            )
+            known_events = self._known_load_events(config.circuit_id, events)
             mask = mask_known_loads(edges, known_events)
             self._nilm_total_events_by_circuit[config.circuit_id] += len(edges)
             self._nilm_unmatched_edges[config.circuit_id].extend(mask.unmatched_edges)
@@ -466,11 +505,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             signatures = cluster_recurring_signatures(
                 self._nilm_unmatched_edges[config.circuit_id]
             )
-            self.store_data.nilm_signatures[config.circuit_id] = (
-                self._nilm_signature_payloads(config.circuit_id, signatures)
-            )
+            payloads = self._nilm_signature_payloads(config.circuit_id, signatures)
+            if payloads != self.store_data.nilm_signatures.get(config.circuit_id, []):
+                self.store_data.nilm_signatures[config.circuit_id] = payloads
+                self._mark_store_dirty()
 
         self._refresh_nilm_state(config.circuit_id)
+
+    def _known_load_events(
+        self: Self,
+        nilm_circuit_id: str,
+        events: Iterable[CircuitEvent],
+    ) -> Iterable[CircuitEvent]:
+        for event in events:
+            if event.circuit_id == nilm_circuit_id:
+                continue
+            if (
+                self._known_load_circuit_ids
+                and event.circuit_id not in self._known_load_circuit_ids
+            ):
+                continue
+            yield event
 
     def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
         enabled = bool(
@@ -541,11 +596,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-    async def _async_save_store(self: Self) -> None:
-        if self._store is None:
+    def _mark_store_dirty(self: Self) -> None:
+        self._store_dirty = True
+
+    async def _async_save_store(self: Self, now: datetime) -> None:
+        if self._store is None or not self._store_dirty:
             return
+        self._apply_retention(now)
         self._store.data = self.store_data
         await self._store.async_save()
+        self._store_dirty = False
+
+    def _apply_retention(self: Self, now: datetime) -> None:
+        retained_events = [
+            event for event in self.store_data.events if self._keep_event(event, now)
+        ]
+        if len(retained_events) != len(self.store_data.events):
+            self.store_data.events = retained_events
+
+    def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
+        retention_mode = self._retention_mode_for_circuit(event.circuit_id)
+        return event.timestamp >= now - RETENTION_WINDOWS[retention_mode]
+
+    def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
+        for config in self.circuit_configs:
+            if config.circuit_id == circuit_id:
+                return config.retention_mode
+        return self._entry_retention_mode
 
     def _source_states_for(
         self: Self,
@@ -589,11 +666,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if len(values) >= 15:
                 baseline = build_baseline("real_power", values)
                 self.store_data.baselines[key] = baseline
+                self._mark_store_dirty()
             self.state.learning_by_circuit[config.circuit_id] = True
             return None
 
-        self.state.learning_by_circuit[config.circuit_id] = baseline.confidence < 0.6
-        if baseline.confidence < 0.6:
+        mature = self._learning_mature(config, now)
+        self.state.learning_by_circuit[config.circuit_id] = (
+            baseline.confidence < 0.6 or not mature
+        )
+        if baseline.confidence < 0.6 or not mature:
             return None
 
         score = score_deviation(sample.real_power, baseline)
@@ -608,6 +689,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 baseline_value=baseline.median,
             )
         )
+
+    def _learning_mature(self: Self, config: CircuitConfig, now: datetime) -> bool:
+        profile = get_profile_definition(config.appliance_profile)
+        circuit_events = [
+            event
+            for event in self.store_data.events
+            if event.circuit_id == config.circuit_id
+        ]
+        cycle_count = sum(
+            1 for event in circuit_events if event.event_type is EventType.START
+        )
+        if profile.minimum_cycles > 0 and cycle_count >= profile.minimum_cycles:
+            return True
+
+        if not circuit_events:
+            return False
+
+        first_seen = min(event.timestamp for event in circuit_events)
+        return now - first_seen >= timedelta(days=profile.minimum_learning_days)
 
     async def _notify_alert(self: Self, alert: AlertEvidence) -> None:
         if alert.circuit_id in self.paused_circuits:
@@ -641,15 +741,115 @@ def _data_quality_problem(issue: str) -> str:
     return "missing_required_sensor"
 
 
+def _string_list_from_sources(
+    entry_data: dict[str, Any],
+    options: dict[str, Any] | None,
+    key: str,
+) -> list[str]:
+    options = options or {}
+    raw = options[key] if key in options else entry_data.get(key, [])
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    return [item for item in raw if isinstance(item, str) and item]
+
+
+def _retention_mode_from_sources(
+    entry_data: dict[str, Any],
+    options: dict[str, Any] | None,
+) -> RetentionMode:
+    options = options or {}
+    raw = options.get(
+        CONF_RETENTION_MODE,
+        entry_data.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE),
+    )
+    try:
+        return RetentionMode(str(raw))
+    except ValueError:
+        return RetentionMode.STANDARD
+
+
+def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:
+    if sensitivity == "high":
+        return ConservativeAlertPolicy(
+            min_repeated=3,
+            min_total_score=2.4,
+            min_average_score=1.2,
+        )
+    if sensitivity == "low":
+        return ConservativeAlertPolicy(
+            min_repeated=4,
+            min_total_score=6.0,
+            min_average_score=1.8,
+        )
+    return ConservativeAlertPolicy()
+
+
+def _nilm_min_delta_w(sensitivity: str) -> float:
+    if sensitivity == "high":
+        return 75.0
+    if sensitivity == "low":
+        return 150.0
+    return 100.0
+
+
 def _circuit_configs_from_entry_data(
     entry_data: dict[str, Any],
+    options: dict[str, Any] | None = None,
 ) -> tuple[CircuitConfig, ...]:
     configs: list[CircuitConfig] = []
     for raw_circuit in entry_data.get(CONF_CIRCUITS, []):
         config = _circuit_config_from_raw(raw_circuit)
         if config is not None:
             configs.append(config)
+
+    if (
+        _experimental_nilm_enabled(entry_data, options)
+        and not any(config.mode is CircuitMode.MAINS_NILM for config in configs)
+    ):
+        mains_config = _mains_nilm_config_from_sources(entry_data, options)
+        if mains_config is not None:
+            configs.append(mains_config)
     return tuple(configs)
+
+
+def _experimental_nilm_enabled(
+    entry_data: dict[str, Any],
+    options: dict[str, Any] | None,
+) -> bool:
+    options = options or {}
+    return bool(
+        options.get(
+            CONF_ENABLE_EXPERIMENTAL_NILM,
+            entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
+        )
+    )
+
+
+def _mains_nilm_config_from_sources(
+    entry_data: dict[str, Any],
+    options: dict[str, Any] | None,
+) -> CircuitConfig | None:
+    mains_entities = _string_list_from_sources(
+        entry_data,
+        options,
+        CONF_MAINS_SOURCE_ENTITIES,
+    )
+    if not mains_entities:
+        return None
+
+    return CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=tuple(
+            SensorRef(entity_id=entity_id, role=SensorRole.REAL_POWER)
+            for entity_id in mains_entities
+        ),
+        retention_mode=_retention_mode_from_sources(entry_data, options),
+    )
 
 
 def _circuit_config_from_raw(raw_circuit: Any) -> CircuitConfig | None:
