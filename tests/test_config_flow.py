@@ -122,6 +122,40 @@ def test_validate_setup_input_requires_source_entities() -> None:
     assert error.value.error_key == "no_source_entities"
 
 
+def test_validate_setup_input_rejects_non_mapping_circuit_items() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        SetupValidationError,
+        validate_setup_input,
+    )
+
+    with pytest.raises(SetupValidationError) as error:
+        validate_setup_input(
+            {
+                CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
+                CONF_CIRCUITS: ["not-a-dict"],
+            }
+        )
+
+    assert error.value.error_key == "invalid_circuits"
+
+
+def test_validate_setup_input_rejects_source_entity_mapping() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        SetupValidationError,
+        validate_setup_input,
+    )
+
+    with pytest.raises(SetupValidationError) as error:
+        validate_setup_input(
+            {
+                CONF_SOURCE_ENTITIES: {"sensor.fridge_power": True},
+                CONF_CIRCUITS: [],
+            }
+        )
+
+    assert error.value.error_key == "invalid_source_entities"
+
+
 @pytest.mark.asyncio
 async def test_fallback_user_flow_returns_no_source_entities_form_error() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
@@ -133,6 +167,67 @@ async def test_fallback_user_flow_returns_no_source_entities_form_error() -> Non
 
     assert result["type"] == "form"
     assert result["errors"]["base"] == "no_source_entities"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_rejects_bogus_retention_mode() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(data={}, options={})
+    )
+    result = await flow.async_step_init({CONF_RETENTION_MODE: "forever"})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "invalid_retention_mode"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_rejects_malformed_mains_source_entities() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(data={}, options={})
+    )
+    result = await flow.async_step_init(
+        {CONF_MAINS_SOURCE_ENTITIES: {"sensor.main_l1_power": True}}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "invalid_mains_source_entities"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_preserves_valid_options() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    user_input = {
+        CONF_ENABLE_EXPERIMENTAL_NILM: True,
+        CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
+        CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
+        CONF_SENSITIVITY: "high",
+        CONF_RETENTION_MODE: "diagnostic",
+    }
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(data={}, options={})
+    )
+
+    result = await flow.async_step_init(user_input)
+
+    assert result["type"] == "create_entry"
+    assert result["data"] == user_input
 
 
 def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:

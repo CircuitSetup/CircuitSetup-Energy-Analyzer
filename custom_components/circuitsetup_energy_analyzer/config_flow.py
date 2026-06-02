@@ -104,6 +104,7 @@ from .models import ApplianceProfile, CircuitMode, RetentionMode
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
+ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 _VALID_CIRCUIT_MODES = {mode.value for mode in CircuitMode}
 _VALID_APPLIANCE_PROFILES = {profile.value for profile in ApplianceProfile}
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
@@ -142,14 +143,15 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
 
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize setup data without requiring Home Assistant."""
-    source_entities = _string_list(user_input.get(CONF_SOURCE_ENTITIES))
+    source_entities = _strict_string_list(
+        user_input.get(CONF_SOURCE_ENTITIES),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
     if not source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     circuits = _validate_circuits(user_input.get(CONF_CIRCUITS, []))
-    retention_mode = str(user_input.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE))
-    if retention_mode not in _VALID_RETENTION_MODES:
-        raise SetupValidationError("invalid_retention_mode")
+    retention_mode = _validate_retention_mode(user_input)
 
     return {
         CONF_SOURCE_ENTITIES: source_entities,
@@ -160,14 +162,38 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
                 DEFAULT_ENABLE_EXPERIMENTAL_NILM,
             )
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _string_list(
-            user_input.get(CONF_MAINS_SOURCE_ENTITIES, [])
+        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
         ),
-        CONF_KNOWN_LOAD_CIRCUITS: _string_list(
-            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, [])
+        CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
+            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            invalid_error_key="invalid_known_load_circuits",
         ),
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: retention_mode,
+    }
+
+
+def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize options flow data without requiring Home Assistant."""
+    return {
+        CONF_ENABLE_EXPERIMENTAL_NILM: bool(
+            user_input.get(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+            )
+        ),
+        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
+        ),
+        CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
+            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            invalid_error_key="invalid_known_load_circuits",
+        ),
+        CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
+        CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
 
 
@@ -179,25 +205,40 @@ def _validate_circuits(value: Any) -> list[Any]:
 
     circuits: list[Any] = []
     for circuit in value:
-        if isinstance(circuit, Mapping):
-            mode = circuit.get("mode")
-            if mode is not None and str(mode) not in _VALID_CIRCUIT_MODES:
-                raise SetupValidationError("invalid_circuit_mode")
-            profile = circuit.get("appliance_profile")
-            if profile is not None and str(profile) not in _VALID_APPLIANCE_PROFILES:
-                raise SetupValidationError("invalid_appliance_profile")
+        if not isinstance(circuit, Mapping):
+            raise SetupValidationError("invalid_circuits")
+        mode = circuit.get("mode")
+        if mode is not None and str(mode) not in _VALID_CIRCUIT_MODES:
+            raise SetupValidationError("invalid_circuit_mode")
+        profile = circuit.get("appliance_profile")
+        if profile is not None and str(profile) not in _VALID_APPLIANCE_PROFILES:
+            raise SetupValidationError("invalid_appliance_profile")
         circuits.append(circuit)
     return circuits
 
 
-def _string_list(value: Any) -> list[str]:
+def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
         return [value] if value else []
-    if not isinstance(value, Iterable):
-        return []
-    return [str(item) for item in value if str(item)]
+    if isinstance(value, Mapping) or not isinstance(value, (list, tuple, set)):
+        raise SetupValidationError(invalid_error_key)
+
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise SetupValidationError(invalid_error_key)
+        if item:
+            items.append(item)
+    return items
+
+
+def _validate_retention_mode(user_input: Mapping[str, Any]) -> str:
+    retention_mode = str(user_input.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE))
+    if retention_mode not in _VALID_RETENTION_MODES:
+        raise SetupValidationError("invalid_retention_mode")
+    return retention_mode
 
 
 DATA_SCHEMA = vol.Schema(
@@ -269,11 +310,22 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=dict(user_input))
+            try:
+                validated = validate_options_input(user_input)
+            except SetupValidationError as err:
+                return await self._async_show_options_form({"base": err.error_key})
+            return self.async_create_entry(title="", data=validated)
 
+        return await self._async_show_options_form()
+
+    async def _async_show_options_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
         return self.async_show_form(
             step_id="init",
             data_schema=_options_schema(self._config_entry),
+            errors=errors or {},
             description_placeholders={
                 "mapping_suggestions": await _async_format_mapping_suggestions(
                     getattr(self, "hass", None)
