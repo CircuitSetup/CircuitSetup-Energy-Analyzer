@@ -155,14 +155,15 @@ class CircuitEvent:
 
 @dataclass(frozen=True, slots=True)
 class BaselineStats:
-    """Learned baseline statistics for a circuit."""
+    """Robust learned baseline statistics for one feature."""
 
-    circuit_id: str
-    learned_at: datetime
-    mean_power: float
-    stdev_power: float
+    feature: str
     sample_count: int
-    features: dict[str, float] = field(default_factory=dict)
+    median: float
+    mad: float
+    p10: float
+    p90: float
+    confidence: float
 
 
 @dataclass(frozen=True, slots=True)
