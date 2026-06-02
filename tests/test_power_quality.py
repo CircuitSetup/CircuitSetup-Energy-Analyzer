@@ -8,6 +8,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitSample,
 )
 from custom_components.circuitsetup_energy_analyzer.power_quality import (
+    MIN_RELATIONSHIP_SCORE,
     extract_power_quality_features,
     relationship_rms_score,
     score_power_quality_features,
@@ -34,7 +35,12 @@ def sample(
     )
 
 
-def baseline(feature: str, median: float, mad: float = 5.0) -> BaselineStats:
+def baseline(
+    feature: str,
+    median: float,
+    mad: float = 5.0,
+    confidence: float = 1.0,
+) -> BaselineStats:
     return BaselineStats(
         feature=feature,
         sample_count=20,
@@ -42,7 +48,7 @@ def baseline(feature: str, median: float, mad: float = 5.0) -> BaselineStats:
         mad=mad,
         p10=median - 10.0,
         p90=median + 10.0,
-        confidence=1.0,
+        confidence=confidence,
     )
 
 
@@ -95,6 +101,24 @@ def test_extract_power_quality_features_suppresses_relationships_below_load_floo
     assert "power_factor_deficit" not in features
 
 
+def test_extract_power_quality_features_suppresses_invalid_power_factor() -> None:
+    features = extract_power_quality_features(
+        sample(
+            real_power=500.0,
+            reactive_power=100.0,
+            apparent_power=510.0,
+            power_factor=1.08,
+        )
+    )
+
+    assert features["real_power"] == 500.0
+    assert features["reactive_power"] == 100.0
+    assert features["apparent_power"] == 510.0
+    assert features["reactive_to_real_ratio"] == 0.2
+    assert "power_factor" not in features
+    assert "power_factor_deficit" not in features
+
+
 def test_score_power_quality_features_handles_missing_optional_baselines() -> None:
     features = extract_power_quality_features(
         sample(
@@ -118,6 +142,26 @@ def test_score_power_quality_features_handles_missing_optional_baselines() -> No
     assert by_feature["real_power"].score < 1.0
     assert by_feature["reactive_power"].score > 3.0
     assert relationship_rms_score(scores) > 2.0
+
+
+def test_score_power_quality_features_uses_unitless_spread_floor() -> None:
+    scores = score_power_quality_features(
+        {
+            "power_factor": 0.93,
+            "reactive_to_real_ratio": 0.24,
+            "real_power": 510.0,
+        },
+        {
+            "power_factor": baseline("power_factor", 0.98, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+            "real_power": baseline("real_power", 500.0, 20.0),
+        },
+    )
+
+    by_feature = {score.feature: score for score in scores}
+    assert by_feature["power_factor"].score > MIN_RELATIONSHIP_SCORE
+    assert by_feature["reactive_to_real_ratio"].score > MIN_RELATIONSHIP_SCORE
+    assert by_feature["real_power"].score < 1.0
 
 
 def test_select_evidence_finds_reactive_shift_under_stable_real_power() -> None:
@@ -151,6 +195,61 @@ def test_select_evidence_finds_reactive_shift_under_stable_real_power() -> None:
     assert evidence.features["relationship_rms"] > 2.0
 
 
+def test_select_evidence_requires_scored_real_power_for_stable_shift() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=560.0,
+                power_factor=0.91,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0, confidence=0.4),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "power_factor": baseline("power_factor", 0.98, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.02, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert evidence is not None
+    assert evidence.feature != "reactive_shift_under_stable_real_power"
+
+
+def test_select_evidence_confidence_uses_lowest_contributor() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=560.0,
+                power_factor=0.91,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0, confidence=0.72),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0, confidence=0.9),
+            "power_factor": baseline("power_factor", 0.98, 0.01, confidence=0.86),
+            "reactive_to_real_ratio": baseline(
+                "reactive_to_real_ratio", 0.16, 0.02, confidence=0.93
+            ),
+            "power_factor_deficit": baseline(
+                "power_factor_deficit", 0.02, 0.01, confidence=0.81
+            ),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert evidence is not None
+    assert evidence.feature == "reactive_shift_under_stable_real_power"
+    assert evidence.baseline_confidence == 0.72
+
+
 def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
     scores = score_power_quality_features(
         extract_power_quality_features(
@@ -178,6 +277,32 @@ def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
     assert evidence is not None
     assert evidence.feature == "resistive_load_became_reactive"
     assert "resistive" in evidence.message
+
+
+def test_select_evidence_ignores_raw_var_when_real_power_changed() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=4000.0,
+                reactive_power=400.0,
+                apparent_power=None,
+                power_factor=None,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 2000.0, 40.0),
+            "reactive_power": baseline("reactive_power", 200.0, 10.0),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.10, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.WATER_HEATER, CircuitMode.DUAL_PHASE),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature != "resistive_load_became_reactive"
 
 
 def test_select_evidence_suppresses_mixed_circuit_appliance_alerts() -> None:

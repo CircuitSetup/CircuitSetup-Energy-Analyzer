@@ -19,6 +19,13 @@ MIN_RELATIONSHIP_SCORE = 1.5
 STABLE_REAL_POWER_SCORE = 1.2
 STABLE_REAL_POWER_RATIO = 0.10
 
+UNITLESS_FEATURE_SPREAD_FLOORS = {
+    "power_factor": 0.01,
+    "power_factor_deficit": 0.01,
+    "reactive_to_real_ratio": 0.02,
+    "apparent_to_real_ratio": 0.02,
+}
+
 MOTOR_PROFILES = frozenset(
     {
         ApplianceProfile.REFRIGERATOR,
@@ -89,7 +96,7 @@ def extract_power_quality_features(
         values["apparent_power"] = apparent_power
 
     loaded = real_power is not None and abs(real_power) >= load_floor_w
-    if power_factor is not None and loaded:
+    if power_factor is not None and loaded and abs(power_factor) <= 1.0:
         values["power_factor"] = power_factor
         values["power_factor_deficit"] = 1.0 - abs(power_factor)
 
@@ -127,7 +134,7 @@ def score_power_quality_features(
                 feature=feature,
                 observed_value=observed,
                 baseline_value=baseline.median,
-                score=score_deviation(observed, baseline),
+                score=_score_feature_deviation(feature, observed, baseline),
                 baseline_confidence=baseline.confidence,
                 change_ratio=_change_ratio(observed, baseline.median),
             )
@@ -193,18 +200,24 @@ def select_power_quality_evidence(
         by_feature.get("power_factor"),
     )
 
-    if config.appliance_profile in RESISTIVE_PROFILES and _score_high(
-        reactive_score,
-        min_relationship_score,
-    ):
-        return _evidence(
-            "resistive_load_became_reactive",
-            "Possible issue: a mostly resistive circuit shows repeated reactive "
-            "power or power-factor behavior that differs from its learned baseline.",
-            reactive_score,
-            rms_score,
-            evidence_features,
+    if config.appliance_profile in RESISTIVE_PROFILES:
+        resistive_score = _strongest(
+            by_feature.get("reactive_to_real_ratio"),
+            pf_score,
         )
+        if not _score_high(resistive_score, min_relationship_score) and stable_real:
+            resistive_score = by_feature.get("reactive_power")
+        if _score_high(resistive_score, min_relationship_score):
+            return _evidence(
+                "resistive_load_became_reactive",
+                "Possible issue: a mostly resistive circuit shows repeated reactive "
+                "power or power-factor behavior that differs from its learned "
+                "baseline.",
+                resistive_score,
+                rms_score,
+                evidence_features,
+                by_feature,
+            )
 
     if stable_real and _score_high(reactive_score, min_relationship_score):
         return _evidence(
@@ -214,6 +227,7 @@ def select_power_quality_evidence(
             reactive_score,
             rms_score,
             evidence_features,
+            by_feature,
         )
 
     if stable_real and _score_high(pf_score, min_relationship_score):
@@ -224,6 +238,7 @@ def select_power_quality_evidence(
             pf_score,
             rms_score,
             evidence_features,
+            by_feature,
         )
 
     if stable_real and _score_high(apparent_score, min_relationship_score):
@@ -234,6 +249,7 @@ def select_power_quality_evidence(
             apparent_score,
             rms_score,
             evidence_features,
+            by_feature,
         )
 
     if config.mode is CircuitMode.DUAL_PHASE and rms_score >= min_relationship_score:
@@ -245,6 +261,7 @@ def select_power_quality_evidence(
             selected,
             rms_score,
             evidence_features,
+            by_feature,
         )
 
     if (
@@ -259,6 +276,7 @@ def select_power_quality_evidence(
             selected,
             rms_score,
             evidence_features,
+            by_feature,
         )
 
     return _real_power_fallback(by_feature)
@@ -270,12 +288,18 @@ def _evidence(
     selected: PowerQualityFeatureScore | None,
     rms_score: float,
     features: Mapping[str, float],
+    by_feature: Mapping[str, PowerQualityFeatureScore],
 ) -> PowerQualityEvidence | None:
     if selected is None:
         return None
     confidence_values = [
         selected.baseline_confidence,
-        *(1.0 for feature_name in features if feature_name != "relationship_rms"),
+        *(
+            score.baseline_confidence
+            for feature_name in features
+            if feature_name != "relationship_rms"
+            if (score := by_feature.get(feature_name)) is not None
+        ),
     ]
     return PowerQualityEvidence(
         feature=feature,
@@ -311,7 +335,7 @@ def _real_power_fallback(
 
 def _real_power_is_stable(score: PowerQualityFeatureScore | None) -> bool:
     if score is None:
-        return True
+        return False
     return (
         score.score <= STABLE_REAL_POWER_SCORE
         or abs(score.change_ratio) <= STABLE_REAL_POWER_RATIO
@@ -335,6 +359,18 @@ def _change_ratio(observed: float, baseline: float) -> float:
     if baseline == 0.0:
         return 0.0
     return (observed - baseline) / baseline
+
+
+def _score_feature_deviation(
+    feature: str,
+    observed: float,
+    baseline: BaselineStats,
+) -> float:
+    spread_floor = UNITLESS_FEATURE_SPREAD_FLOORS.get(feature)
+    if spread_floor is None:
+        return score_deviation(observed, baseline)
+    spread = max(baseline.mad * 1.4826, spread_floor)
+    return abs(observed - baseline.median) / spread
 
 
 def _number_or_none(value: float | None) -> float | None:
