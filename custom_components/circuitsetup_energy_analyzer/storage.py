@@ -37,6 +37,9 @@ class FeatureStoreData:
     baselines: dict[str, BaselineStats] = field(default_factory=dict)
     alerts: list[AlertEvidence] = field(default_factory=list)
     nilm_signatures: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
+    maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    alert_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -141,6 +144,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             str(circuit_id): [dict(signature) for signature in signatures]
             for circuit_id, signatures in data.nilm_signatures.items()
         },
+        "sensitivity_by_circuit": {
+            str(circuit_id): str(sensitivity)
+            for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
+        },
+        "maintenance_by_circuit": _dict_of_dicts(data.maintenance_by_circuit),
+        "alert_feedback": _dict_of_dicts(data.alert_feedback),
     }
 
 
@@ -160,6 +169,17 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             str(circuit_id): [dict(signature) for signature in signatures]
             for circuit_id, signatures in raw.get("nilm_signatures", {}).items()
         },
+        sensitivity_by_circuit={
+            str(circuit_id): str(sensitivity)
+            for circuit_id, sensitivity in raw.get(
+                "sensitivity_by_circuit",
+                {},
+            ).items()
+        },
+        maintenance_by_circuit=_dict_of_dicts(
+            raw.get("maintenance_by_circuit", {}),
+        ),
+        alert_feedback=_dict_of_dicts(raw.get("alert_feedback", {})),
     )
 
 
@@ -175,6 +195,9 @@ def prune_events(
         baselines=data.baselines,
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
+        sensitivity_by_circuit=data.sensitivity_by_circuit,
+        maintenance_by_circuit=data.maintenance_by_circuit,
+        alert_feedback=data.alert_feedback,
     )
 
 
@@ -213,3 +236,7 @@ class FeatureStore:
 
 def _features_to_dict(features: Any) -> dict[str, float]:
     return {str(key): float(value) for key, value in dict(features).items()}
+
+
+def _dict_of_dicts(values: Any) -> dict[str, dict[str, Any]]:
+    return {str(key): dict(value) for key, value in dict(values).items()}

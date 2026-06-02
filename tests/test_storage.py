@@ -17,6 +17,8 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
     baseline_to_dict,
     event_from_dict,
     event_to_dict,
+    feature_store_data_from_dict,
+    feature_store_data_to_dict,
     prune_events,
 )
 
@@ -41,11 +43,17 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         message="Possible issue",
     )
     signatures = {"mains": [{"label": "unknown", "confidence": 0.5}]}
+    sensitivity_by_circuit = {"fridge": "quiet"}
+    maintenance_by_circuit = {"fridge": {"active": True}}
+    alert_feedback = {"fridge:reactive_power": {"action": "expected"}}
     data = FeatureStoreData(
         events=[old, recent],
         baselines={"fridge:startup_power_w": baseline},
         alerts=[alert],
         nilm_signatures=signatures,
+        sensitivity_by_circuit=sensitivity_by_circuit,
+        maintenance_by_circuit=maintenance_by_circuit,
+        alert_feedback=alert_feedback,
     )
 
     pruned = prune_events(data, RetentionMode.LIGHTWEIGHT, now)
@@ -54,6 +62,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.baselines is data.baselines
     assert pruned.alerts is data.alerts
     assert pruned.nilm_signatures is data.nilm_signatures
+    assert pruned.sensitivity_by_circuit is data.sensitivity_by_circuit
+    assert pruned.maintenance_by_circuit is data.maintenance_by_circuit
+    assert pruned.alert_feedback is data.alert_feedback
     assert data.events == [old, recent]
 
 
@@ -132,3 +143,43 @@ def test_baseline_and_alert_serialization_are_json_safe() -> None:
     assert alert_from_dict(alert_raw) == alert
     assert alert_raw["features"] == {"cycle_duration_s": 2.4}
     assert isinstance(alert_raw["features"], dict)
+
+
+def test_feature_store_round_trips_user_experience_state() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    data = FeatureStoreData(
+        sensitivity_by_circuit={"fridge": "quiet"},
+        maintenance_by_circuit={
+            "fridge": {
+                "active": True,
+                "note": "Cleaned coils",
+                "started_at": now.isoformat(),
+                "relearn_on_end": True,
+            }
+        },
+        alert_feedback={
+            "fridge:reactive_power": {
+                "action": "expected",
+                "alert_id": "alert-1",
+                "created_at": now.isoformat(),
+                "change_ratio": 0.42,
+            }
+        },
+        nilm_signatures={
+            "mains": [
+                {
+                    "signature_id": "on-1",
+                    "review_state": "expected",
+                    "user_label": "Microwave",
+                }
+            ]
+        },
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+
+    assert restored.sensitivity_by_circuit == {"fridge": "quiet"}
+    assert restored.maintenance_by_circuit["fridge"]["note"] == "Cleaned coils"
+    assert restored.alert_feedback["fridge:reactive_power"]["action"] == "expected"
+    assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
