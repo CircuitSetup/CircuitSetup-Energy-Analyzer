@@ -43,6 +43,24 @@ async def async_create_data_quality_issue(
     )
 
 
+async def async_delete_data_quality_issue(
+    hass: Any,
+    circuit_id: str,
+    problem: str,
+) -> None:
+    """Delete a Home Assistant Repairs issue for a resolved data-quality problem."""
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except ModuleNotFoundError:
+        return
+
+    delete_issue = getattr(ir, "async_delete_issue", None)
+    if delete_issue is None:
+        return
+
+    delete_issue(hass, DOMAIN, issue_id_for_circuit_problem(circuit_id, problem))
+
+
 def _ha_issue_severity(issue_registry: Any, severity: Severity | str) -> Any:
     issue_severity = getattr(issue_registry, "IssueSeverity", None)
     value = severity.value if isinstance(severity, Severity) else str(severity)

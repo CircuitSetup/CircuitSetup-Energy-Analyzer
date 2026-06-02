@@ -3,14 +3,15 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Self
 
-from . import notifications
+from . import notifications, repairs
+from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .baseline import build_baseline, score_deviation
-from .const import CONF_CIRCUITS, DOMAIN
+from .const import CONF_CIRCUITS, CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from .events import CircuitEventDetector
 from .models import (
     AlertEvidence,
@@ -22,7 +23,15 @@ from .models import (
     SensorRef,
     SensorRole,
 )
-from .normalize import SourceState, build_circuit_sample
+from .nilm import (
+    NilmEdge,
+    NilmEdgeDetector,
+    classify_signature,
+    cluster_recurring_signatures,
+    mask_known_loads,
+    unmatched_load_percentage,
+)
+from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .storage import FeatureStoreData
 
 _LOGGER = logging.getLogger(__name__)
@@ -117,6 +126,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         entry_id: str = "default",
         entry_data: dict[str, Any] | None = None,
         options: dict[str, Any] | None = None,
+        store: Any | None = None,
         store_data: FeatureStoreData | None = None,
         now_fn: Any | None = None,
     ) -> None:
@@ -124,6 +134,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.entry_id = entry_id
         self.entry_data = entry_data or {}
         self.options = options or {}
+        self._store = store
         self.store_data = store_data or FeatureStoreData()
         self.circuit_configs = _circuit_configs_from_entry_data(self.entry_data)
         self._now_fn = now_fn or (lambda: datetime.now(UTC))
@@ -134,6 +145,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._alert_policy = ConservativeAlertPolicy()
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
+        self._active_repair_issues: set[tuple[str, str]] = set()
+        self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
+        self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
+        self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
         self.paused_circuits: set[str] = set()
         self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
@@ -142,6 +157,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.source_entities: tuple[str, ...] = ()
         self.started = False
         self._unsub_state_change: Any = None
+        self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
@@ -170,11 +186,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.started = False
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
-        """Handle Home Assistant source state changes.
-
-        The analysis pipeline is intentionally staged behind this callback; Task 11
-        establishes the runtime coordinator surface that later tasks can feed.
-        """
+        """Handle Home Assistant source state changes."""
         await self.async_process_update()
 
     async def async_process_update(self: Self) -> AnalyzerState:
@@ -182,25 +194,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         now = self._now_fn()
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
+        samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
 
         for config in self.circuit_configs:
-            sample = build_circuit_sample(
-                config,
-                self._source_states_for(config, now),
-                now,
-            )
-            if sample.quality_issues:
-                self.state.data_quality_by_circuit[config.circuit_id] = (
-                    sample.quality_issues[0]
-                )
-            else:
-                self.state.data_quality_by_circuit.pop(config.circuit_id, None)
+            sample = self._sample_for_config(config, now)
+            samples.append((config, sample))
+            await self._sync_data_quality_repairs(config.circuit_id, sample)
 
             detector = self._detectors.setdefault(
                 config.circuit_id,
                 CircuitEventDetector(),
             )
-            events.extend(detector.process(sample))
+            new_events = detector.process(sample)
+            events.extend(new_events)
+            self.store_data.events.extend(new_events)
 
             alert = self._observe_real_power(config, sample, now)
             if alert is not None:
@@ -208,8 +215,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(alert)
                 await self._notify_alert(alert)
 
+        for config, sample in samples:
+            self._process_nilm_sample(config, sample, events)
+
         process_events_into_state(self.state, events, alerts)
         self.async_set_updated_data(self.state)
+        await self._async_save_store()
         return self.state
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
@@ -230,6 +241,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
         self.async_set_updated_data(self.state)
+        await self._async_save_store()
 
     async def async_pause_alerts(
         self: Self,
@@ -268,6 +280,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
         }
         self.async_set_updated_data(self.state)
+        await self._async_save_store()
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
@@ -277,6 +290,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "data_quality": self.state.data_quality_by_circuit.get(circuit_id),
             "learning": self.state.learning_by_circuit.get(circuit_id, True),
         }
+        await self._async_save_store()
 
     async def async_run_mapping_checks(self: Self) -> None:
         """Run lightweight source mapping checks."""
@@ -286,6 +300,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.state.data_quality_by_circuit[config.circuit_id] = (
                     "missing_required_sensor"
                 )
+                await self._sync_data_quality_repairs(
+                    config.circuit_id,
+                    "missing_required_sensor",
+                )
+        self.async_set_updated_data(self.state)
+        await self._async_save_store()
 
     async def async_label_nilm_signature(
         self: Self,
@@ -298,8 +318,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["user_label"] = label
+                await self._async_save_store()
                 return
         signatures.append({"signature_id": signature_id, "user_label": label})
+        await self._async_save_store()
 
     async def async_ignore_nilm_signature(
         self: Self,
@@ -312,12 +334,218 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["ignored"] = True
+                await self._async_save_store()
                 return
         signatures.append({"signature_id": signature_id, "ignored": True})
+        await self._async_save_store()
 
     def has_circuit(self: Self, circuit_id: str) -> bool:
         """Return whether this coordinator owns a circuit id."""
         return any(config.circuit_id == circuit_id for config in self.circuit_configs)
+
+    def _hydrate_state_from_store(self: Self) -> None:
+        for circuit_id, signatures in self.store_data.nilm_signatures.items():
+            for signature in signatures:
+                if signature.get("ignored") is True:
+                    self.ignored_nilm_signatures.add(
+                        (circuit_id, str(signature.get("signature_id", "")))
+                    )
+            self._refresh_nilm_state(circuit_id)
+
+    def _sample_for_config(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> NormalizedCircuitSample:
+        if config.mode is not CircuitMode.DUAL_PHASE:
+            return build_circuit_sample(
+                config,
+                self._source_states_for(config, now),
+                now,
+            )
+
+        left_sensors = tuple(
+            sensor for sensor in config.sensors if _normalized_leg(sensor.leg) == "a"
+        )
+        right_sensors = tuple(
+            sensor for sensor in config.sensors if _normalized_leg(sensor.leg) == "b"
+        )
+        if not left_sensors or not right_sensors:
+            return build_circuit_sample(
+                config,
+                self._source_states_for(config, now),
+                now,
+            )
+
+        left_config = replace(
+            config,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=left_sensors,
+        )
+        right_config = replace(
+            config,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=right_sensors,
+        )
+        left_sample = build_circuit_sample(
+            left_config,
+            self._source_states_for(left_config, now),
+            now,
+        )
+        right_sample = build_circuit_sample(
+            right_config,
+            self._source_states_for(right_config, now),
+            now,
+        )
+        aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
+        return NormalizedCircuitSample(
+            timestamp=aggregated.timestamp,
+            circuit_id=config.circuit_id,
+            real_power=aggregated.combined_real_power,
+            current=aggregated.combined_current,
+            voltage=aggregated.average_voltage,
+            reactive_power=aggregated.combined_reactive_power,
+            apparent_power=aggregated.combined_apparent_power,
+            power_factor=aggregated.average_power_factor,
+            frequency=aggregated.frequency,
+            energy=aggregated.energy,
+            source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
+            quality_issues=aggregated.quality_issues,
+        )
+
+    async def _sync_data_quality_repairs(
+        self: Self,
+        circuit_id: str,
+        sample_or_problem: NormalizedCircuitSample | str,
+    ) -> None:
+        desired: set[tuple[str, str]] = set()
+        if isinstance(sample_or_problem, str):
+            self.state.data_quality_by_circuit[circuit_id] = sample_or_problem
+            desired.add((circuit_id, sample_or_problem))
+        elif sample_or_problem.quality_issues:
+            issue = sample_or_problem.quality_issues[0]
+            problem = _data_quality_problem(issue)
+            self.state.data_quality_by_circuit[circuit_id] = issue
+            desired.add((circuit_id, problem))
+        else:
+            self.state.data_quality_by_circuit.pop(circuit_id, None)
+
+        current = {
+            issue for issue in self._active_repair_issues if issue[0] == circuit_id
+        }
+        for issue in current - desired:
+            await repairs.async_delete_data_quality_issue(self.hass, issue[0], issue[1])
+            self._active_repair_issues.discard(issue)
+
+        for issue in desired - self._active_repair_issues:
+            await repairs.async_create_data_quality_issue(self.hass, issue[0], issue[1])
+            self._active_repair_issues.add(issue)
+
+    def _process_nilm_sample(
+        self: Self,
+        config: CircuitConfig,
+        sample: NormalizedCircuitSample,
+        events: Iterable[CircuitEvent],
+    ) -> None:
+        if not self._nilm_enabled(config):
+            return
+
+        detector = self._nilm_detectors.setdefault(
+            config.circuit_id,
+            NilmEdgeDetector(),
+        )
+        edges = detector.process(sample)
+        if edges:
+            known_events = (
+                event for event in events if event.circuit_id != config.circuit_id
+            )
+            mask = mask_known_loads(edges, known_events)
+            self._nilm_total_events_by_circuit[config.circuit_id] += len(edges)
+            self._nilm_unmatched_edges[config.circuit_id].extend(mask.unmatched_edges)
+
+            signatures = cluster_recurring_signatures(
+                self._nilm_unmatched_edges[config.circuit_id]
+            )
+            self.store_data.nilm_signatures[config.circuit_id] = (
+                self._nilm_signature_payloads(config.circuit_id, signatures)
+            )
+
+        self._refresh_nilm_state(config.circuit_id)
+
+    def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
+        enabled = bool(
+            self.options.get(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                self.entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
+            )
+        )
+        return enabled and (
+            config.mode is CircuitMode.MAINS_NILM
+            or config.appliance_profile is ApplianceProfile.MAINS_NILM
+        )
+
+    def _nilm_signature_payloads(
+        self: Self,
+        circuit_id: str,
+        signatures: Iterable[Any],
+    ) -> list[dict[str, Any]]:
+        existing = {
+            str(signature.get("signature_id")): dict(signature)
+            for signature in self.store_data.nilm_signatures.get(circuit_id, [])
+        }
+        payloads: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for signature in signatures:
+            current = existing.get(signature.signature_id, {})
+            user_label = current.get("user_label")
+            classified_signature = replace(signature, user_label=user_label)
+            ignored = bool(current.get("ignored")) or (
+                circuit_id,
+                signature.signature_id,
+            ) in self.ignored_nilm_signatures
+            payload = {
+                "signature_id": signature.signature_id,
+                "median_delta_w": signature.median_delta_w,
+                "median_delta_var": signature.median_delta_var,
+                "median_delta_va": signature.median_delta_va,
+                "median_delta_pf": signature.median_delta_pf,
+                "occurrence_count": signature.occurrence_count,
+                "confidence": signature.confidence,
+                "classification": classify_signature(classified_signature),
+            }
+            if user_label:
+                payload["user_label"] = user_label
+            if ignored:
+                payload["ignored"] = True
+            payloads.append(payload)
+            seen.add(signature.signature_id)
+
+        for signature_id, signature in existing.items():
+            if signature_id not in seen and (
+                signature.get("user_label") or signature.get("ignored")
+            ):
+                payloads.append(signature)
+
+        return payloads
+
+    def _refresh_nilm_state(self: Self, circuit_id: str) -> None:
+        signatures = self.store_data.nilm_signatures.get(circuit_id, [])
+        active_count = sum(
+            1 for signature in signatures if not signature.get("ignored")
+        )
+        self.state.nilm_signature_count_by_circuit[circuit_id] = active_count
+        self.state.nilm_unmatched_load_percentage_by_circuit[circuit_id] = (
+            unmatched_load_percentage(
+                self._nilm_total_events_by_circuit[circuit_id],
+                len(self._nilm_unmatched_edges[circuit_id]),
+            )
+        )
+
+    async def _async_save_store(self: Self) -> None:
+        if self._store is None:
+            return
+        self._store.data = self.store_data
+        await self._store.async_save()
 
     def _source_states_for(
         self: Self,
@@ -393,6 +621,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _normalized_leg(leg: str | None) -> str | None:
+    if leg is None:
+        return None
+    value = leg.strip().lower()
+    if value in {"a", "left", "l1", "line1", "1"}:
+        return "a"
+    if value in {"b", "right", "l2", "line2", "2"}:
+        return "b"
+    return None
+
+
+def _data_quality_problem(issue: str) -> str:
+    issue_text = issue.lower()
+    if "stale" in issue_text:
+        return "stale_source_sensor"
+    return "missing_required_sensor"
 
 
 def _circuit_configs_from_entry_data(

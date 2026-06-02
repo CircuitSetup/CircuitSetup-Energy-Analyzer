@@ -97,6 +97,6 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
         }
 
     @property
-    def state(self) -> Any:
+    def coordinator_state(self) -> Any:
         """Current coordinator state, tolerating staged test coordinators."""
         return getattr(self.coordinator, "data", None)

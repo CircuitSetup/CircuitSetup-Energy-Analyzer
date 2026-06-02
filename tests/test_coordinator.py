@@ -5,6 +5,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_SOURCE_ENTITIES,
     DOMAIN,
 )
@@ -312,3 +313,234 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     assert coordinator.state.active_alerts_by_circuit["fridge"]
     assert notifications
     assert notifications[0].message.startswith("Possible issue")
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_loads_feature_store_and_runtime_saves(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer as integration
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    saved = []
+
+    class FakeFeatureStore:
+        def __init__(self, hass, entry_id) -> None:
+            self.data = FeatureStoreData(
+                baselines={
+                    "fridge:real_power": BaselineStats(
+                        "real_power",
+                        20,
+                        100.0,
+                        5.0,
+                        90.0,
+                        110.0,
+                        1.0,
+                    )
+                }
+            )
+
+        async def async_load(self):
+            return self.data
+
+        async def async_save(self) -> None:
+            saved.append(self.data)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="170",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    class FakeConfigEntries:
+        async def async_forward_entry_setups(self, entry, platforms) -> None:
+            return None
+
+        async def async_unload_platforms(self, entry, platforms) -> bool:
+            return True
+
+    monkeypatch.setattr(integration, "FeatureStore", FakeFeatureStore)
+
+    hass = SimpleNamespace(
+        data={},
+        states=FakeStates(),
+        config_entries=FakeConfigEntries(),
+    )
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                            "unit": "W",
+                        }
+                    ],
+                }
+            ],
+        },
+        options={},
+    )
+
+    assert await integration.async_setup_entry(hass, entry)
+    coordinator = hass.data[DOMAIN]["entry-1"]
+    coordinator._now_fn = lambda: now
+
+    await coordinator.async_process_update()
+    await coordinator.async_relearn_baseline("fridge")
+
+    assert saved
+    assert "fridge:real_power" not in saved[-1].baselines
+
+
+@pytest.mark.asyncio
+async def test_runtime_dual_phase_aggregates_leg_power() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.hvac_l1_power": "400",
+                "sensor.hvac_l2_power": "450",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.hvac_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    event = coordinator.state.last_event_by_circuit["hvac"]
+    assert event.features["startup_power_w"] == 850.0
+
+
+@pytest.mark.asyncio
+async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"watts": 100.0, "var": 10.0, "time": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state=str(holder["watts"] if "power" in entity_id else holder["var"]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                        {
+                            "entity_id": "sensor.mains_reactive",
+                            "role": "reactive_power",
+                        },
+                    ],
+                }
+            ],
+        },
+        options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        now_fn=lambda: holder["time"],
+    )
+
+    for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1):
+        holder["watts"] = float(watts)
+        holder["var"] = 10.0 if watts < 200 else 150.0
+        holder["time"] = now + timedelta(seconds=index * 30)
+        await coordinator.async_process_update()
+
+    assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
+    assert coordinator.state.nilm_unmatched_load_percentage_by_circuit["mains"] > 0
+    classification = coordinator.store_data.nilm_signatures["mains"][0][
+        "classification"
+    ]
+    assert classification.startswith("possible")
+
+
+@pytest.mark.asyncio
+async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues = []
+
+    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_data_quality_issue",
+        fake_issue,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.missing", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+    )
+
+    await coordinator.async_process_update()
+
+    assert issues == [("fridge", "missing_required_sensor")]

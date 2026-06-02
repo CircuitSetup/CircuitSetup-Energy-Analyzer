@@ -5,6 +5,7 @@ from typing import Any
 from .const import CONF_SOURCE_ENTITIES, DOMAIN, PLATFORMS
 from .coordinator import EnergyAnalyzerCoordinator
 from .services import async_setup_services, async_unload_services
+from .storage import FeatureStore, FeatureStoreData
 
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
@@ -23,11 +24,14 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     entry_id = getattr(entry, "entry_id", "default")
     source_entities = getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, [])
+    store, store_data = await _async_load_feature_store(hass, entry_id)
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_id=entry_id,
         entry_data=getattr(entry, "data", {}),
         options=getattr(entry, "options", {}),
+        store=store,
+        store_data=store_data,
     )
     first_entry = not _has_config_entries(hass.data[DOMAIN])
     try:
@@ -60,3 +64,14 @@ async def async_unload_entry(
         if not _has_config_entries(hass.data.get(DOMAIN, {})):
             await async_unload_services(hass)
     return unload_ok
+
+
+async def _async_load_feature_store(
+    hass: Any,
+    entry_id: str,
+) -> tuple[Any | None, FeatureStoreData]:
+    try:
+        store = FeatureStore(hass, entry_id)
+    except ModuleNotFoundError:
+        return None, FeatureStoreData()
+    return store, await store.async_load()

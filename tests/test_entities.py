@@ -103,6 +103,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_nilm_signature_count",
         "entry-1_fridge_nilm_unmatched_load_percentage",
     ]
+    assert not isinstance(added_entities[0].state, AnalyzerState)
+    assert added_entities[0].coordinator_state is coordinator.data
 
 
 @pytest.mark.asyncio

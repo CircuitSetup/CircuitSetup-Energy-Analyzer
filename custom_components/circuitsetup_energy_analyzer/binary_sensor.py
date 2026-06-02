@@ -72,9 +72,12 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         """Return the latest diagnostic flag."""
-        if self.state is None:
+        if self.coordinator_state is None:
             return self.entity_description.value_fn(None, self.circuit_id)
-        return self.entity_description.value_fn(self.state, self.circuit_id)
+        return self.entity_description.value_fn(
+            self.coordinator_state,
+            self.circuit_id,
+        )
 
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
