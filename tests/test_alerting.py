@@ -27,7 +27,8 @@ def test_policy_waits_for_repeated_observations() -> None:
 
     assert alert is not None
     assert alert.repeated_count == 3
-    assert "changed from its learned baseline" in alert.message
+    assert "Possible issue" in alert.message
+    assert "evidence of a learned-baseline change" in alert.message
 
 
 def test_policy_blocks_low_confidence_baseline() -> None:

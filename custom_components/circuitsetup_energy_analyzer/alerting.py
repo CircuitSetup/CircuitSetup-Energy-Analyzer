@@ -61,8 +61,9 @@ class ConservativeAlertPolicy:
             circuit_id=last.circuit_id,
             severity=Severity.WARNING,
             message=(
-                f"{feature_words} changed from its learned baseline across "
-                f"{len(observations)} recent observations."
+                f"Possible issue: {feature_words} shows evidence of a "
+                f"learned-baseline change across {len(observations)} recent "
+                "observations."
             ),
             feature=last.feature,
             observed_value=last.observed_value,
