@@ -1,0 +1,206 @@
+from datetime import UTC, datetime
+
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    BaselineStats,
+    CircuitConfig,
+    CircuitMode,
+    CircuitSample,
+)
+from custom_components.circuitsetup_energy_analyzer.power_quality import (
+    extract_power_quality_features,
+    relationship_rms_score,
+    score_power_quality_features,
+    select_power_quality_evidence,
+)
+
+NOW = datetime(2026, 6, 2, tzinfo=UTC)
+
+
+def sample(
+    *,
+    real_power: float | None = 500.0,
+    reactive_power: float | None = 80.0,
+    apparent_power: float | None = 506.0,
+    power_factor: float | None = 0.98,
+) -> CircuitSample:
+    return CircuitSample(
+        timestamp=NOW,
+        circuit_id="fridge",
+        real_power=real_power,
+        reactive_power=reactive_power,
+        apparent_power=apparent_power,
+        power_factor=power_factor,
+    )
+
+
+def baseline(feature: str, median: float, mad: float = 5.0) -> BaselineStats:
+    return BaselineStats(
+        feature=feature,
+        sample_count=20,
+        median=median,
+        mad=mad,
+        p10=median - 10.0,
+        p90=median + 10.0,
+        confidence=1.0,
+    )
+
+
+def config(
+    profile: ApplianceProfile = ApplianceProfile.REFRIGERATOR,
+    mode: CircuitMode = CircuitMode.SINGLE_PHASE,
+) -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=profile,
+        mode=mode,
+    )
+
+
+def test_extract_power_quality_features_calculates_loaded_relationships() -> None:
+    features = extract_power_quality_features(
+        sample(
+            real_power=500.0,
+            reactive_power=100.0,
+            apparent_power=510.0,
+            power_factor=0.96,
+        )
+    )
+
+    assert features["real_power"] == 500.0
+    assert features["reactive_power"] == 100.0
+    assert features["apparent_power"] == 510.0
+    assert features["power_factor"] == 0.96
+    assert features["reactive_to_real_ratio"] == 0.2
+    assert features["apparent_to_real_ratio"] == 1.02
+    assert round(features["power_factor_deficit"], 3) == 0.04
+    assert "apparent_power_residual" in features
+
+
+def test_extract_power_quality_features_suppresses_relationships_below_load_floor() -> (
+    None
+):
+    features = extract_power_quality_features(
+        sample(
+            real_power=25.0, reactive_power=40.0, apparent_power=47.0, power_factor=0.53
+        )
+    )
+
+    assert features["real_power"] == 25.0
+    assert features["reactive_power"] == 40.0
+    assert "reactive_to_real_ratio" not in features
+    assert "apparent_to_real_ratio" not in features
+    assert "power_factor" not in features
+    assert "power_factor_deficit" not in features
+
+
+def test_score_power_quality_features_handles_missing_optional_baselines() -> None:
+    features = extract_power_quality_features(
+        sample(
+            real_power=510.0,
+            reactive_power=180.0,
+            apparent_power=None,
+            power_factor=None,
+        )
+    )
+    scores = score_power_quality_features(
+        features,
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+        },
+    )
+
+    by_feature = {score.feature: score for score in scores}
+    assert set(by_feature) == {"real_power", "reactive_power", "reactive_to_real_ratio"}
+    assert by_feature["real_power"].score < 1.0
+    assert by_feature["reactive_power"].score > 3.0
+    assert relationship_rms_score(scores) > 2.0
+
+
+def test_select_evidence_finds_reactive_shift_under_stable_real_power() -> None:
+    features = extract_power_quality_features(
+        sample(
+            real_power=510.0,
+            reactive_power=220.0,
+            apparent_power=560.0,
+            power_factor=0.91,
+        )
+    )
+    scores = score_power_quality_features(
+        features,
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "apparent_power": baseline("apparent_power", 506.0, 12.0),
+            "power_factor": baseline("power_factor", 0.98, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+            "apparent_to_real_ratio": baseline("apparent_to_real_ratio", 1.01, 0.01),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.02, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert evidence is not None
+    assert evidence.feature == "reactive_shift_under_stable_real_power"
+    assert "reactive power" in evidence.message
+    assert "real power stayed" in evidence.message
+    assert evidence.features["relationship_rms"] > 2.0
+
+
+def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=4400.0,
+                reactive_power=900.0,
+                apparent_power=4492.0,
+                power_factor=0.88,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 4400.0, 80.0),
+            "reactive_power": baseline("reactive_power", 20.0, 8.0),
+            "power_factor": baseline("power_factor", 0.99, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.005, 0.002),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.01, 0.005),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.WATER_HEATER, CircuitMode.DUAL_PHASE),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature == "resistive_load_became_reactive"
+    assert "resistive" in evidence.message
+
+
+def test_select_evidence_suppresses_mixed_circuit_appliance_alerts() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=560.0,
+                power_factor=0.91,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+        },
+    )
+
+    assert (
+        select_power_quality_evidence(
+            config(ApplianceProfile.MIXED, CircuitMode.MIXED),
+            scores,
+        )
+        is None
+    )
