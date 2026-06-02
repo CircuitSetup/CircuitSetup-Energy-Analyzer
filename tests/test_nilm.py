@@ -111,6 +111,20 @@ def test_edge_detector_ignores_missing_real_power_and_small_changes() -> None:
     assert edges == [edge(20, -160.0)]
 
 
+def test_edge_detector_invalidates_previous_sample_across_missing_real_power() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many(
+        [
+            sample(0, 50.0),
+            CircuitSample(timestamp=BASE_TIME + timedelta(seconds=5), circuit_id="mains"),
+            sample(10, 180.0),
+        ]
+    )
+
+    assert edges == []
+
+
 def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> None:
     known_event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=11),
@@ -130,7 +144,7 @@ def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> No
     assert result.matched_edges[0].edge == edge(10, 200.0)
     assert result.matched_edges[0].known_circuit_id == "fridge"
     assert result.matched_edges[0].confidence > 0.9
-    assert result.unmatched_edges == [edge(40, 325.0)]
+    assert result.unmatched_edges == (edge(40, 325.0),)
 
 
 def test_mask_known_loads_supports_stop_power_features() -> None:
@@ -144,7 +158,25 @@ def test_mask_known_loads_supports_stop_power_features() -> None:
     result = mask_known_loads([edge(30, -155.0)], [known_event])
 
     assert result.matched_edges[0].known_circuit_id == "pump"
-    assert result.unmatched_edges == []
+    assert result.unmatched_edges == ()
+
+
+def test_mask_known_loads_uses_each_known_event_once_with_closest_tie_break() -> None:
+    known_event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=30),
+        circuit_id="dishwasher",
+        event_type=EventType.START,
+        features={"startup_power_w": 200.0},
+    )
+
+    result = mask_known_loads(
+        [edge(20, 200.0), edge(29, 200.0)],
+        [known_event],
+        time_window=timedelta(seconds=15),
+    )
+
+    assert tuple(match.edge for match in result.matched_edges) == (edge(29, 200.0),)
+    assert result.unmatched_edges == (edge(20, 200.0),)
 
 
 def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> None:
@@ -163,6 +195,27 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert signatures[0].median_delta_w == 300.0
     assert signatures[0].median_delta_var == 35.0
     assert signatures[0].confidence >= 0.6
+
+
+def test_cluster_recurring_signatures_is_stable_for_permuted_similar_edges() -> None:
+    first_order = cluster_recurring_signatures(
+        [
+            edge(0, 121.0, delta_var=10.0),
+            edge(30, 100.0, delta_var=8.0),
+            edge(60, 144.0, delta_var=12.0),
+        ]
+    )
+    second_order = cluster_recurring_signatures(
+        [
+            edge(30, 100.0, delta_var=8.0),
+            edge(60, 144.0, delta_var=12.0),
+            edge(0, 121.0, delta_var=10.0),
+        ]
+    )
+
+    assert first_order == second_order
+    assert len(first_order) == 1
+    assert first_order[0].median_delta_w == 121.0
 
 
 def test_classify_signature_is_conservative_and_allows_user_label_override() -> None:

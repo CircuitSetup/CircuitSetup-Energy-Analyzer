@@ -33,8 +33,8 @@ class KnownLoadMatch:
 class NilmMaskResult:
     """Known-load masking output."""
 
-    matched_edges: list[KnownLoadMatch]
-    unmatched_edges: list[NilmEdge]
+    matched_edges: tuple[KnownLoadMatch, ...]
+    unmatched_edges: tuple[NilmEdge, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +60,7 @@ class NilmEdgeDetector:
 
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
+            self._previous = None
             return []
 
         if self._previous is None or self._previous.real_power is None:
@@ -99,20 +100,20 @@ def mask_known_loads(
 ) -> NilmMaskResult:
     """Mask aggregate edges explained by known circuit start/stop events."""
 
+    edges = list(aggregate_edges)
     events = list(known_events)
-    matched_edges: list[KnownLoadMatch] = []
-    unmatched_edges: list[NilmEdge] = []
+    candidates: list[tuple[int, int, KnownLoadMatch, float]] = []
 
-    for edge in aggregate_edges:
-        best_match: KnownLoadMatch | None = None
-        for event in events:
+    for edge_index, edge in enumerate(edges):
+        for event_index, event in enumerate(events):
             if event.event_type not in {EventType.START, EventType.STOP}:
                 continue
             if event.event_type is EventType.START and edge.direction != "on":
                 continue
             if event.event_type is EventType.STOP and edge.direction != "off":
                 continue
-            if abs(edge.timestamp - event.timestamp) > time_window:
+            time_distance = abs(edge.timestamp - event.timestamp)
+            if time_distance > time_window:
                 continue
             known_watts = _event_power_w(event)
             if known_watts is None or known_watts <= 0:
@@ -123,14 +124,38 @@ def mask_known_loads(
                 continue
 
             confidence = max(0.0, 1.0 - (ratio / watt_tolerance_ratio))
-            candidate = KnownLoadMatch(edge, event.circuit_id, confidence)
-            if best_match is None or candidate.confidence > best_match.confidence:
-                best_match = candidate
+            candidates.append(
+                (
+                    edge_index,
+                    event_index,
+                    KnownLoadMatch(edge, event.circuit_id, confidence),
+                    time_distance.total_seconds(),
+                )
+            )
 
-        if best_match is None:
-            unmatched_edges.append(edge)
-        else:
-            matched_edges.append(best_match)
+    matched_edge_indices: set[int] = set()
+    matched_event_indices: set[int] = set()
+    selected: list[tuple[int, KnownLoadMatch]] = []
+
+    for edge_index, event_index, match, _time_distance in sorted(
+        candidates,
+        key=lambda candidate: (
+            -candidate[2].confidence,
+            candidate[3],
+            candidate[0],
+            candidate[1],
+        ),
+    ):
+        if edge_index in matched_edge_indices or event_index in matched_event_indices:
+            continue
+        matched_edge_indices.add(edge_index)
+        matched_event_indices.add(event_index)
+        selected.append((edge_index, match))
+
+    matched_edges = tuple(match for _index, match in sorted(selected))
+    unmatched_edges = tuple(
+        edge for index, edge in enumerate(edges) if index not in matched_edge_indices
+    )
 
     return NilmMaskResult(matched_edges, unmatched_edges)
 
@@ -138,10 +163,23 @@ def mask_known_loads(
 def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignature]:
     """Cluster similar recurring edges into conservative NILM signatures."""
 
+    sorted_edges = sorted(
+        edges,
+        key=lambda edge: (
+            edge.direction,
+            abs(edge.delta_w),
+            edge.delta_w,
+            edge.delta_var,
+            edge.delta_va,
+            edge.delta_pf,
+            edge.timestamp,
+        ),
+    )
+
     clusters: list[list[NilmEdge]] = []
-    for edge in edges:
+    for edge in sorted_edges:
         for cluster in clusters:
-            if _edge_similar(edge, cluster[0]):
+            if _edge_similar_to_cluster(edge, cluster):
                 cluster.append(edge)
                 break
         else:
@@ -232,6 +270,20 @@ def _edge_similar(edge: NilmEdge, reference: NilmEdge) -> bool:
         return False
     return _within_ratio(edge.delta_w, reference.delta_w, 0.2) and _within_ratio(
         edge.delta_var, reference.delta_var, 0.35
+    )
+
+
+def _edge_similar_to_cluster(edge: NilmEdge, cluster: list[NilmEdge]) -> bool:
+    reference = NilmEdge(
+        timestamp=cluster[0].timestamp,
+        delta_w=float(median(candidate.delta_w for candidate in cluster)),
+        delta_var=float(median(candidate.delta_var for candidate in cluster)),
+        delta_va=float(median(candidate.delta_va for candidate in cluster)),
+        delta_pf=float(median(candidate.delta_pf for candidate in cluster)),
+        direction=cluster[0].direction,
+    )
+    return _edge_similar(edge, reference) or any(
+        _edge_similar(edge, candidate) for candidate in cluster
     )
 
 
