@@ -176,3 +176,10 @@ class AlertEvidence:
     message: str
     event_type: EventType | None = None
     features: dict[str, float] = field(default_factory=dict)
+    feature: str = ""
+    observed_value: float = 0.0
+    baseline_value: float = 0.0
+    change_ratio: float = 0.0
+    repeated_count: int = 1
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
