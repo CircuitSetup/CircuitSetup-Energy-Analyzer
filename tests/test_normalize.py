@@ -70,3 +70,26 @@ def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
     assert sample.real_power_w is None
     assert "sensor.fridge_power unavailable" in sample.quality_issues
     assert "sensor.fridge_power stale" in sample.quality_issues
+
+
+def test_build_circuit_sample_preserves_energy_reading() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+    )
+    states = {
+        "sensor.fridge_energy": SourceState(
+            "sensor.fridge_energy",
+            "12.5",
+            "kWh",
+            now,
+        )
+    }
+
+    sample = build_circuit_sample(config, states, now)
+
+    assert sample.energy == 12.5

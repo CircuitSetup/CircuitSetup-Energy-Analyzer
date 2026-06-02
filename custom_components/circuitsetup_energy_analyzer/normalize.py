@@ -50,7 +50,7 @@ def build_circuit_sample(
     config: CircuitConfig,
     states: dict[str, SourceState],
     now: datetime,
-) -> CircuitSample:
+) -> NormalizedCircuitSample:
     values: dict[SensorRole, float | None] = {}
     quality_issues: list[str] = []
     source_entity_ids = tuple(sensor.entity_id for sensor in config.sensors)
@@ -93,6 +93,7 @@ def build_circuit_sample(
         apparent_power=values.get(SensorRole.APPARENT_POWER),
         power_factor=values.get(SensorRole.POWER_FACTOR),
         frequency=values.get(SensorRole.FREQUENCY),
+        energy=values.get(SensorRole.ENERGY),
         source_entity_ids=source_entity_ids,
         quality_issues=tuple(quality_issues),
     )
