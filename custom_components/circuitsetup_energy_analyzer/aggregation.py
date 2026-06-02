@@ -24,7 +24,7 @@ def aggregate_dual_phase(
     circuit_id: str,
     left: CircuitSample,
     right: CircuitSample,
-) -> DualPhaseSample:
+) -> AggregatedDualPhaseSample:
     """Aggregate two split-phase leg samples into a dual-phase sample."""
 
     issues = [*_quality_issues(left), *_quality_issues(right)]
@@ -35,7 +35,7 @@ def aggregate_dual_phase(
         issues.append("one_leg_low_power")
 
     return AggregatedDualPhaseSample(
-        timestamp=left.timestamp,
+        timestamp=max(left.timestamp, right.timestamp),
         circuit_id=circuit_id,
         leg_a=_leg_sample("left", left),
         leg_b=_leg_sample("right", right),

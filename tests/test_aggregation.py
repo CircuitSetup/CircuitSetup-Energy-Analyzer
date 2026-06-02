@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
+from typing import get_type_hints
 
 from custom_components.circuitsetup_energy_analyzer.aggregation import (
+    AggregatedDualPhaseSample,
     aggregate_dual_phase,
 )
-from custom_components.circuitsetup_energy_analyzer.models import CircuitSample
+from custom_components.circuitsetup_energy_analyzer.models import CircuitSample, LegSample
 
 
 def circuit_sample(
@@ -57,3 +59,36 @@ def test_aggregate_dual_phase_flags_one_leg_missing_power() -> None:
     result = aggregate_dual_phase("hvac", left, right)
 
     assert "one_leg_low_power" in result.quality_issues
+
+
+def test_aggregate_dual_phase_return_type_exposes_aggregate_fields() -> None:
+    hints = get_type_hints(aggregate_dual_phase)
+
+    assert hints["return"] is AggregatedDualPhaseSample
+
+
+def test_aggregate_dual_phase_uses_newest_leg_timestamp() -> None:
+    earlier = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    later = datetime(2026, 6, 2, 12, 1, tzinfo=UTC)
+    left = circuit_sample(2400.0, 121.0, timestamp=earlier)
+    right = circuit_sample(1800.0, 119.0, timestamp=later)
+
+    result = aggregate_dual_phase("hvac", left, right)
+
+    assert result.timestamp == later
+
+
+def test_aggregate_dual_phase_preserves_missing_leg_power() -> None:
+    left = circuit_sample(2400.0, 121.0)
+    right = circuit_sample(None, 119.0)
+
+    result = aggregate_dual_phase("hvac", left, right)
+
+    assert result.leg_b.real_power is None
+    assert result.leg_power_imbalance_ratio is None
+
+
+def test_leg_sample_real_power_allows_missing_values() -> None:
+    hints = get_type_hints(LegSample)
+
+    assert hints["real_power"] == float | None

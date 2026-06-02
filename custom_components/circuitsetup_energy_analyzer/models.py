@@ -119,7 +119,7 @@ class LegSample:
     """Measurement sample for one leg of a split-phase circuit."""
 
     leg: str
-    real_power: float
+    real_power: float | None = None
     current: float | None = None
     voltage: float | None = None
     reactive_power: float | None = None
