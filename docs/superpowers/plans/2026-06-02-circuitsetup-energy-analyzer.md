@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a HACS-installable Home Assistant custom integration that learns per-circuit power-quality baselines from CircuitSetup 6 Channel Energy Meter ESPHome ATM90E32 sensors and exposes conservative diagnostic alerts.
+**Goal:** Build a HACS-installable Home Assistant custom integration that learns per-circuit power-quality baselines from CircuitSetup 6 Channel Energy Meter ESPHome ATM90E32 sensors, exposes conservative diagnostic alerts, and includes opt-in experimental mains/mixed-circuit NILM discovery.
 
-**Architecture:** Implement the analyzer as a Home Assistant custom integration under `custom_components/circuitsetup_energy_analyzer`. Keep appliance-analysis logic in pure Python modules with focused unit tests, then connect it to Home Assistant through config flows, event-driven source sensor tracking, diagnostic entities, persistent notifications, Repairs, and a compact integration-owned feature store.
+**Architecture:** Implement the analyzer as a Home Assistant custom integration under `custom_components/circuitsetup_energy_analyzer`. Keep appliance-analysis and NILM discovery logic in pure Python modules with focused unit tests, then connect it to Home Assistant through config flows, event-driven source sensor tracking, diagnostic entities, persistent notifications, Repairs, and a compact integration-owned feature store.
 
 **Tech Stack:** Python 3.13, Home Assistant custom integration APIs, HACS repository layout, pytest, pytest-homeassistant-custom-component, voluptuous, Home Assistant `Store`, `DataUpdateCoordinator`, `SensorEntity`, `BinarySensorEntity`, and `async_track_state_change_event`.
 
@@ -20,6 +20,8 @@
 - Home Assistant Repairs docs: `https://developers.home-assistant.io/docs/core/platform/repairs/`
 - HACS integration publishing docs: `https://hacs.xyz/docs/publish/integration/`
 - ESPHome ATM90E32 docs: `https://esphome.io/components/sensor/atm90e32/`
+- NILM overview survey: `https://www.mdpi.com/1424-8220/12/12/16838`
+- NILMTK toolkit paper: `https://arxiv.org/abs/1404.3878`
 
 ## File Structure
 
@@ -42,6 +44,7 @@ custom_components/circuitsetup_energy_analyzer/
   manifest.json                # HA integration manifest
   mapping.py                   # Channel grouping and dual-phase suggestions
   models.py                    # Dataclasses/enums shared by the analyzer
+  nilm.py                      # Experimental aggregate event and signature discovery
   normalize.py                 # HA state to normalized circuit sample conversion
   notifications.py             # Persistent notification helpers
   profiles.py                  # Appliance profile definitions and thresholds
@@ -67,6 +70,7 @@ tests/
   test_entities.py
   test_events.py
   test_mapping.py
+  test_nilm.py
   test_normalize.py
   test_profiles.py
   test_services.py
@@ -171,7 +175,7 @@ Create `README.md`:
 
 CircuitSetup Energy Analyzer is a Home Assistant custom integration for analyzing CircuitSetup 6 Channel Energy Meter data exposed by ESPHome ATM90E32 sensors.
 
-The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, and mixed or unprofiled circuits. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
+The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, mixed circuits, and opt-in experimental mains NILM discovery. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
 
 ## Installation
 
@@ -252,10 +256,14 @@ DOMAIN = "circuitsetup_energy_analyzer"
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 CONF_CIRCUITS = "circuits"
+CONF_ENABLE_EXPERIMENTAL_NILM = "enable_experimental_nilm"
+CONF_KNOWN_LOAD_CIRCUITS = "known_load_circuits"
+CONF_MAINS_SOURCE_ENTITIES = "mains_source_entities"
 CONF_RETENTION_MODE = "retention_mode"
 CONF_SENSITIVITY = "sensitivity"
 CONF_SOURCE_ENTITIES = "source_entities"
 
+DEFAULT_ENABLE_EXPERIMENTAL_NILM = False
 DEFAULT_SENSITIVITY = "standard"
 DEFAULT_RETENTION_MODE = "standard"
 
@@ -337,6 +345,15 @@ def test_hvac_profile_supports_dual_phase_and_voltage_context() -> None:
     assert "leg_imbalance" in profile.features
 
 
+def test_mains_nilm_profile_is_experimental_aggregate_mode() -> None:
+    profile = get_profile_definition(ApplianceProfile.MAINS_NILM)
+
+    assert profile.supported_modes == {CircuitMode.MAINS_NILM}
+    assert SensorRole.REAL_POWER in profile.required_roles
+    assert "recurring_signature" in profile.features
+    assert profile.minimum_learning_days >= 7
+
+
 def test_retention_modes_are_user_visible_values() -> None:
     assert {mode.value for mode in RetentionMode} == {
         "lightweight",
@@ -380,6 +397,7 @@ class ApplianceProfile(StrEnum):
     WELL_PUMP = "well_pump"
     SUMP_PUMP = "sump_pump"
     EV_CHARGER = "ev_charger"
+    MAINS_NILM = "mains_nilm"
     MOTOR_LOAD = "motor_load"
     RESISTIVE_LOAD = "resistive_load"
     MIXED = "mixed"
@@ -391,6 +409,7 @@ class CircuitMode(StrEnum):
     SINGLE_PHASE = "single_phase"
     DUAL_PHASE = "dual_phase"
     MIXED = "mixed"
+    MAINS_NILM = "mains_nilm"
 
 
 class RetentionMode(StrEnum):
@@ -750,9 +769,28 @@ PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         supported_modes={CircuitMode.MIXED},
         required_roles={SensorRole.REAL_POWER},
         recommended_roles={SensorRole.VOLTAGE, SensorRole.CURRENT},
-        features={"large_persistent_change", "feed_quality"},
+        features={
+            "large_persistent_change",
+            "feed_quality",
+            "recurring_signature_hint",
+        },
         minimum_cycles=0,
         minimum_learning_days=0,
+    ),
+    ApplianceProfile.MAINS_NILM: ProfileDefinition(
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        supported_modes={CircuitMode.MAINS_NILM},
+        required_roles={SensorRole.REAL_POWER},
+        recommended_roles=POWER_QUALITY_RECOMMENDED | {SensorRole.CURRENT},
+        features={
+            "aggregate_edge",
+            "known_load_match",
+            "unmatched_event",
+            "recurring_signature",
+            "possible_load_class",
+        },
+        minimum_cycles=20,
+        minimum_learning_days=7,
     ),
 }
 
@@ -1920,7 +1958,7 @@ def test_prune_events_uses_retention_mode() -> None:
     now = datetime(2026, 6, 2, tzinfo=UTC)
     old = CircuitEvent("fridge", EventType.START, now - timedelta(days=45))
     recent = CircuitEvent("fridge", EventType.START, now - timedelta(days=5))
-    data = FeatureStoreData(events=[old, recent], baselines={}, alerts=[])
+    data = FeatureStoreData(events=[old, recent], baselines={}, alerts=[], nilm_signatures={})
 
     pruned = prune_events(data, RetentionMode.LIGHTWEIGHT, now)
 
@@ -1930,7 +1968,7 @@ def test_prune_events_uses_retention_mode() -> None:
 def test_standard_retention_keeps_month_of_events() -> None:
     now = datetime(2026, 6, 2, tzinfo=UTC)
     event = CircuitEvent("fridge", EventType.START, now - timedelta(days=25))
-    data = FeatureStoreData(events=[event], baselines={}, alerts=[])
+    data = FeatureStoreData(events=[event], baselines={}, alerts=[], nilm_signatures={})
 
     pruned = prune_events(data, RetentionMode.STANDARD, now)
 
@@ -1993,6 +2031,7 @@ class FeatureStoreData:
     events: list[CircuitEvent]
     baselines: dict[str, BaselineStats]
     alerts: list[AlertEvidence]
+    nilm_signatures: dict[str, list[dict[str, Any]]]
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -2031,6 +2070,7 @@ def prune_events(
         events=[event for event in data.events if event.started_at >= cutoff],
         baselines=data.baselines,
         alerts=data.alerts,
+        nilm_signatures=data.nilm_signatures,
     )
 
 
@@ -2043,18 +2083,22 @@ class FeatureStore:
             STORAGE_VERSION,
             f"{STORAGE_KEY}.{entry_id}",
         )
-        self.data = FeatureStoreData(events=[], baselines={}, alerts=[])
+        self.data = FeatureStoreData(events=[], baselines={}, alerts=[], nilm_signatures={})
 
     async def async_load(self) -> None:
         """Load stored data."""
         raw = await self._store.async_load()
         if raw is None:
-            self.data = FeatureStoreData(events=[], baselines={}, alerts=[])
+            self.data = FeatureStoreData(events=[], baselines={}, alerts=[], nilm_signatures={})
             return
         self.data = FeatureStoreData(
             events=[event_from_dict(event) for event in raw.get("events", [])],
             baselines={},
             alerts=[],
+            nilm_signatures={
+                str(circuit_id): list(signatures)
+                for circuit_id, signatures in raw.get("nilm_signatures", {}).items()
+            },
         )
 
     async def async_save(self) -> None:
@@ -2066,6 +2110,7 @@ class FeatureStore:
                     key: asdict(value) for key, value in self.data.baselines.items()
                 },
                 "alerts": [asdict(alert) for alert in self.data.alerts],
+                "nilm_signatures": self.data.nilm_signatures,
             }
         )
 ```
@@ -2181,6 +2226,8 @@ class AnalyzerState:
     anomaly_score_by_circuit: dict[str, float] = field(default_factory=dict)
     learning_by_circuit: dict[str, bool] = field(default_factory=dict)
     data_quality_by_circuit: dict[str, str] = field(default_factory=dict)
+    nilm_signature_count_by_circuit: dict[str, int] = field(default_factory=dict)
+    nilm_unmatched_load_percentage_by_circuit: dict[str, float] = field(default_factory=dict)
 
 
 def process_events_into_state(
@@ -2319,13 +2366,20 @@ from datetime import UTC, datetime
 
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import CircuitEvent, EventType
-from custom_components.circuitsetup_energy_analyzer.sensor import anomaly_score_value, last_event_value
+from custom_components.circuitsetup_energy_analyzer.sensor import (
+    anomaly_score_value,
+    last_event_value,
+    nilm_signature_count_value,
+    nilm_unmatched_load_percentage_value,
+)
 from custom_components.circuitsetup_energy_analyzer.binary_sensor import is_learning, has_data_quality_problem
 
 
 def test_sensor_values_read_coordinator_state() -> None:
     state = AnalyzerState()
     state.anomaly_score_by_circuit["fridge"] = 4.2
+    state.nilm_signature_count_by_circuit["mains"] = 3
+    state.nilm_unmatched_load_percentage_by_circuit["mains"] = 22.5
     state.last_event_by_circuit["fridge"] = CircuitEvent(
         circuit_id="fridge",
         event_type=EventType.START,
@@ -2334,6 +2388,8 @@ def test_sensor_values_read_coordinator_state() -> None:
 
     assert anomaly_score_value(state, "fridge") == 4.2
     assert last_event_value(state, "fridge") == "start"
+    assert nilm_signature_count_value(state, "mains") == 3
+    assert nilm_unmatched_load_percentage_value(state, "mains") == 22.5
 
 
 def test_binary_values_read_coordinator_state() -> None:
@@ -2420,6 +2476,16 @@ def last_event_value(state: AnalyzerState, circuit_id: str) -> str | None:
     return event.event_type.value if event else None
 
 
+def nilm_signature_count_value(state: AnalyzerState, circuit_id: str) -> int:
+    """Return number of discovered NILM signatures."""
+    return state.nilm_signature_count_by_circuit.get(circuit_id, 0)
+
+
+def nilm_unmatched_load_percentage_value(state: AnalyzerState, circuit_id: str) -> float:
+    """Return unmatched NILM load percentage."""
+    return state.nilm_unmatched_load_percentage_by_circuit.get(circuit_id, 0.0)
+
+
 @dataclass(frozen=True, kw_only=True)
 class CircuitSensorEntityDescription(SensorEntityDescription):
     """Sensor description for analyzer diagnostics."""
@@ -2439,6 +2505,19 @@ SENSOR_DESCRIPTIONS: tuple[CircuitSensorEntityDescription, ...] = (
         key="last_event",
         translation_key="last_event",
         value_fn=last_event_value,
+    ),
+    CircuitSensorEntityDescription(
+        key="nilm_discovered_signatures",
+        translation_key="nilm_discovered_signatures",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=nilm_signature_count_value,
+    ),
+    CircuitSensorEntityDescription(
+        key="nilm_unmatched_load_percentage",
+        translation_key="nilm_unmatched_load_percentage",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=nilm_unmatched_load_percentage_value,
     ),
 )
 
@@ -2605,7 +2684,14 @@ Create `tests/test_config_flow.py`:
 ```python
 from homeassistant import config_entries
 
-from custom_components.circuitsetup_energy_analyzer.const import CONF_CIRCUITS, CONF_SOURCE_ENTITIES, DOMAIN
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
+    CONF_SOURCE_ENTITIES,
+    DOMAIN,
+)
 from custom_components.circuitsetup_energy_analyzer.config_flow import format_mapping_suggestions
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
 from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
@@ -2618,6 +2704,9 @@ async def test_user_flow_creates_entry(hass) -> None:
         context={"source": config_entries.SOURCE_USER},
         data={
             CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
+            CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
             CONF_CIRCUITS: [
                 {
                     "id": "fridge",
@@ -2632,6 +2721,11 @@ async def test_user_flow_creates_entry(hass) -> None:
     assert result["type"] == "create_entry"
     assert result["title"] == "CircuitSetup Energy Analyzer"
     assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.fridge_power"]
+    assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
 
 
 async def test_user_flow_requires_source_entities(hass) -> None:
@@ -2700,9 +2794,13 @@ from homeassistant.core import callback
 
 from .const import (
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
+    DEFAULT_ENABLE_EXPERIMENTAL_NILM,
     DEFAULT_RETENTION_MODE,
     DEFAULT_SENSITIVITY,
     DOMAIN,
@@ -2730,6 +2828,12 @@ DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SOURCE_ENTITIES): [str],
         vol.Required(CONF_CIRCUITS): [dict],
+        vol.Optional(
+            CONF_ENABLE_EXPERIMENTAL_NILM,
+            default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+        ): bool,
+        vol.Optional(CONF_MAINS_SOURCE_ENTITIES, default=[]): [str],
+        vol.Optional(CONF_KNOWN_LOAD_CIRCUITS, default=[]): [str],
         vol.Optional(CONF_SENSITIVITY, default=DEFAULT_SENSITIVITY): str,
         vol.Optional(CONF_RETENTION_MODE, default=DEFAULT_RETENTION_MODE): str,
     }
@@ -2802,6 +2906,30 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(
+                        CONF_ENABLE_EXPERIMENTAL_NILM,
+                        default=self._config_entry.options.get(
+                            CONF_ENABLE_EXPERIMENTAL_NILM,
+                            self._config_entry.data.get(
+                                CONF_ENABLE_EXPERIMENTAL_NILM,
+                                DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+                            ),
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_MAINS_SOURCE_ENTITIES,
+                        default=self._config_entry.options.get(
+                            CONF_MAINS_SOURCE_ENTITIES,
+                            self._config_entry.data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                        ),
+                    ): [str],
+                    vol.Optional(
+                        CONF_KNOWN_LOAD_CIRCUITS,
+                        default=self._config_entry.options.get(
+                            CONF_KNOWN_LOAD_CIRCUITS,
+                            self._config_entry.data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                        ),
+                    ): [str],
+                    vol.Optional(
                         CONF_SENSITIVITY,
                         default=self._config_entry.options.get(
                             CONF_SENSITIVITY,
@@ -2838,6 +2966,9 @@ Create `custom_components/circuitsetup_energy_analyzer/strings.json`:
         "data": {
           "source_entities": "Source sensor entity IDs",
           "circuits": "Circuit definitions",
+          "enable_experimental_nilm": "Enable experimental NILM",
+          "mains_source_entities": "Mains NILM source entity IDs",
+          "known_load_circuits": "Known directly monitored circuits",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention mode"
         }
@@ -2853,7 +2984,10 @@ Create `custom_components/circuitsetup_energy_analyzer/strings.json`:
         "title": "CircuitSetup Energy Analyzer options",
         "data": {
           "sensitivity": "Sensitivity",
-          "retention_mode": "Retention mode"
+          "retention_mode": "Retention mode",
+          "enable_experimental_nilm": "Enable experimental NILM",
+          "mains_source_entities": "Mains NILM source entity IDs",
+          "known_load_circuits": "Known directly monitored circuits"
         }
       }
     }
@@ -2865,6 +2999,12 @@ Create `custom_components/circuitsetup_energy_analyzer/strings.json`:
       },
       "last_event": {
         "name": "Last event"
+      },
+      "nilm_discovered_signatures": {
+        "name": "NILM discovered signatures"
+      },
+      "nilm_unmatched_load_percentage": {
+        "name": "NILM unmatched load percentage"
       }
     },
     "binary_sensor": {
@@ -2918,6 +3058,7 @@ from datetime import UTC, datetime
 from custom_components.circuitsetup_energy_analyzer.models import AlertEvidence, Severity
 from custom_components.circuitsetup_energy_analyzer.notifications import notification_id_for_alert
 from custom_components.circuitsetup_energy_analyzer.repairs import issue_id_for_circuit_problem
+from custom_components.circuitsetup_energy_analyzer.services import NILM_LABEL_SERVICE_SCHEMA
 
 
 def test_notification_id_is_stable_per_circuit_feature() -> None:
@@ -2939,6 +3080,15 @@ def test_notification_id_is_stable_per_circuit_feature() -> None:
 
 def test_repair_issue_id_is_stable() -> None:
     assert issue_id_for_circuit_problem("hvac", "phase_mismatch") == "hvac_phase_mismatch"
+
+
+def test_nilm_label_schema_requires_signature_and_label() -> None:
+    validated = NILM_LABEL_SERVICE_SCHEMA(
+        {"circuit_id": "mains", "signature_id": "signature_1", "label": "Microwave"}
+    )
+
+    assert validated["signature_id"] == "signature_1"
+    assert validated["label"] == "Microwave"
 ```
 
 - [ ] **Step 2: Run service tests to verify they fail**
@@ -3070,9 +3220,24 @@ SERVICE_RELEARN_BASELINE = "relearn_baseline"
 SERVICE_PAUSE_ALERTS = "pause_alerts"
 SERVICE_ACKNOWLEDGE_ALERT = "acknowledge_alert"
 SERVICE_EXPORT_DIAGNOSTICS = "export_diagnostics"
+SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
+SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_RUN_MAPPING_CHECKS = "run_mapping_checks"
 
 CIRCUIT_SERVICE_SCHEMA = vol.Schema({vol.Required("circuit_id"): cv.string})
+NILM_LABEL_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("circuit_id"): cv.string,
+        vol.Required("signature_id"): cv.string,
+        vol.Required("label"): cv.string,
+    }
+)
+NILM_SIGNATURE_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("circuit_id"): cv.string,
+        vol.Required("signature_id"): cv.string,
+    }
+)
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
@@ -3099,6 +3264,25 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             schema=CIRCUIT_SERVICE_SCHEMA,
         )
 
+    async def _handle_nilm_signature_service(call: ServiceCall) -> None:
+        hass.bus.async_fire(
+            f"{DOMAIN}_{call.service}",
+            dict(call.data),
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LABEL_NILM_SIGNATURE,
+        _handle_nilm_signature_service,
+        schema=NILM_LABEL_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_IGNORE_NILM_SIGNATURE,
+        _handle_nilm_signature_service,
+        schema=NILM_SIGNATURE_SERVICE_SCHEMA,
+    )
+
 
 async def async_unload_services(hass: HomeAssistant) -> None:
     """Unregister integration services."""
@@ -3107,6 +3291,8 @@ async def async_unload_services(hass: HomeAssistant) -> None:
         SERVICE_PAUSE_ALERTS,
         SERVICE_ACKNOWLEDGE_ALERT,
         SERVICE_EXPORT_DIAGNOSTICS,
+        SERVICE_IGNORE_NILM_SIGNATURE,
+        SERVICE_LABEL_NILM_SIGNATURE,
         SERVICE_RUN_MAPPING_CHECKS,
     ):
         hass.services.async_remove(DOMAIN, service)
@@ -3142,6 +3328,30 @@ export_diagnostics:
 run_mapping_checks:
   fields:
     circuit_id:
+      required: true
+      selector:
+        text:
+label_nilm_signature:
+  fields:
+    circuit_id:
+      required: true
+      selector:
+        text:
+    signature_id:
+      required: true
+      selector:
+        text:
+    label:
+      required: true
+      selector:
+        text:
+ignore_nilm_signature:
+  fields:
+    circuit_id:
+      required: true
+      selector:
+        text:
+    signature_id:
       required: true
       selector:
         text:
@@ -3289,6 +3499,13 @@ sections:
           - entity: sensor.hvac_energy_analyzer_last_event
           - entity: binary_sensor.hvac_energy_analyzer_learning
           - entity: binary_sensor.hvac_energy_analyzer_data_quality_problem
+      - type: entities
+        title: Mains NILM
+        entities:
+          - entity: sensor.mains_energy_analyzer_nilm_discovered_signatures
+          - entity: sensor.mains_energy_analyzer_nilm_unmatched_load_percentage
+          - entity: binary_sensor.mains_energy_analyzer_learning
+          - entity: binary_sensor.mains_energy_analyzer_data_quality_problem
 ```
 
 - [ ] **Step 3: Expand README with HACS and behavior notes**
@@ -3300,7 +3517,7 @@ Replace `README.md` with:
 
 CircuitSetup Energy Analyzer is a Home Assistant custom integration for analyzing CircuitSetup 6 Channel Energy Meter data exposed by ESPHome ATM90E32 sensors.
 
-The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, and mixed or unprofiled circuits. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
+The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, mixed circuits, and opt-in experimental mains NILM discovery. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
 
 ## Installation
 
@@ -3315,11 +3532,16 @@ Install through HACS as a custom repository:
 
 - Single-phase appliance: one CT/channel mapped to one primary appliance.
 - Dual-phase appliance: two CT/channels treated as one appliance, with leg imbalance checks.
-- Mixed or unprofiled circuit: no appliance-health diagnosis; feed-quality and large-change diagnostics only.
+- Mixed or unprofiled circuit: feed-quality and large-change diagnostics, with optional experimental NILM hints for recurring signatures.
+- Mains aggregate NILM source: opt-in experimental whole-home load signature discovery from main CT channels.
+
+## Experimental NILM
+
+Experimental NILM can discover recurring aggregate load signatures from mains channels and mixed circuits. It uses local event detection and confidence scoring. It does not provide definitive appliance labels unless a user confirms and names a recurring signature.
 
 ## Alert Philosophy
 
-The integration is evidence-first. It learns for at least 7 days or enough profile-specific cycles, requires repeated anomaly evidence, and phrases alerts as possible behavior changes rather than appliance diagnoses.
+The integration is evidence-first. It learns for at least 7 days or enough profile-specific cycles, requires repeated anomaly evidence, and phrases alerts as possible behavior changes rather than appliance diagnoses. Experimental NILM output uses possible or unknown load wording until a user confirms a signature label.
 
 ## Dashboard
 
@@ -3344,6 +3566,14 @@ Modify `custom_components/circuitsetup_energy_analyzer/strings.json` by adding t
     "stale_source_sensor": {
       "title": "Energy Analyzer source sensor is stale",
       "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit."
+    },
+    "missing_mains_nilm_sensor": {
+      "title": "Energy Analyzer mains NILM sensor is missing",
+      "description": "Experimental NILM is enabled but a configured mains source sensor is missing or unavailable. Per-circuit analysis can continue, but NILM discovery is paused."
+    },
+    "low_nilm_confidence": {
+      "title": "Energy Analyzer NILM confidence is low",
+      "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications."
     }
   }
 ```
@@ -3369,7 +3599,322 @@ git add README.md docs/dashboard-example.yaml custom_components/circuitsetup_ene
 git commit -m "docs: document energy analyzer setup and diagnostics"
 ```
 
-### Task 16: Final Validation
+### Task 16: Experimental NILM Discovery
+
+**Files:**
+- Create: `custom_components/circuitsetup_energy_analyzer/nilm.py`
+- Create: `tests/test_nilm.py`
+
+- [ ] **Step 1: Write failing NILM tests**
+
+Create `tests/test_nilm.py`:
+
+```python
+from datetime import UTC, datetime, timedelta
+
+from custom_components.circuitsetup_energy_analyzer.models import CircuitEvent, CircuitSample, EventType
+from custom_components.circuitsetup_energy_analyzer.nilm import (
+    NilmEdgeDetector,
+    classify_signature,
+    cluster_recurring_signatures,
+    mask_known_loads,
+    unmatched_load_percentage,
+)
+
+
+def sample(offset: int, watts: float, var: float, pf: float = 0.95) -> CircuitSample:
+    return CircuitSample(
+        circuit_id="mains",
+        timestamp=datetime(2026, 6, 2, tzinfo=UTC) + timedelta(seconds=offset),
+        real_power_w=watts,
+        reactive_power_var=var,
+        apparent_power_va=(watts**2 + var**2) ** 0.5,
+        power_factor=pf,
+    )
+
+
+def test_edge_detector_finds_aggregate_on_edge() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    assert detector.process(sample(0, 300.0, 20.0)) == []
+    edges = detector.process(sample(10, 925.0, 160.0, 0.86))
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 625.0
+    assert edges[0].delta_var == 140.0
+    assert edges[0].direction == "on"
+
+
+def test_known_load_masking_removes_matching_event() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+    detector.process(sample(0, 300.0, 20.0))
+    edge = detector.process(sample(10, 925.0, 160.0))[0]
+    known = CircuitEvent(
+        circuit_id="fridge",
+        event_type=EventType.START,
+        started_at=edge.timestamp + timedelta(seconds=2),
+        features={"startup_power_w": 610.0},
+    )
+
+    result = mask_known_loads([edge], [known])
+
+    assert result.unmatched_edges == []
+    assert result.matched_edges[0].known_circuit_id == "fridge"
+
+
+def test_cluster_recurring_signatures_groups_similar_unknown_edges() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+    edges = []
+    sequence = (
+        (300.0, 20.0),
+        (910.0, 160.0),
+        (320.0, 25.0),
+        (925.0, 168.0),
+        (315.0, 24.0),
+        (900.0, 155.0),
+    )
+    for index, (watts, var) in enumerate(sequence):
+        edges.extend(detector.process(sample(index * 60, watts, var)))
+
+    signatures = cluster_recurring_signatures([edge for edge in edges if edge.direction == "on"])
+
+    assert len(signatures) == 1
+    assert signatures[0].occurrence_count == 3
+    assert signatures[0].confidence >= 0.6
+    assert classify_signature(signatures[0]) == "possible motor-like load"
+    assert unmatched_load_percentage(total_events=10, unmatched_events=3) == 30.0
+```
+
+- [ ] **Step 2: Run NILM tests to verify they fail**
+
+Run:
+
+```bash
+python -m pytest tests/test_nilm.py -q
+```
+
+Expected: FAIL with an import error for `nilm`.
+
+- [ ] **Step 3: Implement experimental NILM helpers**
+
+Create `custom_components/circuitsetup_energy_analyzer/nilm.py`:
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from statistics import median
+
+from .models import CircuitEvent, CircuitSample, EventType
+
+
+@dataclass(frozen=True, slots=True)
+class NilmEdge:
+    """Aggregate mains edge used by experimental NILM."""
+
+    timestamp: datetime
+    delta_w: float
+    delta_var: float
+    delta_va: float
+    delta_pf: float
+    direction: str
+
+
+@dataclass(frozen=True, slots=True)
+class KnownLoadMatch:
+    """Aggregate edge matched to a directly monitored circuit event."""
+
+    edge: NilmEdge
+    known_circuit_id: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class NilmMaskResult:
+    """Known-load masking result."""
+
+    matched_edges: list[KnownLoadMatch]
+    unmatched_edges: list[NilmEdge]
+
+
+@dataclass(frozen=True, slots=True)
+class NilmSignature:
+    """Recurring unmatched aggregate signature."""
+
+    signature_id: str
+    median_delta_w: float
+    median_delta_var: float
+    median_delta_va: float
+    median_delta_pf: float
+    occurrence_count: int
+    confidence: float
+    user_label: str | None = None
+
+
+class NilmEdgeDetector:
+    """Detect aggregate on/off edges from mains samples."""
+
+    def __init__(self, *, min_delta_w: float = 100.0) -> None:
+        self._min_delta_w = min_delta_w
+        self._previous: CircuitSample | None = None
+
+    def process(self, sample: CircuitSample) -> list[NilmEdge]:
+        """Process one aggregate sample and return detected edges."""
+        if self._previous is None:
+            self._previous = sample
+            return []
+
+        previous = self._previous
+        self._previous = sample
+        previous_w = previous.real_power_w or 0.0
+        current_w = sample.real_power_w or 0.0
+        delta_w = current_w - previous_w
+
+        if abs(delta_w) < self._min_delta_w:
+            return []
+
+        return [
+            NilmEdge(
+                timestamp=sample.timestamp,
+                delta_w=delta_w,
+                delta_var=(sample.reactive_power_var or 0.0)
+                - (previous.reactive_power_var or 0.0),
+                delta_va=(sample.apparent_power_va or 0.0)
+                - (previous.apparent_power_va or 0.0),
+                delta_pf=(sample.power_factor or 0.0) - (previous.power_factor or 0.0),
+                direction="on" if delta_w > 0 else "off",
+            )
+        ]
+
+
+def mask_known_loads(
+    aggregate_edges: list[NilmEdge],
+    known_events: list[CircuitEvent],
+    *,
+    time_window: timedelta = timedelta(seconds=15),
+    watt_tolerance_ratio: float = 0.25,
+) -> NilmMaskResult:
+    """Mask aggregate edges that match directly monitored circuit events."""
+    matched: list[KnownLoadMatch] = []
+    unmatched: list[NilmEdge] = []
+
+    for edge in aggregate_edges:
+        best_match: KnownLoadMatch | None = None
+        for event in known_events:
+            if event.event_type not in {EventType.START, EventType.STOP}:
+                continue
+            event_time = event.started_at if event.event_type is EventType.START else event.ended_at
+            if event_time is None or abs(event_time - edge.timestamp) > time_window:
+                continue
+            event_watts = event.features.get("startup_power_w") or event.features.get("stop_power_w")
+            if event_watts is None:
+                continue
+            tolerance = max(abs(edge.delta_w) * watt_tolerance_ratio, 50.0)
+            if abs(abs(edge.delta_w) - abs(event_watts)) <= tolerance:
+                confidence = max(0.0, 1.0 - abs(abs(edge.delta_w) - abs(event_watts)) / tolerance)
+                best_match = KnownLoadMatch(edge=edge, known_circuit_id=event.circuit_id, confidence=confidence)
+                break
+        if best_match is None:
+            unmatched.append(edge)
+        else:
+            matched.append(best_match)
+
+    return NilmMaskResult(matched_edges=matched, unmatched_edges=unmatched)
+
+
+def _similar_edges(left: NilmEdge, right: NilmEdge) -> bool:
+    watt_close = abs(left.delta_w - right.delta_w) <= max(abs(left.delta_w) * 0.20, 75.0)
+    var_close = abs(left.delta_var - right.delta_var) <= max(abs(left.delta_var) * 0.35, 75.0)
+    return watt_close and var_close and left.direction == right.direction
+
+
+def cluster_recurring_signatures(edges: list[NilmEdge]) -> list[NilmSignature]:
+    """Cluster similar unmatched aggregate edges into recurring signatures."""
+    clusters: list[list[NilmEdge]] = []
+    for edge in edges:
+        for cluster in clusters:
+            if _similar_edges(cluster[0], edge):
+                cluster.append(edge)
+                break
+        else:
+            clusters.append([edge])
+
+    signatures: list[NilmSignature] = []
+    for index, cluster in enumerate(clusters, start=1):
+        if len(cluster) < 3:
+            continue
+        occurrence_count = len(cluster)
+        confidence = min(0.95, 0.4 + occurrence_count * 0.1)
+        signatures.append(
+            NilmSignature(
+                signature_id=f"signature_{index}",
+                median_delta_w=float(median(edge.delta_w for edge in cluster)),
+                median_delta_var=float(median(edge.delta_var for edge in cluster)),
+                median_delta_va=float(median(edge.delta_va for edge in cluster)),
+                median_delta_pf=float(median(edge.delta_pf for edge in cluster)),
+                occurrence_count=occurrence_count,
+                confidence=confidence,
+            )
+        )
+    return signatures
+
+
+def classify_signature(signature: NilmSignature) -> str:
+    """Return a conservative possible load class for a signature."""
+    if signature.user_label:
+        return signature.user_label
+    absolute_var = abs(signature.median_delta_var)
+    absolute_w = abs(signature.median_delta_w)
+    if absolute_w == 0:
+        return "unknown recurring load"
+    var_ratio = absolute_var / absolute_w
+    if var_ratio < 0.10 and abs(signature.median_delta_pf) < 0.05:
+        return "possible resistive load"
+    if var_ratio >= 0.15:
+        return "possible motor-like load"
+    if abs(signature.median_delta_pf) >= 0.08:
+        return "possible power-electronics load"
+    return "unknown recurring load"
+
+
+def unmatched_load_percentage(*, total_events: int, unmatched_events: int) -> float:
+    """Return percentage of aggregate NILM events that remain unmatched."""
+    if total_events <= 0:
+        return 0.0
+    return round(unmatched_events / total_events * 100.0, 2)
+```
+
+- [ ] **Step 4: Run NILM tests**
+
+Run:
+
+```bash
+python -m pytest tests/test_nilm.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Run related entity/storage tests**
+
+Run:
+
+```bash
+python -m pytest tests/test_storage.py tests/test_entities.py tests/test_config_flow.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit NILM discovery**
+
+Run:
+
+```bash
+git add custom_components/circuitsetup_energy_analyzer/nilm.py tests/test_nilm.py
+git commit -m "feat: add experimental nilm discovery"
+```
+
+### Task 17: Final Validation
 
 **Files:**
 - Modify only files required to fix validation failures.
@@ -3471,6 +4016,7 @@ Spec coverage:
 - Diagnostic entities and binary sensors: Task 12.
 - Persistent notifications, Repairs, and services: Task 14.
 - Standard HA entities first, dashboard example later: Tasks 12 and 15.
-- Tests and validation: Every task includes tests; Task 16 runs full validation.
+- Experimental mixed-circuit and mains NILM: Tasks 2, 10, 12, 13, 15, and 16.
+- Tests and validation: Every task includes tests; Task 17 runs full validation.
 
-No unresolved scope remains for v1. Full NILM, custom Lovelace cards, external databases, waveform/harmonic analysis, and ESPHome firmware changes remain outside this plan.
+No unresolved scope remains for v1. Deep-learning/cloud NILM, definitive NILM labels without user confirmation, custom Lovelace cards, external databases, waveform/harmonic analysis, and ESPHome firmware changes remain outside this plan.

@@ -6,6 +6,8 @@ Build a HACS-installable Home Assistant custom integration that analyzes power-q
 
 The integration should help users understand when an individual monitored circuit has changed from its learned normal behavior. It should be conservative: it reports evidence of changed behavior and possible issues, not definitive appliance diagnoses.
 
+V1 also includes opt-in experimental non-intrusive load monitoring (NILM) for mixed circuits and mains aggregate channels. NILM output is a discovery aid, not a reliable appliance diagnosis engine.
+
 ## Current Context
 
 This repository is greenfield. The integration will be built as a Home Assistant custom integration under `custom_components/circuitsetup_energy_analyzer` and packaged so users can install and update it through HACS.
@@ -19,7 +21,7 @@ Power, reactive power, power factor, and energy readings depend on correct volta
 The project will use a Home Assistant-native architecture:
 
 - A UI config flow for selecting ESPHome/ATM90E32 sensor entities, confirming channel mappings, setting circuit mode, and assigning appliance profiles.
-- An analyzer engine that validates incoming sensor data, detects events, learns circuit baselines, and scores deviations.
+- An analyzer engine that validates incoming sensor data, detects events, learns circuit baselines, scores deviations, and optionally runs experimental NILM event/signature detection.
 - A compact integration-owned event and feature store for learned behavior and alert evidence.
 - Home Assistant output entities for continuous diagnostic state, persistent notifications for important feed or appliance-behavior events, and Repairs/issues only for integration or source-data problems.
 
@@ -31,9 +33,12 @@ Each configured circuit has a mode:
 
 - Single-phase appliance: one CT/channel mapped to one primary appliance profile, such as a refrigerator, freezer, sump pump, or small motor load.
 - Dual-phase appliance: two CT/channels treated as one appliance, such as HVAC, water heater, pool pump, oven, dryer, or large pump. Combined power behavior is analyzed while each leg is still checked for imbalance and data quality.
-- Mixed or unprofiled circuit: lights, plugs, or general branch circuits where appliance-health analysis is skipped. These circuits can still receive feed-quality, availability, and large-change diagnostics.
+- Mixed or unprofiled circuit: lights, plugs, or general branch circuits. These circuits can run basic feed-quality and large-change diagnostics, or users can enable experimental NILM hints for recurring load signatures on that circuit.
+- Mains aggregate NILM source: one or two main service CT/channel groups, usually L1 and L2, used for experimental whole-home event detection and recurring signature discovery.
 
 The setup flow should auto-suggest dual-phase channel pairings, then require user confirmation. Suggestions may use entity/device names, available phase metadata, correlated load changes, similar voltage behavior, and sensor availability. The user must also be able to manually set or override all channel mappings.
+
+If experimental NILM is enabled, the setup flow should also let users select mains aggregate channels, mark directly monitored circuits as known loads, and choose whether mixed circuits participate in NILM hints.
 
 ## Data Flow
 
@@ -65,6 +70,16 @@ Dual-phase circuits should calculate combined W, VAR, VA, and current while pres
 - One-leg-only behavior on loads expected to use both legs
 - Suspected bad pairing
 - Suspected CT inversion or voltage/current phase mismatch
+
+Experimental NILM data flow should:
+
+- Build an aggregate mains sample from selected mains L1/L2 channels.
+- Detect aggregate on/off edges using changes in W, VAR, VA, PF, and current.
+- Compare mains events with directly monitored appliance events and mask or subtract known loads where timing and magnitude match.
+- Cluster recurring unmatched aggregate events into signatures with learned W/VAR/VA/PF deltas, duration, time-of-day tendency, and confidence.
+- Associate recurring signatures with mixed circuits only when a branch circuit also shows correlated changes.
+- Expose signatures as unknown recurring loads or possible appliance classes until the user confirms a label.
+- Store NILM events and signatures as derived features, not raw high-frequency samples.
 
 ## Appliance Profiles
 
@@ -133,7 +148,28 @@ Potential alerts:
 
 ### Mixed Or Unprofiled Circuits
 
-Do not attempt appliance-health analysis. Provide data-quality, feed-quality, availability, and large persistent change diagnostics only.
+Provide data-quality, feed-quality, availability, and large persistent change diagnostics.
+
+If experimental NILM hints are enabled, learn recurring on/off signatures on the mixed circuit. Output should remain exploratory: "unknown recurring 650 W load" or "possible motor-like load" instead of a firm appliance label. Mixed-circuit NILM should not create appliance-health alerts unless the user confirms and labels a recurring signature.
+
+### Mains Aggregate NILM
+
+Use selected mains channels to detect whole-home aggregate events and discover recurring load signatures. Where directly monitored appliance circuits exist, those known events should be masked or subtracted before classifying unknown aggregate events.
+
+Potential outputs:
+
+- Unknown recurring load signatures
+- Possible class hints such as resistive load, motor-like load, compressor-like load, or power-electronics load
+- Confidence score for each signature
+- Matched known-load percentage
+- Unmatched aggregate load percentage
+- User-confirmed labels for signatures
+
+Potential alerts:
+
+- Important recurring unknown load that becomes frequent or high energy
+- Major aggregate load change that does not match known circuits
+- NILM data-quality issues such as missing mains sensors or too much overlapping activity for confident classification
 
 ## Baseline And Alert Policy
 
@@ -151,6 +187,8 @@ Feed-quality and setup/data-quality alerts may trigger sooner because they are n
 
 Alert wording should avoid definitive diagnosis. For example, it should prefer "compressor run time is 38% longer than its learned baseline across 5 recent cycles" over "compressor is failing."
 
+Experimental NILM alerts require the same conservative posture plus a confidence gate. NILM should prefer "possible" and "unknown recurring load" wording until a user confirms a signature label. Low-confidence or heavily overlapping events should remain diagnostic observations, not notifications.
+
 Users should be able to tune sensitivity, pause alerts, relearn a baseline, acknowledge an alert, and export diagnostics.
 
 ## Storage And Retention
@@ -161,6 +199,7 @@ The integration-owned store should keep compact derived records:
 
 - Short rolling sample buffer for event detection
 - Starts, stops, steady-state windows, voltage sags/swells, and leg imbalance events
+- NILM aggregate events, known-load matches, unmatched events, recurring signatures, confidence, and user-confirmed labels
 - Learned baseline summaries: median, robust spread, percentiles, cycle counts, and confidence score
 - Alert evidence: changed features, magnitude, affected cycles, and timestamps
 
@@ -180,11 +219,13 @@ Setup flow:
 
 1. Select or auto-detect CircuitSetup/ESPHome meter entities.
 2. Review suggested channel groups.
-3. Choose circuit mode: single-phase appliance, dual-phase appliance, or mixed/unprofiled.
+3. Choose circuit mode: single-phase appliance, dual-phase appliance, mixed/unprofiled, or mains aggregate NILM source.
 4. Assign appliance profile.
 5. Confirm required and optional sensors.
-6. Choose sensitivity and retention mode.
-7. Start in learning mode.
+6. Enable or disable experimental NILM for mains and mixed circuits.
+7. Mark directly monitored appliance circuits as known loads for NILM masking/subtraction.
+8. Choose sensitivity and retention mode.
+9. Start in learning mode.
 
 Outputs:
 
@@ -193,6 +234,7 @@ Outputs:
 - Persistent notifications for important feed or appliance-behavior changes.
 - Repairs/issues only for integration and data-quality problems.
 - Services/actions for relearn baseline, pause alerts, acknowledge alert, export diagnostics, and run mapping checks.
+- Services/actions for labeling NILM signatures, ignoring a signature, and rerunning known-load matching.
 - Documentation with example dashboard YAML/cards, but no custom Lovelace card in v1.
 
 Example entities:
@@ -203,6 +245,9 @@ Example entities:
 - `binary_sensor.fridge_energy_analyzer_learning`
 - `binary_sensor.hvac_energy_analyzer_voltage_sag`
 - `sensor.hvac_energy_analyzer_leg_imbalance`
+- `sensor.mains_energy_analyzer_nilm_unmatched_load_percentage`
+- `sensor.mains_energy_analyzer_nilm_discovered_signatures`
+- `sensor.kitchen_mixed_energy_analyzer_possible_load_signature`
 
 ## Repairs, Notifications, And Entities
 
@@ -217,6 +262,8 @@ Repairs/issues should be limited to integration problems:
 - Likely CT inversion
 - Likely phase mismatch
 - Suspicious dual-phase pairing
+- Missing or stale mains aggregate NILM sensors
+- NILM classification confidence too low because of overlapping aggregate events
 - Not enough valid data to learn after a reasonable period
 - Integration store or migration problems
 
@@ -227,6 +274,8 @@ The integration should fail softly and transparently:
 - If required sensors are missing, create a Repair and mark the circuit data-quality status as bad.
 - If optional sensors are missing, degrade analysis and explain which features are unavailable.
 - If source values become unavailable or stale, pause appliance-health scoring for the affected circuit.
+- If mains aggregate NILM sensors are unavailable, pause NILM while keeping ordinary per-circuit analysis active.
+- If a NILM signature has low confidence or too much event overlap, keep it as an observation and do not notify.
 - If a baseline is not confident, stay in learning mode and expose why.
 - If storage migration fails, preserve existing data where possible and surface a Repair.
 
@@ -239,6 +288,7 @@ Use test-driven development around focused units:
 - Sample normalization, unit handling, stale-data detection, and sign validation.
 - Dual-phase aggregation and leg imbalance checks.
 - Event detection for compressor-like cycles, resistive loads, motor starts, voltage sag, and mixed circuits.
+- Experimental NILM edge detection, known-load masking/subtraction, recurring signature clustering, confidence gates, and user label handling.
 - Baseline learning and confidence thresholds.
 - Conservative alert gating and repeated-evidence requirements.
 - HA entity state output, persistent notification creation, and Repair creation.
@@ -248,8 +298,10 @@ Synthetic fixtures should model common household loads and data-quality failures
 
 ## Non-Goals For V1
 
-- Full NILM disaggregation on mixed circuits.
 - Definitive appliance failure diagnosis.
+- Definitive NILM appliance labels without user confirmation.
+- Cloud-based NILM or deep-learning NILM models.
+- High-accuracy disaggregation during overlapping load events.
 - High-frequency waveform or harmonic analysis beyond the values exposed as HA entities.
 - A custom Lovelace card.
 - Required external databases.
@@ -270,3 +322,5 @@ Synthetic fixtures should model common household loads and data-quality failures
 - Shaw, Norford, Leeb, and Luo, HVAC fault detection via electrical load monitoring: `https://emsg.mit.edu/wp-content/uploads/2016/07/21_Detection-and-Diagnosis-of-HVAC-Faults-via-Electrical-Load-Monitoring.pdf`
 - Khodapanah, Zobaa, and Abbod, induction motor power factor estimation: `https://link.springer.com/article/10.1007/s00202-018-0723-7`
 - ORNL water heater anomaly detection publication: `https://www.ornl.gov/publication/anomaly-detection-mpc-forecast-fleet-water-heaters`
+- NILM overview survey: `https://www.mdpi.com/1424-8220/12/12/16838`
+- NILMTK toolkit paper: `https://arxiv.org/abs/1404.3878`
