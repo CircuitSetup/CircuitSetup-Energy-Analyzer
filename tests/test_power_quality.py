@@ -191,6 +191,25 @@ def test_score_power_quality_features_uses_unitless_spread_floor() -> None:
     assert by_feature["real_power"].score < 1.0
 
 
+def test_relationship_rms_score_excludes_apparent_power_residual() -> None:
+    scores = score_power_quality_features(
+        {
+            "real_power": 500.0,
+            "apparent_power_residual": 100.0,
+        },
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "apparent_power_residual": baseline(
+                "apparent_power_residual",
+                0.0,
+                1.0,
+            ),
+        },
+    )
+
+    assert relationship_rms_score(scores) == 0.0
+
+
 def test_select_evidence_finds_reactive_shift_under_stable_real_power() -> None:
     features = extract_power_quality_features(
         sample(
@@ -288,6 +307,29 @@ def test_select_evidence_counts_pf_family_once() -> None:
 
     assert relationship_rms_score(scores) > MIN_RELATIONSHIP_SCORE
     assert evidence is None or evidence.feature != "power_factor_shift_under_load"
+
+
+def test_select_evidence_counts_reactive_family_once() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=None,
+                power_factor=None,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert relationship_rms_score(scores) > MIN_RELATIONSHIP_SCORE
+    assert evidence is None or evidence.feature not in RELATIONSHIP_EVIDENCE_FEATURES
 
 
 def test_select_evidence_still_allows_real_power_fallback() -> None:
