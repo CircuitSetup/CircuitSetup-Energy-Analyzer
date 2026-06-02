@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from statistics import median
-from typing import Iterable
 
 from .models import CircuitEvent, CircuitSample, EventType
 
@@ -222,7 +222,11 @@ def classify_signature(signature: NilmSignature) -> str:
     abs_va = abs(signature.median_delta_va)
     reactive_ratio = abs_var / max(abs_w, 1.0)
 
-    if abs_w >= 200 and reactive_ratio <= 0.12 and abs(signature.median_delta_pf) <= 0.08:
+    if (
+        abs_w >= 200
+        and reactive_ratio <= 0.12
+        and abs(signature.median_delta_pf) <= 0.08
+    ):
         return "possible resistive load"
     if abs_w >= 200 and reactive_ratio >= 0.3:
         return "possible motor-like load"

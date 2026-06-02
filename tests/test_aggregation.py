@@ -5,7 +5,10 @@ from custom_components.circuitsetup_energy_analyzer.aggregation import (
     AggregatedDualPhaseSample,
     aggregate_dual_phase,
 )
-from custom_components.circuitsetup_energy_analyzer.models import CircuitSample, LegSample
+from custom_components.circuitsetup_energy_analyzer.models import (
+    CircuitSample,
+    LegSample,
+)
 
 
 def circuit_sample(

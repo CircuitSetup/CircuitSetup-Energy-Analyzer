@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from .models import SensorRole
-
 
 _DEVICE_CLASSES = {
     "power",
@@ -136,7 +135,11 @@ def _build_discovered_sensor(
         or getattr(entry, "original_name", None)
         or entity_id
     )
-    device_class = attributes.get("device_class") or getattr(entry, "device_class", None)
+    device_class = attributes.get("device_class") or getattr(
+        entry,
+        "device_class",
+        None,
+    )
 
     return DiscoveredSensor(
         entity_id=entity_id,

@@ -91,7 +91,10 @@ def _difference_optional(left: float | None, right: float | None) -> float | Non
     return abs(left - right)
 
 
-def _imbalance_ratio(left_watts: float | None, right_watts: float | None) -> float | None:
+def _imbalance_ratio(
+    left_watts: float | None,
+    right_watts: float | None,
+) -> float | None:
     if left_watts is None or right_watts is None:
         return None
 

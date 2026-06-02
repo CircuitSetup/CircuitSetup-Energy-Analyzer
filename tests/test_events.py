@@ -1,7 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.events import CircuitEventDetector
-from custom_components.circuitsetup_energy_analyzer.models import CircuitSample, EventType
+from custom_components.circuitsetup_energy_analyzer.models import (
+    CircuitSample,
+    EventType,
+)
 
 
 def sample(

@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 from .models import CircuitConfig, CircuitSample, SensorRole
 
-
 STALE_AFTER = timedelta(minutes=10)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 

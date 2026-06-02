@@ -6,7 +6,10 @@ from custom_components.circuitsetup_energy_analyzer.alerting import (
     ConservativeAlertPolicy,
     Observation,
 )
-from custom_components.circuitsetup_energy_analyzer.models import AlertEvidence, Severity
+from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
+    Severity,
+)
 
 
 def test_policy_waits_for_repeated_observations() -> None:

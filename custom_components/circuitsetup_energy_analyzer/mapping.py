@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from itertools import combinations
-import re
 
 from .discovery import DiscoveredSensor
 from .models import SensorRole
-
 
 _CHANNEL_PATTERN = re.compile(
     r"(?:^|[^a-z0-9])(?:ch|channel|ct)\s*[_-]?\s*(\d+)(?:$|[^a-z0-9])",
@@ -78,7 +77,11 @@ def suggest_dual_phase_pairs(
                 )
             )
 
-    return sorted(suggestions, key=lambda suggestion: suggestion.confidence, reverse=True)
+    return sorted(
+        suggestions,
+        key=lambda suggestion: suggestion.confidence,
+        reverse=True,
+    )
 
 
 def _score_pair(

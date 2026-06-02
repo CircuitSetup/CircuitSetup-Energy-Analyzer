@@ -55,7 +55,12 @@ except ModuleNotFoundError:
         def __init_subclass__(cls, **kwargs: Any) -> None:
             super().__init_subclass__()
 
-        def async_create_entry(self, *, title: str, data: dict[str, Any]) -> dict[str, Any]:
+        def async_create_entry(
+            self,
+            *,
+            title: str,
+            data: dict[str, Any],
+        ) -> dict[str, Any]:
             return {"type": "create_entry", "title": title, "data": data}
 
         def async_show_form(
@@ -100,7 +105,6 @@ from .const import (
 from .discovery import async_discover_sensors
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
 from .models import ApplianceProfile, CircuitMode, RetentionMode
-
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"

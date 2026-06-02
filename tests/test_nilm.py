@@ -17,7 +17,6 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     unmatched_load_percentage,
 )
 
-
 BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
 
@@ -68,7 +67,13 @@ def test_edge_detector_emits_on_and_off_edges_from_current_sample_fields() -> No
 
     edges = detector.process_many(
         [
-            sample(0, 80.0, reactive_power=10.0, apparent_power=82.0, power_factor=0.98),
+            sample(
+                0,
+                80.0,
+                reactive_power=10.0,
+                apparent_power=82.0,
+                power_factor=0.98,
+            ),
             sample(
                 10,
                 260.0,
@@ -101,7 +106,10 @@ def test_edge_detector_ignores_missing_real_power_and_small_changes() -> None:
     edges = detector.process_many(
         [
             sample(0, 50.0),
-            CircuitSample(timestamp=BASE_TIME + timedelta(seconds=5), circuit_id="mains"),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=5),
+                circuit_id="mains",
+            ),
             sample(10, 120.0),
             sample(15, 180.0),
             sample(20, 20.0),
@@ -117,7 +125,10 @@ def test_edge_detector_invalidates_previous_sample_across_missing_real_power() -
     edges = detector.process_many(
         [
             sample(0, 50.0),
-            CircuitSample(timestamp=BASE_TIME + timedelta(seconds=5), circuit_id="mains"),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=5),
+                circuit_id="mains",
+            ),
             sample(10, 180.0),
         ]
     )

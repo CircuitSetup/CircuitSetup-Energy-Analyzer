@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-import logging
 from typing import Any, Self
 
 from .const import DOMAIN

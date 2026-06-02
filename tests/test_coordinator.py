@@ -124,7 +124,9 @@ def test_process_events_into_state_replaces_active_alert_set() -> None:
 
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
-    import custom_components.circuitsetup_energy_analyzer.coordinator as coordinator_module
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
 
     unsubscribed: list[str] = []
 
@@ -196,7 +198,7 @@ async def test_setup_entry_stores_and_unload_stops_coordinator_without_ha() -> N
 
 
 @pytest.mark.asyncio
-async def test_setup_entry_rolls_back_coordinator_when_platform_forwarding_fails() -> None:
+async def test_setup_entry_rolls_back_forwarding_failure() -> None:
     from custom_components.circuitsetup_energy_analyzer import async_setup_entry
 
     class FakeConfigEntries:

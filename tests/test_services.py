@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+import voluptuous as vol
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SOURCE_ENTITIES,
@@ -91,7 +92,9 @@ def test_repair_issue_id_does_not_collide_on_underscores() -> None:
 
 
 def test_repair_issue_severity_normalizes_unsupported_values_to_warning() -> None:
-    from custom_components.circuitsetup_energy_analyzer.repairs import _ha_issue_severity
+    from custom_components.circuitsetup_energy_analyzer.repairs import (
+        _ha_issue_severity,
+    )
 
     class FakeIssueSeverity:
         WARNING = "warning"
@@ -130,7 +133,7 @@ def test_nilm_label_schema_raises_for_missing_required_field() -> None:
         NILM_LABEL_SERVICE_SCHEMA,
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(vol.Invalid):
         NILM_LABEL_SERVICE_SCHEMA(
             {
                 "circuit_id": "mains",
@@ -225,8 +228,12 @@ async def test_setup_entry_rolls_back_services_when_platform_forwarding_fails() 
 async def test_setup_entry_rolls_back_services_when_coordinator_start_fails(
     monkeypatch,
 ) -> None:
-    import custom_components.circuitsetup_energy_analyzer.coordinator as coordinator_module
-    from custom_components.circuitsetup_energy_analyzer import async_setup_entry
+    from custom_components.circuitsetup_energy_analyzer import (
+        async_setup_entry,
+    )
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
 
     class FakeServices:
         def __init__(self) -> None:
