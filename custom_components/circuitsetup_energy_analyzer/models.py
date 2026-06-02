@@ -175,7 +175,7 @@ class AlertEvidence:
     severity: Severity
     message: str
     event_type: EventType | None = None
-    features: dict[str, float] = field(default_factory=dict)
+    features: Mapping[str, float] = field(default_factory=dict)
     feature: str = ""
     observed_value: float = 0.0
     baseline_value: float = 0.0
@@ -183,3 +183,6 @@ class AlertEvidence:
     repeated_count: int = 1
     first_seen: datetime | None = None
     last_seen: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", MappingProxyType(dict(self.features)))

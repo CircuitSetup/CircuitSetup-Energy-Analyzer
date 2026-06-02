@@ -27,11 +27,13 @@ class ConservativeAlertPolicy:
     def __init__(
         self: Self,
         min_repeated: int = 3,
-        min_score: float = 3.0,
+        min_total_score: float = 3.0,
+        min_average_score: float = 1.5,
         min_baseline_confidence: float = 0.6,
     ) -> None:
         self.min_repeated = min_repeated
-        self.min_score = min_score
+        self.min_total_score = min_total_score
+        self.min_average_score = min_average_score
         self.min_baseline_confidence = min_baseline_confidence
         self._observations: defaultdict[tuple[str, str], deque[Observation]] = (
             defaultdict(lambda: deque(maxlen=self.min_repeated))
@@ -48,7 +50,13 @@ class ConservativeAlertPolicy:
         if len(observations) < self.min_repeated:
             return None
 
-        if sum(item.score for item in observations) < self.min_score:
+        total_score = sum(item.score for item in observations)
+        average_score = total_score / len(observations)
+
+        if (
+            total_score < self.min_total_score
+            or average_score < self.min_average_score
+        ):
             return None
 
         first = observations[0]
