@@ -1,0 +1,69 @@
+{
+  "title": "CircuitSetup Energy Analyzer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure CircuitSetup Energy Analyzer",
+        "description": "Select CircuitSetup energy source sensors and define monitored circuits.\n\n{mapping_suggestions}",
+        "data": {
+          "source_entities": "Source sensor entity IDs",
+          "circuits": "Circuit definitions",
+          "enable_experimental_nilm": "Enable experimental NILM",
+          "mains_source_entities": "Mains NILM source entity IDs",
+          "known_load_circuits": "Known directly monitored circuits",
+          "sensitivity": "Sensitivity",
+          "retention_mode": "Retention mode"
+        }
+      }
+    },
+    "error": {
+      "no_source_entities": "Select at least one source sensor.",
+      "invalid_circuits": "Circuit definitions must be a list.",
+      "invalid_circuit_mode": "Select a supported circuit mode.",
+      "invalid_appliance_profile": "Select a supported appliance profile.",
+      "invalid_retention_mode": "Select a supported retention mode."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "CircuitSetup Energy Analyzer options",
+        "description": "Tune diagnostics and experimental NILM settings.\n\n{mapping_suggestions}",
+        "data": {
+          "enable_experimental_nilm": "Enable experimental NILM",
+          "mains_source_entities": "Mains NILM source entity IDs",
+          "known_load_circuits": "Known directly monitored circuits",
+          "sensitivity": "Sensitivity",
+          "retention_mode": "Retention mode"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "anomaly_score": {
+        "name": "Anomaly score"
+      },
+      "last_event": {
+        "name": "Last event"
+      },
+      "nilm_signature_count": {
+        "name": "NILM discovered signatures"
+      },
+      "nilm_discovered_signatures": {
+        "name": "NILM discovered signatures"
+      },
+      "nilm_unmatched_load_percentage": {
+        "name": "NILM unmatched load percentage"
+      }
+    },
+    "binary_sensor": {
+      "learning": {
+        "name": "Learning"
+      },
+      "data_quality_problem": {
+        "name": "Data quality problem"
+      }
+    }
+  }
+}

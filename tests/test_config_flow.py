@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
+    CONF_RETENTION_MODE,
+    CONF_SENSITIVITY,
+    CONF_SOURCE_ENTITIES,
+)
+from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
+from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
+from custom_components.circuitsetup_energy_analyzer.models import SensorRole
+
+
+def test_format_mapping_suggestions_shows_confirmation_text() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        format_mapping_suggestions,
+    )
+
+    left = DiscoveredSensor(
+        "sensor.panel_ch1_power",
+        "HVAC L1 Power",
+        SensorRole.REAL_POWER,
+        "meter-1",
+        "W",
+        "power",
+        "esphome",
+    )
+    right = DiscoveredSensor(
+        "sensor.panel_ch2_power",
+        "HVAC L2 Power",
+        SensorRole.REAL_POWER,
+        "meter-1",
+        "W",
+        "power",
+        "esphome",
+    )
+
+    text = format_mapping_suggestions(
+        [DualPhaseSuggestion(left, right, 0.8, ("neighboring channels",))]
+    )
+
+    assert "HVAC L1 Power" in text
+    assert "sensor.panel_ch1_power" in text
+    assert "HVAC L2 Power" in text
+    assert "sensor.panel_ch2_power" in text
+    assert "80%" in text
+    assert "neighboring channels" in text
+    assert "confirm or manually override" in text
+
+
+def test_format_mapping_suggestions_requires_manual_definition_when_empty() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        format_mapping_suggestions,
+    )
+
+    text = format_mapping_suggestions([])
+
+    assert "manual definition" in text
+
+
+def test_validate_setup_input_preserves_nilm_and_circuit_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_setup_input,
+    )
+
+    payload = {
+        CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.main_l1_power"],
+        CONF_ENABLE_EXPERIMENTAL_NILM: True,
+        CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
+        CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
+        CONF_SENSITIVITY: "high",
+        CONF_RETENTION_MODE: "diagnostic",
+        CONF_CIRCUITS: [
+            {
+                "circuit_id": "fridge",
+                "name": "Fridge",
+                "mode": "mixed",
+                "appliance_profile": "mixed",
+                "source_entities": ["sensor.fridge_power"],
+            },
+            {
+                "id": "mains",
+                "name": "Mains NILM",
+                "mode": "mains_nilm",
+                "appliance_profile": "mains_nilm",
+                "source_entities": [
+                    "sensor.main_l1_power",
+                    "sensor.main_l2_power",
+                ],
+            },
+        ],
+    }
+
+    validated = validate_setup_input(payload)
+
+    assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_SOURCE_ENTITIES]
+    assert validated[CONF_ENABLE_EXPERIMENTAL_NILM] is True
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
+    assert validated[CONF_KNOWN_LOAD_CIRCUITS] == ["fridge"]
+    assert validated[CONF_SENSITIVITY] == "high"
+    assert validated[CONF_RETENTION_MODE] == "diagnostic"
+    assert validated[CONF_CIRCUITS] == payload[CONF_CIRCUITS]
+
+
+def test_validate_setup_input_requires_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        SetupValidationError,
+        validate_setup_input,
+    )
+
+    with pytest.raises(SetupValidationError) as error:
+        validate_setup_input({CONF_SOURCE_ENTITIES: [], CONF_CIRCUITS: []})
+
+    assert error.value.error_key == "no_source_entities"
+
+
+@pytest.mark.asyncio
+async def test_fallback_user_flow_returns_no_source_entities_form_error() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+    result = await flow.async_step_user({CONF_SOURCE_ENTITIES: [], CONF_CIRCUITS: []})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "no_source_entities"
+
+
+def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    strings_path = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "circuitsetup_energy_analyzer"
+        / "strings.json"
+    )
+
+    assert config_flow.CircuitSetupEnergyAnalyzerConfigFlow.VERSION == 1
+    assert json.loads(strings_path.read_text(encoding="utf-8"))["title"] == (
+        "CircuitSetup Energy Analyzer"
+    )

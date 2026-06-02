@@ -1,0 +1,339 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from types import SimpleNamespace
+from typing import Any
+
+try:
+    import voluptuous as vol
+except ModuleNotFoundError:
+
+    class _Schema:
+        def __init__(self, schema: Mapping[Any, Any]) -> None:
+            self.schema = schema
+
+        def __call__(self, value: Any) -> Any:
+            return value
+
+    class _Marker:
+        def __init__(self, key: str, default: Any = None) -> None:
+            self.key = key
+            self.default = default
+
+        def __hash__(self) -> int:
+            return hash((self.key, self.default))
+
+        def __eq__(self, other: object) -> bool:
+            return (
+                isinstance(other, _Marker)
+                and self.key == other.key
+                and self.default == other.default
+            )
+
+    class _VoluptuousFallback:
+        Schema = _Schema
+
+        @staticmethod
+        def Required(key: str, default: Any = None) -> _Marker:
+            return _Marker(key, default)
+
+        @staticmethod
+        def Optional(key: str, default: Any = None) -> _Marker:
+            return _Marker(key, default)
+
+    vol = _VoluptuousFallback()
+
+try:
+    from homeassistant import config_entries
+    from homeassistant.core import callback
+except ModuleNotFoundError:
+
+    def callback(func: Any) -> Any:
+        return func
+
+    class _ConfigFlow:
+        def __init_subclass__(cls, **kwargs: Any) -> None:
+            super().__init_subclass__()
+
+        def async_create_entry(self, *, title: str, data: dict[str, Any]) -> dict[str, Any]:
+            return {"type": "create_entry", "title": title, "data": data}
+
+        def async_show_form(
+            self,
+            *,
+            step_id: str,
+            data_schema: Any,
+            errors: dict[str, str] | None = None,
+            description_placeholders: dict[str, str] | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "type": "form",
+                "step_id": step_id,
+                "data_schema": data_schema,
+                "errors": errors or {},
+                "description_placeholders": description_placeholders or {},
+            }
+
+    class _OptionsFlow(_ConfigFlow):
+        pass
+
+    config_entries = SimpleNamespace(
+        ConfigEntry=Any,
+        ConfigFlow=_ConfigFlow,
+        ConfigFlowResult=dict[str, Any],
+        OptionsFlow=_OptionsFlow,
+    )
+
+from .const import (
+    CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
+    CONF_RETENTION_MODE,
+    CONF_SENSITIVITY,
+    CONF_SOURCE_ENTITIES,
+    DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+    DEFAULT_RETENTION_MODE,
+    DEFAULT_SENSITIVITY,
+    DOMAIN,
+)
+from .discovery import async_discover_sensors
+from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
+from .models import ApplianceProfile, CircuitMode, RetentionMode
+
+
+TITLE = "CircuitSetup Energy Analyzer"
+ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
+_VALID_CIRCUIT_MODES = {mode.value for mode in CircuitMode}
+_VALID_APPLIANCE_PROFILES = {profile.value for profile in ApplianceProfile}
+_VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
+
+
+class SetupValidationError(ValueError):
+    """Setup validation error with a Home Assistant translation key."""
+
+    def __init__(self, error_key: str) -> None:
+        super().__init__(error_key)
+        self.error_key = error_key
+
+
+def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> str:
+    """Format auto-suggested dual-phase mappings for user confirmation."""
+    suggestion_list = list(suggestions)
+    if not suggestion_list:
+        return (
+            "No dual-phase mapping suggestions were found; manual definition is "
+            "needed for circuit channels."
+        )
+
+    lines = [
+        "Suggested dual-phase channel pairs are listed below. Review each pair, "
+        "then confirm or manually override the mapping before saving."
+    ]
+    for suggestion in suggestion_list:
+        reasons = ", ".join(suggestion.reasons) if suggestion.reasons else "no reasons"
+        lines.append(
+            f"- {suggestion.left.name} ({suggestion.left.entity_id}) + "
+            f"{suggestion.right.name} ({suggestion.right.entity_id}): "
+            f"{suggestion.confidence:.0%} confidence; reasons: {reasons}."
+        )
+    return "\n".join(lines)
+
+
+def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize setup data without requiring Home Assistant."""
+    source_entities = _string_list(user_input.get(CONF_SOURCE_ENTITIES))
+    if not source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+
+    circuits = _validate_circuits(user_input.get(CONF_CIRCUITS, []))
+    retention_mode = str(user_input.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE))
+    if retention_mode not in _VALID_RETENTION_MODES:
+        raise SetupValidationError("invalid_retention_mode")
+
+    return {
+        CONF_SOURCE_ENTITIES: source_entities,
+        CONF_CIRCUITS: circuits,
+        CONF_ENABLE_EXPERIMENTAL_NILM: bool(
+            user_input.get(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+            )
+        ),
+        CONF_MAINS_SOURCE_ENTITIES: _string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, [])
+        ),
+        CONF_KNOWN_LOAD_CIRCUITS: _string_list(
+            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, [])
+        ),
+        CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
+        CONF_RETENTION_MODE: retention_mode,
+    }
+
+
+def _validate_circuits(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SetupValidationError("invalid_circuits")
+
+    circuits: list[Any] = []
+    for circuit in value:
+        if isinstance(circuit, Mapping):
+            mode = circuit.get("mode")
+            if mode is not None and str(mode) not in _VALID_CIRCUIT_MODES:
+                raise SetupValidationError("invalid_circuit_mode")
+            profile = circuit.get("appliance_profile")
+            if profile is not None and str(profile) not in _VALID_APPLIANCE_PROFILES:
+                raise SetupValidationError("invalid_appliance_profile")
+        circuits.append(circuit)
+    return circuits
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, Iterable):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
+DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SOURCE_ENTITIES): [str],
+        vol.Optional(CONF_CIRCUITS, default=[]): [dict],
+        vol.Optional(
+            CONF_ENABLE_EXPERIMENTAL_NILM,
+            default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+        ): bool,
+        vol.Optional(CONF_MAINS_SOURCE_ENTITIES, default=[]): [str],
+        vol.Optional(CONF_KNOWN_LOAD_CIRCUITS, default=[]): [str],
+        vol.Optional(CONF_SENSITIVITY, default=DEFAULT_SENSITIVITY): str,
+        vol.Optional(CONF_RETENTION_MODE, default=DEFAULT_RETENTION_MODE): str,
+    }
+)
+
+
+class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Config flow for CircuitSetup Energy Analyzer."""
+
+    VERSION = 1
+    MINOR_VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> CircuitSetupEnergyAnalyzerOptionsFlow:
+        """Create the options flow."""
+        return CircuitSetupEnergyAnalyzerOptionsFlow(config_entry)
+
+    async def async_step_user(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle user setup."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                validated = validate_setup_input(user_input)
+            except SetupValidationError as err:
+                errors["base"] = err.error_key
+            else:
+                return self.async_create_entry(title=TITLE, data=validated)
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "mapping_suggestions": await _async_format_mapping_suggestions(
+                    getattr(self, "hass", None)
+                )
+            },
+        )
+
+
+class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
+    """Options flow for CircuitSetup Energy Analyzer."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Manage integration options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=dict(user_input))
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_options_schema(self._config_entry),
+            description_placeholders={
+                "mapping_suggestions": await _async_format_mapping_suggestions(
+                    getattr(self, "hass", None)
+                )
+            },
+        )
+
+
+def _options_schema(config_entry: config_entries.ConfigEntry) -> Any:
+    options = getattr(config_entry, "options", {}) or {}
+    data = getattr(config_entry, "data", {}) or {}
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                default=options.get(
+                    CONF_ENABLE_EXPERIMENTAL_NILM,
+                    data.get(
+                        CONF_ENABLE_EXPERIMENTAL_NILM,
+                        DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+                    ),
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_MAINS_SOURCE_ENTITIES,
+                default=options.get(
+                    CONF_MAINS_SOURCE_ENTITIES,
+                    data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                ),
+            ): [str],
+            vol.Optional(
+                CONF_KNOWN_LOAD_CIRCUITS,
+                default=options.get(
+                    CONF_KNOWN_LOAD_CIRCUITS,
+                    data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                ),
+            ): [str],
+            vol.Optional(
+                CONF_SENSITIVITY,
+                default=options.get(
+                    CONF_SENSITIVITY,
+                    data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+                ),
+            ): str,
+            vol.Optional(
+                CONF_RETENTION_MODE,
+                default=options.get(
+                    CONF_RETENTION_MODE,
+                    data.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE),
+                ),
+            ): str,
+        }
+    )
+
+
+async def _async_format_mapping_suggestions(hass: Any) -> str:
+    if hass is None:
+        return format_mapping_suggestions([])
+    try:
+        discovered = await async_discover_sensors(hass)
+    except Exception:
+        discovered = []
+    return format_mapping_suggestions(suggest_dual_phase_pairs(discovered))
