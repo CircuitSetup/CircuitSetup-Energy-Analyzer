@@ -127,6 +127,25 @@ def test_extract_power_quality_features_suppresses_invalid_power_factor() -> Non
     assert "power_factor_deficit" not in features
 
 
+def test_extract_power_quality_features_suppresses_negative_apparent_power() -> None:
+    features = extract_power_quality_features(
+        sample(
+            real_power=500.0,
+            reactive_power=80.0,
+            apparent_power=-506.0,
+            power_factor=0.98,
+        )
+    )
+
+    assert features["real_power"] == 500.0
+    assert features["reactive_power"] == 80.0
+    assert features["power_factor"] == 0.98
+    assert features["reactive_to_real_ratio"] == 0.16
+    assert "apparent_power" not in features
+    assert "apparent_to_real_ratio" not in features
+    assert "apparent_power_residual" not in features
+
+
 def test_score_power_quality_features_handles_missing_optional_baselines() -> None:
     features = extract_power_quality_features(
         sample(
@@ -216,6 +235,29 @@ def test_select_evidence_requires_multiple_relationship_contributors() -> None:
         {
             "real_power": baseline("real_power", 500.0, 20.0),
             "reactive_power": baseline("reactive_power", 80.0, 10.0),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert relationship_rms_score(scores) > 0.0
+    assert evidence is None or evidence.feature not in RELATIONSHIP_EVIDENCE_FEATURES
+
+
+def test_select_evidence_requires_two_material_relationship_contributors() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=None,
+                power_factor=0.98,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "power_factor": baseline("power_factor", 0.98, 0.01),
         },
     )
 
@@ -346,6 +388,36 @@ def test_select_evidence_ignores_raw_var_when_real_power_changed() -> None:
 
     assert evidence is not None
     assert evidence.feature != "resistive_load_became_reactive"
+
+
+def test_select_evidence_suppresses_proportional_motor_load_scaling() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=1000.0,
+                reactive_power=160.0,
+                apparent_power=1012.0,
+                power_factor=0.98,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+            "apparent_power": baseline("apparent_power", 506.0, 12.0),
+            "power_factor": baseline("power_factor", 0.98, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+            "apparent_to_real_ratio": baseline("apparent_to_real_ratio", 1.012, 0.01),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.02, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.MOTOR_LOAD),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature == "real_power"
 
 
 def test_select_evidence_suppresses_mixed_circuit_appliance_alerts() -> None:

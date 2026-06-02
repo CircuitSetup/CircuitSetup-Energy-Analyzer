@@ -88,6 +88,9 @@ def extract_power_quality_features(
     apparent_power = _number_or_none(getattr(sample, "apparent_power", None))
     power_factor = _number_or_none(getattr(sample, "power_factor", None))
 
+    if apparent_power is not None and apparent_power < 0.0:
+        apparent_power = None
+
     if real_power is not None:
         values["real_power"] = real_power
     if reactive_power is not None:
@@ -175,7 +178,7 @@ def select_power_quality_evidence(
 
     by_feature = {score.feature: score for score in scores}
     real_score = by_feature.get("real_power")
-    if _relationship_contributor_count(scores) < 2:
+    if _relationship_contributor_count(scores, min_relationship_score) < 2:
         return _real_power_fallback(by_feature)
 
     rms_score = relationship_rms_score(scores)
@@ -190,11 +193,13 @@ def select_power_quality_evidence(
     }
     evidence_features["relationship_rms"] = rms_score
 
-    reactive_score = _strongest(
+    reactive_score = _relationship_driver_score(
+        stable_real,
         by_feature.get("reactive_to_real_ratio"),
         by_feature.get("reactive_power"),
     )
-    apparent_score = _strongest(
+    apparent_score = _relationship_driver_score(
+        stable_real,
         by_feature.get("apparent_to_real_ratio"),
         by_feature.get("apparent_power"),
     )
@@ -257,6 +262,8 @@ def select_power_quality_evidence(
 
     if config.mode is CircuitMode.DUAL_PHASE and rms_score >= min_relationship_score:
         selected = _strongest(reactive_score, pf_score, apparent_score)
+        if not _score_high(selected, min_relationship_score):
+            return _real_power_fallback(by_feature)
         return _evidence(
             "split_phase_relationship_changed",
             "Possible issue: the combined split-phase W/VAR/VA/PF relationship "
@@ -272,6 +279,8 @@ def select_power_quality_evidence(
         and rms_score >= min_relationship_score
     ):
         selected = _strongest(reactive_score, pf_score, apparent_score)
+        if not _score_high(selected, min_relationship_score):
+            return _real_power_fallback(by_feature)
         return _evidence(
             "motor_relationship_changed",
             "Possible issue: motor-load W/VAR/VA/PF behavior changed from its "
@@ -345,7 +354,10 @@ def _real_power_is_stable(score: PowerQualityFeatureScore | None) -> bool:
     )
 
 
-def _relationship_contributor_count(scores: Sequence[PowerQualityFeatureScore]) -> int:
+def _relationship_contributor_count(
+    scores: Sequence[PowerQualityFeatureScore],
+    threshold: float,
+) -> int:
     return sum(
         1
         for score in scores
@@ -354,7 +366,18 @@ def _relationship_contributor_count(scores: Sequence[PowerQualityFeatureScore]) 
             "real_power",
             "apparent_power_residual",
         }
+        and score.score >= threshold
     )
+
+
+def _relationship_driver_score(
+    stable_real: bool,
+    normalized_score: PowerQualityFeatureScore | None,
+    raw_score: PowerQualityFeatureScore | None,
+) -> PowerQualityFeatureScore | None:
+    if stable_real:
+        return _strongest(normalized_score, raw_score)
+    return normalized_score
 
 
 def _score_high(score: PowerQualityFeatureScore | None, threshold: float) -> bool:
