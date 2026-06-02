@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "circuitsetup-energy-analyzer"
+version = "0.1.0"
+description = "Home Assistant custom integration for CircuitSetup Energy Meter appliance diagnostics"
+requires-python = ">=3.12"
+dependencies = [
+  "homeassistant>=2025.1.0",
+  "voluptuous>=0.15.2",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.25.0",
+  "pytest-homeassistant-custom-component>=0.13.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "T20"]
