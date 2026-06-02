@@ -70,6 +70,10 @@
     }
   },
   "issues": {
+    "missing_source_entities": {
+      "title": "Energy Analyzer source sensors are missing",
+      "description": "The integration has no configured source sensors. Add at least one CircuitSetup energy sensor before appliance analysis can start."
+    },
     "missing_required_sensor": {
       "title": "Energy Analyzer source sensor is missing",
       "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue."

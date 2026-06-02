@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import builtins
+import importlib
+import json
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -59,3 +64,33 @@ async def test_diagnostics_reports_runtime_loaded_without_ha() -> None:
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["runtime_loaded"] is True
+
+
+def test_diagnostics_reraises_nested_homeassistant_import_failures(
+    monkeypatch,
+) -> None:
+    original_import = builtins.__import__
+    sys.modules.pop("custom_components.circuitsetup_energy_analyzer.diagnostics", None)
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "homeassistant.helpers" and "device_registry" in fromlist:
+            raise ModuleNotFoundError(
+                "No module named 'voluptuous'",
+                name="voluptuous",
+            )
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(ModuleNotFoundError) as err:
+        importlib.import_module("custom_components.circuitsetup_energy_analyzer.diagnostics")
+
+    assert err.value.name == "voluptuous"
+
+
+def test_strings_include_service_repair_problem_keys() -> None:
+    strings = json.loads(
+        Path("custom_components/circuitsetup_energy_analyzer/strings.json").read_text()
+    )
+
+    assert "missing_source_entities" in strings["issues"]

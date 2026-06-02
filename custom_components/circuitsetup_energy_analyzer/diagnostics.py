@@ -6,7 +6,9 @@ from .const import DOMAIN
 
 try:
     from homeassistant.helpers import device_registry as dr
-except ModuleNotFoundError:
+except ModuleNotFoundError as err:
+    if err.name != "homeassistant":
+        raise
     dr = None
 
 
