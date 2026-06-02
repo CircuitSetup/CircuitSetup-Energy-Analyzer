@@ -86,7 +86,7 @@ async def async_discover_sensors(hass: Any) -> list[DiscoveredSensor]:
         state = hass.states.get(entity_id) if getattr(hass, "states", None) else None
         entry = registry_entries.get(entity_id)
         sensor = _build_discovered_sensor(entity_id, state, entry)
-        if score_circuitsetup_candidate(sensor) > 0:
+        if score_circuitsetup_candidate(sensor) >= 3:
             sensors.append(sensor)
 
     return sensors
@@ -145,5 +145,7 @@ def _build_discovered_sensor(
         device_id=getattr(entry, "device_id", None),
         unit=attributes.get("unit_of_measurement"),
         device_class=device_class,
-        integration_domain=getattr(entry, "platform", None),
+        integration_domain=(
+            getattr(entry, "platform", None) or attributes.get("integration_domain")
+        ),
     )
