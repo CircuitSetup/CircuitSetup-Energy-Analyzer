@@ -43,6 +43,41 @@ def last_event_value(state: Any, circuit_id: str) -> str | None:
     return event.event_type.value
 
 
+def power_quality_score_value(state: Any, circuit_id: str) -> float:
+    """Return the current power-quality relationship score for a circuit."""
+    return float(
+        getattr(state, "power_quality_score_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def power_quality_evidence_value(state: Any, circuit_id: str) -> str:
+    """Return the current power-quality evidence message for a circuit."""
+    return str(
+        getattr(state, "power_quality_evidence_by_circuit", {}).get(circuit_id, "")
+    )
+
+
+def reactive_power_drift_value(state: Any, circuit_id: str) -> float:
+    """Return the current reactive-power drift ratio for a circuit."""
+    return float(
+        getattr(state, "reactive_power_drift_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def apparent_power_drift_value(state: Any, circuit_id: str) -> float:
+    """Return the current apparent-power drift ratio for a circuit."""
+    return float(
+        getattr(state, "apparent_power_drift_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def power_factor_drift_value(state: Any, circuit_id: str) -> float:
+    """Return the current power-factor drift ratio for a circuit."""
+    return float(
+        getattr(state, "power_factor_drift_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
 def nilm_signature_count_value(state: Any, circuit_id: str) -> int:
     """Return the number of discovered NILM signatures for a circuit."""
     return int(
@@ -82,6 +117,35 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="last_event",
         name_suffix="Last Event",
         value_fn=last_event_value,
+    ),
+    DiagnosticSensorDescription(
+        key="power_quality_score",
+        name_suffix="Power Quality Score",
+        value_fn=power_quality_score_value,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="power_quality_evidence",
+        name_suffix="Power Quality Evidence",
+        value_fn=power_quality_evidence_value,
+    ),
+    DiagnosticSensorDescription(
+        key="reactive_power_drift",
+        name_suffix="Reactive Power Drift",
+        value_fn=reactive_power_drift_value,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="apparent_power_drift",
+        name_suffix="Apparent Power Drift",
+        value_fn=apparent_power_drift_value,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="power_factor_drift",
+        name_suffix="Power Factor Drift",
+        value_fn=power_factor_drift_value,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="nilm_signature_count",

@@ -23,9 +23,14 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         anomaly_score_value,
+        apparent_power_drift_value,
         last_event_value,
         nilm_signature_count_value,
         nilm_unmatched_load_percentage_value,
+        power_factor_drift_value,
+        power_quality_evidence_value,
+        power_quality_score_value,
+        reactive_power_drift_value,
     )
 
     event = CircuitEvent(
@@ -38,17 +43,34 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     state = AnalyzerState(
         last_event_by_circuit={"fridge": event},
         anomaly_score_by_circuit={"fridge": 0.42},
+        power_quality_score_by_circuit={"fridge": 3.25},
+        power_quality_evidence_by_circuit={
+            "fridge": "Possible issue: reactive power changed"
+        },
+        reactive_power_drift_by_circuit={"fridge": 0.38},
+        apparent_power_drift_by_circuit={"fridge": 0.12},
+        power_factor_drift_by_circuit={"fridge": 0.07},
         nilm_signature_count_by_circuit={"fridge": 3},
         nilm_unmatched_load_percentage_by_circuit={"fridge": 17.5},
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
     assert last_event_value(state, "fridge") == "start"
+    assert power_quality_score_value(state, "fridge") == 3.25
+    assert (
+        power_quality_evidence_value(state, "fridge")
+        == "Possible issue: reactive power changed"
+    )
+    assert reactive_power_drift_value(state, "fridge") == 0.38
+    assert apparent_power_drift_value(state, "fridge") == 0.12
+    assert power_factor_drift_value(state, "fridge") == 0.07
     assert nilm_signature_count_value(state, "fridge") == 3
     assert nilm_unmatched_load_percentage_value(state, "fridge") == 17.5
 
     assert anomaly_score_value(state, "unknown") == 0.0
     assert last_event_value(state, "unknown") is None
+    assert power_quality_score_value(state, "unknown") == 0.0
+    assert power_quality_evidence_value(state, "unknown") == ""
     assert nilm_signature_count_value(state, "unknown") == 0
     assert nilm_unmatched_load_percentage_value(state, "unknown") == 0.0
 
@@ -94,12 +116,22 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert [entity.name for entity in added_entities] == [
         "Kitchen Fridge Anomaly Score",
         "Kitchen Fridge Last Event",
+        "Kitchen Fridge Power Quality Score",
+        "Kitchen Fridge Power Quality Evidence",
+        "Kitchen Fridge Reactive Power Drift",
+        "Kitchen Fridge Apparent Power Drift",
+        "Kitchen Fridge Power Factor Drift",
         "Kitchen Fridge NILM Discovered Signatures",
         "Kitchen Fridge NILM Unmatched Load Percentage",
     ]
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_fridge_anomaly_score",
         "entry-1_fridge_last_event",
+        "entry-1_fridge_power_quality_score",
+        "entry-1_fridge_power_quality_evidence",
+        "entry-1_fridge_reactive_power_drift",
+        "entry-1_fridge_apparent_power_drift",
+        "entry-1_fridge_power_factor_drift",
         "entry-1_fridge_nilm_signature_count",
         "entry-1_fridge_nilm_unmatched_load_percentage",
     ]
@@ -128,6 +160,11 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
+        "mains",
         "mains",
         "mains",
         "mains",
