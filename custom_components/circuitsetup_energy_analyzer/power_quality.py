@@ -25,6 +25,14 @@ UNITLESS_FEATURE_SPREAD_FLOORS = {
     "reactive_to_real_ratio": 0.02,
     "apparent_to_real_ratio": 0.02,
 }
+RELATIONSHIP_FEATURE_FAMILIES = {
+    "power_factor": "pf",
+    "power_factor_deficit": "pf",
+    "reactive_power": "reactive",
+    "reactive_to_real_ratio": "reactive",
+    "apparent_power": "apparent",
+    "apparent_to_real_ratio": "apparent",
+}
 
 MOTOR_PROFILES = frozenset(
     {
@@ -179,11 +187,15 @@ def select_power_quality_evidence(
     by_feature = {score.feature: score for score in scores}
     real_score = by_feature.get("real_power")
     if _relationship_contributor_count(scores, min_relationship_score) < 2:
-        return _real_power_fallback(by_feature)
+        return _real_power_fallback(by_feature, min_relationship_score)
 
+    material_family_scores = _material_relationship_family_scores(
+        scores,
+        min_relationship_score,
+    )
     rms_score = relationship_rms_score(scores)
     if rms_score < min_relationship_score:
-        return _real_power_fallback(by_feature)
+        return _real_power_fallback(by_feature, min_relationship_score)
 
     stable_real = _real_power_is_stable(real_score)
     evidence_features = {
@@ -225,6 +237,13 @@ def select_power_quality_evidence(
                 rms_score,
                 evidence_features,
                 by_feature,
+                _contributor_feature_names(
+                    resistive_score,
+                    material_family_scores,
+                    include_real_power=(
+                        stable_real and resistive_score.feature == "reactive_power"
+                    ),
+                ),
             )
 
     if stable_real and _score_high(reactive_score, min_relationship_score):
@@ -236,6 +255,11 @@ def select_power_quality_evidence(
             rms_score,
             evidence_features,
             by_feature,
+            _contributor_feature_names(
+                reactive_score,
+                material_family_scores,
+                include_real_power=True,
+            ),
         )
 
     if stable_real and _score_high(pf_score, min_relationship_score):
@@ -247,6 +271,11 @@ def select_power_quality_evidence(
             rms_score,
             evidence_features,
             by_feature,
+            _contributor_feature_names(
+                pf_score,
+                material_family_scores,
+                include_real_power=True,
+            ),
         )
 
     if stable_real and _score_high(apparent_score, min_relationship_score):
@@ -258,12 +287,17 @@ def select_power_quality_evidence(
             rms_score,
             evidence_features,
             by_feature,
+            _contributor_feature_names(
+                apparent_score,
+                material_family_scores,
+                include_real_power=True,
+            ),
         )
 
     if config.mode is CircuitMode.DUAL_PHASE and rms_score >= min_relationship_score:
         selected = _strongest(reactive_score, pf_score, apparent_score)
         if not _score_high(selected, min_relationship_score):
-            return _real_power_fallback(by_feature)
+            return _real_power_fallback(by_feature, min_relationship_score)
         return _evidence(
             "split_phase_relationship_changed",
             "Possible issue: the combined split-phase W/VAR/VA/PF relationship "
@@ -272,6 +306,14 @@ def select_power_quality_evidence(
             rms_score,
             evidence_features,
             by_feature,
+            _contributor_feature_names(
+                selected,
+                material_family_scores,
+                include_real_power=(
+                    stable_real
+                    and selected.feature in {"reactive_power", "apparent_power"}
+                ),
+            ),
         )
 
     if (
@@ -280,7 +322,7 @@ def select_power_quality_evidence(
     ):
         selected = _strongest(reactive_score, pf_score, apparent_score)
         if not _score_high(selected, min_relationship_score):
-            return _real_power_fallback(by_feature)
+            return _real_power_fallback(by_feature, min_relationship_score)
         return _evidence(
             "motor_relationship_changed",
             "Possible issue: motor-load W/VAR/VA/PF behavior changed from its "
@@ -289,9 +331,17 @@ def select_power_quality_evidence(
             rms_score,
             evidence_features,
             by_feature,
+            _contributor_feature_names(
+                selected,
+                material_family_scores,
+                include_real_power=(
+                    stable_real
+                    and selected.feature in {"reactive_power", "apparent_power"}
+                ),
+            ),
         )
 
-    return _real_power_fallback(by_feature)
+    return _real_power_fallback(by_feature, min_relationship_score)
 
 
 def _evidence(
@@ -301,18 +351,17 @@ def _evidence(
     rms_score: float,
     features: Mapping[str, float],
     by_feature: Mapping[str, PowerQualityFeatureScore],
+    contributor_features: Sequence[str],
 ) -> PowerQualityEvidence | None:
     if selected is None:
         return None
     confidence_values = [
-        selected.baseline_confidence,
-        *(
-            score.baseline_confidence
-            for feature_name in features
-            if feature_name != "relationship_rms"
-            if (score := by_feature.get(feature_name)) is not None
-        ),
+        by_feature[feature_name].baseline_confidence
+        for feature_name in contributor_features
+        if feature_name in by_feature
     ]
+    if selected.feature not in contributor_features:
+        confidence_values.append(selected.baseline_confidence)
     return PowerQualityEvidence(
         feature=feature,
         message=message,
@@ -329,9 +378,10 @@ def _evidence(
 
 def _real_power_fallback(
     by_feature: Mapping[str, PowerQualityFeatureScore],
+    threshold: float,
 ) -> PowerQualityEvidence | None:
     real_score = by_feature.get("real_power")
-    if real_score is None or real_score.score < MIN_RELATIONSHIP_SCORE:
+    if real_score is None or real_score.score < threshold:
         return None
     return PowerQualityEvidence(
         feature="real_power",
@@ -358,16 +408,37 @@ def _relationship_contributor_count(
     scores: Sequence[PowerQualityFeatureScore],
     threshold: float,
 ) -> int:
-    return sum(
-        1
-        for score in scores
-        if score.feature
-        not in {
-            "real_power",
-            "apparent_power_residual",
-        }
-        and score.score >= threshold
-    )
+    return len(_material_relationship_family_scores(scores, threshold))
+
+
+def _material_relationship_family_scores(
+    scores: Sequence[PowerQualityFeatureScore],
+    threshold: float,
+) -> dict[str, PowerQualityFeatureScore]:
+    family_scores: dict[str, PowerQualityFeatureScore] = {}
+    for score in scores:
+        family = RELATIONSHIP_FEATURE_FAMILIES.get(score.feature)
+        if family is None or score.score < threshold:
+            continue
+        current = family_scores.get(family)
+        if current is None or score.score > current.score:
+            family_scores[family] = score
+    return family_scores
+
+
+def _contributor_feature_names(
+    selected: PowerQualityFeatureScore | None,
+    material_family_scores: Mapping[str, PowerQualityFeatureScore],
+    *,
+    include_real_power: bool,
+) -> tuple[str, ...]:
+    feature_names: list[str] = []
+    if include_real_power:
+        feature_names.append("real_power")
+    feature_names.extend(score.feature for score in material_family_scores.values())
+    if selected is not None:
+        feature_names.append(selected.feature)
+    return tuple(dict.fromkeys(feature_names))
 
 
 def _relationship_driver_score(

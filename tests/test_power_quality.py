@@ -267,6 +267,29 @@ def test_select_evidence_requires_two_material_relationship_contributors() -> No
     assert evidence is None or evidence.feature not in RELATIONSHIP_EVIDENCE_FEATURES
 
 
+def test_select_evidence_counts_pf_family_once() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=None,
+                apparent_power=None,
+                power_factor=0.90,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "power_factor": baseline("power_factor", 0.98, 0.01),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.02, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert relationship_rms_score(scores) > MIN_RELATIONSHIP_SCORE
+    assert evidence is None or evidence.feature != "power_factor_shift_under_load"
+
+
 def test_select_evidence_still_allows_real_power_fallback() -> None:
     scores = score_power_quality_features(
         {"real_power": 700.0},
@@ -278,6 +301,22 @@ def test_select_evidence_still_allows_real_power_fallback() -> None:
     assert relationship_rms_score(scores) == 0.0
     assert evidence is not None
     assert evidence.feature == "real_power"
+
+
+def test_real_power_fallback_uses_active_threshold() -> None:
+    scores = score_power_quality_features(
+        {"real_power": 560.0},
+        {"real_power": baseline("real_power", 500.0, 20.0)},
+    )
+
+    evidence = select_power_quality_evidence(
+        config(),
+        scores,
+        min_relationship_score=3.0,
+    )
+
+    assert relationship_rms_score(scores) == 0.0
+    assert evidence is None
 
 
 def test_select_evidence_requires_scored_real_power_for_stable_shift() -> None:
@@ -333,6 +372,39 @@ def test_select_evidence_confidence_uses_lowest_contributor() -> None:
     assert evidence is not None
     assert evidence.feature == "reactive_shift_under_stable_real_power"
     assert evidence.baseline_confidence == 0.72
+
+
+def test_evidence_confidence_ignores_noncontributing_low_confidence_scores() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=506.0,
+                power_factor=0.91,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0, confidence=0.9),
+            "reactive_power": baseline(
+                "reactive_power", 80.0, 10.0, confidence=0.95
+            ),
+            "reactive_to_real_ratio": baseline(
+                "reactive_to_real_ratio", 0.16, 0.02, confidence=0.94
+            ),
+            "power_factor": baseline("power_factor", 0.98, 0.01, confidence=0.93),
+            "power_factor_deficit": baseline(
+                "power_factor_deficit", 0.02, 0.01, confidence=0.92
+            ),
+            "apparent_power": baseline("apparent_power", 506.0, 12.0, confidence=0.6),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert evidence is not None
+    assert evidence.feature == "reactive_shift_under_stable_real_power"
+    assert evidence.baseline_confidence == 0.9
 
 
 def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
