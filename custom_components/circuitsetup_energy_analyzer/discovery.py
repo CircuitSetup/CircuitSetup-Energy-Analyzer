@@ -41,13 +41,16 @@ def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole |
         return SensorRole.POWER_FACTOR
     if "voltage" in text:
         return SensorRole.VOLTAGE
-    if "current" in text:
+    if "current" in text or re.search(r"\bamps?\b", text):
         return SensorRole.CURRENT
     if "frequency" in text:
         return SensorRole.FREQUENCY
-    if "power" in text:
+    if "power" in text or re.search(r"\bwatts?\b", text):
         return SensorRole.REAL_POWER
-    if re.search(r"\benergy\b", text):
+    if re.search(r"\b(?:kwh|wh)\b", text) or re.search(
+        r"\benergy\b(?!\s+meter\b)",
+        text,
+    ):
         return SensorRole.ENERGY
     return None
 

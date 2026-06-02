@@ -62,6 +62,39 @@ def test_infer_sensor_role_from_entity_id_and_friendly_name() -> None:
         assert infer_sensor_role(entity_id, friendly_name) is role
 
 
+def test_infer_sensor_role_from_circuitsetup_live_sensor_names() -> None:
+    cases = [
+        (
+            "sensor.energy_meter_2b01f8_ct1_watts",
+            "CircuitSetup Energy Meter CT1 Watts",
+            SensorRole.REAL_POWER,
+        ),
+        (
+            "sensor.energy_meter_2b01f8_ct1_amps",
+            "CircuitSetup Energy Meter CT1 Amps",
+            SensorRole.CURRENT,
+        ),
+        (
+            "sensor.energy_meter_2b01f8_circuitsetup_energy_meter_total_watts",
+            "CircuitSetup Energy Meter Total Watts",
+            SensorRole.REAL_POWER,
+        ),
+        (
+            "sensor.energy_meter_2b01f8_circuitsetup_energy_meter_total_amps",
+            "CircuitSetup Energy Meter Total Amps",
+            SensorRole.CURRENT,
+        ),
+        (
+            "sensor.energy_meter_2b01f8_circuitsetup_energy_meter_total_kwh",
+            "CircuitSetup Energy Meter Total kWh",
+            SensorRole.ENERGY,
+        ),
+    ]
+
+    for entity_id, friendly_name, role in cases:
+        assert infer_sensor_role(entity_id, friendly_name) is role
+
+
 def test_score_circuitsetup_candidate_prefers_esphome_meter_metadata() -> None:
     sensor = DiscoveredSensor(
         entity_id="sensor.circuitsetup_energy_meter_power_1",

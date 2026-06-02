@@ -41,6 +41,23 @@ def test_dual_phase_suggestions_pair_neighboring_channels() -> None:
     assert "neighboring channels" in suggestions[0].reasons
 
 
+def test_dual_phase_suggestions_do_not_pair_different_meter_prefixes() -> None:
+    candidates = [
+        discovered_sensor(
+            "sensor.circuitsetup_energy_meter_558f54_ct1_watts",
+            "CircuitSetup Energy Meter 558f54 CT1 Watts",
+            device_id=None,
+        ),
+        discovered_sensor(
+            "sensor.energy_meter_2af0e8_ct2_watts",
+            "CircuitSetup Energy Meter 24x 2af0e8 CT2 Watts",
+            device_id=None,
+        ),
+    ]
+
+    assert suggest_dual_phase_pairs(candidates) == []
+
+
 def test_channel_group_rejects_missing_real_power() -> None:
     group = ChannelGroup(
         group_id="fridge",

@@ -12,16 +12,20 @@ _CHANNEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_NAME_TOKENS = {
+    "24x",
     "a",
     "amp",
     "amps",
     "channel",
     "ch",
+    "circuitsetup",
     "ct",
+    "energy",
     "kw",
     "l1",
     "l2",
     "leg",
+    "meter",
     "power",
     "real",
     "sensor",
@@ -93,6 +97,11 @@ def _score_pair(
     confidence = 0.0
     reasons: list[str] = []
 
+    left_meter = _meter_signature(left)
+    right_meter = _meter_signature(right)
+    if left_meter is not None and right_meter is not None and left_meter != right_meter:
+        return confidence, reasons
+
     if left.device_id is not None and left.device_id == right.device_id:
         confidence += 0.25
         reasons.append("same device")
@@ -119,6 +128,20 @@ def _channel_number(sensor: DiscoveredSensor) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def _meter_signature(sensor: DiscoveredSensor) -> str | None:
+    text = f"{sensor.entity_id} {sensor.name}".lower()
+    patterns = (
+        r"energy_meter(?:_eth_ws)?_([0-9a-f]{6})",
+        r"circuitsetup_energy_meter_([0-9a-f]{6})",
+        r"\b([0-9a-f]{6})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 def _useful_name_tokens(sensor: DiscoveredSensor) -> set[str]:
