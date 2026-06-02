@@ -1395,6 +1395,288 @@ async def test_export_diagnostics_includes_power_quality_runtime_state() -> None
 
 
 @pytest.mark.asyncio
+async def test_runtime_populates_readiness_health_and_checklist_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.fridge_power": "120",
+                "sensor.fridge_var": "35",
+                "sensor.fridge_pf": "0.91",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {
+                            "entity_id": "sensor.fridge_var",
+                            "role": "reactive_power",
+                        },
+                        {"entity_id": "sensor.fridge_pf", "role": "power_factor"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(days=1),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+            ],
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power",
+                    18,
+                    100.0,
+                    5.0,
+                    90.0,
+                    110.0,
+                    0.8,
+                )
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.health_status_by_circuit["fridge"] == "learning"
+    assert coordinator.state.health_summary_by_circuit["fridge"] == "Learning"
+    readiness = coordinator.state.readiness_by_circuit["fridge"]
+    assert readiness["baseline_age_days"] == 1.0
+    assert readiness["cycle_count"] == 2
+    assert readiness["baseline_confidence"] == 0.8
+    assert readiness["required_metric_coverage"] == 1.0
+    assert readiness["optional_metric_coverage"] == 1.0
+    assert readiness["alert_ready"] is False
+    assert readiness["suppression_reason"] == "learning"
+    assert (
+        coordinator.state.data_quality_checklist_by_circuit["fridge"][
+            "required_sensors_present"
+        ]
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repairs(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_data_quality_issue",
+        fake_issue,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.missing", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+
+    await coordinator.async_start_maintenance("fridge", note="Changed filter")
+    await coordinator.async_process_update()
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is True
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["note"] == (
+        "Changed filter"
+    )
+    assert "fridge" in coordinator.paused_circuits
+    assert coordinator.state.maintenance_by_circuit["fridge"]["active"] is True
+    assert issues == [("fridge", "missing_required_sensor")]
+
+
+def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        options={CONF_SENSITIVITY: "standard"},
+        store_data=FeatureStoreData(
+            sensitivity_by_circuit={"fridge": "sensitive", "hvac": "quiet"}
+        ),
+    )
+
+    assert coordinator._sensitivity_for_circuit("unknown") == "balanced"
+    assert coordinator._alert_policy_for_circuit("fridge").min_repeated == 3
+    assert coordinator._alert_policy_for_circuit("hvac").min_repeated == 4
+
+
+@pytest.mark.asyncio
+async def test_expected_alert_feedback_suppresses_repeated_notification(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            alert_feedback={"fridge:reactive_power": {"action": "expected"}}
+        ),
+    )
+    expected_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Expected compressor behavior",
+        feature="reactive_power",
+    )
+    other_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 1, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Different behavior",
+        feature="power_factor",
+    )
+
+    await coordinator._notify_alert(expected_alert)
+    await coordinator._notify_alert(other_alert)
+
+    assert notifications == [other_alert]
+
+
+@pytest.mark.asyncio
+async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="reactive_power",
+        observed_value=42.0,
+        baseline_value=20.0,
+        change_ratio=1.1,
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(alerts=[alert]),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
+    )
+
+    await coordinator.async_mark_alert_expected(notification_id_for_alert(alert))
+
+    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
+        "action"
+    ] == "expected"
+    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
+        "alert_id"
+    ] == notification_id_for_alert(alert)
+
+    await coordinator.async_mark_alert_unhelpful(notification_id_for_alert(alert))
+
+    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
+        "action"
+    ] == "unhelpful"
+
+
+@pytest.mark.asyncio
+async def test_export_diagnostics_includes_ux_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    coordinator.state.health_status_by_circuit["fridge"] = "possible_issue"
+    coordinator.state.health_summary_by_circuit["fridge"] = "Possible issue"
+    coordinator.state.readiness_by_circuit["fridge"] = {"alert_ready": True}
+    coordinator.state.learning_progress_by_circuit["fridge"] = {"cycle_count": 3}
+    coordinator.state.data_quality_checklist_by_circuit["fridge"] = {
+        "required_sensors_present": True
+    }
+    coordinator.state.alert_evidence_by_circuit["fridge"] = {
+        "feature": "reactive_power"
+    }
+    coordinator.state.sensitivity_by_circuit["fridge"] = "quiet"
+    coordinator.state.maintenance_by_circuit["fridge"] = {"active": True}
+    coordinator.state.nilm_review_by_circuit["fridge"] = [
+        {"signature_id": "on-1", "review_state": "new"}
+    ]
+
+    await coordinator.async_export_diagnostics("fridge")
+
+    assert coordinator.last_exported_diagnostics["health_status"] == "possible_issue"
+    assert coordinator.last_exported_diagnostics["health_summary"] == "Possible issue"
+    assert coordinator.last_exported_diagnostics["readiness"] == {
+        "alert_ready": True
+    }
+    assert coordinator.last_exported_diagnostics["learning_progress"] == {
+        "cycle_count": 3
+    }
+    assert coordinator.last_exported_diagnostics["data_quality_checklist"] == {
+        "required_sensors_present": True
+    }
+    assert coordinator.last_exported_diagnostics["alert_evidence"] == {
+        "feature": "reactive_power"
+    }
+    assert coordinator.last_exported_diagnostics["sensitivity"] == "quiet"
+    assert coordinator.last_exported_diagnostics["maintenance"] == {"active": True}
+    assert coordinator.last_exported_diagnostics["nilm_review"] == [
+        {"signature_id": "on-1", "review_state": "new"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runtime_learns_power_quality_baselines_for_optional_metrics() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

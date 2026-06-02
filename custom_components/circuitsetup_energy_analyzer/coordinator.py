@@ -52,6 +52,14 @@ from .power_quality import (
 )
 from .profiles import get_profile_definition
 from .storage import RETENTION_WINDOWS, FeatureStoreData
+from .ux import (
+    alert_evidence_detail,
+    alert_policy_name_for_sensitivity,
+    data_quality_checklist,
+    health_summary,
+    learning_progress,
+    normalize_sensitivity,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +107,21 @@ class AnalyzerState:
     power_factor_drift_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_signature_count_by_circuit: dict[str, int] = field(default_factory=dict)
     nilm_unmatched_load_percentage_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    health_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    health_summary_by_circuit: dict[str, str] = field(default_factory=dict)
+    readiness_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    learning_progress_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    data_quality_checklist_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    alert_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
+    maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
 
@@ -187,6 +210,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for config in self.circuit_configs
         }
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
+        self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -267,6 +291,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._process_nilm_sample(config, sample, events)
 
         process_events_into_state(self.state, events, alerts)
+        for config, sample in samples:
+            self._refresh_ux_state(config, sample, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
         return self.state
@@ -290,8 +316,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
         self._clear_power_quality_state(circuit_id)
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
+        await self._async_save_store(now)
 
     async def async_pause_alerts(
         self: Self,
@@ -300,6 +328,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Pause alert notifications for a circuit."""
         self.paused_circuits.add(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
 
     async def async_acknowledge_alert(self: Self, alert_id: str) -> None:
         """Acknowledge an active alert evidence item."""
@@ -330,8 +360,76 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
         }
+        self._refresh_all_ux_state(self._now_fn())
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
+
+    async def async_set_circuit_sensitivity(
+        self: Self,
+        circuit_id: str,
+        preset: str,
+    ) -> None:
+        """Persist an alert sensitivity preset for one circuit."""
+        self.store_data.sensitivity_by_circuit[circuit_id] = normalize_sensitivity(
+            preset
+        )
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_start_maintenance(
+        self: Self,
+        circuit_id: str,
+        note: str = "",
+        duration: str | None = None,
+        relearn_on_end: bool = False,
+    ) -> None:
+        """Mark one circuit in maintenance and pause appliance notifications."""
+        now = self._now_fn()
+        payload: dict[str, Any] = {
+            "active": True,
+            "note": str(note),
+            "started_at": now.isoformat(),
+            "relearn_on_end": bool(relearn_on_end),
+        }
+        if duration is not None:
+            payload["duration"] = str(duration)
+        self.store_data.maintenance_by_circuit[circuit_id] = payload
+        self.paused_circuits.add(circuit_id)
+        self._mark_store_dirty()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_end_maintenance(
+        self: Self,
+        circuit_id: str,
+        relearn: bool = False,
+    ) -> None:
+        """Clear maintenance state and optionally relearn the circuit baseline."""
+        now = self._now_fn()
+        current = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
+        should_relearn = bool(relearn or current.get("relearn_on_end"))
+        current.update({"active": False, "ended_at": now.isoformat()})
+        self.store_data.maintenance_by_circuit[circuit_id] = current
+        self.paused_circuits.discard(circuit_id)
+        self._mark_store_dirty()
+        if should_relearn:
+            await self.async_relearn_baseline(circuit_id)
+            return
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_mark_alert_expected(self: Self, alert_id: str) -> None:
+        """Mark an alert pattern as expected for future notifications."""
+        await self._store_alert_feedback(alert_id, "expected")
+
+    async def async_mark_alert_unhelpful(self: Self, alert_id: str) -> None:
+        """Mark an alert pattern as unhelpful for future notifications."""
+        await self._store_alert_feedback(alert_id, "unhelpful")
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
@@ -360,6 +458,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 circuit_id,
                 0.0,
             ),
+            "health_status": self.state.health_status_by_circuit.get(circuit_id),
+            "health_summary": self.state.health_summary_by_circuit.get(circuit_id),
+            "readiness": self.state.readiness_by_circuit.get(circuit_id, {}),
+            "learning_progress": self.state.learning_progress_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "data_quality_checklist": self.state.data_quality_checklist_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "alert_evidence": self.state.alert_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "sensitivity": self.state.sensitivity_by_circuit.get(circuit_id),
+            "maintenance": self.state.maintenance_by_circuit.get(circuit_id, {}),
+            "nilm_review": self.state.nilm_review_by_circuit.get(circuit_id, []),
         }
         self.async_set_updated_data(self.state)
 
@@ -375,6 +491,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     config.circuit_id,
                     "missing_required_sensor",
                 )
+            self._refresh_ux_state(config, None, self._now_fn())
         self.async_set_updated_data(self.state)
 
     async def async_label_nilm_signature(
@@ -389,10 +506,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if signature.get("signature_id") == signature_id:
                 signature["user_label"] = label
                 self._mark_store_dirty()
+                self._refresh_nilm_state(circuit_id)
+                self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+                self.async_set_updated_data(self.state)
                 await self._async_save_store(self._now_fn())
                 return
         signatures.append({"signature_id": signature_id, "user_label": label})
         self._mark_store_dirty()
+        self._refresh_nilm_state(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
 
     async def async_ignore_nilm_signature(
@@ -407,10 +530,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if signature.get("signature_id") == signature_id:
                 signature["ignored"] = True
                 self._mark_store_dirty()
+                self._refresh_nilm_state(circuit_id)
+                self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+                self.async_set_updated_data(self.state)
                 await self._async_save_store(self._now_fn())
                 return
         signatures.append({"signature_id": signature_id, "ignored": True})
         self._mark_store_dirty()
+        self._refresh_nilm_state(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
 
     def has_circuit(self: Self, circuit_id: str) -> bool:
@@ -418,6 +547,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return any(config.circuit_id == circuit_id for config in self.circuit_configs)
 
     def _hydrate_state_from_store(self: Self) -> None:
+        for circuit_id, maintenance in self.store_data.maintenance_by_circuit.items():
+            if maintenance.get("active") is True:
+                self.paused_circuits.add(circuit_id)
         for circuit_id, signatures in self.store_data.nilm_signatures.items():
             for signature in signatures:
                 if signature.get("ignored") is True:
@@ -425,6 +557,119 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                         (circuit_id, str(signature.get("signature_id", "")))
                     )
             self._refresh_nilm_state(circuit_id)
+        self._refresh_all_ux_state(self._now_fn())
+
+    def _refresh_all_ux_state(self: Self, now: datetime) -> None:
+        for config in self.circuit_configs:
+            self._refresh_ux_state(config, None, now)
+
+    def _refresh_ux_state_for_circuit(
+        self: Self,
+        circuit_id: str,
+        now: datetime,
+    ) -> None:
+        config = self._config_for_circuit(circuit_id)
+        if config is not None:
+            self._refresh_ux_state(config, None, now)
+
+    def _refresh_ux_state(
+        self: Self,
+        config: CircuitConfig,
+        sample: NormalizedCircuitSample | None,
+        now: datetime,
+    ) -> None:
+        circuit_id = config.circuit_id
+        checklist = data_quality_checklist(config, sample)
+        if (
+            sample is None
+            and circuit_id in self.state.data_quality_checklist_by_circuit
+        ):
+            checklist = dict(self.state.data_quality_checklist_by_circuit[circuit_id])
+        self.state.data_quality_checklist_by_circuit[circuit_id] = checklist
+
+        learning = self.state.learning_by_circuit.get(circuit_id, True)
+        suppression_reason = self._suppression_reason(circuit_id, learning)
+        progress = learning_progress(
+            config,
+            events=self.store_data.events,
+            baselines=self.store_data.baselines,
+            baseline_buffer_counts={
+                key: len(values) for key, values in self._baseline_values.items()
+            },
+            now=now,
+            learning=learning,
+            suppression_reason=suppression_reason,
+        )
+        self.state.learning_progress_by_circuit[circuit_id] = progress
+
+        maintenance = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
+        maintenance.setdefault("active", circuit_id in self.paused_circuits)
+        self.state.maintenance_by_circuit[circuit_id] = maintenance
+        self.state.sensitivity_by_circuit[circuit_id] = self._sensitivity_for_circuit(
+            circuit_id
+        )
+        self._refresh_alert_evidence_state(circuit_id)
+        self._refresh_nilm_state(circuit_id)
+
+        status, summary = health_summary(
+            data_quality_problem=bool(
+                self.state.data_quality_by_circuit.get(circuit_id)
+            ),
+            paused=bool(maintenance.get("active"))
+            or circuit_id in self.paused_circuits,
+            active_alerts=bool(self.state.active_alerts_by_circuit.get(circuit_id)),
+            nilm_review_count=len(
+                self.state.nilm_review_by_circuit.get(circuit_id, [])
+            ),
+            mixed=(
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            ),
+            learning=learning,
+        )
+        self.state.health_status_by_circuit[circuit_id] = status
+        self.state.health_summary_by_circuit[circuit_id] = summary
+        self.state.readiness_by_circuit[circuit_id] = {
+            **progress,
+            "required_metric_coverage": checklist["required_metric_coverage"],
+            "optional_metric_coverage": checklist["optional_metric_coverage"],
+            "health_status": status,
+            "health_summary": summary,
+        }
+
+    def _suppression_reason(self: Self, circuit_id: str, learning: bool) -> str | None:
+        if self.state.data_quality_by_circuit.get(circuit_id):
+            return "data_quality"
+        if circuit_id in self.paused_circuits:
+            return "paused"
+        if learning:
+            return "learning"
+        return None
+
+    def _refresh_alert_evidence_state(self: Self, circuit_id: str) -> None:
+        alert = self._latest_alert_for_circuit(circuit_id)
+        if alert is None:
+            self.state.alert_evidence_by_circuit.pop(circuit_id, None)
+            return
+        self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(alert)
+
+    def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
+        alerts = list(self.state.active_alerts_by_circuit.get(circuit_id, []))
+        if not alerts:
+            alerts = [
+                alert
+                for alert in self.store_data.alerts
+                if alert.circuit_id == circuit_id
+            ]
+        if not alerts:
+            return None
+        return max(alerts, key=lambda alert: alert.timestamp)
+
+    def _config_for_circuit(self: Self, circuit_id: str) -> CircuitConfig | None:
+        for config in self.circuit_configs:
+            if config.circuit_id == circuit_id:
+                return config
+        return None
 
     def _sample_for_config(
         self: Self,
@@ -561,10 +806,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not self._nilm_enabled(config):
             return
 
+        min_delta_w = _nilm_min_delta_w(
+            self._sensitivity_for_circuit(config.circuit_id)
+        )
         detector = self._nilm_detectors.setdefault(
             config.circuit_id,
-            NilmEdgeDetector(min_delta_w=_nilm_min_delta_w(self._sensitivity)),
+            NilmEdgeDetector(min_delta_w=min_delta_w),
         )
+        detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
         if edges:
             known_events = self._known_load_events(config.circuit_id, events)
@@ -665,6 +914,59 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 len(self._nilm_unmatched_edges[circuit_id]),
             )
         )
+        self.state.nilm_review_by_circuit[circuit_id] = [
+            _nilm_review_payload(signature) for signature in signatures
+        ]
+
+    def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
+        return normalize_sensitivity(
+            self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
+        )
+
+    def _alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._alert_policies.get(key)
+        if policy is None:
+            policy = _alert_policy_for_sensitivity(policy_name)
+            self._alert_policies[key] = policy
+        return policy
+
+    async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
+        alert = self._alert_for_id(alert_id)
+        if alert is None:
+            return
+        self.store_data.alert_feedback[_alert_feedback_key(alert)] = {
+            "action": action,
+            "alert_id": alert_id,
+            "created_at": self._now_fn().isoformat(),
+            "circuit_id": alert.circuit_id,
+            "feature": _alert_feature(alert),
+            "change_ratio": alert.change_ratio,
+            "observed_value": alert.observed_value,
+            "baseline_value": alert.baseline_value,
+        }
+        self._mark_store_dirty()
+        self._refresh_ux_state_for_circuit(alert.circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+
+    def _alert_for_id(self: Self, alert_id: str) -> AlertEvidence | None:
+        alerts = list(self.store_data.alerts)
+        for active_alerts in self.state.active_alerts_by_circuit.values():
+            alerts.extend(active_alerts)
+        for alert in alerts:
+            if notifications.notification_id_for_alert(alert) == alert_id:
+                return alert
+        return None
+
+    def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
+        feedback = self.store_data.alert_feedback.get(_alert_feedback_key(alert), {})
+        return feedback.get("action") in {"expected", "unhelpful"}
 
     def _mark_store_dirty(self: Self) -> None:
         self._store_dirty = True
@@ -724,6 +1026,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         sample: Any,
         now: datetime,
     ) -> AlertEvidence | None:
+        policy = self._alert_policy_for_circuit(config.circuit_id)
         features = extract_power_quality_features(sample)
         if not features:
             self.state.learning_by_circuit[config.circuit_id] = True
@@ -750,14 +1053,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         evidence = select_power_quality_evidence(
             config,
             scores,
-            min_relationship_score=self._alert_policy.min_average_score,
+            min_relationship_score=policy.min_average_score,
         )
         if (
             evidence is None
             and config.mode is not CircuitMode.MIXED
             and config.appliance_profile is not ApplianceProfile.MIXED
         ):
-            evidence = self._real_power_fallback_evidence(scores)
+            evidence = self._real_power_fallback_evidence(scores, policy)
         self._update_power_quality_state(config.circuit_id, scores, evidence)
 
         mature = self._learning_mature(config, now)
@@ -770,7 +1073,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if evidence is None:
             return None
 
-        return self._alert_policy.observe(
+        return policy.observe(
             Observation(
                 circuit_id=config.circuit_id,
                 feature=evidence.feature,
@@ -787,12 +1090,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _real_power_fallback_evidence(
         self: Self,
         scores: Iterable[Any],
+        policy: ConservativeAlertPolicy,
     ) -> PowerQualityEvidence | None:
         for score in scores:
             if (
                 score.feature == "real_power"
                 and score.baseline_confidence
-                >= self._alert_policy.min_baseline_confidence
+                >= policy.min_baseline_confidence
             ):
                 return PowerQualityEvidence(
                     feature="real_power",
@@ -879,6 +1183,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def _notify_alert(self: Self, alert: AlertEvidence) -> None:
         if alert.circuit_id in self.paused_circuits:
             return
+        if self._has_suppressed_alert_feedback(alert):
+            return
         alert_id = notifications.notification_id_for_alert(alert)
         if alert_id in self._notified_alert_ids:
             return
@@ -888,6 +1194,31 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _alert_feature(alert: AlertEvidence) -> str:
+    if alert.feature:
+        return alert.feature
+    if alert.event_type is not None:
+        return alert.event_type.value
+    return "alert"
+
+
+def _alert_feedback_key(alert: AlertEvidence) -> str:
+    return f"{alert.circuit_id}:{_alert_feature(alert)}"
+
+
+def _nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(signature)
+    if payload.get("review_state"):
+        return payload
+    if payload.get("ignored"):
+        payload["review_state"] = "ignored"
+    elif payload.get("user_label"):
+        payload["review_state"] = "labeled"
+    else:
+        payload["review_state"] = "new"
+    return payload
 
 
 def _sum_sample_values(
@@ -966,13 +1297,14 @@ def _retention_mode_from_sources(
 
 
 def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:
-    if sensitivity == "high":
+    policy_name = alert_policy_name_for_sensitivity(sensitivity)
+    if policy_name == "high":
         return ConservativeAlertPolicy(
             min_repeated=3,
             min_total_score=2.4,
             min_average_score=1.2,
         )
-    if sensitivity == "low":
+    if policy_name == "low":
         return ConservativeAlertPolicy(
             min_repeated=4,
             min_total_score=6.0,
@@ -982,9 +1314,10 @@ def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:
 
 
 def _nilm_min_delta_w(sensitivity: str) -> float:
-    if sensitivity == "high":
+    policy_name = alert_policy_name_for_sensitivity(sensitivity)
+    if policy_name == "high":
         return 75.0
-    if sensitivity == "low":
+    if policy_name == "low":
         return 150.0
     return 100.0
 
