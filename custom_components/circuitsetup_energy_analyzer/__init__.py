@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .const import CONF_SOURCE_ENTITIES, DOMAIN, PLATFORMS
+from .coordinator import EnergyAnalyzerCoordinator
 
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
@@ -14,9 +15,9 @@ async def async_setup_entry(
     """Set up CircuitSetup Energy Analyzer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     source_entities = getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, [])
-    hass.data[DOMAIN][getattr(entry, "entry_id", "default")] = {
-        CONF_SOURCE_ENTITIES: source_entities
-    }
+    coordinator = EnergyAnalyzerCoordinator(hass)
+    await coordinator.async_start(source_entities)
+    hass.data[DOMAIN][getattr(entry, "entry_id", "default")] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -28,5 +29,9 @@ async def async_unload_entry(
     """Unload CircuitSetup Energy Analyzer."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data.get(DOMAIN, {}).pop(getattr(entry, "entry_id", "default"), None)
+        coordinator = hass.data.get(DOMAIN, {}).pop(
+            getattr(entry, "entry_id", "default"), None
+        )
+        if coordinator is not None:
+            await coordinator.async_stop()
     return unload_ok
