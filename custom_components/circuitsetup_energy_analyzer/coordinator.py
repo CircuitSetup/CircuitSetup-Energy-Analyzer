@@ -69,11 +69,14 @@ def process_events_into_state(
     for alert in alerts:
         alerts_by_circuit[alert.circuit_id].append(alert)
 
-    for circuit_id, circuit_alerts in alerts_by_circuit.items():
-        state.active_alerts_by_circuit[circuit_id] = circuit_alerts
-        state.anomaly_score_by_circuit[circuit_id] = max(
-            _alert_anomaly_score(alert) for alert in circuit_alerts
-        )
+    state.active_alerts_by_circuit = dict(alerts_by_circuit)
+    state.anomaly_score_by_circuit = {
+        circuit_id: max(_alert_anomaly_score(alert) for alert in circuit_alerts)
+        for circuit_id, circuit_alerts in alerts_by_circuit.items()
+    }
+
+    for circuit_id in state.last_event_by_circuit:
+        state.anomaly_score_by_circuit.setdefault(circuit_id, 0.0)
 
     return state
 
@@ -101,6 +104,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
+        if self._unsub_state_change is not None:
+            self._unsub_state_change()
+            self._unsub_state_change = None
+
         self.source_entities = tuple(source_entities)
         self.started = True
 
