@@ -175,6 +175,9 @@ def select_power_quality_evidence(
 
     by_feature = {score.feature: score for score in scores}
     real_score = by_feature.get("real_power")
+    if _relationship_contributor_count(scores) < 2:
+        return _real_power_fallback(by_feature)
+
     rms_score = relationship_rms_score(scores)
     if rms_score < min_relationship_score:
         return _real_power_fallback(by_feature)
@@ -339,6 +342,18 @@ def _real_power_is_stable(score: PowerQualityFeatureScore | None) -> bool:
     return (
         score.score <= STABLE_REAL_POWER_SCORE
         or abs(score.change_ratio) <= STABLE_REAL_POWER_RATIO
+    )
+
+
+def _relationship_contributor_count(scores: Sequence[PowerQualityFeatureScore]) -> int:
+    return sum(
+        1
+        for score in scores
+        if score.feature
+        not in {
+            "real_power",
+            "apparent_power_residual",
+        }
     )
 
 

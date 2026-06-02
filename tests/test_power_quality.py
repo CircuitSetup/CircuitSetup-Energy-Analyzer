@@ -16,6 +16,14 @@ from custom_components.circuitsetup_energy_analyzer.power_quality import (
 )
 
 NOW = datetime(2026, 6, 2, tzinfo=UTC)
+RELATIONSHIP_EVIDENCE_FEATURES = {
+    "reactive_shift_under_stable_real_power",
+    "power_factor_shift_under_load",
+    "apparent_power_shift",
+    "motor_relationship_changed",
+    "split_phase_relationship_changed",
+    "resistive_load_became_reactive",
+}
 
 
 def sample(
@@ -193,6 +201,41 @@ def test_select_evidence_finds_reactive_shift_under_stable_real_power() -> None:
     assert "reactive power" in evidence.message
     assert "real power stayed" in evidence.message
     assert evidence.features["relationship_rms"] > 2.0
+
+
+def test_select_evidence_requires_multiple_relationship_contributors() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=510.0,
+                reactive_power=220.0,
+                apparent_power=None,
+                power_factor=None,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 500.0, 20.0),
+            "reactive_power": baseline("reactive_power", 80.0, 10.0),
+        },
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert relationship_rms_score(scores) > 0.0
+    assert evidence is None or evidence.feature not in RELATIONSHIP_EVIDENCE_FEATURES
+
+
+def test_select_evidence_still_allows_real_power_fallback() -> None:
+    scores = score_power_quality_features(
+        {"real_power": 700.0},
+        {"real_power": baseline("real_power", 500.0, 20.0)},
+    )
+
+    evidence = select_power_quality_evidence(config(), scores)
+
+    assert relationship_rms_score(scores) == 0.0
+    assert evidence is not None
+    assert evidence.feature == "real_power"
 
 
 def test_select_evidence_requires_scored_real_power_for_stable_shift() -> None:
