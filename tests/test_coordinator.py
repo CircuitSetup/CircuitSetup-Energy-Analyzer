@@ -1061,3 +1061,246 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
 
     assert await alert_count_for_sensitivity("standard") == 0
     assert await alert_count_for_sensitivity("high") == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_learns_power_quality_baselines_for_optional_metrics() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.fridge_power": "500",
+                "sensor.fridge_var": "80",
+                "sensor.fridge_va": "506",
+                "sensor.fridge_pf": "0.98",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_var", "role": "reactive_power"},
+                        {"entity_id": "sensor.fridge_va", "role": "apparent_power"},
+                        {"entity_id": "sensor.fridge_pf", "role": "power_factor"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(15):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert "fridge:real_power" in coordinator.store_data.baselines
+    assert "fridge:reactive_power" in coordinator.store_data.baselines
+    assert "fridge:apparent_power" in coordinator.store_data.baselines
+    assert "fridge:power_factor" in coordinator.store_data.baselines
+    assert "fridge:reactive_to_real_ratio" in coordinator.store_data.baselines
+    assert "fridge:apparent_to_real_ratio" in coordinator.store_data.baselines
+    assert coordinator.state.learning_by_circuit["fridge"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_notifies_power_quality_relationship_change_after_maturity(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.fridge_power": "510",
+                "sensor.fridge_var": "220",
+                "sensor.fridge_va": "560",
+                "sensor.fridge_pf": "0.91",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_var", "role": "reactive_power"},
+                        {"entity_id": "sensor.fridge_va", "role": "apparent_power"},
+                        {"entity_id": "sensor.fridge_pf", "role": "power_factor"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "fridge:real_power": BaselineStats(
+                    "real_power", 20, 500.0, 20.0, 470.0, 530.0, 1.0
+                ),
+                "fridge:reactive_power": BaselineStats(
+                    "reactive_power", 20, 80.0, 10.0, 65.0, 95.0, 1.0
+                ),
+                "fridge:apparent_power": BaselineStats(
+                    "apparent_power", 20, 506.0, 12.0, 490.0, 520.0, 1.0
+                ),
+                "fridge:power_factor": BaselineStats(
+                    "power_factor", 20, 0.98, 0.01, 0.96, 0.99, 1.0
+                ),
+                "fridge:reactive_to_real_ratio": BaselineStats(
+                    "reactive_to_real_ratio", 20, 0.16, 0.02, 0.12, 0.20, 1.0
+                ),
+                "fridge:apparent_to_real_ratio": BaselineStats(
+                    "apparent_to_real_ratio", 20, 1.01, 0.01, 1.0, 1.02, 1.0
+                ),
+                "fridge:power_factor_deficit": BaselineStats(
+                    "power_factor_deficit", 20, 0.02, 0.01, 0.01, 0.04, 1.0
+                ),
+                "fridge:apparent_power_residual": BaselineStats(
+                    "apparent_power_residual", 20, 0.0, 1.0, -1.0, 1.0, 1.0
+                ),
+            },
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "reactive_shift_under_stable_real_power"
+    assert "reactive power" in alert.message
+    assert "real power stayed" in alert.message
+    assert alert.features["relationship_rms"] > 2.0
+    assert coordinator.state.power_quality_score_by_circuit["fridge"] > 2.0
+    assert coordinator.state.power_quality_evidence_by_circuit["fridge"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mixed_power": "510",
+                "sensor.mixed_var": "220",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mixed",
+                    "name": "Kitchen Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {"entity_id": "sensor.mixed_power", "role": "real_power"},
+                        {"entity_id": "sensor.mixed_var", "role": "reactive_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="mixed",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "mixed:real_power": BaselineStats(
+                    "real_power", 20, 500.0, 20.0, 470.0, 530.0, 1.0
+                ),
+                "mixed:reactive_power": BaselineStats(
+                    "reactive_power", 20, 80.0, 10.0, 65.0, 95.0, 1.0
+                ),
+                "mixed:reactive_to_real_ratio": BaselineStats(
+                    "reactive_to_real_ratio", 20, 0.16, 0.02, 0.12, 0.20, 1.0
+                ),
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    for _ in range(3):
+        await coordinator.async_process_update()
+
+    assert notifications == []
+    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
+    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""

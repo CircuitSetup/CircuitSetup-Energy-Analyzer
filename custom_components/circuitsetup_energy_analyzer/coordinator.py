@@ -10,7 +10,7 @@ from typing import Any, Self
 from . import notifications, repairs
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
-from .baseline import build_baseline, score_deviation
+from .baseline import build_baseline
 from .const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -43,6 +43,13 @@ from .nilm import (
     unmatched_load_percentage,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
+from .power_quality import (
+    PowerQualityEvidence,
+    extract_power_quality_features,
+    relationship_rms_score,
+    score_power_quality_features,
+    select_power_quality_evidence,
+)
 from .profiles import get_profile_definition
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 
@@ -85,6 +92,11 @@ class AnalyzerState:
     anomaly_score_by_circuit: dict[str, float] = field(default_factory=dict)
     learning_by_circuit: dict[str, bool] = field(default_factory=dict)
     data_quality_by_circuit: dict[str, str] = field(default_factory=dict)
+    power_quality_score_by_circuit: dict[str, float] = field(default_factory=dict)
+    power_quality_evidence_by_circuit: dict[str, str] = field(default_factory=dict)
+    reactive_power_drift_by_circuit: dict[str, float] = field(default_factory=dict)
+    apparent_power_drift_by_circuit: dict[str, float] = field(default_factory=dict)
+    power_factor_drift_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_signature_count_by_circuit: dict[str, int] = field(default_factory=dict)
     nilm_unmatched_load_percentage_by_circuit: dict[str, float] = field(
         default_factory=dict
@@ -244,7 +256,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.events.extend(new_events)
                 self._mark_store_dirty()
 
-            alert = self._observe_real_power(config, sample, now)
+            alert = self._observe_power_quality(config, sample, now)
             if alert is not None:
                 alerts.append(alert)
                 self.store_data.alerts.append(alert)
@@ -685,46 +697,94 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         return states
 
-    def _observe_real_power(
+    def _observe_power_quality(
         self: Self,
         config: CircuitConfig,
         sample: Any,
         now: datetime,
     ) -> AlertEvidence | None:
-        if sample.real_power is None:
+        features = extract_power_quality_features(sample)
+        if not features:
             self.state.learning_by_circuit.setdefault(config.circuit_id, True)
             return None
 
-        key = _baseline_key(config.circuit_id, "real_power")
-        baseline = self.store_data.baselines.get(key)
-        if baseline is None:
-            values = self._baseline_values[key]
-            values.append(sample.real_power)
-            if len(values) >= 15:
-                baseline = build_baseline("real_power", values)
-                self.store_data.baselines[key] = baseline
-                self._mark_store_dirty()
-            self.state.learning_by_circuit[config.circuit_id] = True
-            return None
+        baselines: dict[str, Any] = {}
+        learning_new_features = False
+        for feature, value in features.items():
+            key = _baseline_key(config.circuit_id, feature)
+            baseline = self.store_data.baselines.get(key)
+            if baseline is None:
+                values = self._baseline_values[key]
+                values.append(value)
+                if len(values) >= 15:
+                    baseline = build_baseline(feature, values)
+                    self.store_data.baselines[key] = baseline
+                    self._mark_store_dirty()
+                learning_new_features = True
+            if baseline is not None:
+                baselines[feature] = baseline
+
+        scores = score_power_quality_features(features, baselines)
+        evidence = select_power_quality_evidence(
+            config,
+            scores,
+            min_relationship_score=self._alert_policy.min_average_score,
+        )
+        self._update_power_quality_state(config.circuit_id, scores, evidence)
 
         mature = self._learning_mature(config, now)
+        has_confident_scores = any(score.baseline_confidence >= 0.6 for score in scores)
         self.state.learning_by_circuit[config.circuit_id] = (
-            baseline.confidence < 0.6 or not mature
+            learning_new_features or not mature or not has_confident_scores
         )
-        if baseline.confidence < 0.6 or not mature:
+        if learning_new_features or not mature or not has_confident_scores:
+            return None
+        if evidence is None:
             return None
 
-        score = score_deviation(sample.real_power, baseline)
         return self._alert_policy.observe(
             Observation(
                 circuit_id=config.circuit_id,
-                feature="real_power",
-                score=score,
-                baseline_confidence=baseline.confidence,
+                feature=evidence.feature,
+                score=evidence.score,
+                baseline_confidence=evidence.baseline_confidence,
                 observed_at=now,
-                observed_value=sample.real_power,
-                baseline_value=baseline.median,
+                observed_value=evidence.observed_value,
+                baseline_value=evidence.baseline_value,
+                message=evidence.message,
+                features=evidence.features,
             )
+        )
+
+    def _update_power_quality_state(
+        self: Self,
+        circuit_id: str,
+        scores: Iterable[Any],
+        evidence: PowerQualityEvidence | None,
+    ) -> None:
+        def _drift(primary: str, fallback: str) -> float:
+            score = by_feature.get(primary, by_feature.get(fallback))
+            return abs(score.change_ratio) if score is not None else 0.0
+
+        scores = list(scores)
+        by_feature = {score.feature: score for score in scores}
+        self.state.power_quality_score_by_circuit[circuit_id] = relationship_rms_score(
+            scores
+        )
+        self.state.power_quality_evidence_by_circuit[circuit_id] = (
+            evidence.message if evidence is not None else ""
+        )
+        self.state.reactive_power_drift_by_circuit[circuit_id] = _drift(
+            "reactive_power",
+            "reactive_to_real_ratio",
+        )
+        self.state.apparent_power_drift_by_circuit[circuit_id] = _drift(
+            "apparent_power",
+            "apparent_to_real_ratio",
+        )
+        self.state.power_factor_drift_by_circuit[circuit_id] = _drift(
+            "power_factor",
+            "power_factor_deficit",
         )
 
     def _learning_mature(self: Self, config: CircuitConfig, now: datetime) -> bool:
