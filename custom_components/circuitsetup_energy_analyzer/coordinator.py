@@ -752,7 +752,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             scores,
             min_relationship_score=self._alert_policy.min_average_score,
         )
-        if evidence is None:
+        if (
+            evidence is None
+            and config.mode is not CircuitMode.MIXED
+            and config.appliance_profile is not ApplianceProfile.MIXED
+        ):
             evidence = self._real_power_fallback_evidence(scores)
         self._update_power_quality_state(config.circuit_id, scores, evidence)
 

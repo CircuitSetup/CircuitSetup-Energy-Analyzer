@@ -1635,3 +1635,82 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
     assert notifications == []
     assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
     assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mixed_power": "170",
+                "sensor.mixed_var": "90",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mixed",
+                    "name": "Kitchen Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {"entity_id": "sensor.mixed_power", "role": "real_power"},
+                        {"entity_id": "sensor.mixed_var", "role": "reactive_power"},
+                    ],
+                }
+            ],
+        },
+        options={CONF_SENSITIVITY: "high"},
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="mixed",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "mixed:real_power": BaselineStats(
+                    "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+                ),
+                "mixed:reactive_power": BaselineStats(
+                    "reactive_power", 20, 80.0, 10.0, 65.0, 95.0, 1.0
+                ),
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    for _ in range(3):
+        await coordinator.async_process_update()
+
+    assert notifications == []
+    assert coordinator.state.active_alerts_by_circuit.get("mixed", []) == []
+    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
+    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
