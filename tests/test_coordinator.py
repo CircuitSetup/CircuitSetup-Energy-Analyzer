@@ -4,15 +4,19 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_CIRCUITS,
     CONF_SOURCE_ENTITIES,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    BaselineStats,
     CircuitEvent,
     EventType,
+    RetentionMode,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
 def test_process_events_into_state_tracks_latest_event_per_circuit() -> None:
@@ -215,3 +219,96 @@ async def test_setup_entry_rolls_back_forwarding_failure() -> None:
         await async_setup_entry(hass, entry)
 
     assert hass.data[DOMAIN] == {}
+
+
+@pytest.mark.asyncio
+async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    now_holder = {"value": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def __init__(self) -> None:
+            self._states = {
+                "sensor.fridge_power": SimpleNamespace(
+                    state="170",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now,
+                )
+            }
+
+        def get(self, entity_id: str):
+            state = self._states[entity_id]
+            state.last_updated = now_holder["value"]
+            return state
+
+    hass = SimpleNamespace(states=FakeStates(), data={DOMAIN: {}})
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:real_power": BaselineStats(
+                feature="real_power",
+                sample_count=20,
+                median=100.0,
+                mad=5.0,
+                p10=90.0,
+                p90=110.0,
+                confidence=1.0,
+            )
+        }
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        hass,
+        entry_id="entry-1",
+        entry_data={
+            CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                            "unit": "W",
+                        }
+                    ],
+                    "retention_mode": RetentionMode.STANDARD.value,
+                }
+            ],
+        },
+        store_data=store_data,
+        now_fn=lambda: now_holder["value"],
+    )
+
+    await coordinator.async_process_update()
+    now_holder["value"] = now + timedelta(minutes=1)
+    await coordinator.async_process_update()
+    now_holder["value"] = now + timedelta(minutes=2)
+    await coordinator.async_process_update()
+
+    assert (
+        coordinator.state.last_event_by_circuit["fridge"].event_type
+        is EventType.START
+    )
+    assert coordinator.state.learning_by_circuit["fridge"] is False
+    assert coordinator.state.anomaly_score_by_circuit["fridge"] > 0.5
+    assert coordinator.state.active_alerts_by_circuit["fridge"]
+    assert notifications
+    assert notifications[0].message.startswith("Possible issue")

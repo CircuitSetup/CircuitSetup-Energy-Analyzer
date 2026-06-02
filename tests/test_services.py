@@ -12,9 +12,11 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    BaselineStats,
     EventType,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
 def test_notification_id_for_alert_uses_feature_or_event_type() -> None:
@@ -183,6 +185,109 @@ async def test_setup_and_unload_services_with_fake_hass() -> None:
 
     assert hass.services.registered == {}
     assert (DOMAIN, SERVICE_RELEARN_BASELINE) in hass.services.removed
+
+
+@pytest.mark.asyncio
+async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ACKNOWLEDGE_ALERT,
+        SERVICE_EXPORT_DIAGNOSTICS,
+        SERVICE_IGNORE_NILM_SIGNATURE,
+        SERVICE_LABEL_NILM_SIGNATURE,
+        SERVICE_PAUSE_ALERTS,
+        SERVICE_RELEARN_BASELINE,
+        SERVICE_RUN_MAPPING_CHECKS,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="real_power",
+    )
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:real_power": BaselineStats(
+                "real_power",
+                20,
+                100.0,
+                5.0,
+                90.0,
+                110.0,
+                1.0,
+            )
+        },
+        alerts=[alert],
+        nilm_signatures={"mains": [{"signature_id": "signature_1"}]},
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_id="entry-1",
+        entry_data={},
+        store_data=store_data,
+    )
+    coordinator.state.active_alerts_by_circuit["fridge"] = [alert]
+    coordinator.state.anomaly_score_by_circuit["fridge"] = 2.0
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
+        SimpleNamespace(data={"circuit_id": "fridge"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_PAUSE_ALERTS)](
+        SimpleNamespace(data={"circuit_id": "fridge", "duration": "01:00:00"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_ACKNOWLEDGE_ALERT)](
+        SimpleNamespace(data={"alert_id": notification_id_for_alert(alert)})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_EXPORT_DIAGNOSTICS)](
+        SimpleNamespace(data={"circuit_id": "fridge"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_RUN_MAPPING_CHECKS)](
+        SimpleNamespace(data={})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_LABEL_NILM_SIGNATURE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "signature_id": "signature_1",
+                "label": "Microwave",
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
+        SimpleNamespace(data={"circuit_id": "mains", "signature_id": "signature_1"})
+    )
+
+    assert "fridge:real_power" not in coordinator.store_data.baselines
+    assert "fridge" in coordinator.paused_circuits
+    assert coordinator.store_data.alerts == []
+    assert coordinator.state.active_alerts_by_circuit == {}
+    assert coordinator.last_exported_diagnostics["circuit_id"] == "fridge"
+    assert coordinator.mapping_checks_run == 1
+    assert coordinator.store_data.nilm_signatures["mains"][0]["user_label"] == (
+        "Microwave"
+    )
+    assert ("mains", "signature_1") in coordinator.ignored_nilm_signatures
 
 
 @pytest.mark.asyncio

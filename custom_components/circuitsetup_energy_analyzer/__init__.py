@@ -23,7 +23,12 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     entry_id = getattr(entry, "entry_id", "default")
     source_entities = getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, [])
-    coordinator = EnergyAnalyzerCoordinator(hass)
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry_id,
+        entry_data=getattr(entry, "data", {}),
+        options=getattr(entry, "options", {}),
+    )
     first_entry = not _has_config_entries(hass.data[DOMAIN])
     try:
         if first_entry:
