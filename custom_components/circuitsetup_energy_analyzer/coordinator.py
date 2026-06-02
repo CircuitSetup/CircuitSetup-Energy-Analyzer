@@ -398,6 +398,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> NormalizedCircuitSample:
+        if config.mode is CircuitMode.MAINS_NILM:
+            return self._aggregate_parallel_sample(config, now)
         if config.mode is not CircuitMode.DUAL_PHASE:
             return build_circuit_sample(
                 config,
@@ -452,6 +454,41 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             energy=aggregated.energy,
             source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
             quality_issues=aggregated.quality_issues,
+        )
+
+    def _aggregate_parallel_sample(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> NormalizedCircuitSample:
+        samples = [
+            build_circuit_sample(
+                replace(config, sensors=(sensor,)),
+                self._source_states_for(replace(config, sensors=(sensor,)), now),
+                now,
+            )
+            for sensor in config.sensors
+        ]
+        if not samples:
+            return build_circuit_sample(config, {}, now)
+
+        return NormalizedCircuitSample(
+            timestamp=max(sample.timestamp for sample in samples),
+            circuit_id=config.circuit_id,
+            real_power=_sum_sample_values(samples, "real_power"),
+            current=_sum_sample_values(samples, "current"),
+            voltage=_average_sample_values(samples, "voltage"),
+            reactive_power=_sum_sample_values(samples, "reactive_power"),
+            apparent_power=_sum_sample_values(samples, "apparent_power"),
+            power_factor=_average_sample_values(samples, "power_factor"),
+            frequency=_average_sample_values(samples, "frequency"),
+            energy=_sum_sample_values(samples, "energy"),
+            source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
+            quality_issues=tuple(
+                issue
+                for sample in samples
+                for issue in getattr(sample, "quality_issues", ())
+            ),
         )
 
     async def _sync_data_quality_repairs(
@@ -723,6 +760,34 @@ def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
 
 
+def _sum_sample_values(
+    samples: Iterable[NormalizedCircuitSample],
+    attribute: str,
+) -> float | None:
+    values = [
+        value
+        for sample in samples
+        if (value := getattr(sample, attribute, None)) is not None
+    ]
+    if not values:
+        return None
+    return float(sum(values))
+
+
+def _average_sample_values(
+    samples: Iterable[NormalizedCircuitSample],
+    attribute: str,
+) -> float | None:
+    values = [
+        value
+        for sample in samples
+        if (value := getattr(sample, attribute, None)) is not None
+    ]
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
 def _normalized_leg(leg: str | None) -> str | None:
     if leg is None:
         return None
@@ -799,8 +864,9 @@ def _circuit_configs_from_entry_data(
     options: dict[str, Any] | None = None,
 ) -> tuple[CircuitConfig, ...]:
     configs: list[CircuitConfig] = []
+    default_retention_mode = _retention_mode_from_sources(entry_data, options)
     for raw_circuit in entry_data.get(CONF_CIRCUITS, []):
-        config = _circuit_config_from_raw(raw_circuit)
+        config = _circuit_config_from_raw(raw_circuit, default_retention_mode)
         if config is not None:
             configs.append(config)
 
@@ -852,7 +918,10 @@ def _mains_nilm_config_from_sources(
     )
 
 
-def _circuit_config_from_raw(raw_circuit: Any) -> CircuitConfig | None:
+def _circuit_config_from_raw(
+    raw_circuit: Any,
+    default_retention_mode: RetentionMode = RetentionMode.STANDARD,
+) -> CircuitConfig | None:
     if isinstance(raw_circuit, CircuitConfig):
         return raw_circuit
     if not isinstance(raw_circuit, dict):
@@ -868,7 +937,7 @@ def _circuit_config_from_raw(raw_circuit: Any) -> CircuitConfig | None:
         )
         mode = CircuitMode(raw_circuit.get("mode", CircuitMode.MIXED.value))
         retention_mode = RetentionMode(
-            raw_circuit.get("retention_mode", RetentionMode.STANDARD.value)
+            raw_circuit.get("retention_mode", default_retention_mode.value)
         )
     except ValueError:
         return None

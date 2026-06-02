@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .const import DOMAIN
+from .const import CONF_CIRCUITS, DOMAIN
 
 try:
     from homeassistant.helpers.entity import EntityCategory
@@ -43,6 +43,14 @@ def circuit_info_from_config(circuit: Any) -> CircuitInfo | None:
         return None
 
     return CircuitInfo(circuit_id=str(circuit_id), name=str(name))
+
+
+def circuits_for_entities(entry: Any, coordinator: Any) -> tuple[Any, ...]:
+    """Return runtime circuits when available, falling back to entry data."""
+    runtime_circuits = tuple(getattr(coordinator, "circuit_configs", ()) or ())
+    if runtime_circuits:
+        return runtime_circuits
+    return tuple(getattr(entry, "data", {}).get(CONF_CIRCUITS, []))
 
 
 class CircuitAnalyzerEntity(CoordinatorEntity):

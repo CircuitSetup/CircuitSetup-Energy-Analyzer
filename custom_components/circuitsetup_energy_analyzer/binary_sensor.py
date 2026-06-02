@@ -4,8 +4,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .const import CONF_CIRCUITS, DOMAIN
-from .entity import CircuitAnalyzerEntity, circuit_info_from_config
+from .const import DOMAIN
+from .entity import (
+    CircuitAnalyzerEntity,
+    circuit_info_from_config,
+    circuits_for_entities,
+)
 
 try:
     from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -86,7 +90,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[CircuitAnalyzerBinarySensor] = []
 
-    for raw_circuit in getattr(entry, "data", {}).get(CONF_CIRCUITS, []):
+    for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue

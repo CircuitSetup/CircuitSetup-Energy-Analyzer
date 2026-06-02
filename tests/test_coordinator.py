@@ -8,6 +8,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
     DOMAIN,
@@ -223,6 +224,33 @@ async def test_setup_entry_rolls_back_forwarding_failure() -> None:
         await async_setup_entry(hass, entry)
 
     assert hass.data[DOMAIN] == {}
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_listens_to_synthetic_mains_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer import async_setup_entry
+
+    class FakeConfigEntries:
+        async def async_forward_entry_setups(self, entry, platforms) -> None:
+            return None
+
+        async def async_unload_platforms(self, entry, platforms) -> bool:
+            return True
+
+    hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.mains_l1_power"],
+        },
+    )
+
+    assert await async_setup_entry(hass, entry) is True
+
+    coordinator = hass.data[DOMAIN]["entry-1"]
+    assert coordinator.source_entities == ("sensor.mains_l1_power",)
 
 
 @pytest.mark.asyncio
@@ -551,6 +579,67 @@ async def test_runtime_applies_retention_before_persisting_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_entry_retention_applies_when_circuit_omits_retention() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    old_event = CircuitEvent(
+        timestamp=now - timedelta(days=30),
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    store_data = FeatureStoreData(events=[old_event])
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.data = store_data
+            self.saved_events: list[list[CircuitEvent]] = []
+
+        async def async_save(self) -> None:
+            self.saved_events.append(list(self.data.events))
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            return SimpleNamespace(
+                state="170",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    fake_store = FakeStore()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_RETENTION_MODE: RetentionMode.LIGHTWEIGHT.value,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+        store=fake_store,
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert fake_store.saved_events
+    assert old_event not in fake_store.saved_events[-1]
+
+
+@pytest.mark.asyncio
 async def test_runtime_skips_store_write_when_update_has_no_persisted_changes() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -788,6 +877,45 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
         coordinator.circuit_configs[0].appliance_profile
         is ApplianceProfile.MAINS_NILM
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_synthetic_mains_sums_multiple_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_l1_power": "125",
+                "sensor.mains_l2_power": "175",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.mains_l1_power",
+                "sensor.mains_l2_power",
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    event = coordinator.state.last_event_by_circuit["mains"]
+    assert event.features["startup_power_w"] == 300.0
 
 
 @pytest.mark.asyncio

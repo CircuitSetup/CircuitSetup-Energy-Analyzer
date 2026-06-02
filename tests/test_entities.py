@@ -111,6 +111,31 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         async_setup_entry,
@@ -135,3 +160,25 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
         "entry-1_well_pump_learning",
         "entry-1_well_pump_data_quality_problem",
     ]
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        async_setup_entry,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert [entity.circuit_id for entity in added_entities] == ["mains", "mains"]

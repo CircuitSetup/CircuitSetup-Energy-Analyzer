@@ -23,7 +23,6 @@ async def async_setup_entry(
     """Set up CircuitSetup Energy Analyzer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     entry_id = getattr(entry, "entry_id", "default")
-    source_entities = getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, [])
     store, store_data = await _async_load_feature_store(hass, entry_id)
     coordinator = EnergyAnalyzerCoordinator(
         hass,
@@ -37,7 +36,7 @@ async def async_setup_entry(
     try:
         if first_entry:
             await async_setup_services(hass)
-        await coordinator.async_start(source_entities)
+        await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
@@ -64,6 +63,17 @@ async def async_unload_entry(
         if not _has_config_entries(hass.data.get(DOMAIN, {})):
             await async_unload_services(hass)
     return unload_ok
+
+
+def _source_entities_for_entry(
+    entry: CircuitSetupEnergyAnalyzerConfigEntry,
+    coordinator: EnergyAnalyzerCoordinator,
+) -> tuple[str, ...]:
+    entity_ids = list(getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, []))
+    for config in getattr(coordinator, "circuit_configs", ()):
+        for sensor in getattr(config, "sensors", ()):
+            entity_ids.append(sensor.entity_id)
+    return tuple(dict.fromkeys(entity_ids))
 
 
 async def _async_load_feature_store(
