@@ -46,6 +46,16 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     sensitivity_by_circuit = {"fridge": "quiet"}
     maintenance_by_circuit = {"fridge": {"active": True}}
     alert_feedback = {"fridge:reactive_power": {"action": "expected"}}
+    energy_usage_settings_by_circuit = {
+        "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
+    }
+    energy_usage_by_circuit = {
+        "fridge": {
+            "last_energy_kwh": 112.5,
+            "last_sample_at": now.isoformat(),
+            "days": [{"date": "2026-06-02", "usage_kwh": 8.5}],
+        }
+    }
     data = FeatureStoreData(
         events=[old, recent],
         baselines={"fridge:startup_power_w": baseline},
@@ -54,6 +64,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         sensitivity_by_circuit=sensitivity_by_circuit,
         maintenance_by_circuit=maintenance_by_circuit,
         alert_feedback=alert_feedback,
+        energy_usage_settings_by_circuit=energy_usage_settings_by_circuit,
+        energy_usage_by_circuit=energy_usage_by_circuit,
     )
 
     pruned = prune_events(data, RetentionMode.LIGHTWEIGHT, now)
@@ -65,6 +77,11 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.sensitivity_by_circuit is data.sensitivity_by_circuit
     assert pruned.maintenance_by_circuit is data.maintenance_by_circuit
     assert pruned.alert_feedback is data.alert_feedback
+    assert (
+        pruned.energy_usage_settings_by_circuit
+        is data.energy_usage_settings_by_circuit
+    )
+    assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
     assert data.events == [old, recent]
 
 
@@ -165,6 +182,9 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 "change_ratio": 0.42,
             }
         },
+        energy_usage_settings_by_circuit={
+            "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
+        },
         nilm_signatures={
             "mains": [
                 {
@@ -174,6 +194,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 }
             ]
         },
+        energy_usage_by_circuit={
+            "fridge": {
+                "last_energy_kwh": 112.5,
+                "last_sample_at": now.isoformat(),
+                "days": [{"date": "2026-06-02", "usage_kwh": 8.5}],
+            }
+        },
     )
 
     raw = feature_store_data_to_dict(data)
@@ -182,4 +209,11 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.sensitivity_by_circuit == {"fridge": "quiet"}
     assert restored.maintenance_by_circuit["fridge"]["note"] == "Cleaned coils"
     assert restored.alert_feedback["fridge:reactive_power"]["action"] == "expected"
+    assert restored.energy_usage_settings_by_circuit["fridge"] == {
+        "window_days": 14,
+        "daily_spike_ratio": 0.2,
+    }
     assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
+    assert restored.energy_usage_by_circuit["fridge"]["days"] == [
+        {"date": "2026-06-02", "usage_kwh": 8.5}
+    ]

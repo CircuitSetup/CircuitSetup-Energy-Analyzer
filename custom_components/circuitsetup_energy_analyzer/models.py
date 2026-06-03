@@ -107,6 +107,8 @@ class CircuitConfig:
     sensors: tuple[SensorRef, ...] = ()
     retention_mode: RetentionMode = RetentionMode.STANDARD
     power_flow: PowerFlowMode = PowerFlowMode.LOAD
+    energy_usage_window_days: int = 7
+    daily_energy_spike_ratio: float = 0.25
 
 
 @dataclass(frozen=True, slots=True)

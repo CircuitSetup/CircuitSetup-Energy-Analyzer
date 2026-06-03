@@ -27,6 +27,7 @@ EXPECTED_OPTIONS_LABELS = {
 EXPECTED_SERVICE_FIELD_NAMES = {
     "alert_id": "Alert ID",
     "circuit_id": "Circuit ID",
+    "daily_spike_ratio": "Daily Spike Ratio",
     "duration": "Duration",
     "label": "Label",
     "note": "Note",
@@ -36,6 +37,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "signature_id": "Signature ID",
     "source_signature_id": "Source Signature ID",
     "target_signature_id": "Target Signature ID",
+    "window_days": "Window Days",
 }
 
 

@@ -2129,6 +2129,130 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
 
 
 @pytest.mark.asyncio
+async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    holder = {"time": now, "energy": 112.6}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_energy"
+            return SimpleNamespace(
+                state=str(holder["energy"]),
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "fridge": {
+                    "last_energy_kwh": 100.0,
+                    "last_sample_at": "2026-06-03T00:00:00+00:00",
+                    "days": [
+                        {"date": "2026-05-27", "usage_kwh": 6.0},
+                        {"date": "2026-05-28", "usage_kwh": 7.0},
+                        {"date": "2026-05-29", "usage_kwh": 8.0},
+                        {"date": "2026-05-30", "usage_kwh": 7.0},
+                        {"date": "2026-05-31", "usage_kwh": 6.0},
+                        {"date": "2026-06-01", "usage_kwh": 8.0},
+                        {"date": "2026-06-02", "usage_kwh": 8.0},
+                    ],
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        holder["energy"] += 0.1
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "daily_energy_usage_spike"
+    assert "used 12.9 kWh today" in alert.message
+    assert "25%" in alert.message
+    assert alert.observed_value == 12.9
+    assert alert.baseline_value == 12.5
+    assert alert.features["baseline_total_kwh"] == 50.0
+    assert coordinator.state.daily_energy_usage_by_circuit["fridge"] == 12.9
+    assert coordinator.state.energy_usage_share_by_circuit["fridge"] == 25.8
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_energy_usage_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_energy_usage_settings(
+        "fridge",
+        window_days=14,
+        daily_spike_ratio=0.2,
+    )
+
+    assert saved
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "window_days": 14,
+        "daily_spike_ratio": 0.2,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

@@ -82,6 +82,15 @@
       },
       "nilm_unmatched_load_percentage": {
         "name": "NILM unmatched load percentage"
+      },
+      "daily_energy_usage": {
+        "name": "Daily energy usage"
+      },
+      "energy_usage_share": {
+        "name": "Energy usage share"
+      },
+      "energy_usage_status": {
+        "name": "Energy usage status"
       }
     },
     "binary_sensor": {

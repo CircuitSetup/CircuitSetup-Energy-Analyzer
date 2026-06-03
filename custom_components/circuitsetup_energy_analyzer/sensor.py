@@ -13,9 +13,14 @@ from .entity import (
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
-    from homeassistant.const import PERCENTAGE
+    from homeassistant.const import PERCENTAGE, UnitOfEnergy
 except ModuleNotFoundError:
     PERCENTAGE = "%"
+
+    class UnitOfEnergy:
+        """Fallback energy unit constants."""
+
+        KILO_WATT_HOUR = "kWh"
 
     class SensorEntity:
         """Fallback sensor base for tests without Home Assistant."""
@@ -186,6 +191,31 @@ def nilm_unmatched_load_percentage_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def daily_energy_usage_value(state: Any, circuit_id: str) -> float:
+    """Return today's cumulative usage derived from the circuit energy sensor."""
+    return float(
+        getattr(state, "daily_energy_usage_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def energy_usage_share_value(state: Any, circuit_id: str) -> float:
+    """Return today's usage as a percent of the learned energy window."""
+    return float(
+        getattr(state, "energy_usage_share_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def energy_usage_status_value(state: Any, circuit_id: str) -> str:
+    """Return the daily energy usage tracker status."""
+    evidence = getattr(state, "energy_usage_evidence_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    if isinstance(evidence, Mapping):
+        return str(evidence.get("status") or "learning")
+    return "learning"
+
+
 def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
@@ -308,6 +338,28 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         value_fn=nilm_unmatched_load_percentage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="daily_energy_usage",
+        name_suffix="Daily Energy Usage",
+        value_fn=daily_energy_usage_value,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="energy_usage_share",
+        name_suffix="Energy Usage Share",
+        value_fn=energy_usage_share_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="energy_usage_status",
+        name_suffix="Energy Usage Status",
+        value_fn=energy_usage_status_value,
+        attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
     ),
 )
 

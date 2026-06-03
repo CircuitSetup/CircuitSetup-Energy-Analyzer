@@ -96,6 +96,29 @@ def test_build_circuit_sample_preserves_energy_reading() -> None:
     assert sample.energy == 12.5
 
 
+def test_build_circuit_sample_converts_wh_energy_to_kwh() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+    )
+    states = {
+        "sensor.fridge_energy": SourceState(
+            "sensor.fridge_energy",
+            "12500",
+            "Wh",
+            now,
+        )
+    }
+
+    sample = build_circuit_sample(config, states, now)
+
+    assert sample.energy == 12.5
+
+
 def test_build_circuit_sample_flags_negative_load_power() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(

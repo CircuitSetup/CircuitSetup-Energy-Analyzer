@@ -53,6 +53,7 @@ from .power_quality import (
 )
 from .profiles import get_profile_definition
 from .storage import RETENTION_WINDOWS, FeatureStoreData
+from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
 from .ux import (
     alert_evidence_detail,
     alert_policy_name_for_sensitivity,
@@ -123,6 +124,11 @@ class AnalyzerState:
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    energy_usage_share_by_circuit: dict[str, float] = field(default_factory=dict)
+    energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
 
@@ -212,6 +218,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         }
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -287,6 +294,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(alert)
                 self._mark_store_dirty()
                 await self._notify_alert(alert)
+
+            usage_alert = self._observe_energy_usage(config, sample, now)
+            if usage_alert is not None:
+                alerts.append(usage_alert)
+                self.store_data.alerts.append(usage_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(usage_alert)
 
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
@@ -374,6 +388,32 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.sensitivity_by_circuit[circuit_id] = normalize_sensitivity(
             preset
         )
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_energy_usage_settings(
+        self: Self,
+        circuit_id: str,
+        window_days: Any = None,
+        daily_spike_ratio: Any = None,
+    ) -> None:
+        """Persist daily energy usage spike settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._energy_usage_settings_for_config(config, circuit_id)
+        settings = {
+            "window_days": _positive_int_value(
+                window_days,
+                default=current.window_days,
+            ),
+            "daily_spike_ratio": _positive_float_value(
+                daily_spike_ratio,
+                default=current.daily_spike_ratio,
+            ),
+        }
+        self.store_data.energy_usage_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
@@ -477,6 +517,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "sensitivity": self.state.sensitivity_by_circuit.get(circuit_id),
             "maintenance": self.state.maintenance_by_circuit.get(circuit_id, {}),
             "nilm_review": self.state.nilm_review_by_circuit.get(circuit_id, []),
+            "daily_energy_usage_kwh": self.state.daily_energy_usage_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "energy_usage_share_percent": self.state.energy_usage_share_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "energy_usage_evidence": self.state.energy_usage_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
         }
         self.async_set_updated_data(self.state)
 
@@ -994,6 +1046,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._alert_policies[key] = policy
         return policy
 
+    def _usage_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._usage_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=0.8,
+            )
+            self._usage_alert_policies[key] = policy
+        return policy
+
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
         alert = self._alert_for_id(alert_id)
         if alert is None:
@@ -1056,10 +1127,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ]
         if len(retained_events) != len(self.store_data.events):
             self.store_data.events = retained_events
+        self._prune_energy_usage(now)
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
         return event.timestamp >= now - RETENTION_WINDOWS[retention_mode]
+
+    def _prune_energy_usage(self: Self, now: datetime) -> None:
+        for circuit_id, history in self.store_data.energy_usage_by_circuit.items():
+            retention_mode = self._retention_mode_for_circuit(circuit_id)
+            cutoff = (now.date() - RETENTION_WINDOWS[retention_mode]).isoformat()
+            days = history.get("days", [])
+            if not isinstance(days, list):
+                continue
+            history["days"] = [
+                day
+                for day in days
+                if isinstance(day, dict) and str(day.get("date", "")) >= cutoff
+            ]
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
@@ -1156,6 +1241,100 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 message=evidence.message,
                 features=evidence.features,
             )
+        )
+
+    def _observe_energy_usage(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        settings = self._energy_usage_settings_for_config(
+            config,
+            config.circuit_id,
+        )
+        result = record_energy_usage(
+            self.store_data.energy_usage_by_circuit.setdefault(
+                config.circuit_id,
+                {},
+            ),
+            circuit_id=config.circuit_id,
+            timestamp=now,
+            energy_kwh=sample.energy,
+            settings=EnergyUsageSettings(
+                window_days=settings.window_days,
+                daily_spike_ratio=settings.daily_spike_ratio,
+            ),
+            retention_days=RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(config.circuit_id)
+            ].days,
+        )
+        if result is None:
+            return None
+
+        self._mark_store_dirty()
+        self.state.daily_energy_usage_by_circuit[config.circuit_id] = (
+            result.daily_usage_kwh
+        )
+        self.state.energy_usage_share_by_circuit[config.circuit_id] = round(
+            result.daily_usage_share * 100,
+            1,
+        )
+        self.state.energy_usage_evidence_by_circuit[config.circuit_id] = (
+            _energy_usage_evidence_payload(result)
+        )
+
+        if result.spike is None:
+            return None
+
+        spike = result.spike
+        policy = self._usage_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            spike.daily_usage_kwh / spike.threshold_kwh
+            if spike.threshold_kwh > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="daily_energy_usage_spike",
+                score=score,
+                baseline_confidence=min(
+                    spike.baseline_day_count / spike.window_days,
+                    1.0,
+                ),
+                observed_at=now,
+                observed_value=spike.daily_usage_kwh,
+                baseline_value=spike.threshold_kwh,
+                message=_energy_usage_spike_message(config, spike),
+                features=spike.features,
+            )
+        )
+
+    def _energy_usage_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> EnergyUsageSettings:
+        overrides = self.store_data.energy_usage_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_window_days = (
+            config.energy_usage_window_days if config is not None else 7
+        )
+        default_spike_ratio = (
+            config.daily_energy_spike_ratio if config is not None else 0.25
+        )
+        return EnergyUsageSettings(
+            window_days=_positive_int_value(
+                overrides.get("window_days"),
+                default=default_window_days,
+            ),
+            daily_spike_ratio=_positive_float_value(
+                overrides.get("daily_spike_ratio"),
+                default=default_spike_ratio,
+            ),
         )
 
     def _real_power_fallback_evidence(
@@ -1265,6 +1444,46 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _energy_usage_spike_message(
+    config: CircuitConfig,
+    spike: EnergyUsageSpike,
+) -> str:
+    share_percent = round(spike.daily_usage_share * 100, 1)
+    threshold_percent = round(spike.threshold_ratio * 100)
+    return (
+        f"Possible issue: {config.name} used {_format_kwh(spike.daily_usage_kwh)} "
+        f"kWh today, which is {share_percent}% of its last {spike.window_days} "
+        f"days of usage ({_format_kwh(spike.baseline_total_kwh)} kWh). This is "
+        f"above the configured {threshold_percent}% daily usage threshold."
+    )
+
+
+def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "date": result.date,
+        "daily_usage_kwh": result.daily_usage_kwh,
+        "baseline_total_kwh": result.baseline_total_kwh,
+        "baseline_window_days": result.window_days,
+        "baseline_day_count": result.baseline_day_count,
+        "threshold_ratio": result.threshold_ratio,
+        "threshold_kwh": result.threshold_kwh,
+        "daily_usage_share_percent": round(result.daily_usage_share * 100, 1),
+        "status": (
+            "over_threshold"
+            if result.spike is not None
+            else (
+                "tracking"
+                if result.baseline_day_count >= result.window_days
+                else "learning"
+            )
+        ),
+    }
+
+
+def _format_kwh(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def _alert_feature(alert: AlertEvidence) -> str:
@@ -1504,6 +1723,18 @@ def _circuit_config_from_raw(
         sensors=_sensor_refs_from_raw(raw_circuit),
         retention_mode=retention_mode,
         power_flow=_power_flow_mode_from_raw(raw_circuit, appliance_profile, mode),
+        energy_usage_window_days=_positive_int_from_raw(
+            raw_circuit,
+            "energy_usage_window_days",
+            "usage_window_days",
+            default=7,
+        ),
+        daily_energy_spike_ratio=_positive_float_from_raw(
+            raw_circuit,
+            "daily_energy_spike_ratio",
+            "usage_spike_ratio",
+            default=0.25,
+        ),
     )
 
 
@@ -1542,6 +1773,56 @@ def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:
         if ref is not None:
             refs.append(ref)
     return tuple(refs)
+
+
+def _positive_int_from_raw(
+    raw: dict[str, Any],
+    *keys: str,
+    default: int,
+) -> int:
+    for key in keys:
+        if key not in raw:
+            continue
+        try:
+            value = int(raw[key])
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return default
+
+
+def _positive_int_value(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _positive_float_from_raw(
+    raw: dict[str, Any],
+    *keys: str,
+    default: float,
+) -> float:
+    for key in keys:
+        if key not in raw:
+            continue
+        try:
+            value = float(raw[key])
+        except (TypeError, ValueError):
+            continue
+        if value > 0.0:
+            return value
+    return default
+
+
+def _positive_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0.0 else default
 
 
 def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:

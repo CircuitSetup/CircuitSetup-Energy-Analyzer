@@ -251,6 +251,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
         SERVICE_MERGE_NILM_SIGNATURES,
         SERVICE_SET_CIRCUIT_SENSITIVITY,
+        SERVICE_SET_ENERGY_USAGE_SETTINGS,
         SERVICE_START_MAINTENANCE,
         async_setup_services,
     )
@@ -278,6 +279,19 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             preset: str,
         ) -> None:
             self.calls.append(("async_set_circuit_sensitivity", (circuit_id, preset)))
+
+        async def async_set_energy_usage_settings(
+            self,
+            circuit_id: str,
+            window_days: object = None,
+            daily_spike_ratio: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_energy_usage_settings",
+                    (circuit_id, window_days, daily_spike_ratio),
+                )
+            )
 
         async def async_start_maintenance(
             self,
@@ -339,6 +353,15 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
         SimpleNamespace(data={"circuit_id": "fridge", "preset": "quiet"})
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_ENERGY_USAGE_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "window_days": 14,
+                "daily_spike_ratio": 0.2,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
         SimpleNamespace(
             data={
@@ -373,6 +396,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
 
     assert coordinator.calls == [
         ("async_set_circuit_sensitivity", ("fridge", "quiet")),
+        ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),
         ("async_mark_alert_expected", ("alert-1",)),

@@ -118,6 +118,38 @@ set_circuit_sensitivity:
             - quiet
             - balanced
             - sensitive
+set_energy_usage_settings:
+  name: Set energy usage settings
+  description: Set daily energy usage spike tracking for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    window_days:
+      name: Window Days
+      description: Rolling energy baseline window in days for the circuit.
+      required: false
+      example: 7
+      selector:
+        number:
+          min: 1
+          max: 60
+          mode: box
+    daily_spike_ratio:
+      name: Daily Spike Ratio
+      description: Daily usage share that can trigger a possible-issue alert.
+      required: false
+      example: 0.25
+      selector:
+        number:
+          min: 0.01
+          max: 1
+          step: 0.01
+          mode: box
 start_maintenance:
   name: Start maintenance
   description: Pause appliance alert notifications while a circuit is being serviced.

@@ -88,6 +88,8 @@ def build_circuit_sample(
 
         if sensor.role in _POWER_ROLES and _is_kw(source.unit):
             value *= 1000
+        elif sensor.role is SensorRole.ENERGY:
+            value = _normalize_energy_kwh(value, source.unit)
 
         values[sensor.role] = value
         source_by_role[sensor.role] = sensor.entity_id
@@ -122,6 +124,17 @@ def build_circuit_sample(
 
 def _is_kw(unit: str | None) -> bool:
     return unit is not None and unit.strip().lower() == "kw"
+
+
+def _normalize_energy_kwh(value: float, unit: str | None) -> float:
+    if unit is None:
+        return value
+    normalized = unit.strip().lower()
+    if normalized == "wh":
+        return value / 1000
+    if normalized == "mwh":
+        return value * 1000
+    return value
 
 
 def _negative_load_power_issue(

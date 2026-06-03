@@ -14,6 +14,7 @@ SERVICE_RUN_MAPPING_CHECKS = "run_mapping_checks"
 SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
+SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
@@ -27,6 +28,8 @@ ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
 ATTR_LABEL = "label"
 ATTR_PRESET = "preset"
+ATTR_WINDOW_DAYS = "window_days"
+ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
 ATTR_NOTE = "note"
 ATTR_RELEARN = "relearn"
 ATTR_RELEARN_ON_END = "relearn_on_end"
@@ -69,6 +72,10 @@ def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> C
 
 CIRCUIT_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID,))
 SENSITIVITY_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID, ATTR_PRESET))
+ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_WINDOW_DAYS, ATTR_DAILY_SPIKE_RATIO),
+)
 MAINTENANCE_START_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_NOTE, ATTR_DURATION, ATTR_RELEARN_ON_END),
@@ -102,6 +109,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_LABEL_NILM_SIGNATURE: NILM_LABEL_SERVICE_SCHEMA,
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
+    SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_START_MAINTENANCE: MAINTENANCE_START_SERVICE_SCHEMA,
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
@@ -215,6 +223,14 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_set_circuit_sensitivity",
                 circuit_id,
                 data.get(ATTR_PRESET),
+            )
+        elif service == SERVICE_SET_ENERGY_USAGE_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_energy_usage_settings",
+                circuit_id,
+                data.get(ATTR_WINDOW_DAYS),
+                data.get(ATTR_DAILY_SPIKE_RATIO),
             )
         elif service == SERVICE_START_MAINTENANCE:
             await _call_if_present(

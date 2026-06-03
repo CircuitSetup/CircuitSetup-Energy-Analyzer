@@ -36,6 +36,22 @@ handled differently:
 - Solar inverter circuits treat negative real power as exported generation and analyze the export magnitude.
 - Mains NILM circuits keep signed net power so import and export behavior can be disaggregated without losing direction.
 
+## Energy Usage Spikes
+
+For circuits with cumulative energy sensors, the analyzer derives daily kWh
+usage from the positive delta between readings. By default it compares today's
+usage with the previous 7 full days. If today uses more than 25% of that
+7-day total, the integration records usage-spike evidence and sends a possible
+issue notification only after the condition repeats.
+
+For example, if a refrigerator circuit used 50 kWh over the previous 7 days,
+the default daily spike threshold is 12.5 kWh. If today's derived usage rises
+above that threshold, the alert evidence includes today's kWh, the baseline
+total, the threshold, and the percentage of the learned window used today.
+
+The `set_energy_usage_settings` service can adjust the rolling window and daily
+spike ratio for a specific circuit.
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
@@ -62,5 +78,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `binary_sensor.<circuit>_data_quality_problem`
 - `sensor.<circuit>_nilm_discovered_signatures`
 - `sensor.<circuit>_nilm_unmatched_load_percentage`
+- `sensor.<circuit>_daily_energy_usage`
+- `sensor.<circuit>_energy_usage_share`
+- `sensor.<circuit>_energy_usage_status`
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator, HVAC, and Mains NILM cards.

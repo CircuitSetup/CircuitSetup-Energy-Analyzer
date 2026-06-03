@@ -40,6 +40,10 @@ class FeatureStoreData:
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     alert_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
+    energy_usage_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    energy_usage_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -150,6 +154,10 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         },
         "maintenance_by_circuit": _dict_of_dicts(data.maintenance_by_circuit),
         "alert_feedback": _dict_of_dicts(data.alert_feedback),
+        "energy_usage_settings_by_circuit": _dict_of_dicts(
+            data.energy_usage_settings_by_circuit
+        ),
+        "energy_usage_by_circuit": _dict_of_dicts(data.energy_usage_by_circuit),
     }
 
 
@@ -180,6 +188,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("maintenance_by_circuit", {}),
         ),
         alert_feedback=_dict_of_dicts(raw.get("alert_feedback", {})),
+        energy_usage_settings_by_circuit=_dict_of_dicts(
+            raw.get("energy_usage_settings_by_circuit", {}),
+        ),
+        energy_usage_by_circuit=_dict_of_dicts(
+            raw.get("energy_usage_by_circuit", {}),
+        ),
     )
 
 
@@ -198,6 +212,8 @@ def prune_events(
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
+        energy_usage_settings_by_circuit=data.energy_usage_settings_by_circuit,
+        energy_usage_by_circuit=data.energy_usage_by_circuit,
     )
 
 

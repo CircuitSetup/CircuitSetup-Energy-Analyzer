@@ -294,9 +294,15 @@ def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
     )
 
     assert config_flow.CircuitSetupEnergyAnalyzerConfigFlow.VERSION == 1
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["integration_type"] == "hub"
     assert (
-        json.loads(manifest_path.read_text(encoding="utf-8"))["integration_type"]
-        == "hub"
+        manifest["documentation"]
+        == "https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer"
+    )
+    assert (
+        manifest["issue_tracker"]
+        == "https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer/issues"
     )
     assert json.loads(strings_path.read_text(encoding="utf-8"))["title"] == (
         "CircuitSetup Energy Analyzer"
