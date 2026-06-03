@@ -814,6 +814,53 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None
 
 
 @pytest.mark.asyncio
+async def test_nilm_signature_expected_and_merge_review_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-1",
+                        "classification": "unknown recurring load",
+                    },
+                    {
+                        "signature_id": "on-2",
+                        "classification": "possible motor-like load",
+                    },
+                    {
+                        "signature_id": "on-3",
+                        "classification": "ignored load",
+                        "ignored": True,
+                    },
+                ]
+            }
+        ),
+    )
+
+    await coordinator.async_mark_nilm_signature_expected("mains", "on-1")
+    await coordinator.async_merge_nilm_signatures("mains", "on-2", "on-1")
+
+    signatures = {
+        signature["signature_id"]: signature
+        for signature in coordinator.store_data.nilm_signatures["mains"]
+    }
+    assert signatures["on-1"]["review_state"] == "expected"
+    assert signatures["on-1"]["expected"] is True
+    assert signatures["on-2"]["review_state"] == "merged"
+    assert signatures["on-2"]["merged_into"] == "on-1"
+    assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
+    assert {
+        signature["review_state"]
+        for signature in coordinator.state.nilm_review_by_circuit["mains"]
+    } == {"expected", "merged", "ignored"}
+
+
+@pytest.mark.asyncio
 async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

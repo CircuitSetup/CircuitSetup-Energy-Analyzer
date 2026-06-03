@@ -542,6 +542,38 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
 
+    async def async_mark_nilm_signature_expected(
+        self: Self,
+        circuit_id: str,
+        signature_id: str,
+    ) -> None:
+        """Persist an expected NILM signature review decision."""
+        signature = self._nilm_signature_for_review(circuit_id, signature_id)
+        signature["expected"] = True
+        signature["review_state"] = "expected"
+        self._mark_store_dirty()
+        self._refresh_nilm_state(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+
+    async def async_merge_nilm_signatures(
+        self: Self,
+        circuit_id: str,
+        source_signature_id: str,
+        target_signature_id: str,
+    ) -> None:
+        """Persist that one NILM signature should be treated as another."""
+        self._nilm_signature_for_review(circuit_id, target_signature_id)
+        source = self._nilm_signature_for_review(circuit_id, source_signature_id)
+        source["review_state"] = "merged"
+        source["merged_into"] = target_signature_id
+        self._mark_store_dirty()
+        self._refresh_nilm_state(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+
     def has_circuit(self: Self, circuit_id: str) -> bool:
         """Return whether this coordinator owns a circuit id."""
         return any(config.circuit_id == circuit_id for config in self.circuit_configs)
@@ -891,12 +923,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 payload["user_label"] = user_label
             if ignored:
                 payload["ignored"] = True
+            for key in ("review_state", "expected", "merged_into"):
+                if key in current:
+                    payload[key] = current[key]
             payloads.append(payload)
             seen.add(signature.signature_id)
 
         for signature_id, signature in existing.items():
             if signature_id not in seen and (
                 signature.get("user_label") or signature.get("ignored")
+                or signature.get("expected") or signature.get("merged_into")
+                or signature.get("review_state")
             ):
                 payloads.append(signature)
 
@@ -905,7 +942,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _refresh_nilm_state(self: Self, circuit_id: str) -> None:
         signatures = self.store_data.nilm_signatures.get(circuit_id, [])
         active_count = sum(
-            1 for signature in signatures if not signature.get("ignored")
+            1
+            for signature in signatures
+            if not signature.get("ignored")
+            and signature.get("review_state") != "merged"
         )
         self.state.nilm_signature_count_by_circuit[circuit_id] = active_count
         self.state.nilm_unmatched_load_percentage_by_circuit[circuit_id] = (
@@ -967,6 +1007,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
         feedback = self.store_data.alert_feedback.get(_alert_feedback_key(alert), {})
         return feedback.get("action") in {"expected", "unhelpful"}
+
+    def _nilm_signature_for_review(
+        self: Self,
+        circuit_id: str,
+        signature_id: str,
+    ) -> dict[str, Any]:
+        signatures = self.store_data.nilm_signatures.setdefault(circuit_id, [])
+        for signature in signatures:
+            if signature.get("signature_id") == signature_id:
+                return signature
+        signature = {"signature_id": signature_id, "review_state": "new"}
+        signatures.append(signature)
+        return signature
 
     def _mark_store_dirty(self: Self) -> None:
         self._store_dirty = True

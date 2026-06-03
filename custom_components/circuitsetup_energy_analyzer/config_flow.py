@@ -133,7 +133,10 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
 
     lines = [
         "Suggested dual-phase channel pairs are listed below. Review each pair, "
-        "then confirm or manually override the mapping before saving."
+        "then confirm or manually override the mapping before saving. You can "
+        "accept, edit, mark as mixed, or exclude each suggested circuit. "
+        "Confidence may use naming, phase pairing, correlated changes, "
+        "required metric availability, and optional metric availability."
     ]
     for suggestion in suggestion_list:
         reasons = ", ".join(suggestion.reasons) if suggestion.reasons else "no reasons"

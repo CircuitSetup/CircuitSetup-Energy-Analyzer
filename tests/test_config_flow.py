@@ -54,6 +54,9 @@ def test_format_mapping_suggestions_shows_confirmation_text() -> None:
     assert "80%" in text
     assert "neighboring channels" in text
     assert "confirm or manually override" in text
+    assert "accept, edit, mark as mixed, or exclude" in text
+    assert "required metric availability" in text
+    assert "optional metric availability" in text
 
 
 def test_format_mapping_suggestions_requires_manual_definition_when_empty() -> None:
