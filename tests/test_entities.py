@@ -22,15 +22,21 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
+        alert_evidence_value,
         anomaly_score_value,
         apparent_power_drift_value,
+        data_quality_checklist_value,
+        health_summary_value,
         last_event_value,
+        learning_progress_value,
         nilm_signature_count_value,
         nilm_unmatched_load_percentage_value,
         power_factor_drift_value,
         power_quality_evidence_value,
         power_quality_score_value,
         reactive_power_drift_value,
+        readiness_value,
+        sensitivity_value,
     )
 
     event = CircuitEvent(
@@ -52,6 +58,38 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         power_factor_drift_by_circuit={"fridge": 0.07},
         nilm_signature_count_by_circuit={"fridge": 3},
         nilm_unmatched_load_percentage_by_circuit={"fridge": 17.5},
+        health_status_by_circuit={"fridge": "possible_issue"},
+        health_summary_by_circuit={"fridge": "Possible issue"},
+        readiness_by_circuit={
+            "fridge": {
+                "health_status": "possible_issue",
+                "health_summary": "Possible issue",
+            }
+        },
+        learning_progress_by_circuit={
+            "fridge": {
+                "learned_feature_count": 5,
+                "pending_feature_samples": {"reactive_power": 3},
+                "alert_ready": False,
+            },
+            "ready": {
+                "learned_feature_count": 1,
+                "pending_feature_samples": {},
+                "alert_ready": True,
+            },
+        },
+        data_quality_checklist_by_circuit={
+            "fridge": {
+                "quality_issues": [],
+                "required_sensors_present": True,
+            },
+            "well_pump": {
+                "quality_issues": ["missing_required_sensor"],
+                "required_sensors_present": False,
+            },
+        },
+        alert_evidence_by_circuit={"fridge": {"feature": "reactive_power"}},
+        sensitivity_by_circuit={"fridge": "quiet"},
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
@@ -66,6 +104,14 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert power_factor_drift_value(state, "fridge") == 0.07
     assert nilm_signature_count_value(state, "fridge") == 3
     assert nilm_unmatched_load_percentage_value(state, "fridge") == 17.5
+    assert health_summary_value(state, "fridge") == "Possible issue"
+    assert readiness_value(state, "fridge") == "possible_issue"
+    assert learning_progress_value(state, "fridge") == 62.5
+    assert learning_progress_value(state, "ready") == 100.0
+    assert data_quality_checklist_value(state, "fridge") == "ok"
+    assert data_quality_checklist_value(state, "well_pump") == "problem"
+    assert alert_evidence_value(state, "fridge") == "reactive_power"
+    assert sensitivity_value(state, "fridge") == "quiet"
 
     assert anomaly_score_value(state, "unknown") == 0.0
     assert last_event_value(state, "unknown") is None
@@ -76,12 +122,19 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert power_factor_drift_value(state, "unknown") == 0.0
     assert nilm_signature_count_value(state, "unknown") == 0
     assert nilm_unmatched_load_percentage_value(state, "unknown") == 0.0
+    assert health_summary_value(state, "unknown") == "Ready"
+    assert readiness_value(state, "unknown") == "ready"
+    assert learning_progress_value(state, "unknown") == 0.0
+    assert data_quality_checklist_value(state, "unknown") == "problem"
+    assert alert_evidence_value(state, "unknown") == ""
+    assert sensitivity_value(state, "unknown") == "balanced"
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         has_data_quality_problem,
         is_learning,
+        is_maintenance_active,
     )
 
     state = AnalyzerState(
@@ -90,6 +143,7 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
             "fridge": "",
             "well_pump": "missing current sample",
         },
+        maintenance_by_circuit={"fridge": {"active": True}},
     )
 
     assert is_learning(state, "fridge") is False
@@ -97,6 +151,67 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert has_data_quality_problem(state, "fridge") is False
     assert has_data_quality_problem(state, "well_pump") is True
     assert has_data_quality_problem(state, "unknown") is False
+    assert is_maintenance_active(state, "fridge") is True
+    assert is_maintenance_active(state, "unknown") is False
+
+
+def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    readiness = {
+        "health_status": "possible_issue",
+        "health_summary": "Possible issue",
+    }
+    progress = {
+        "learned_feature_count": 5,
+        "pending_feature_samples": {"reactive_power": 3},
+    }
+    checklist = {"quality_issues": [], "required_sensors_present": True}
+    evidence = {"feature": "reactive_power", "change_ratio": 0.42}
+    state = AnalyzerState(
+        readiness_by_circuit={"fridge": readiness},
+        learning_progress_by_circuit={"fridge": progress},
+        data_quality_checklist_by_circuit={"fridge": checklist},
+        alert_evidence_by_circuit={"fridge": evidence},
+        sensitivity_by_circuit={"fridge": "quiet"},
+    )
+    coordinator = SimpleNamespace(data=state)
+    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["readiness"],
+    ).extra_state_attributes == readiness
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["learning_progress"],
+    ).extra_state_attributes == progress
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["data_quality_checklist"],
+    ).extra_state_attributes == checklist
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["alert_evidence"],
+    ).extra_state_attributes == evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["sensitivity"],
+    ).extra_state_attributes == {"preset": "quiet"}
 
 
 @pytest.mark.asyncio
@@ -119,6 +234,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert [entity.name for entity in added_entities] == [
         "Kitchen Fridge Anomaly Score",
         "Kitchen Fridge Last Event",
+        "Kitchen Fridge Health Summary",
+        "Kitchen Fridge Readiness",
+        "Kitchen Fridge Learning Progress",
+        "Kitchen Fridge Data Quality Checklist",
+        "Kitchen Fridge Alert Evidence",
+        "Kitchen Fridge Sensitivity",
         "Kitchen Fridge Power Quality Score",
         "Kitchen Fridge Power Quality Evidence",
         "Kitchen Fridge Reactive Power Drift",
@@ -130,6 +251,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_fridge_anomaly_score",
         "entry-1_fridge_last_event",
+        "entry-1_fridge_health_summary",
+        "entry-1_fridge_readiness",
+        "entry-1_fridge_learning_progress",
+        "entry-1_fridge_data_quality_checklist",
+        "entry-1_fridge_alert_evidence",
+        "entry-1_fridge_sensitivity",
         "entry-1_fridge_power_quality_score",
         "entry-1_fridge_power_quality_evidence",
         "entry-1_fridge_reactive_power_drift",
@@ -172,6 +299,12 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
         "mains",
         "mains",
         "mains",
+        "mains",
+        "mains",
+        "mains",
+        "mains",
+        "mains",
+        "mains",
     ]
 
 
@@ -195,10 +328,12 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
     assert [entity.name for entity in added_entities] == [
         "Well Pump Learning",
         "Well Pump Data Quality Problem",
+        "Well Pump Maintenance",
     ]
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_well_pump_learning",
         "entry-1_well_pump_data_quality_problem",
+        "entry-1_well_pump_maintenance",
     ]
 
 
@@ -221,4 +356,8 @@ async def test_binary_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert [entity.circuit_id for entity in added_entities] == ["mains", "mains"]
+    assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+    ]

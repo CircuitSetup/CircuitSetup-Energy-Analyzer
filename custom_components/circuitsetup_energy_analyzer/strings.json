@@ -50,6 +50,24 @@
       "last_event": {
         "name": "Last event"
       },
+      "health_summary": {
+        "name": "Health summary"
+      },
+      "readiness": {
+        "name": "Readiness"
+      },
+      "learning_progress": {
+        "name": "Learning progress"
+      },
+      "data_quality_checklist": {
+        "name": "Data quality checklist"
+      },
+      "alert_evidence": {
+        "name": "Alert evidence"
+      },
+      "sensitivity": {
+        "name": "Sensitivity"
+      },
       "nilm_signature_count": {
         "name": "NILM discovered signatures"
       },
@@ -66,6 +84,9 @@
       },
       "data_quality_problem": {
         "name": "Data quality problem"
+      },
+      "maintenance": {
+        "name": "Maintenance"
       }
     }
   },

@@ -144,6 +144,61 @@ def test_nilm_label_schema_raises_for_missing_required_field() -> None:
         )
 
 
+def test_user_experience_service_schemas_validate_required_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ALERT_FEEDBACK_SERVICE_SCHEMA,
+        MAINTENANCE_END_SERVICE_SCHEMA,
+        MAINTENANCE_START_SERVICE_SCHEMA,
+        NILM_MERGE_SERVICE_SCHEMA,
+        NILM_SIGNATURE_SERVICE_SCHEMA,
+        SENSITIVITY_SERVICE_SCHEMA,
+    )
+
+    assert SENSITIVITY_SERVICE_SCHEMA(
+        {"circuit_id": "fridge", "preset": "quiet"}
+    ) == {"circuit_id": "fridge", "preset": "quiet"}
+    assert MAINTENANCE_START_SERVICE_SCHEMA(
+        {
+            "circuit_id": "fridge",
+            "note": "Changed filter",
+            "duration": "02:00:00",
+            "relearn_on_end": True,
+        }
+    ) == {
+        "circuit_id": "fridge",
+        "note": "Changed filter",
+        "duration": "02:00:00",
+        "relearn_on_end": True,
+    }
+    assert MAINTENANCE_END_SERVICE_SCHEMA(
+        {"circuit_id": "fridge", "relearn": True}
+    ) == {"circuit_id": "fridge", "relearn": True}
+    assert ALERT_FEEDBACK_SERVICE_SCHEMA({"alert_id": "alert-1"}) == {
+        "alert_id": "alert-1"
+    }
+    assert NILM_SIGNATURE_SERVICE_SCHEMA(
+        {"circuit_id": "mains", "signature_id": "signature_1"}
+    ) == {"circuit_id": "mains", "signature_id": "signature_1"}
+    assert NILM_MERGE_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "source_signature_id": "signature_2",
+            "target_signature_id": "signature_1",
+        }
+    ) == {
+        "circuit_id": "mains",
+        "source_signature_id": "signature_2",
+        "target_signature_id": "signature_1",
+    }
+
+    with pytest.raises(vol.Invalid):
+        SENSITIVITY_SERVICE_SCHEMA({"circuit_id": "fridge"})
+    with pytest.raises(vol.Invalid):
+        NILM_MERGE_SERVICE_SCHEMA(
+            {"circuit_id": "mains", "source_signature_id": "signature_2"}
+        )
+
+
 @pytest.mark.asyncio
 async def test_setup_and_unload_services_with_fake_hass() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
@@ -185,6 +240,146 @@ async def test_setup_and_unload_services_with_fake_hass() -> None:
 
     assert hass.services.registered == {}
     assert (DOMAIN, SERVICE_RELEARN_BASELINE) in hass.services.removed
+
+
+@pytest.mark.asyncio
+async def test_user_experience_services_dispatch_to_loaded_coordinators() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_END_MAINTENANCE,
+        SERVICE_MARK_ALERT_EXPECTED,
+        SERVICE_MARK_ALERT_UNHELPFUL,
+        SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+        SERVICE_MERGE_NILM_SIGNATURES,
+        SERVICE_SET_CIRCUIT_SENSITIVITY,
+        SERVICE_START_MAINTENANCE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id in {"fridge", "mains"}
+
+        async def async_set_circuit_sensitivity(
+            self,
+            circuit_id: str,
+            preset: str,
+        ) -> None:
+            self.calls.append(("async_set_circuit_sensitivity", (circuit_id, preset)))
+
+        async def async_start_maintenance(
+            self,
+            circuit_id: str,
+            note: str = "",
+            duration: str | None = None,
+            relearn_on_end: bool = False,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_start_maintenance",
+                    (circuit_id, note, duration, relearn_on_end),
+                )
+            )
+
+        async def async_end_maintenance(
+            self,
+            circuit_id: str,
+            relearn: bool = False,
+        ) -> None:
+            self.calls.append(("async_end_maintenance", (circuit_id, relearn)))
+
+        async def async_mark_alert_expected(self, alert_id: str) -> None:
+            self.calls.append(("async_mark_alert_expected", (alert_id,)))
+
+        async def async_mark_alert_unhelpful(self, alert_id: str) -> None:
+            self.calls.append(("async_mark_alert_unhelpful", (alert_id,)))
+
+        async def async_mark_nilm_signature_expected(
+            self,
+            circuit_id: str,
+            signature_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_mark_nilm_signature_expected", (circuit_id, signature_id))
+            )
+
+        async def async_merge_nilm_signatures(
+            self,
+            circuit_id: str,
+            source_signature_id: str,
+            target_signature_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_merge_nilm_signatures",
+                    (circuit_id, source_signature_id, target_signature_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
+        SimpleNamespace(data={"circuit_id": "fridge", "preset": "quiet"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "note": "Changed filter",
+                "duration": "02:00:00",
+                "relearn_on_end": True,
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_END_MAINTENANCE)](
+        SimpleNamespace(data={"circuit_id": "fridge", "relearn": True})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_EXPECTED)](
+        SimpleNamespace(data={"alert_id": "alert-1"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_UNHELPFUL)](
+        SimpleNamespace(data={"alert_id": "alert-2"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_MARK_NILM_SIGNATURE_EXPECTED)](
+        SimpleNamespace(data={"circuit_id": "mains", "signature_id": "signature_1"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "source_signature_id": "signature_2",
+                "target_signature_id": "signature_1",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        ("async_set_circuit_sensitivity", ("fridge", "quiet")),
+        ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
+        ("async_end_maintenance", ("fridge", True)),
+        ("async_mark_alert_expected", ("alert-1",)),
+        ("async_mark_alert_unhelpful", ("alert-2",)),
+        ("async_mark_nilm_signature_expected", ("mains", "signature_1")),
+        ("async_merge_nilm_signatures", ("mains", "signature_2", "signature_1")),
+    ]
 
 
 @pytest.mark.asyncio

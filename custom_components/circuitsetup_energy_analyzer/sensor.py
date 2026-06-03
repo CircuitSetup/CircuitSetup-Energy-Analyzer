@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +41,97 @@ def last_event_value(state: Any, circuit_id: str) -> str | None:
     if event is None:
         return None
     return event.event_type.value
+
+
+def health_summary_value(state: Any, circuit_id: str) -> str:
+    """Return a dashboard-friendly health summary for a circuit."""
+    summary = getattr(state, "health_summary_by_circuit", {}).get(circuit_id)
+    if summary:
+        return str(summary)
+
+    status = readiness_value(state, circuit_id)
+    return {
+        "learning": "Learning",
+        "ready": "Ready",
+        "needs_data": "Needs data",
+        "paused": "Paused",
+        "possible_issue": "Possible issue",
+        "mixed_observation": "Mixed observation",
+        "nilm_review": "NILM review",
+    }.get(status, str(status).replace("_", " ").title())
+
+
+def readiness_value(state: Any, circuit_id: str) -> str:
+    """Return the readiness/health status for a circuit."""
+    readiness = getattr(state, "readiness_by_circuit", {}).get(circuit_id, {})
+    if isinstance(readiness, Mapping) and readiness.get("health_status"):
+        return str(readiness["health_status"])
+
+    status = getattr(state, "health_status_by_circuit", {}).get(circuit_id)
+    if status:
+        return str(status)
+
+    if getattr(state, "learning_by_circuit", {}).get(circuit_id) is True:
+        return "learning"
+    return "ready"
+
+
+def learning_progress_value(state: Any, circuit_id: str) -> float:
+    """Return learning progress as a dashboard-friendly percentage."""
+    progress = getattr(state, "learning_progress_by_circuit", {}).get(circuit_id, {})
+    if not isinstance(progress, Mapping):
+        return 0.0
+    if progress.get("alert_ready") is True:
+        return 100.0
+
+    learned_count = _numeric_count(progress.get("learned_feature_count"))
+    pending_samples = progress.get("pending_feature_samples", {})
+    if isinstance(pending_samples, Mapping):
+        pending_count = sum(_numeric_count(value) for value in pending_samples.values())
+    else:
+        pending_count = _numeric_count(pending_samples)
+
+    total = learned_count + pending_count
+    if total <= 0:
+        return 0.0
+    return round((learned_count / total) * 100.0, 1)
+
+
+def data_quality_checklist_value(state: Any, circuit_id: str) -> str:
+    """Return ok/problem based on data-quality checklist state."""
+    checklist = getattr(state, "data_quality_checklist_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    if not isinstance(checklist, Mapping):
+        return "problem"
+    if checklist.get("quality_issues"):
+        return "problem"
+    if checklist.get("required_sensors_present") is not True:
+        return "problem"
+    for key in ("numeric_states_valid", "source_data_fresh"):
+        if key in checklist and checklist[key] is not True:
+            return "problem"
+    return "ok"
+
+
+def alert_evidence_value(state: Any, circuit_id: str) -> str:
+    """Return the feature named in the latest alert evidence."""
+    evidence = getattr(state, "alert_evidence_by_circuit", {}).get(circuit_id, {})
+    if isinstance(evidence, Mapping):
+        return str(evidence.get("feature") or "")
+
+    alerts = getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, [])
+    if alerts:
+        return str(getattr(alerts[-1], "feature", "") or "")
+    return ""
+
+
+def sensitivity_value(state: Any, circuit_id: str) -> str:
+    """Return the active sensitivity preset for a circuit."""
+    return str(
+        getattr(state, "sensitivity_by_circuit", {}).get(circuit_id, "balanced")
+    )
 
 
 def power_quality_score_value(state: Any, circuit_id: str) -> float:
@@ -95,6 +186,26 @@ def nilm_unmatched_load_percentage_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def _numeric_count(value: Any) -> float:
+    if isinstance(value, int | float):
+        return max(float(value), 0.0)
+    return 0.0
+
+
+def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] | None]:
+    def attributes(state: Any, circuit_id: str) -> dict[str, Any] | None:
+        value = getattr(state, field_name, {}).get(circuit_id)
+        if isinstance(value, Mapping):
+            return dict(value)
+        return None
+
+    return attributes
+
+
+def _sensitivity_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    return {"preset": sensitivity_value(state, circuit_id)}
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticSensorDescription:
     """Description for one diagnostic sensor entity."""
@@ -104,6 +215,7 @@ class DiagnosticSensorDescription:
     value_fn: Callable[[Any, str], Any]
     native_unit_of_measurement: str | None = None
     state_class: str | None = None
+    attributes_fn: Callable[[Any, str], dict[str, Any] | None] | None = None
 
 
 SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
@@ -117,6 +229,43 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="last_event",
         name_suffix="Last Event",
         value_fn=last_event_value,
+    ),
+    DiagnosticSensorDescription(
+        key="health_summary",
+        name_suffix="Health Summary",
+        value_fn=health_summary_value,
+    ),
+    DiagnosticSensorDescription(
+        key="readiness",
+        name_suffix="Readiness",
+        value_fn=readiness_value,
+        attributes_fn=_mapping_attributes("readiness_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="learning_progress",
+        name_suffix="Learning Progress",
+        value_fn=learning_progress_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("learning_progress_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="data_quality_checklist",
+        name_suffix="Data Quality Checklist",
+        value_fn=data_quality_checklist_value,
+        attributes_fn=_mapping_attributes("data_quality_checklist_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="alert_evidence",
+        name_suffix="Alert Evidence",
+        value_fn=alert_evidence_value,
+        attributes_fn=_mapping_attributes("alert_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="sensitivity",
+        name_suffix="Sensitivity",
+        value_fn=sensitivity_value,
+        attributes_fn=_sensitivity_attributes,
     ),
     DiagnosticSensorDescription(
         key="power_quality_score",
@@ -194,6 +343,14 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             self.coordinator_state,
             self.circuit_id,
         )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional diagnostics for sensors that expose detail."""
+        attributes_fn = self.entity_description.attributes_fn
+        if attributes_fn is None:
+            return None
+        return attributes_fn(self.coordinator_state, self.circuit_id)
 
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:

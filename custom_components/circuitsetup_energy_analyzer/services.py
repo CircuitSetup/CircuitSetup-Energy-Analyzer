@@ -13,12 +13,25 @@ SERVICE_EXPORT_DIAGNOSTICS = "export_diagnostics"
 SERVICE_RUN_MAPPING_CHECKS = "run_mapping_checks"
 SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
+SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
+SERVICE_START_MAINTENANCE = "start_maintenance"
+SERVICE_END_MAINTENANCE = "end_maintenance"
+SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
+SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
+SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
+SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
 
 ATTR_CIRCUIT_ID = "circuit_id"
 ATTR_DURATION = "duration"
 ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
 ATTR_LABEL = "label"
+ATTR_PRESET = "preset"
+ATTR_NOTE = "note"
+ATTR_RELEARN = "relearn"
+ATTR_RELEARN_ON_END = "relearn_on_end"
+ATTR_SOURCE_SIGNATURE_ID = "source_signature_id"
+ATTR_TARGET_SIGNATURE_ID = "target_signature_id"
 
 _SERVICES_KEY = "_services_setup"
 
@@ -55,10 +68,27 @@ def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> C
 
 
 CIRCUIT_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID,))
+SENSITIVITY_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID, ATTR_PRESET))
+MAINTENANCE_START_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_NOTE, ATTR_DURATION, ATTR_RELEARN_ON_END),
+)
+MAINTENANCE_END_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_RELEARN,),
+)
+ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(required=(ATTR_ALERT_ID,))
 NILM_LABEL_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID, ATTR_SIGNATURE_ID, ATTR_LABEL)
 )
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID, ATTR_SIGNATURE_ID))
+NILM_MERGE_SERVICE_SCHEMA = _schema(
+    required=(
+        ATTR_CIRCUIT_ID,
+        ATTR_SOURCE_SIGNATURE_ID,
+        ATTR_TARGET_SIGNATURE_ID,
+    )
+)
 
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
@@ -71,6 +101,13 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RUN_MAPPING_CHECKS: None,
     SERVICE_LABEL_NILM_SIGNATURE: NILM_LABEL_SERVICE_SCHEMA,
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
+    SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
+    SERVICE_START_MAINTENANCE: MAINTENANCE_START_SERVICE_SCHEMA,
+    SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
+    SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
+    SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
 }
 
 
@@ -133,6 +170,18 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             await _call_if_present(coordinator, "async_acknowledge_alert", alert_id)
         return
 
+    if service == SERVICE_MARK_ALERT_EXPECTED:
+        alert_id = data.get(ATTR_ALERT_ID)
+        for coordinator in _loaded_coordinators(hass):
+            await _call_if_present(coordinator, "async_mark_alert_expected", alert_id)
+        return
+
+    if service == SERVICE_MARK_ALERT_UNHELPFUL:
+        alert_id = data.get(ATTR_ALERT_ID)
+        for coordinator in _loaded_coordinators(hass):
+            await _call_if_present(coordinator, "async_mark_alert_unhelpful", alert_id)
+        return
+
     for coordinator in _target_coordinators(hass, circuit_id):
         if service == SERVICE_RELEARN_BASELINE:
             await _call_if_present(coordinator, "async_relearn_baseline", circuit_id)
@@ -159,6 +208,44 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_ignore_nilm_signature",
                 circuit_id,
                 data.get(ATTR_SIGNATURE_ID),
+            )
+        elif service == SERVICE_SET_CIRCUIT_SENSITIVITY:
+            await _call_if_present(
+                coordinator,
+                "async_set_circuit_sensitivity",
+                circuit_id,
+                data.get(ATTR_PRESET),
+            )
+        elif service == SERVICE_START_MAINTENANCE:
+            await _call_if_present(
+                coordinator,
+                "async_start_maintenance",
+                circuit_id,
+                data.get(ATTR_NOTE, ""),
+                data.get(ATTR_DURATION),
+                data.get(ATTR_RELEARN_ON_END, False),
+            )
+        elif service == SERVICE_END_MAINTENANCE:
+            await _call_if_present(
+                coordinator,
+                "async_end_maintenance",
+                circuit_id,
+                data.get(ATTR_RELEARN, False),
+            )
+        elif service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
+            await _call_if_present(
+                coordinator,
+                "async_mark_nilm_signature_expected",
+                circuit_id,
+                data.get(ATTR_SIGNATURE_ID),
+            )
+        elif service == SERVICE_MERGE_NILM_SIGNATURES:
+            await _call_if_present(
+                coordinator,
+                "async_merge_nilm_signatures",
+                circuit_id,
+                data.get(ATTR_SOURCE_SIGNATURE_ID),
+                data.get(ATTR_TARGET_SIGNATURE_ID),
             )
 
 

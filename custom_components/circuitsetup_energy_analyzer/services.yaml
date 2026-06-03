@@ -76,3 +76,110 @@ ignore_nilm_signature:
       example: signature_1
       selector:
         text:
+set_circuit_sensitivity:
+  name: Set circuit sensitivity
+  description: Set the alert sensitivity preset for one configured circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: fridge
+      selector:
+        text:
+    preset:
+      required: true
+      example: balanced
+      selector:
+        select:
+          options:
+            - quiet
+            - balanced
+            - sensitive
+start_maintenance:
+  name: Start maintenance
+  description: Pause appliance alert notifications while a circuit is being serviced.
+  fields:
+    circuit_id:
+      required: true
+      example: fridge
+      selector:
+        text:
+    note:
+      required: false
+      example: Cleaned coils
+      selector:
+        text:
+    duration:
+      required: false
+      example: "02:00:00"
+      selector:
+        duration:
+    relearn_on_end:
+      required: false
+      example: false
+      selector:
+        boolean:
+end_maintenance:
+  name: End maintenance
+  description: Resume appliance alert notifications for a serviced circuit.
+  fields:
+    circuit_id:
+      required: true
+      example: fridge
+      selector:
+        text:
+    relearn:
+      required: false
+      example: false
+      selector:
+        boolean:
+mark_alert_expected:
+  name: Mark alert expected
+  description: Mark an alert pattern as expected so repeated notifications are suppressed.
+  fields:
+    alert_id:
+      required: true
+      example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
+      selector:
+        text:
+mark_alert_unhelpful:
+  name: Mark alert unhelpful
+  description: Mark an alert pattern as unhelpful so repeated notifications are suppressed.
+  fields:
+    alert_id:
+      required: true
+      example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
+      selector:
+        text:
+mark_nilm_signature_expected:
+  name: Mark NILM signature expected
+  description: Mark an experimental NILM signature as an expected load pattern.
+  fields:
+    circuit_id:
+      required: true
+      example: mains
+      selector:
+        text:
+    signature_id:
+      required: true
+      example: signature_1
+      selector:
+        text:
+merge_nilm_signatures:
+  name: Merge NILM signatures
+  description: Merge two experimental NILM signatures that represent the same load.
+  fields:
+    circuit_id:
+      required: true
+      example: mains
+      selector:
+        text:
+    source_signature_id:
+      required: true
+      example: signature_2
+      selector:
+        text:
+    target_signature_id:
+      required: true
+      example: signature_1
+      selector:
+        text:

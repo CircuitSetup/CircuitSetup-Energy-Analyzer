@@ -30,6 +30,14 @@ def has_data_quality_problem(state: Any, circuit_id: str) -> bool:
     return bool(issue)
 
 
+def is_maintenance_active(state: Any, circuit_id: str) -> bool:
+    """Return whether a circuit is currently marked as in maintenance."""
+    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
+    if not isinstance(maintenance, dict):
+        return False
+    return maintenance.get("active") is True
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticBinarySensorDescription:
     """Description for one diagnostic binary sensor entity."""
@@ -49,6 +57,11 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         key="data_quality_problem",
         name_suffix="Data Quality Problem",
         value_fn=has_data_quality_problem,
+    ),
+    DiagnosticBinarySensorDescription(
+        key="maintenance",
+        name_suffix="Maintenance",
+        value_fn=is_maintenance_active,
     ),
 )
 

@@ -2,37 +2,116 @@ type: sections
 title: Energy Analyzer
 sections:
   - type: grid
+    title: Setup health
+    cards:
+      - type: entities
+        title: Overall readiness
+        entities:
+          - entity: sensor.refrigerator_health_summary
+          - entity: sensor.refrigerator_readiness
+          - entity: sensor.hvac_health_summary
+          - entity: sensor.hvac_readiness
+          - entity: sensor.mains_health_summary
+          - entity: sensor.mains_readiness
+      - type: entities
+        title: Data quality
+        entities:
+          - entity: sensor.refrigerator_data_quality_checklist
+          - entity: binary_sensor.refrigerator_data_quality_problem
+          - entity: sensor.hvac_data_quality_checklist
+          - entity: binary_sensor.hvac_data_quality_problem
+          - entity: sensor.mains_data_quality_checklist
+          - entity: binary_sensor.mains_data_quality_problem
+  - type: grid
+    title: Learning progress
+    cards:
+      - type: entities
+        title: Appliance baselines
+        entities:
+          - entity: sensor.refrigerator_learning_progress
+          - entity: binary_sensor.refrigerator_learning
+          - entity: sensor.hvac_learning_progress
+          - entity: binary_sensor.hvac_learning
+          - entity: sensor.mains_learning_progress
+          - entity: binary_sensor.mains_learning
+      - type: entities
+        title: Service windows
+        entities:
+          - entity: binary_sensor.refrigerator_maintenance
+          - entity: sensor.refrigerator_sensitivity
+          - entity: binary_sensor.hvac_maintenance
+          - entity: sensor.hvac_sensitivity
+          - entity: binary_sensor.mains_maintenance
+          - entity: sensor.mains_sensitivity
+  - type: grid
+    title: Circuit summaries
     cards:
       - type: entities
         title: Refrigerator
         entities:
           - entity: sensor.refrigerator_anomaly_score
+          - entity: sensor.refrigerator_last_event
+          - entity: sensor.refrigerator_alert_evidence
+      - type: entities
+        title: HVAC
+        entities:
+          - entity: sensor.hvac_anomaly_score
+          - entity: sensor.hvac_last_event
+          - entity: sensor.hvac_alert_evidence
+      - type: entities
+        title: Mains
+        entities:
+          - entity: sensor.mains_anomaly_score
+          - entity: sensor.mains_last_event
+          - entity: sensor.mains_alert_evidence
+  - type: grid
+    title: Active evidence
+    cards:
+      - type: history-graph
+        title: Recent anomaly score
+        hours_to_show: 24
+        entities:
+          - entity: sensor.refrigerator_anomaly_score
+          - entity: sensor.hvac_anomaly_score
+          - entity: sensor.mains_anomaly_score
+      - type: entities
+        title: Alert evidence
+        entities:
+          - entity: sensor.refrigerator_alert_evidence
+          - entity: sensor.hvac_alert_evidence
+          - entity: sensor.mains_alert_evidence
+  - type: grid
+    title: Power-quality diagnostics
+    cards:
+      - type: entities
+        title: Refrigerator power quality
+        entities:
           - entity: sensor.refrigerator_power_quality_score
           - entity: sensor.refrigerator_power_quality_evidence
           - entity: sensor.refrigerator_reactive_power_drift
           - entity: sensor.refrigerator_apparent_power_drift
           - entity: sensor.refrigerator_power_factor_drift
-          - entity: sensor.refrigerator_last_event
-          - entity: binary_sensor.refrigerator_learning
-          - entity: binary_sensor.refrigerator_data_quality_problem
       - type: entities
-        title: HVAC
+        title: HVAC power quality
         entities:
-          - entity: sensor.hvac_anomaly_score
           - entity: sensor.hvac_power_quality_score
           - entity: sensor.hvac_power_quality_evidence
           - entity: sensor.hvac_reactive_power_drift
           - entity: sensor.hvac_apparent_power_drift
           - entity: sensor.hvac_power_factor_drift
-          - entity: sensor.hvac_last_event
-          - entity: binary_sensor.hvac_learning
-          - entity: binary_sensor.hvac_data_quality_problem
+  - type: grid
+    title: Experimental NILM review
+    cards:
       - type: entities
         title: Mains NILM
         entities:
-          - entity: sensor.mains_anomaly_score
-          - entity: sensor.mains_last_event
-          - entity: binary_sensor.mains_learning
-          - entity: binary_sensor.mains_data_quality_problem
           - entity: sensor.mains_nilm_discovered_signatures
           - entity: sensor.mains_nilm_unmatched_load_percentage
+          - entity: sensor.mains_learning_progress
+          - entity: sensor.mains_alert_evidence
+      - type: entities
+        title: Review controls
+        entities:
+          - entity: sensor.mains_readiness
+          - entity: sensor.mains_sensitivity
+          - entity: binary_sensor.mains_maintenance
