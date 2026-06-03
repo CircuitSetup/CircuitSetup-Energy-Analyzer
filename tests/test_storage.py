@@ -218,6 +218,22 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         energy_usage_settings_by_circuit={
             "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
         },
+        billing_settings_by_circuit={
+            "fridge": {
+                "cycle_start_day": 15,
+                "budget_kwh": 300.0,
+                "budget_alert_ratio": 0.9,
+            }
+        },
+        billing_by_circuit={
+            "fridge": {
+                "cycle_start": "2026-05-15",
+                "cycle_end": "2026-06-15",
+                "cycle_usage_kwh": 42.0,
+                "last_energy_kwh": 112.5,
+                "last_sample_at": now.isoformat(),
+            }
+        },
         demand_settings_by_circuit={
             "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
         },
@@ -267,6 +283,12 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "window_days": 14,
         "daily_spike_ratio": 0.2,
     }
+    assert restored.billing_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 15,
+        "budget_kwh": 300.0,
+        "budget_alert_ratio": 0.9,
+    }
+    assert restored.billing_by_circuit["fridge"]["cycle_usage_kwh"] == 42.0
     assert restored.demand_settings_by_circuit["hvac"] == {
         "window_minutes": 15,
         "demand_limit_w": 4500.0,

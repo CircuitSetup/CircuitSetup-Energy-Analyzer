@@ -12,6 +12,11 @@ from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .balance import BalanceInput, calculate_balance
 from .baseline import build_baseline
+from .billing import (
+    BillingCycleBudgetEvidence,
+    BillingCycleSettings,
+    record_billing_cycle_usage,
+)
 from .const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -134,6 +139,17 @@ class AnalyzerState:
     energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
+    billing_cycle_forecast_kwh_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    billing_cycle_budget_usage_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    billing_cycle_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    billing_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -244,6 +260,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._billing_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._standby_alert_policies: dict[
             tuple[str, str],
@@ -331,6 +351,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(usage_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(usage_alert)
+
+            billing_alert = self._observe_billing_cycle(config, sample, now)
+            if billing_alert is not None:
+                alerts.append(billing_alert)
+                self.store_data.alerts.append(billing_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(billing_alert)
 
             demand_alert = self._observe_demand(config, sample, now)
             if demand_alert is not None:
@@ -459,6 +486,39 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         }
         self.store_data.energy_usage_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_billing_cycle_settings(
+        self: Self,
+        circuit_id: str,
+        cycle_start_day: Any = None,
+        budget_kwh: Any = None,
+        budget_alert_ratio: Any = None,
+    ) -> None:
+        """Persist billing-cycle usage forecast settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._billing_cycle_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "cycle_start_day": _positive_int_value(
+                cycle_start_day,
+                default=current.cycle_start_day,
+            ),
+            "budget_alert_ratio": _positive_float_value(
+                budget_alert_ratio,
+                default=current.budget_alert_ratio,
+            ),
+        }
+        budget = _optional_positive_float_value(
+            budget_kwh,
+            default=current.budget_kwh,
+        )
+        if budget is not None:
+            settings["budget_kwh"] = budget
+        self.store_data.billing_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
@@ -634,6 +694,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "energy_usage_evidence": self.state.energy_usage_evidence_by_circuit.get(
                 circuit_id,
                 {},
+            ),
+            "billing_cycle_usage_kwh": (
+                self.state.billing_cycle_usage_kwh_by_circuit.get(circuit_id, 0.0)
+            ),
+            "billing_cycle_forecast_kwh": (
+                self.state.billing_cycle_forecast_kwh_by_circuit.get(circuit_id, 0.0)
+            ),
+            "billing_cycle_budget_usage_percent": (
+                self.state.billing_cycle_budget_usage_by_circuit.get(circuit_id, 0.0)
+            ),
+            "billing_cycle_status": self.state.billing_cycle_status_by_circuit.get(
+                circuit_id,
+                "no_budget",
+            ),
+            "billing_cycle_evidence": (
+                self.state.billing_cycle_evidence_by_circuit.get(circuit_id, {})
             ),
             "current_demand_w": self.state.current_demand_w_by_circuit.get(
                 circuit_id,
@@ -1249,6 +1325,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._usage_alert_policies[key] = policy
         return policy
 
+    def _billing_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._billing_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._billing_alert_policies[key] = policy
+        return policy
+
     def _demand_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
@@ -1560,6 +1655,65 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_billing_cycle(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        settings = self._billing_cycle_settings_for_config(
+            config,
+            config.circuit_id,
+        )
+        result = record_billing_cycle_usage(
+            self.store_data.billing_by_circuit.setdefault(config.circuit_id, {}),
+            circuit_id=config.circuit_id,
+            timestamp=now,
+            energy_kwh=sample.energy,
+            settings=settings,
+        )
+        if result is None:
+            return None
+
+        self._mark_store_dirty()
+        self.state.billing_cycle_usage_kwh_by_circuit[config.circuit_id] = (
+            result.cycle_usage_kwh
+        )
+        self.state.billing_cycle_forecast_kwh_by_circuit[config.circuit_id] = (
+            result.projected_cycle_kwh
+        )
+        self.state.billing_cycle_budget_usage_by_circuit[config.circuit_id] = (
+            result.budget_usage_percent
+        )
+        self.state.billing_cycle_status_by_circuit[config.circuit_id] = result.status
+        self.state.billing_cycle_evidence_by_circuit[config.circuit_id] = (
+            _billing_cycle_evidence_payload(result)
+        )
+
+        if result.budget_exceeded is None:
+            return None
+
+        evidence = result.budget_exceeded
+        policy = self._billing_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            evidence.projected_cycle_kwh / evidence.budget_kwh
+            if evidence.budget_kwh > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="billing_cycle_budget",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=evidence.projected_cycle_kwh,
+                baseline_value=evidence.budget_kwh,
+                message=_billing_cycle_budget_message(config, evidence),
+                features=evidence.features,
+            )
+        )
+
     def _observe_demand(
         self: Self,
         config: CircuitConfig,
@@ -1704,6 +1858,43 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             daily_spike_ratio=_positive_float_value(
                 overrides.get("daily_spike_ratio"),
                 default=default_spike_ratio,
+            ),
+        )
+
+    def _billing_cycle_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> BillingCycleSettings:
+        overrides = self.store_data.billing_settings_by_circuit.get(circuit_id, {})
+        default_start_day = (
+            config.billing_cycle_start_day if config is not None else 1
+        )
+        default_budget_kwh = (
+            config.billing_cycle_budget_kwh if config is not None else None
+        )
+        default_alert_ratio = (
+            config.billing_cycle_budget_alert_ratio if config is not None else 1.0
+        )
+        default_min_elapsed_days = (
+            config.billing_cycle_min_elapsed_days if config is not None else 3
+        )
+        return BillingCycleSettings(
+            cycle_start_day=_positive_int_value(
+                overrides.get("cycle_start_day"),
+                default=default_start_day,
+            ),
+            budget_kwh=_optional_positive_float_value(
+                overrides.get("budget_kwh"),
+                default=default_budget_kwh,
+            ),
+            budget_alert_ratio=_positive_float_value(
+                overrides.get("budget_alert_ratio"),
+                default=default_alert_ratio,
+            ),
+            min_elapsed_days=_positive_int_value(
+                overrides.get("min_elapsed_days"),
+                default=default_min_elapsed_days,
             ),
         )
 
@@ -1908,6 +2099,36 @@ def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
                 else "learning"
             )
         ),
+    }
+
+
+def _billing_cycle_budget_message(
+    config: CircuitConfig,
+    evidence: BillingCycleBudgetEvidence,
+) -> str:
+    return (
+        f"Possible issue: {config.name} is projected to use "
+        f"{_format_kwh(evidence.projected_cycle_kwh)} kWh in the "
+        f"{evidence.cycle_start} to {evidence.cycle_end} billing cycle, above "
+        f"the configured {_format_kwh(evidence.budget_kwh)} kWh "
+        f"billing-cycle budget."
+    )
+
+
+def _billing_cycle_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "cycle_start": result.cycle_start,
+        "cycle_end": result.cycle_end,
+        "cycle_start_day": result.cycle_start_day,
+        "cycle_usage_kwh": result.cycle_usage_kwh,
+        "projected_cycle_kwh": result.projected_cycle_kwh,
+        "elapsed_days": result.elapsed_days,
+        "cycle_days": result.cycle_days,
+        "budget_kwh": result.budget_kwh,
+        "budget_alert_ratio": result.budget_alert_ratio,
+        "budget_usage_percent": result.budget_usage_percent,
+        "projected_budget_usage_percent": result.projected_budget_usage_percent,
+        "status": result.status,
     }
 
 
@@ -2248,6 +2469,28 @@ def _circuit_config_from_raw(
             "daily_energy_spike_ratio",
             "usage_spike_ratio",
             default=0.25,
+        ),
+        billing_cycle_start_day=_positive_int_from_raw(
+            raw_circuit,
+            "billing_cycle_start_day",
+            "cycle_start_day",
+            default=1,
+        ),
+        billing_cycle_budget_kwh=_optional_positive_float_from_raw(
+            raw_circuit,
+            "billing_cycle_budget_kwh",
+            "budget_kwh",
+        ),
+        billing_cycle_budget_alert_ratio=_positive_float_from_raw(
+            raw_circuit,
+            "billing_cycle_budget_alert_ratio",
+            "budget_alert_ratio",
+            default=1.0,
+        ),
+        billing_cycle_min_elapsed_days=_positive_int_from_raw(
+            raw_circuit,
+            "billing_cycle_min_elapsed_days",
+            default=3,
         ),
         demand_window_minutes=_positive_int_from_raw(
             raw_circuit,

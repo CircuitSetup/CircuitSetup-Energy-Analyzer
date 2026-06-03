@@ -181,6 +181,48 @@ set_demand_settings:
           min: 1
           max: 100000
           mode: box
+set_billing_cycle_settings:
+  name: Set billing cycle settings
+  description: Set billing-cycle usage forecasting for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    cycle_start_day:
+      name: Cycle Start Day
+      description: Day of the month when the utility billing cycle starts.
+      required: false
+      example: 15
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    budget_kwh:
+      name: Budget kWh
+      description: Optional kWh budget for the current billing cycle.
+      required: false
+      example: 300
+      selector:
+        number:
+          min: 1
+          max: 100000
+          mode: box
+    budget_alert_ratio:
+      name: Budget Alert Ratio
+      description: Budget share that can trigger projected-over-budget alerts.
+      required: false
+      example: 1.0
+      selector:
+        number:
+          min: 0.01
+          max: 2
+          step: 0.01
+          mode: box
 set_standby_settings:
   name: Set standby settings
   description: Set Always On and standby tracking for one configured circuit.

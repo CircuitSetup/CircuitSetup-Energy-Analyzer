@@ -117,6 +117,13 @@ sections:
           - entity: sensor.refrigerator_energy_usage_share
           - entity: sensor.refrigerator_energy_usage_status
       - type: entities
+        title: Refrigerator billing cycle
+        entities:
+          - entity: sensor.refrigerator_billing_cycle_usage
+          - entity: sensor.refrigerator_billing_cycle_forecast
+          - entity: sensor.refrigerator_billing_cycle_budget_usage
+          - entity: sensor.refrigerator_billing_cycle_status
+      - type: entities
         title: Refrigerator standby
         entities:
           - entity: sensor.refrigerator_always_on_power

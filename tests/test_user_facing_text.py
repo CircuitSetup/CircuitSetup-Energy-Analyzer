@@ -27,7 +27,10 @@ EXPECTED_OPTIONS_LABELS = {
 EXPECTED_SERVICE_FIELD_NAMES = {
     "alert_id": "Alert ID",
     "always_on_alert_w": "Always On Alert W",
+    "budget_alert_ratio": "Budget Alert Ratio",
+    "budget_kwh": "Budget kWh",
     "circuit_id": "Circuit ID",
+    "cycle_start_day": "Cycle Start Day",
     "daily_spike_ratio": "Daily Spike Ratio",
     "demand_limit_w": "Demand Limit W",
     "duration": "Duration",

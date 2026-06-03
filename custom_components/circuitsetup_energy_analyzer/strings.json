@@ -116,6 +116,18 @@
       "balance_status": {
         "name": "Balance status"
       },
+      "billing_cycle_usage": {
+        "name": "Billing cycle usage"
+      },
+      "billing_cycle_forecast": {
+        "name": "Billing cycle forecast"
+      },
+      "billing_cycle_budget_usage": {
+        "name": "Billing cycle budget usage"
+      },
+      "billing_cycle_status": {
+        "name": "Billing cycle status"
+      },
       "always_on_power": {
         "name": "Always On power"
       },

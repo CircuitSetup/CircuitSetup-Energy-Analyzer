@@ -250,6 +250,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
         SERVICE_MERGE_NILM_SIGNATURES,
+        SERVICE_SET_BILLING_CYCLE_SETTINGS,
         SERVICE_SET_CIRCUIT_SENSITIVITY,
         SERVICE_SET_DEMAND_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
@@ -305,6 +306,25 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 (
                     "async_set_demand_settings",
                     (circuit_id, window_minutes, demand_limit_w),
+                )
+            )
+
+        async def async_set_billing_cycle_settings(
+            self,
+            circuit_id: str,
+            cycle_start_day: object = None,
+            budget_kwh: object = None,
+            budget_alert_ratio: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_billing_cycle_settings",
+                    (
+                        circuit_id,
+                        cycle_start_day,
+                        budget_kwh,
+                        budget_alert_ratio,
+                    ),
                 )
             )
 
@@ -405,6 +425,16 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_BILLING_CYCLE_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "cycle_start_day": 15,
+                "budget_kwh": 300.0,
+                "budget_alert_ratio": 0.9,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_STANDBY_SETTINGS)](
         SimpleNamespace(
             data={
@@ -451,6 +481,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_circuit_sensitivity", ("fridge", "quiet")),
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
+        ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),

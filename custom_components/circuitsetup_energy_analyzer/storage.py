@@ -44,6 +44,10 @@ class FeatureStoreData:
         default_factory=dict
     )
     energy_usage_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    billing_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    billing_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     demand_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -166,6 +170,10 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             data.energy_usage_settings_by_circuit
         ),
         "energy_usage_by_circuit": _dict_of_dicts(data.energy_usage_by_circuit),
+        "billing_settings_by_circuit": _dict_of_dicts(
+            data.billing_settings_by_circuit
+        ),
+        "billing_by_circuit": _dict_of_dicts(data.billing_by_circuit),
         "demand_settings_by_circuit": _dict_of_dicts(data.demand_settings_by_circuit),
         "demand_by_circuit": _dict_of_dicts(data.demand_by_circuit),
         "standby_settings_by_circuit": _dict_of_dicts(
@@ -208,6 +216,10 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         energy_usage_by_circuit=_dict_of_dicts(
             raw.get("energy_usage_by_circuit", {}),
         ),
+        billing_settings_by_circuit=_dict_of_dicts(
+            raw.get("billing_settings_by_circuit", {}),
+        ),
+        billing_by_circuit=_dict_of_dicts(raw.get("billing_by_circuit", {})),
         demand_settings_by_circuit=_dict_of_dicts(
             raw.get("demand_settings_by_circuit", {}),
         ),
@@ -236,6 +248,8 @@ def prune_events(
         alert_feedback=data.alert_feedback,
         energy_usage_settings_by_circuit=data.energy_usage_settings_by_circuit,
         energy_usage_by_circuit=data.energy_usage_by_circuit,
+        billing_settings_by_circuit=data.billing_settings_by_circuit,
+        billing_by_circuit=data.billing_by_circuit,
         demand_settings_by_circuit=data.demand_settings_by_circuit,
         demand_by_circuit=data.demand_by_circuit,
         standby_settings_by_circuit=data.standby_settings_by_circuit,

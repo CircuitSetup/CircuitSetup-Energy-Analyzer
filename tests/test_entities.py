@@ -29,6 +29,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         apparent_power_drift_value,
         balance_power_value,
         balance_status_value,
+        billing_cycle_budget_usage_value,
+        billing_cycle_forecast_value,
+        billing_cycle_status_value,
+        billing_cycle_usage_value,
         current_demand_value,
         daily_energy_usage_value,
         data_quality_checklist_value,
@@ -123,6 +127,16 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         balance_evidence_by_circuit={
             "fridge": {"status": "tracking", "balance_power_w": 2300.0}
         },
+        billing_cycle_usage_kwh_by_circuit={"fridge": 100.0},
+        billing_cycle_forecast_kwh_by_circuit={"fridge": 300.0},
+        billing_cycle_budget_usage_by_circuit={"fridge": 40.0},
+        billing_cycle_status_by_circuit={"fridge": "projected_over_budget"},
+        billing_cycle_evidence_by_circuit={
+            "fridge": {
+                "status": "projected_over_budget",
+                "projected_cycle_kwh": 300.0,
+            }
+        },
         always_on_power_w_by_circuit={"fridge": 45.0},
         standby_threshold_w_by_circuit={"fridge": 8.0},
         standby_status_by_circuit={"fridge": "standby"},
@@ -163,6 +177,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
     assert balance_status_value(state, "fridge") == "tracking"
+    assert billing_cycle_usage_value(state, "fridge") == 100.0
+    assert billing_cycle_forecast_value(state, "fridge") == 300.0
+    assert billing_cycle_budget_usage_value(state, "fridge") == 40.0
+    assert billing_cycle_status_value(state, "fridge") == "projected_over_budget"
     assert always_on_power_value(state, "fridge") == 45.0
     assert standby_threshold_value(state, "fridge") == 8.0
     assert standby_status_value(state, "fridge") == "standby"
@@ -194,6 +212,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "unknown") == 0.0
     assert monitored_coverage_value(state, "unknown") == 0.0
     assert balance_status_value(state, "unknown") == "missing_mains"
+    assert billing_cycle_usage_value(state, "unknown") == 0.0
+    assert billing_cycle_forecast_value(state, "unknown") == 0.0
+    assert billing_cycle_budget_usage_value(state, "unknown") == 0.0
+    assert billing_cycle_status_value(state, "unknown") == "no_budget"
     assert always_on_power_value(state, "unknown") == 0.0
     assert standby_threshold_value(state, "unknown") == 0.0
     assert standby_status_value(state, "unknown") == "learning"
@@ -256,6 +278,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "balance_power_w": 2300.0,
         "monitored_coverage_percent": 54.0,
     }
+    billing_cycle_evidence = {
+        "status": "projected_over_budget",
+        "cycle_usage_kwh": 100.0,
+        "projected_cycle_kwh": 300.0,
+    }
     standby_evidence = {
         "status": "standby",
         "always_on_power_w": 45.0,
@@ -270,6 +297,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
         demand_evidence_by_circuit={"fridge": demand_evidence},
         balance_evidence_by_circuit={"fridge": balance_evidence},
+        billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
         standby_evidence_by_circuit={"fridge": standby_evidence},
     )
     coordinator = SimpleNamespace(data=state)
@@ -376,6 +404,30 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["billing_cycle_usage"],
+    ).extra_state_attributes == billing_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["billing_cycle_forecast"],
+    ).extra_state_attributes == billing_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["billing_cycle_budget_usage"],
+    ).extra_state_attributes == billing_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["billing_cycle_status"],
+    ).extra_state_attributes == billing_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["always_on_power"],
     ).extra_state_attributes == standby_evidence
     assert CircuitAnalyzerSensor(
@@ -439,10 +491,14 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Demand Limit Usage",
         "Kitchen Fridge Demand Status",
         "Kitchen Fridge Balance Power",
-        "Kitchen Fridge Monitored Power",
-        "Kitchen Fridge Monitored Coverage",
-        "Kitchen Fridge Balance Status",
-        "Kitchen Fridge Always On Power",
+            "Kitchen Fridge Monitored Power",
+            "Kitchen Fridge Monitored Coverage",
+            "Kitchen Fridge Balance Status",
+            "Kitchen Fridge Billing Cycle Usage",
+            "Kitchen Fridge Billing Cycle Forecast",
+            "Kitchen Fridge Billing Cycle Budget Usage",
+            "Kitchen Fridge Billing Cycle Status",
+            "Kitchen Fridge Always On Power",
         "Kitchen Fridge Standby Threshold",
         "Kitchen Fridge Standby Status",
         "Kitchen Fridge Always On Limit Usage",
@@ -474,6 +530,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_monitored_power",
         "entry-1_fridge_monitored_coverage",
         "entry-1_fridge_balance_status",
+        "entry-1_fridge_billing_cycle_usage",
+        "entry-1_fridge_billing_cycle_forecast",
+        "entry-1_fridge_billing_cycle_budget_usage",
+        "entry-1_fridge_billing_cycle_status",
         "entry-1_fridge_always_on_power",
         "entry-1_fridge_standby_threshold",
         "entry-1_fridge_standby_status",
@@ -504,6 +564,10 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
         "mains",
         "mains",
         "mains",

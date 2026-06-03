@@ -52,6 +52,18 @@ total, the threshold, and the percentage of the learned window used today.
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
 
+## Billing Cycle Forecasts
+
+The analyzer can also track circuit usage against a utility-style billing
+cycle. By default the cycle starts on the first day of the month. For circuits
+with cumulative energy sensors, diagnostic entities show current-cycle kWh,
+projected end-of-cycle kWh, budget usage percentage, and billing-cycle status.
+
+Use the `set_billing_cycle_settings` service to set a cycle start day and an
+optional kWh budget for a circuit. When a budget is configured, projected
+over-budget notifications require repeated evidence and include the current
+usage, projected usage, configured budget, and billing-cycle dates.
+
 ## Peak Demand Tracking
 
 The analyzer also tracks rolling power demand for each circuit with real-power
@@ -119,6 +131,10 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_daily_energy_usage`
 - `sensor.<circuit>_energy_usage_share`
 - `sensor.<circuit>_energy_usage_status`
+- `sensor.<circuit>_billing_cycle_usage`
+- `sensor.<circuit>_billing_cycle_forecast`
+- `sensor.<circuit>_billing_cycle_budget_usage`
+- `sensor.<circuit>_billing_cycle_status`
 - `sensor.<circuit>_current_demand`
 - `sensor.<circuit>_peak_demand`
 - `sensor.<circuit>_demand_limit_usage`

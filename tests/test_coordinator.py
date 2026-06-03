@@ -2587,6 +2587,133 @@ async def test_runtime_persists_standby_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_billing_cycle_and_notifies_budget(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 10, 18, 0, tzinfo=UTC)
+    holder = {"time": now, "energy": 200.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_energy"
+            return SimpleNamespace(
+                state=str(holder["energy"]),
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "billing_cycle_start_day": 1,
+                    "billing_cycle_budget_kwh": 250.0,
+                    "billing_cycle_budget_alert_ratio": 1.0,
+                    "billing_cycle_min_elapsed_days": 3,
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            billing_by_circuit={
+                "fridge": {
+                    "cycle_start": "2026-06-01",
+                    "cycle_end": "2026-07-01",
+                    "cycle_usage_kwh": 90.0,
+                    "last_energy_kwh": 190.0,
+                    "last_sample_at": "2026-06-10T00:00:00+00:00",
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for hour in (18, 19, 20):
+        holder["time"] = datetime(2026, 6, 10, hour, 0, tzinfo=UTC)
+        await coordinator.async_process_update()
+
+    assert len(notifications) == 1
+    alert = notifications[0]
+    assert alert.feature == "billing_cycle_budget"
+    assert "Fridge is projected to use 300 kWh" in alert.message
+    assert "configured 250 kWh billing-cycle budget" in alert.message
+    assert coordinator.state.billing_cycle_usage_kwh_by_circuit["fridge"] == 100.0
+    assert coordinator.state.billing_cycle_forecast_kwh_by_circuit["fridge"] == 300.0
+    assert coordinator.state.billing_cycle_budget_usage_by_circuit["fridge"] == 40.0
+    assert (
+        coordinator.state.billing_cycle_status_by_circuit["fridge"]
+        == "projected_over_budget"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_billing_cycle_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_billing_cycle_settings(
+        "fridge",
+        cycle_start_day=15,
+        budget_kwh=300.0,
+        budget_alert_ratio=0.9,
+    )
+
+    assert saved
+    assert coordinator.store_data.billing_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 15,
+        "budget_kwh": 300.0,
+        "budget_alert_ratio": 0.9,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

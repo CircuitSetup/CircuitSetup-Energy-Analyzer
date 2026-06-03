@@ -278,6 +278,46 @@ def balance_status_value(state: Any, circuit_id: str) -> str:
     return str(status or "missing_mains")
 
 
+def billing_cycle_usage_value(state: Any, circuit_id: str) -> float:
+    """Return current billing-cycle usage in kWh."""
+    return float(
+        getattr(state, "billing_cycle_usage_kwh_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def billing_cycle_forecast_value(state: Any, circuit_id: str) -> float:
+    """Return projected end-of-cycle usage in kWh."""
+    return float(
+        getattr(state, "billing_cycle_forecast_kwh_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def billing_cycle_budget_usage_value(state: Any, circuit_id: str) -> float:
+    """Return current billing-cycle usage as a percent of the configured budget."""
+    return float(
+        getattr(state, "billing_cycle_budget_usage_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
+    """Return the billing-cycle tracker status."""
+    return str(
+        getattr(state, "billing_cycle_status_by_circuit", {}).get(
+            circuit_id,
+            "no_budget",
+        )
+    )
+
+
 def always_on_power_value(state: Any, circuit_id: str) -> float:
     """Return estimated Always On power for a circuit."""
     return float(
@@ -510,6 +550,36 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Balance Status",
         value_fn=balance_status_value,
         attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="billing_cycle_usage",
+        name_suffix="Billing Cycle Usage",
+        value_fn=billing_cycle_usage_value,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="billing_cycle_forecast",
+        name_suffix="Billing Cycle Forecast",
+        value_fn=billing_cycle_forecast_value,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="billing_cycle_budget_usage",
+        name_suffix="Billing Cycle Budget Usage",
+        value_fn=billing_cycle_budget_usage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="billing_cycle_status",
+        name_suffix="Billing Cycle Status",
+        value_fn=billing_cycle_status_value,
+        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="always_on_power",
