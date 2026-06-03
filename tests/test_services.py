@@ -152,6 +152,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
         SENSITIVITY_SERVICE_SCHEMA,
+        UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA,
     )
 
     assert SENSITIVITY_SERVICE_SCHEMA(
@@ -189,6 +190,19 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         "circuit_id": "mains",
         "source_signature_id": "signature_2",
         "target_signature_id": "signature_1",
+    }
+    assert UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 8.5,
+        }
+    ) == {
+        "circuit_id": "mains",
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "tolerance_percent": 8.5,
     }
 
     with pytest.raises(vol.Invalid):
@@ -259,6 +273,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_SET_ENERGY_GOAL_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
         SERVICE_SET_STANDBY_SETTINGS,
+        SERVICE_SET_UTILITY_COMPARISON_SETTINGS,
         SERVICE_START_MAINTENANCE,
         async_setup_services,
     )
@@ -404,6 +419,25 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 )
             )
 
+        async def async_set_utility_comparison_settings(
+            self,
+            circuit_id: str,
+            utility_energy_entity: object = None,
+            measured_energy_entities: object = None,
+            tolerance_percent: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_utility_comparison_settings",
+                    (
+                        circuit_id,
+                        utility_energy_entity,
+                        measured_energy_entities,
+                        tolerance_percent,
+                    ),
+                )
+            )
+
         async def async_export_history_csv(self, circuit_id: str) -> None:
             self.calls.append(("async_export_history_csv", (circuit_id,)))
 
@@ -537,6 +571,16 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_UTILITY_COMPARISON_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "utility_energy_entity": "sensor.opower_current_bill_usage",
+                "measured_energy_entities": ["sensor.panel_import_energy"],
+                "tolerance_percent": 8.5,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_EXPORT_HISTORY_CSV)](
         SimpleNamespace(data={"circuit_id": "fridge"})
     )
@@ -584,6 +628,15 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             ("fridge", 1, 0.20, 0.30, "17:00", "21:00", "0,1,2,3,4", "Peak"),
         ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
+        (
+            "async_set_utility_comparison_settings",
+            (
+                "mains",
+                "sensor.opower_current_bill_usage",
+                ["sensor.panel_import_energy"],
+                8.5,
+            ),
+        ),
         ("async_export_history_csv", ("fridge",)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),

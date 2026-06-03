@@ -137,6 +137,12 @@
       "balance_status": {
         "name": "Balance status"
       },
+      "utility_comparison_difference": {
+        "name": "Utility comparison difference"
+      },
+      "utility_comparison_status": {
+        "name": "Utility comparison status"
+      },
       "billing_cycle_usage": {
         "name": "Billing cycle usage"
       },

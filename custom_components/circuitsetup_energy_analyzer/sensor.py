@@ -337,6 +337,26 @@ def balance_status_value(state: Any, circuit_id: str) -> str:
     return str(status or "missing_mains")
 
 
+def utility_comparison_difference_value(state: Any, circuit_id: str) -> float:
+    """Return measured-vs-utility kWh difference as a percentage."""
+    return float(
+        getattr(state, "utility_comparison_difference_percent_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def utility_comparison_status_value(state: Any, circuit_id: str) -> str:
+    """Return the utility comparison tracker status."""
+    return str(
+        getattr(state, "utility_comparison_status_by_circuit", {}).get(
+            circuit_id,
+            "unconfigured",
+        )
+    )
+
+
 def billing_cycle_usage_value(state: Any, circuit_id: str) -> float:
     """Return current billing-cycle usage in kWh."""
     return float(
@@ -687,6 +707,20 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Balance Status",
         value_fn=balance_status_value,
         attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="utility_comparison_difference",
+        name_suffix="Utility Comparison Difference",
+        value_fn=utility_comparison_difference_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("utility_comparison_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="utility_comparison_status",
+        name_suffix="Utility Comparison Status",
+        value_fn=utility_comparison_status_value,
+        attributes_fn=_mapping_attributes("utility_comparison_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="billing_cycle_usage",

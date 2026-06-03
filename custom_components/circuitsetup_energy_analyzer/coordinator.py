@@ -82,6 +82,11 @@ from .profiles import get_profile_definition
 from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
+from .utility_comparison import (
+    DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+    UtilityComparisonSettings,
+    compare_utility_energy,
+)
 from .ux import (
     alert_evidence_detail,
     alert_policy_name_for_sensitivity,
@@ -208,6 +213,16 @@ class AnalyzerState:
     balance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    utility_comparison_difference_kwh_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    utility_comparison_difference_percent_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    utility_comparison_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    utility_comparison_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     always_on_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     standby_threshold_w_by_circuit: dict[str, float] = field(default_factory=dict)
     standby_status_by_circuit: dict[str, str] = field(default_factory=dict)
@@ -310,6 +325,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ] = {}
         self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._standby_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._utility_comparison_alert_policies: dict[
             tuple[str, str],
             ConservativeAlertPolicy,
         ] = {}
@@ -449,6 +468,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
         self._refresh_balance_state(samples)
+        for utility_alert in self._observe_utility_comparisons(now):
+            alerts.append(utility_alert)
+            self.store_data.alerts.append(utility_alert)
+            self._mark_store_dirty()
+            await self._notify_alert(utility_alert)
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -767,6 +791,41 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
+    async def async_set_utility_comparison_settings(
+        self: Self,
+        circuit_id: str,
+        utility_energy_entity: Any = None,
+        measured_energy_entities: Any = None,
+        tolerance_percent: Any = None,
+    ) -> None:
+        """Persist utility-vs-measured kWh comparison settings."""
+        current = self._utility_comparison_settings_for_circuit(circuit_id)
+        utility_entity = (
+            current.utility_energy_entity
+            if utility_energy_entity is None
+            else str(utility_energy_entity).strip()
+        )
+        measured_entities = _entity_id_tuple_value(
+            measured_energy_entities,
+            default=current.measured_energy_entities,
+        )
+        settings: dict[str, Any] = {
+            "tolerance_percent": _nonnegative_float_value(
+                tolerance_percent,
+                default=current.tolerance_percent,
+            ),
+        }
+        if utility_entity:
+            settings["utility_energy_entity"] = utility_entity
+        if measured_entities:
+            settings["measured_energy_entities"] = list(measured_entities)
+        self.store_data.utility_comparison_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
     async def async_start_maintenance(
         self: Self,
         circuit_id: str,
@@ -946,6 +1005,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "demand_evidence": self.state.demand_evidence_by_circuit.get(
                 circuit_id,
                 {},
+            ),
+            "utility_comparison_difference_kwh": (
+                self.state.utility_comparison_difference_kwh_by_circuit.get(
+                    circuit_id,
+                    0.0,
+                )
+            ),
+            "utility_comparison_difference_percent": (
+                self.state.utility_comparison_difference_percent_by_circuit.get(
+                    circuit_id,
+                    0.0,
+                )
+            ),
+            "utility_comparison_status": (
+                self.state.utility_comparison_status_by_circuit.get(
+                    circuit_id,
+                    "unconfigured",
+                )
+            ),
+            "utility_comparison_evidence": (
+                self.state.utility_comparison_evidence_by_circuit.get(
+                    circuit_id,
+                    {},
+                )
             ),
             "always_on_power_w": self.state.always_on_power_w_by_circuit.get(
                 circuit_id,
@@ -1548,6 +1631,156 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 "status": result.status,
             }
 
+    def _observe_utility_comparisons(
+        self: Self,
+        now: datetime,
+    ) -> list[AlertEvidence]:
+        alerts: list[AlertEvidence] = []
+        for circuit_id in self.store_data.utility_comparison_settings_by_circuit:
+            config = self._config_for_circuit(circuit_id)
+            if config is None:
+                continue
+            alert = self._observe_utility_comparison(config, now)
+            if alert is not None:
+                alerts.append(alert)
+        return alerts
+
+    def _observe_utility_comparison(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        settings = self._utility_comparison_settings_for_circuit(config.circuit_id)
+        utility_kwh = self._energy_kwh_for_entity(
+            settings.utility_energy_entity,
+            now,
+        )
+        if settings.measured_energy_entities:
+            comparison_source = "explicit_entities"
+            measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
+                settings.measured_energy_entities,
+                now,
+            )
+        else:
+            comparison_source = "circuit_energy_sum"
+            fallback_entities = self._load_energy_entity_ids_for_sum(config.circuit_id)
+            measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
+                fallback_entities,
+                now,
+            )
+
+        result = compare_utility_energy(
+            settings=settings,
+            utility_kwh=utility_kwh,
+            measured_kwh=measured_kwh,
+            measured_entity_ids=measured_entity_ids,
+            comparison_source=comparison_source,
+        )
+        self._update_utility_comparison_state(config.circuit_id, result)
+        if result.status != "mismatch":
+            return None
+
+        score = (
+            result.absolute_difference_percent / result.tolerance_percent
+            if result.tolerance_percent > 0.0
+            else result.absolute_difference_percent
+        )
+        policy = self._utility_comparison_alert_policy_for_circuit(config.circuit_id)
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="utility_energy_mismatch",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=result.measured_kwh or 0.0,
+                baseline_value=result.utility_kwh or 0.0,
+                message=_utility_comparison_message(config, result),
+                features=result.features or {},
+            )
+        )
+
+    def _update_utility_comparison_state(
+        self: Self,
+        circuit_id: str,
+        result: Any,
+    ) -> None:
+        self.state.utility_comparison_difference_kwh_by_circuit[circuit_id] = (
+            result.difference_kwh
+        )
+        self.state.utility_comparison_difference_percent_by_circuit[circuit_id] = (
+            result.difference_percent
+        )
+        self.state.utility_comparison_status_by_circuit[circuit_id] = result.status
+        self.state.utility_comparison_evidence_by_circuit[circuit_id] = (
+            _utility_comparison_evidence_payload(result)
+        )
+
+    def _energy_kwh_sum_for_entities(
+        self: Self,
+        entity_ids: Iterable[str],
+        now: datetime,
+    ) -> tuple[float | None, tuple[str, ...]]:
+        values: list[float] = []
+        valid_entity_ids: list[str] = []
+        for entity_id in entity_ids:
+            value = self._energy_kwh_for_entity(entity_id, now)
+            if value is None:
+                continue
+            values.append(value)
+            valid_entity_ids.append(entity_id)
+        if not values:
+            return None, ()
+        return round(sum(values), 3), tuple(valid_entity_ids)
+
+    def _energy_kwh_for_entity(
+        self: Self,
+        entity_id: str,
+        now: datetime,
+    ) -> float | None:
+        del now
+        if not entity_id:
+            return None
+        hass_states = getattr(self.hass, "states", None)
+        get_state = getattr(hass_states, "get", None)
+        if get_state is None:
+            return None
+        raw_state = get_state(entity_id)
+        if raw_state is None:
+            return None
+        state = str(getattr(raw_state, "state", "")).strip()
+        if state.lower() in {"unknown", "unavailable", ""}:
+            return None
+        try:
+            value = float(state)
+        except ValueError:
+            return None
+        attributes = getattr(raw_state, "attributes", {}) or {}
+        unit = attributes.get("unit_of_measurement")
+        return _energy_value_kwh(value, unit)
+
+    def _load_energy_entity_ids_for_sum(self: Self, circuit_id: str) -> tuple[str, ...]:
+        entity_ids: list[str] = []
+        for config in self.circuit_configs:
+            if config.circuit_id == circuit_id:
+                continue
+            if (
+                config.mode is CircuitMode.MAINS_NILM
+                or config.appliance_profile is ApplianceProfile.MAINS_NILM
+            ):
+                continue
+            if (
+                config.power_flow is PowerFlowMode.GENERATION
+                or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
+            ):
+                continue
+            entity_ids.extend(
+                sensor.entity_id
+                for sensor in config.sensors
+                if sensor.role is SensorRole.ENERGY
+            )
+        return tuple(entity_ids)
+
     def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
         return normalize_sensitivity(
             self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
@@ -1659,6 +1892,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._standby_alert_policies[key] = policy
+        return policy
+
+    def _utility_comparison_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._utility_comparison_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._utility_comparison_alert_policies[key] = policy
         return policy
 
     def _cycle_alert_policy_for_circuit(
@@ -2556,6 +2808,26 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
+    def _utility_comparison_settings_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> UtilityComparisonSettings:
+        overrides = self.store_data.utility_comparison_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        return UtilityComparisonSettings(
+            utility_energy_entity=str(overrides.get("utility_energy_entity") or ""),
+            measured_energy_entities=_entity_id_tuple_value(
+                overrides.get("measured_energy_entities"),
+                default=(),
+            ),
+            tolerance_percent=_nonnegative_float_value(
+                overrides.get("tolerance_percent"),
+                default=DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+            ),
+        )
+
     def _real_power_fallback_evidence(
         self: Self,
         scores: Iterable[Any],
@@ -2832,8 +3104,41 @@ def _standby_evidence_payload(result: Any) -> dict[str, Any]:
     }
 
 
+def _utility_comparison_message(config: CircuitConfig, result: Any) -> str:
+    return (
+        f"Utility comparison mismatch: {config.name} measured "
+        f"{_format_kwh(result.measured_kwh or 0.0)} kWh while "
+        f"{result.utility_energy_entity} reports "
+        f"{_format_kwh(result.utility_kwh or 0.0)} kWh. Difference is "
+        f"{_format_kwh(result.difference_kwh)} kWh "
+        f"({_format_percent(result.absolute_difference_percent)}%), above the "
+        f"{_format_percent(result.tolerance_percent)}% tolerance. Verify both "
+        "sensors cover the same billing or current-bill period before treating "
+        "this as a meter, CT, or utility-data problem."
+    )
+
+
+def _utility_comparison_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "status": result.status,
+        "utility_energy_entity": result.utility_energy_entity,
+        "measured_energy_entities": list(result.measured_entity_ids),
+        "comparison_source": result.comparison_source,
+        "utility_kwh": result.utility_kwh,
+        "measured_kwh": result.measured_kwh,
+        "difference_kwh": result.difference_kwh,
+        "difference_percent": result.difference_percent,
+        "absolute_difference_percent": result.absolute_difference_percent,
+        "tolerance_percent": result.tolerance_percent,
+    }
+
+
 def _format_kwh(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _format_percent(value: float) -> str:
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def _format_w(value: float) -> str:
@@ -3312,6 +3617,39 @@ def _positive_float_value(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
+
+
+def _nonnegative_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0.0 else default
+
+
+def _entity_id_tuple_value(
+    value: Any,
+    *,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        raw_items: Any = value.replace("\n", ",").split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        return default
+    return tuple(str(item).strip() for item in raw_items if str(item).strip())
+
+
+def _energy_value_kwh(value: float, unit: Any) -> float:
+    normalized = str(unit or "kWh").strip().lower()
+    if normalized == "wh":
+        return round(value / 1000.0, 3)
+    if normalized == "mwh":
+        return round(value * 1000.0, 3)
+    return round(value, 3)
 
 
 def _weekday_tuple_value(

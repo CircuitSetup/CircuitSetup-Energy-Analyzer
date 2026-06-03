@@ -410,6 +410,46 @@ set_standby_settings:
           min: 1
           max: 100000
           mode: box
+set_utility_comparison_settings:
+  name: Set utility comparison settings
+  description: Compare utility-reported kWh with a mains kWh sensor or summed circuit kWh sensors.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured aggregate circuit identifier, usually mains.
+      required: true
+      example: mains
+      selector:
+        text:
+    utility_energy_entity:
+      name: Utility Energy Entity
+      description: Opower or utility kWh sensor representing the same period as measured data.
+      required: false
+      example: sensor.opower_current_bill_usage
+      selector:
+        entity:
+          domain: sensor
+    measured_energy_entities:
+      name: Measured Energy Entities
+      description: Optional mains kWh sensors; leave empty to sum configured load circuit energy sensors.
+      required: false
+      example:
+        - sensor.panel_import_energy
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+    tolerance_percent:
+      name: Tolerance Percent
+      description: Percent difference allowed before repeated observations create a possible-issue alert.
+      required: false
+      example: 10
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.1
+          mode: box
 start_maintenance:
   name: Start maintenance
   description: Pause appliance alert notifications while a circuit is being serviced.

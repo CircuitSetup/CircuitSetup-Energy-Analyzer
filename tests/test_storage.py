@@ -55,6 +55,13 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     demand_settings_by_circuit = {
         "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
     }
+    utility_comparison_settings_by_circuit = {
+        "mains": {
+            "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 10.0,
+        }
+    }
     standby_settings_by_circuit = {
         "office": {
             "window_hours": 24,
@@ -97,6 +104,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         energy_usage_by_circuit=energy_usage_by_circuit,
         demand_settings_by_circuit=demand_settings_by_circuit,
         demand_by_circuit=demand_by_circuit,
+        utility_comparison_settings_by_circuit=(
+            utility_comparison_settings_by_circuit
+        ),
         standby_settings_by_circuit=standby_settings_by_circuit,
         standby_by_circuit=standby_by_circuit,
     )
@@ -121,6 +131,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
     assert pruned.demand_settings_by_circuit is data.demand_settings_by_circuit
     assert pruned.demand_by_circuit is data.demand_by_circuit
+    assert (
+        pruned.utility_comparison_settings_by_circuit
+        is data.utility_comparison_settings_by_circuit
+    )
     assert pruned.standby_settings_by_circuit is data.standby_settings_by_circuit
     assert pruned.standby_by_circuit is data.standby_by_circuit
     assert data.events == [old, recent]
@@ -271,6 +285,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         demand_settings_by_circuit={
             "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
         },
+        utility_comparison_settings_by_circuit={
+            "mains": {
+                "utility_energy_entity": "sensor.opower_current_bill_usage",
+                "measured_energy_entities": ["sensor.panel_import_energy"],
+                "tolerance_percent": 10.0,
+            }
+        },
         standby_settings_by_circuit={
             "office": {
                 "window_hours": 24,
@@ -348,6 +369,11 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.demand_by_circuit["hvac"]["daily_peaks"] == [
         {"date": "2026-06-02", "peak_demand_w": 3200.0}
     ]
+    assert restored.utility_comparison_settings_by_circuit["mains"] == {
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "tolerance_percent": 10.0,
+    }
     assert restored.standby_settings_by_circuit["office"] == {
         "window_hours": 24,
         "standby_threshold_w": 8.0,

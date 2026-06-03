@@ -67,6 +67,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         sensitivity_value,
         standby_status_value,
         standby_threshold_value,
+        utility_comparison_difference_value,
+        utility_comparison_status_value,
     )
 
     event = CircuitEvent(
@@ -152,6 +154,16 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         balance_evidence_by_circuit={
             "fridge": {"status": "tracking", "balance_power_w": 2300.0}
         },
+        utility_comparison_difference_kwh_by_circuit={"fridge": 15.0},
+        utility_comparison_difference_percent_by_circuit={"fridge": 12.5},
+        utility_comparison_status_by_circuit={"fridge": "mismatch"},
+        utility_comparison_evidence_by_circuit={
+            "fridge": {
+                "status": "mismatch",
+                "utility_kwh": 120.0,
+                "measured_kwh": 135.0,
+            }
+        },
         billing_cycle_usage_kwh_by_circuit={"fridge": 100.0},
         billing_cycle_forecast_kwh_by_circuit={"fridge": 300.0},
         billing_cycle_budget_usage_by_circuit={"fridge": 40.0},
@@ -216,6 +228,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
     assert balance_status_value(state, "fridge") == "tracking"
+    assert utility_comparison_difference_value(state, "fridge") == 12.5
+    assert utility_comparison_status_value(state, "fridge") == "mismatch"
     assert billing_cycle_usage_value(state, "fridge") == 100.0
     assert billing_cycle_forecast_value(state, "fridge") == 300.0
     assert billing_cycle_budget_usage_value(state, "fridge") == 40.0
@@ -262,6 +276,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "unknown") == 0.0
     assert monitored_coverage_value(state, "unknown") == 0.0
     assert balance_status_value(state, "unknown") == "missing_mains"
+    assert utility_comparison_difference_value(state, "unknown") == 0.0
+    assert utility_comparison_status_value(state, "unknown") == "unconfigured"
     assert billing_cycle_usage_value(state, "unknown") == 0.0
     assert billing_cycle_forecast_value(state, "unknown") == 0.0
     assert billing_cycle_budget_usage_value(state, "unknown") == 0.0
@@ -346,6 +362,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "balance_power_w": 2300.0,
         "monitored_coverage_percent": 54.0,
     }
+    utility_comparison_evidence = {
+        "status": "mismatch",
+        "utility_kwh": 120.0,
+        "measured_kwh": 135.0,
+    }
     billing_cycle_evidence = {
         "status": "projected_over_budget",
         "cycle_usage_kwh": 100.0,
@@ -373,6 +394,9 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         run_cycle_evidence_by_circuit={"fridge": run_cycle_evidence},
         demand_evidence_by_circuit={"fridge": demand_evidence},
         balance_evidence_by_circuit={"fridge": balance_evidence},
+        utility_comparison_evidence_by_circuit={
+            "fridge": utility_comparison_evidence
+        },
         billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
         cost_evidence_by_circuit={"fridge": cost_evidence},
         standby_evidence_by_circuit={"fridge": standby_evidence},
@@ -523,6 +547,18 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["utility_comparison_difference"],
+    ).extra_state_attributes == utility_comparison_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["utility_comparison_status"],
+    ).extra_state_attributes == utility_comparison_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["billing_cycle_usage"],
     ).extra_state_attributes == billing_cycle_evidence
     assert CircuitAnalyzerSensor(
@@ -641,10 +677,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Demand Limit Usage",
         "Kitchen Fridge Demand Status",
         "Kitchen Fridge Balance Power",
-            "Kitchen Fridge Monitored Power",
-            "Kitchen Fridge Monitored Coverage",
-            "Kitchen Fridge Balance Status",
-            "Kitchen Fridge Billing Cycle Usage",
+        "Kitchen Fridge Monitored Power",
+        "Kitchen Fridge Monitored Coverage",
+        "Kitchen Fridge Balance Status",
+        "Kitchen Fridge Utility Comparison Difference",
+        "Kitchen Fridge Utility Comparison Status",
+        "Kitchen Fridge Billing Cycle Usage",
             "Kitchen Fridge Billing Cycle Forecast",
             "Kitchen Fridge Billing Cycle Budget Usage",
             "Kitchen Fridge Billing Cycle Status",
@@ -691,6 +729,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_monitored_power",
         "entry-1_fridge_monitored_coverage",
         "entry-1_fridge_balance_status",
+        "entry-1_fridge_utility_comparison_difference",
+        "entry-1_fridge_utility_comparison_status",
         "entry-1_fridge_billing_cycle_usage",
         "entry-1_fridge_billing_cycle_forecast",
         "entry-1_fridge_billing_cycle_budget_usage",

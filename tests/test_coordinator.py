@@ -3177,6 +3177,271 @@ async def test_runtime_persists_standby_settings() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_power": "1000",
+                "sensor.opower_current_bill_usage": "120",
+                "sensor.panel_import_energy": "135",
+            }
+            units = {
+                "sensor.mains_power": "W",
+                "sensor.opower_current_bill_usage": "kWh",
+                "sensor.panel_import_energy": "kWh",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_energy_entity": "sensor.opower_current_bill_usage",
+                    "measured_energy_entities": ["sensor.panel_import_energy"],
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "utility_energy_mismatch"
+    assert alert.repeated_count == 3
+    assert alert.observed_value == 135.0
+    assert alert.baseline_value == 120.0
+    assert alert.change_ratio == 0.125
+    assert "Utility comparison mismatch" in alert.message
+    assert "Mains measured 135 kWh" in alert.message
+    assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
+        "mismatch"
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
+        == 15.0
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
+        == 12.5
+    )
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"] == {
+        "status": "mismatch",
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "comparison_source": "explicit_entities",
+        "utility_kwh": 120.0,
+        "measured_kwh": 135.0,
+        "difference_kwh": 15.0,
+        "difference_percent": 12.5,
+        "absolute_difference_percent": 12.5,
+        "tolerance_percent": 10.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_sums_circuit_energy_when_measured_entities_omitted() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_power": "1000",
+                "sensor.opower_current_bill_usage": "50",
+                "sensor.fridge_energy": "20",
+                "sensor.hvac_energy": "42",
+                "sensor.solar_energy": "100",
+            }
+            units = {
+                "sensor.mains_power": "W",
+                "sensor.opower_current_bill_usage": "kWh",
+                "sensor.fridge_energy": "kWh",
+                "sensor.hvac_energy": "kWh",
+                "sensor.solar_energy": "kWh",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_energy", "role": "energy"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_energy_entity": "sensor.opower_current_bill_usage",
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
+        "mismatch"
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
+        == 12.0
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
+        == 24.0
+    )
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"] == {
+        "status": "mismatch",
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "measured_energy_entities": [
+            "sensor.fridge_energy",
+            "sensor.hvac_energy",
+        ],
+        "comparison_source": "circuit_energy_sum",
+        "utility_kwh": 50.0,
+        "measured_kwh": 62.0,
+        "difference_kwh": 12.0,
+        "difference_percent": 24.0,
+        "absolute_difference_percent": 24.0,
+        "tolerance_percent": 10.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_utility_comparison_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="sensor.opower_current_bill_usage",
+        measured_energy_entities=["sensor.panel_import_energy"],
+        tolerance_percent=8.5,
+    )
+
+    assert saved
+    assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "tolerance_percent": 8.5,
+    }
+
+
 def test_standby_settings_default_to_two_day_low_watermark_window() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

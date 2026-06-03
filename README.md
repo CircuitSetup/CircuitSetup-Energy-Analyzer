@@ -167,6 +167,27 @@ solar configuration, or multiplier problems.
 Generation circuits, such as solar inverter channels, are excluded from the
 monitored load sum so they do not look like household consumption.
 
+## Utility And Opower Comparison
+
+For aggregate circuits, the analyzer can compare a utility-reported kWh sensor
+with a measured same-period kWh source. This is intended for sanity-check
+evidence, not normal energy history. Use Home Assistant's Energy Dashboard for
+standard long-term energy charts, tariffs, costs, and device energy rollups.
+
+Use the `set_utility_comparison_settings` service on a mains or aggregate
+circuit. Set `utility_energy_entity` to an Opower/current-bill/utility kWh
+sensor. If you also set `measured_energy_entities`, those mains kWh sensors are
+summed and compared with the utility value. If measured entities are left empty,
+the analyzer sums configured load-circuit energy sensors and excludes mains and
+generation circuits such as solar inverters.
+
+The default tolerance is 10%. When the measured value repeatedly differs from
+the utility value by more than the configured tolerance, the analyzer sends a
+possible-issue notification with the utility kWh, measured kWh, difference,
+percent difference, source entities, and tolerance. Before acting on the alert,
+verify that the utility and measured sensors represent the same billing or
+current-bill period; utility integrations can update on a delay.
+
 ## Always On And Standby Tracking
 
 For circuits with real-power sensors, the analyzer estimates an Always On load
@@ -233,6 +254,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`
 - `sensor.<circuit>_balance_status`
+- `sensor.<circuit>_utility_comparison_difference`
+- `sensor.<circuit>_utility_comparison_status`
 - `sensor.<circuit>_always_on_power`
 - `sensor.<circuit>_standby_threshold`
 - `sensor.<circuit>_standby_status`

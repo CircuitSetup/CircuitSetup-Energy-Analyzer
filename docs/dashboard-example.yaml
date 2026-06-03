@@ -80,6 +80,8 @@ sections:
           - entity: sensor.mains_monitored_power
           - entity: sensor.mains_monitored_coverage
           - entity: sensor.mains_balance_status
+          - entity: sensor.mains_utility_comparison_difference
+          - entity: sensor.mains_utility_comparison_status
   - type: grid
     title: Active evidence
     cards:
@@ -159,6 +161,11 @@ sections:
           - entity: sensor.mains_monitored_power
           - entity: sensor.mains_monitored_coverage
           - entity: sensor.mains_balance_status
+      - type: entities
+        title: Utility comparison
+        entities:
+          - entity: sensor.mains_utility_comparison_difference
+          - entity: sensor.mains_utility_comparison_status
   - type: grid
     title: Experimental NILM review
     cards:
