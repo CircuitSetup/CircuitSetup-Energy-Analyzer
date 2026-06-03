@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
+from typing import Any
 
 
 class ApplianceProfile(StrEnum):
@@ -20,6 +21,7 @@ class ApplianceProfile(StrEnum):
     WELL_PUMP = "well_pump"
     SUMP_PUMP = "sump_pump"
     EV_CHARGER = "ev_charger"
+    SOLAR_INVERTER = "solar_inverter"
     MAINS_NILM = "mains_nilm"
     MOTOR_LOAD = "motor_load"
     RESISTIVE_LOAD = "resistive_load"
@@ -33,6 +35,14 @@ class CircuitMode(StrEnum):
     DUAL_PHASE = "dual_phase"
     MIXED = "mixed"
     MAINS_NILM = "mains_nilm"
+
+
+class PowerFlowMode(StrEnum):
+    """Real-power sign convention for a circuit."""
+
+    LOAD = "load"
+    GENERATION = "generation"
+    MAINS_NET = "mains_net"
 
 
 class RetentionMode(StrEnum):
@@ -96,6 +106,7 @@ class CircuitConfig:
     mode: CircuitMode
     sensors: tuple[SensorRef, ...] = ()
     retention_mode: RetentionMode = RetentionMode.STANDARD
+    power_flow: PowerFlowMode = PowerFlowMode.LOAD
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +158,7 @@ class CircuitEvent:
     circuit_id: str
     event_type: EventType
     severity: Severity = Severity.INFO
-    features: Mapping[str, float] = field(default_factory=dict)
+    features: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
@@ -175,7 +186,7 @@ class AlertEvidence:
     severity: Severity
     message: str
     event_type: EventType | None = None
-    features: Mapping[str, float] = field(default_factory=dict)
+    features: Mapping[str, Any] = field(default_factory=dict)
     feature: str = ""
     observed_value: float = 0.0
     baseline_value: float = 0.0

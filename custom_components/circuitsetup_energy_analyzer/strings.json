@@ -113,6 +113,10 @@
       "title": "Energy Analyzer source sensor is stale",
       "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit."
     },
+    "unexpected_negative_real_power": {
+      "title": "Energy Analyzer sees negative load power",
+      "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected."
+    },
     "missing_mains_nilm_sensor": {
       "title": "Energy Analyzer mains NILM sensor is missing",
       "description": "Experimental NILM is enabled but a configured mains source sensor is missing or unavailable. Per-circuit analysis can continue, but NILM discovery is paused."

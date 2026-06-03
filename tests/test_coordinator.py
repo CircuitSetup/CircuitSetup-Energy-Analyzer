@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     BaselineStats,
     CircuitEvent,
     EventType,
+    PowerFlowMode,
     RetentionMode,
     Severity,
 )
@@ -759,6 +760,61 @@ async def test_runtime_dual_phase_aggregates_leg_power() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_dual_phase_generation_preserves_export_direction() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.solar_l1_power": "-1600",
+                "sensor.solar_l2_power": "-1500",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar inverter",
+                    "mode": "dual_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.solar_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.solar_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    event = coordinator.state.last_event_by_circuit["solar"]
+    assert event.features["startup_power_w"] == 3100.0
+    assert event.features["raw_real_power_w"] == -3100.0
+    assert event.features["power_flow_direction"] == "export"
+
+
+@pytest.mark.asyncio
 async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -899,6 +955,71 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_negative_load_power_creates_orientation_issue(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    issues = []
+
+    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_data_quality_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.fridge_power": "-180",
+                "sensor.fridge_current": "1.7",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={
+                    "unit_of_measurement": (
+                        "A" if "current" in entity_id else "W"
+                    )
+                },
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_current", "role": "current"},
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert issues == [("fridge", "unexpected_negative_real_power")]
+    assert "negative_real_power_load" in coordinator.state.data_quality_by_circuit[
+        "fridge"
+    ]
+    assert "fridge" not in coordinator.state.last_event_by_circuit
+    assert "fridge:real_power" not in coordinator.store_data.baselines
+
+
+@pytest.mark.asyncio
 async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -924,6 +1045,47 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
         coordinator.circuit_configs[0].appliance_profile
         is ApplianceProfile.MAINS_NILM
     )
+    assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
+
+
+def test_runtime_circuit_config_defaults_solar_inverter_to_generation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar inverter",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "battery",
+                    "name": "Battery",
+                    "mode": "single_phase",
+                    "appliance_profile": "mixed",
+                    "power_flow": "bidirectional",
+                    "sensors": [
+                        {"entity_id": "sensor.battery_power", "role": "real_power"}
+                    ],
+                },
+            ]
+        },
+    )
+
+    by_id = {config.circuit_id: config for config in coordinator.circuit_configs}
+
+    assert by_id["solar"].appliance_profile is ApplianceProfile.SOLAR_INVERTER
+    assert by_id["solar"].power_flow is PowerFlowMode.GENERATION
+    assert by_id["battery"].power_flow is PowerFlowMode.MAINS_NET
 
 
 @pytest.mark.asyncio

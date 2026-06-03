@@ -36,7 +36,7 @@ class CircuitEventDetector:
                         timestamp=sample.timestamp,
                         circuit_id=sample.circuit_id,
                         event_type=EventType.START,
-                        features={"startup_power_w": watts},
+                        features=_power_features(sample, "startup_power_w", watts),
                     )
                 )
             elif sample.voltage is not None:
@@ -94,3 +94,18 @@ class CircuitEventDetector:
                 "real_power_w": sample.real_power,
             },
         )
+
+
+def _power_features(
+    sample: CircuitSample,
+    primary_key: str,
+    watts: float,
+) -> dict[str, float | str]:
+    features: dict[str, float | str] = {primary_key: watts}
+    raw_real_power = getattr(sample, "raw_real_power", None)
+    if raw_real_power is not None:
+        features["raw_real_power_w"] = float(raw_real_power)
+    power_flow_direction = getattr(sample, "power_flow_direction", None)
+    if power_flow_direction:
+        features["power_flow_direction"] = str(power_flow_direction)
+    return features

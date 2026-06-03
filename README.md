@@ -25,6 +25,17 @@ CircuitSetup Energy Analyzer supports four analysis modes:
 - Mixed circuits are useful when one branch circuit feeds multiple small loads. The integration reports data quality, large changes, and recurring evidence conservatively instead of pretending the circuit is a clean appliance signature.
 - Mains NILM circuits are whole-home aggregate inputs. Experimental NILM can look for recurring aggregate signatures after known directly monitored circuits are masked out.
 
+## Power Flow
+
+CircuitSetup real-power sensors may report negative watts when a CT is reversed
+or when a source, such as a solar inverter, is exporting power. The analyzer
+tracks the raw watts separately from the analysis watts so those cases can be
+handled differently:
+
+- Load circuits treat sustained negative real power as a data-quality problem and raise a Repair suggesting CT orientation review or a different power-flow setting.
+- Solar inverter circuits treat negative real power as exported generation and analyze the export magnitude.
+- Mains NILM circuits keep signed net power so import and export behavior can be disaggregated without losing direction.
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.

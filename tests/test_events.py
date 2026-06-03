@@ -2,8 +2,18 @@ from datetime import UTC, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.events import CircuitEventDetector
 from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
     CircuitSample,
     EventType,
+    PowerFlowMode,
+    SensorRef,
+    SensorRole,
+)
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    SourceState,
+    build_circuit_sample,
 )
 
 
@@ -53,3 +63,35 @@ def test_event_detector_emits_voltage_sag_under_load() -> None:
         EventType.START,
         EventType.VOLTAGE_SAG,
     ]
+
+
+def test_event_detector_treats_generation_export_as_start() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="solar",
+        name="Solar inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+        sensors=(SensorRef("sensor.solar_power", SensorRole.REAL_POWER),),
+    )
+    exported = build_circuit_sample(
+        config,
+        {
+            "sensor.solar_power": SourceState(
+                "sensor.solar_power",
+                "-3200",
+                "W",
+                now,
+            )
+        },
+        now,
+    )
+    detector = CircuitEventDetector(on_threshold_w=80.0)
+
+    events = detector.process(exported)
+
+    assert [event.event_type for event in events] == [EventType.START]
+    assert events[0].features["startup_power_w"] == 3200.0
+    assert events[0].features["raw_real_power_w"] == -3200.0
+    assert events[0].features["power_flow_direction"] == "export"

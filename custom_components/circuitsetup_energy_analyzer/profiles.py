@@ -147,6 +147,20 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         features=frozenset({"charge_session", "ramp_rate", "leg_imbalance"}),
         minimum_cycles=5,
     ),
+    ApplianceProfile.SOLAR_INVERTER: ProfileDefinition(
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=_POWER_CONTEXT,
+        features=frozenset({
+            "export_profile",
+            "production_ramp",
+            "voltage_coupling",
+            "inverter_power_factor",
+        }),
+        minimum_cycles=0,
+        minimum_learning_days=max(MIN_LEARNING_DAYS, 7),
+    ),
     ApplianceProfile.MOTOR_LOAD: ProfileDefinition(
         appliance_profile=ApplianceProfile.MOTOR_LOAD,
         supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),

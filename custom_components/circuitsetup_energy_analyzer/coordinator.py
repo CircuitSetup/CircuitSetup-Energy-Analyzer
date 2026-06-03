@@ -30,6 +30,7 @@ from .models import (
     CircuitEvent,
     CircuitMode,
     EventType,
+    PowerFlowMode,
     RetentionMode,
     SensorRef,
     SensorRole,
@@ -751,6 +752,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             now,
         )
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
+        raw_real_power = _sum_sample_values(
+            (left_sample, right_sample),
+            "raw_real_power",
+        )
         return NormalizedCircuitSample(
             timestamp=aggregated.timestamp,
             circuit_id=config.circuit_id,
@@ -764,6 +769,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             energy=aggregated.energy,
             source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
             quality_issues=aggregated.quality_issues,
+            raw_real_power=raw_real_power,
+            power_flow=config.power_flow,
+            power_flow_direction=_power_flow_direction(
+                raw_real_power,
+                config.power_flow,
+            ),
         )
 
     def _aggregate_parallel_sample(
@@ -782,6 +793,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not samples:
             return build_circuit_sample(config, {}, now)
 
+        raw_real_power = _sum_sample_values(samples, "raw_real_power")
         return NormalizedCircuitSample(
             timestamp=max(sample.timestamp for sample in samples),
             circuit_id=config.circuit_id,
@@ -798,6 +810,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 issue
                 for sample in samples
                 for issue in getattr(sample, "quality_issues", ())
+            ),
+            raw_real_power=raw_real_power,
+            power_flow=config.power_flow,
+            power_flow_direction=_power_flow_direction(
+                raw_real_power,
+                config.power_flow,
             ),
         )
 
@@ -1302,6 +1320,23 @@ def _average_sample_values(
     return float(sum(values) / len(values))
 
 
+def _power_flow_direction(
+    raw_real_power: float | None,
+    power_flow: PowerFlowMode,
+) -> str | None:
+    if raw_real_power is None:
+        return None
+    if power_flow is PowerFlowMode.LOAD:
+        return "unexpected_export" if raw_real_power < 0 else "load"
+    if power_flow is PowerFlowMode.GENERATION:
+        return "export" if raw_real_power < 0 else "import"
+    if raw_real_power > 0:
+        return "import"
+    if raw_real_power < 0:
+        return "export"
+    return "balanced"
+
+
 def _normalized_leg(leg: str | None) -> str | None:
     if leg is None:
         return None
@@ -1315,6 +1350,8 @@ def _normalized_leg(leg: str | None) -> str | None:
 
 def _data_quality_problem(issue: str) -> str:
     issue_text = issue.lower()
+    if "negative_real_power_load" in issue_text:
+        return "unexpected_negative_real_power"
     if "stale" in issue_text:
         return "stale_source_sensor"
     return "missing_required_sensor"
@@ -1431,6 +1468,7 @@ def _mains_nilm_config_from_sources(
             for entity_id in mains_entities
         ),
         retention_mode=_retention_mode_from_sources(entry_data, options),
+        power_flow=PowerFlowMode.MAINS_NET,
     )
 
 
@@ -1465,7 +1503,32 @@ def _circuit_config_from_raw(
         mode=mode,
         sensors=_sensor_refs_from_raw(raw_circuit),
         retention_mode=retention_mode,
+        power_flow=_power_flow_mode_from_raw(raw_circuit, appliance_profile, mode),
     )
+
+
+def _power_flow_mode_from_raw(
+    raw_circuit: dict[str, Any],
+    appliance_profile: ApplianceProfile,
+    mode: CircuitMode,
+) -> PowerFlowMode:
+    raw_power_flow = raw_circuit.get("power_flow")
+    if raw_power_flow is not None:
+        value = str(raw_power_flow).strip().lower()
+        if value == "bidirectional":
+            return PowerFlowMode.MAINS_NET
+        try:
+            return PowerFlowMode(value)
+        except ValueError:
+            return PowerFlowMode.LOAD
+    if (
+        appliance_profile is ApplianceProfile.MAINS_NILM
+        or mode is CircuitMode.MAINS_NILM
+    ):
+        return PowerFlowMode.MAINS_NET
+    if appliance_profile is ApplianceProfile.SOLAR_INVERTER:
+        return PowerFlowMode.GENERATION
+    return PowerFlowMode.LOAD
 
 
 def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:

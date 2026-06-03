@@ -58,6 +58,19 @@ def test_mains_nilm_profile_is_experimental_aggregate_mode() -> None:
     assert definition.minimum_learning_days >= 7
 
 
+def test_solar_inverter_profile_supports_generation_power_quality() -> None:
+    definition = get_profile_definition(ApplianceProfile.SOLAR_INVERTER)
+
+    assert definition.supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
+    assert SensorRole.REAL_POWER in definition.required_roles
+    assert SensorRole.VOLTAGE in definition.recommended_roles
+    assert SensorRole.POWER_FACTOR in definition.recommended_roles
+    assert "export_profile" in definition.features
+
+
 def test_circuit_event_features_are_readable_but_immutable() -> None:
     event = CircuitEvent(
         timestamp=datetime(2026, 6, 2, tzinfo=UTC),
