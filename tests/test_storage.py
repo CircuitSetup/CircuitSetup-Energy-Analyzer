@@ -230,7 +230,7 @@ def test_feature_store_round_trips_user_experience_state() -> None:
             "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
         },
         activity_alert_settings_by_circuit={
-            "fridge": {"max_active_minutes": 45.0}
+            "fridge": {"max_active_minutes": 45.0, "max_idle_minutes": 120.0}
         },
         billing_settings_by_circuit={
             "fridge": {
@@ -322,7 +322,8 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "goal_alert_ratio": 1.0,
     }
     assert restored.activity_alert_settings_by_circuit["fridge"] == {
-        "max_active_minutes": 45.0
+        "max_active_minutes": 45.0,
+        "max_idle_minutes": 120.0,
     }
     assert restored.billing_settings_by_circuit["fridge"] == {
         "cycle_start_day": 15,

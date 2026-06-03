@@ -99,9 +99,10 @@ timing, learned baseline, sample count, and confidence. It does not diagnose a
 specific failed part.
 
 For user-defined activity alerts, use the `set_activity_alert_settings` service
-to set a `max_active_minutes` value. This is useful for appliance-style "left
-on too long" notices, such as a pump, oven, dryer, or refrigerator compressor
-run that exceeds a user-selected duration.
+to set `max_active_minutes` and/or `max_idle_minutes` values. This is useful
+for appliance-style "left on too long" notices, such as a pump, oven, dryer, or
+refrigerator compressor run that exceeds a user-selected duration, and for
+"no activity for too long" notices when an expected cycling load has not run.
 
 ## Billing Cycle Forecasts
 

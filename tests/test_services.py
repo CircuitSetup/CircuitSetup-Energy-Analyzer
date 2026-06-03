@@ -330,11 +330,12 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             self,
             circuit_id: str,
             max_active_minutes: object = None,
+            max_idle_minutes: object = None,
         ) -> None:
             self.calls.append(
                 (
                     "async_set_activity_alert_settings",
-                    (circuit_id, max_active_minutes),
+                    (circuit_id, max_active_minutes, max_idle_minutes),
                 )
             )
 
@@ -498,6 +499,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             data={
                 "circuit_id": "fridge",
                 "max_active_minutes": 45,
+                "max_idle_minutes": 120,
             }
         )
     )
@@ -575,7 +577,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_energy_goal_settings", ("fridge", 12.0, 1.0)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
-        ("async_set_activity_alert_settings", ("fridge", 45)),
+        ("async_set_activity_alert_settings", ("fridge", 45, 120)),
         ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
         (
             "async_set_cost_settings",

@@ -246,6 +246,16 @@ set_activity_alert_settings:
           min: 1
           max: 10080
           mode: box
+    max_idle_minutes:
+      name: Max Idle Minutes
+      description: Notify when the circuit shows no activity longer than this many minutes.
+      required: false
+      example: 120
+      selector:
+        number:
+          min: 1
+          max: 10080
+          mode: box
 set_billing_cycle_settings:
   name: Set billing cycle settings
   description: Set billing-cycle usage forecasting for one configured circuit.

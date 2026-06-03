@@ -40,6 +40,7 @@ ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
 ATTR_DAILY_GOAL_KWH = "daily_goal_kwh"
 ATTR_GOAL_ALERT_RATIO = "goal_alert_ratio"
 ATTR_MAX_ACTIVE_MINUTES = "max_active_minutes"
+ATTR_MAX_IDLE_MINUTES = "max_idle_minutes"
 ATTR_CYCLE_START_DAY = "cycle_start_day"
 ATTR_BUDGET_KWH = "budget_kwh"
 ATTR_BUDGET_ALERT_RATIO = "budget_alert_ratio"
@@ -106,7 +107,7 @@ ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA = _schema(
 )
 ACTIVITY_ALERT_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_MAX_ACTIVE_MINUTES,),
+    optional=(ATTR_MAX_ACTIVE_MINUTES, ATTR_MAX_IDLE_MINUTES),
 )
 BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
@@ -319,6 +320,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_set_activity_alert_settings",
                 circuit_id,
                 data.get(ATTR_MAX_ACTIVE_MINUTES),
+                data.get(ATTR_MAX_IDLE_MINUTES),
             )
         elif service == SERVICE_SET_BILLING_CYCLE_SETTINGS:
             await _call_if_present(

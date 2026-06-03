@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, time
 from types import MappingProxyType
 from typing import Any
 
@@ -13,6 +14,7 @@ class ActivityAlertSettings:
     """User-configured activity notification settings for one circuit."""
 
     max_active_minutes: float | None = None
+    max_idle_minutes: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,31 +44,85 @@ def evaluate_activity_alert(
     max_active_minutes = _positive_float_or_none(settings.max_active_minutes)
     active_minutes = round(summary.active_cycle_seconds / 60.0, 3)
     if (
-        max_active_minutes is None
-        or summary.status != "running"
-        or active_minutes <= max_active_minutes
+        max_active_minutes is not None
+        and summary.status == "running"
+        and active_minutes > max_active_minutes
+    ):
+        return ActivityAlertEvidence(
+            feature="activity_left_on",
+            message=(
+                f"Activity alert: {circuit_name} has been active for "
+                f"{_format_minutes(active_minutes)}, above the configured "
+                f"{_format_minutes(max_active_minutes)} limit."
+            ),
+            observed_value=active_minutes,
+            baseline_value=max_active_minutes,
+            score=active_minutes / max_active_minutes,
+            features={
+                "active_minutes": active_minutes,
+                "max_active_minutes": max_active_minutes,
+                "active_cycle_seconds": summary.active_cycle_seconds,
+                "last_start": (
+                    summary.last_start.isoformat() if summary.last_start else None
+                ),
+            },
+        )
+
+    max_idle_minutes = _positive_float_or_none(settings.max_idle_minutes)
+    idle_seconds = _idle_seconds(summary)
+    if (
+        max_idle_minutes is None
+        or idle_seconds is None
+        or idle_seconds <= max_idle_minutes * 60.0
     ):
         return None
 
+    idle_minutes = round(idle_seconds / 60.0, 3)
     return ActivityAlertEvidence(
-        feature="activity_left_on",
+        feature="activity_inactive_too_long",
         message=(
-            f"Activity alert: {circuit_name} has been active for "
-            f"{_format_minutes(active_minutes)}, above the configured "
-            f"{_format_minutes(max_active_minutes)} limit."
+            f"Activity alert: {circuit_name} has shown no activity for "
+            f"{_format_minutes(idle_minutes)}, above the configured "
+            f"{_format_minutes(max_idle_minutes)} limit."
         ),
-        observed_value=active_minutes,
-        baseline_value=max_active_minutes,
-        score=active_minutes / max_active_minutes,
+        observed_value=idle_minutes,
+        baseline_value=max_idle_minutes,
+        score=idle_minutes / max_idle_minutes,
         features={
-            "active_minutes": active_minutes,
-            "max_active_minutes": max_active_minutes,
-            "active_cycle_seconds": summary.active_cycle_seconds,
+            "idle_minutes": idle_minutes,
+            "max_idle_minutes": max_idle_minutes,
+            "idle_seconds": round(idle_seconds, 3),
             "last_start": (
                 summary.last_start.isoformat() if summary.last_start else None
             ),
+            "last_stop": summary.last_stop.isoformat() if summary.last_stop else None,
+            "status": summary.status,
         },
     )
+
+
+def _idle_seconds(summary: CircuitCycleSummary) -> float | None:
+    if summary.status == "running":
+        return None
+    if summary.status == "no_activity":
+        return max(float(summary.day_elapsed_seconds), 0.0)
+    if summary.status != "idle" or summary.last_stop is None:
+        return None
+
+    day_start = _day_start(summary, summary.last_stop)
+    seconds_since_stop = summary.day_elapsed_seconds - max(
+        (summary.last_stop - day_start).total_seconds(),
+        0.0,
+    )
+    return max(seconds_since_stop, 0.0)
+
+
+def _day_start(summary: CircuitCycleSummary, reference: datetime) -> datetime:
+    try:
+        summary_date = datetime.fromisoformat(summary.date).date()
+    except ValueError:
+        summary_date = reference.date()
+    return datetime.combine(summary_date, time.min, tzinfo=reference.tzinfo)
 
 
 def _positive_float_or_none(value: Any) -> float | None:

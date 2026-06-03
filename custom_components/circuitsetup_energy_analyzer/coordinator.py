@@ -601,6 +601,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
         max_active_minutes: Any = None,
+        max_idle_minutes: Any = None,
     ) -> None:
         """Persist user-configured activity alert settings for one circuit."""
         current = self._activity_alert_settings_for_config(None, circuit_id)
@@ -608,9 +609,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             max_active_minutes,
             default=current.max_active_minutes,
         )
+        max_idle = _optional_positive_float_value(
+            max_idle_minutes,
+            default=current.max_idle_minutes,
+        )
         settings: dict[str, Any] = {}
         if max_minutes is not None:
             settings["max_active_minutes"] = max_minutes
+        if max_idle is not None:
+            settings["max_idle_minutes"] = max_idle
         self.store_data.activity_alert_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
@@ -2152,7 +2159,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             max_active_minutes=_optional_positive_float_value(
                 overrides.get("max_active_minutes"),
                 default=None,
-            )
+            ),
+            max_idle_minutes=_optional_positive_float_value(
+                overrides.get("max_idle_minutes"),
+                default=None,
+            ),
         )
 
     def _observe_billing_cycle(
