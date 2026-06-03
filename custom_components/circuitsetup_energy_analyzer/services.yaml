@@ -3,6 +3,8 @@ relearn_baseline:
   description: Relearn the baseline for a configured circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: fridge
       selector:
@@ -12,11 +14,15 @@ pause_alerts:
   description: Pause alert notifications for a configured circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: fridge
       selector:
         text:
     duration:
+      name: Duration
+      description: How long alert notifications should stay paused.
       required: false
       example: "01:00:00"
       selector:
@@ -26,6 +32,8 @@ acknowledge_alert:
   description: Acknowledge an alert evidence notification.
   fields:
     alert_id:
+      name: Alert ID
+      description: Alert identifier from the alert evidence notification.
       required: true
       example: circuitsetup_energy_analyzer_alert_fridge_cycle_duration_s
       selector:
@@ -35,6 +43,8 @@ export_diagnostics:
   description: Export diagnostics for a configured circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: mains
       selector:
@@ -48,16 +58,22 @@ label_nilm_signature:
   description: Label a detected NILM signature for a mains circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: mains
       selector:
         text:
     signature_id:
+      name: Signature ID
+      description: Detected NILM signature identifier to label.
       required: true
       example: signature_1
       selector:
         text:
     label:
+      name: Label
+      description: Friendly load name to assign to the signature.
       required: true
       example: Microwave
       selector:
@@ -67,11 +83,15 @@ ignore_nilm_signature:
   description: Ignore a detected NILM signature for a mains circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: mains
       selector:
         text:
     signature_id:
+      name: Signature ID
+      description: Detected NILM signature identifier to ignore.
       required: true
       example: signature_1
       selector:
@@ -81,11 +101,15 @@ set_circuit_sensitivity:
   description: Set the alert sensitivity preset for one configured circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: fridge
       selector:
         text:
     preset:
+      name: Preset
+      description: Alert sensitivity preset for the circuit.
       required: true
       example: balanced
       selector:
@@ -99,21 +123,29 @@ start_maintenance:
   description: Pause appliance alert notifications while a circuit is being serviced.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: fridge
       selector:
         text:
     note:
+      name: Note
+      description: Optional maintenance note stored with the circuit.
       required: false
       example: Cleaned coils
       selector:
         text:
     duration:
+      name: Duration
+      description: How long the circuit should stay in maintenance mode.
       required: false
       example: "02:00:00"
       selector:
         duration:
     relearn_on_end:
+      name: Relearn On End
+      description: Relearn the circuit baseline when maintenance ends.
       required: false
       example: false
       selector:
@@ -123,11 +155,15 @@ end_maintenance:
   description: Resume appliance alert notifications for a serviced circuit.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: fridge
       selector:
         text:
     relearn:
+      name: Relearn
+      description: Relearn the circuit baseline after ending maintenance.
       required: false
       example: false
       selector:
@@ -137,6 +173,8 @@ mark_alert_expected:
   description: Mark an alert pattern as expected so repeated notifications are suppressed.
   fields:
     alert_id:
+      name: Alert ID
+      description: Alert identifier from the alert evidence notification.
       required: true
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
       selector:
@@ -146,6 +184,8 @@ mark_alert_unhelpful:
   description: Mark an alert pattern as unhelpful so repeated notifications are suppressed.
   fields:
     alert_id:
+      name: Alert ID
+      description: Alert identifier from the alert evidence notification.
       required: true
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
       selector:
@@ -155,11 +195,15 @@ mark_nilm_signature_expected:
   description: Mark an experimental NILM signature as an expected load pattern.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: mains
       selector:
         text:
     signature_id:
+      name: Signature ID
+      description: Detected NILM signature identifier to mark expected.
       required: true
       example: signature_1
       selector:
@@ -169,16 +213,22 @@ merge_nilm_signatures:
   description: Merge two experimental NILM signatures that represent the same load.
   fields:
     circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
       required: true
       example: mains
       selector:
         text:
     source_signature_id:
+      name: Source Signature ID
+      description: Signature identifier to merge into the target signature.
       required: true
       example: signature_2
       selector:
         text:
     target_signature_id:
+      name: Target Signature ID
+      description: Signature identifier that should keep the merged history.
       required: true
       example: signature_1
       selector:

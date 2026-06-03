@@ -6,13 +6,22 @@
         "title": "Configure CircuitSetup Energy Analyzer",
         "description": "Select CircuitSetup energy source sensors and define monitored circuits.\n\n{mapping_suggestions}",
         "data": {
-          "source_entities": "Source sensor entity IDs",
-          "circuits": "Circuit definitions",
-          "enable_experimental_nilm": "Enable experimental NILM",
-          "mains_source_entities": "Mains NILM source entity IDs",
-          "known_load_circuits": "Known directly monitored circuits",
+          "source_entities": "Source Entities",
+          "circuits": "Circuit Definitions",
+          "enable_experimental_nilm": "Enable Experimental NILM",
+          "mains_source_entities": "Mains Source Entities",
+          "known_load_circuits": "Known Load Circuits",
           "sensitivity": "Sensitivity",
-          "retention_mode": "Retention mode"
+          "retention_mode": "Retention Mode"
+        },
+        "data_description": {
+          "source_entities": "CircuitSetup and ESPHome sensor entities used as inputs for circuit analysis.",
+          "circuits": "Optional JSON list defining circuit IDs, names, modes, appliance profiles, and source entities.",
+          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "mains_source_entities": "Aggregate mains sensor entities used for experimental NILM analysis.",
+          "known_load_circuits": "Circuit IDs already monitored directly and excluded from unmatched NILM load estimates.",
+          "sensitivity": "Controls how readily possible issues are reported.",
+          "retention_mode": "Controls how much historical diagnostic data is retained."
         }
       }
     },
@@ -33,11 +42,18 @@
         "title": "CircuitSetup Energy Analyzer options",
         "description": "Tune diagnostics and experimental NILM settings.\n\n{mapping_suggestions}",
         "data": {
-          "enable_experimental_nilm": "Enable experimental NILM",
-          "mains_source_entities": "Mains NILM source entity IDs",
-          "known_load_circuits": "Known directly monitored circuits",
+          "enable_experimental_nilm": "Enable Experimental NILM",
+          "mains_source_entities": "Mains Source Entities",
+          "known_load_circuits": "Known Load Circuits",
           "sensitivity": "Sensitivity",
-          "retention_mode": "Retention mode"
+          "retention_mode": "Retention Mode"
+        },
+        "data_description": {
+          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "mains_source_entities": "Aggregate mains sensor entities used for experimental NILM analysis.",
+          "known_load_circuits": "Circuit IDs already monitored directly and excluded from unmatched NILM load estimates.",
+          "sensitivity": "Controls how readily possible issues are reported.",
+          "retention_mode": "Controls how much historical diagnostic data is retained."
         }
       }
     }
