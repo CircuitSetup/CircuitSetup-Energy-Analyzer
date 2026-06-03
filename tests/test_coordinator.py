@@ -883,6 +883,83 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_power_metric_consistency() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.pump_power": "480",
+                "sensor.pump_apparent": "600",
+                "sensor.pump_pf": "0.8",
+                "sensor.pump_voltage": "120",
+                "sensor.pump_current": "10",
+            }
+            units = {
+                "sensor.pump_power": "W",
+                "sensor.pump_apparent": "VA",
+                "sensor.pump_pf": "",
+                "sensor.pump_voltage": "V",
+                "sensor.pump_current": "A",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "pump",
+                    "name": "Well Pump",
+                    "mode": "single_phase",
+                    "appliance_profile": "well_pump",
+                    "sensors": [
+                        {"entity_id": "sensor.pump_power", "role": "real_power"},
+                        {
+                            "entity_id": "sensor.pump_apparent",
+                            "role": "apparent_power",
+                        },
+                        {"entity_id": "sensor.pump_pf", "role": "power_factor"},
+                        {"entity_id": "sensor.pump_voltage", "role": "voltage"},
+                        {"entity_id": "sensor.pump_current", "role": "current"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.metric_consistency_score_by_circuit["pump"] == 50.0
+    assert (
+        coordinator.state.metric_consistency_status_by_circuit["pump"]
+        == "apparent_power_mismatch"
+    )
+    assert coordinator.state.metric_consistency_evidence_by_circuit["pump"] == {
+        "status": "apparent_power_mismatch",
+        "mismatch_score_percent": 50.0,
+        "expected_apparent_power_va": 1200.0,
+        "reported_apparent_power_va": 600.0,
+        "apparent_power_difference_percent": -50.0,
+        "apparent_power_tolerance_percent": 15.0,
+        "apparent_power_source": "voltage_current",
+        "expected_power_factor": 0.8,
+        "reported_power_factor": 0.8,
+        "power_factor_difference": 0.0,
+        "power_factor_tolerance": 0.15,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_dual_phase_generation_preserves_export_direction() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

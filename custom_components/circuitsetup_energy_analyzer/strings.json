@@ -137,6 +137,12 @@
       "leg_imbalance_status": {
         "name": "Leg imbalance status"
       },
+      "metric_consistency_score": {
+        "name": "Metric consistency score"
+      },
+      "metric_consistency_status": {
+        "name": "Metric consistency status"
+      },
       "balance_power": {
         "name": "Balance power"
       },

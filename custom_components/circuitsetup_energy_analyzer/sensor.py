@@ -339,6 +339,26 @@ def leg_imbalance_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def metric_consistency_score_value(state: Any, circuit_id: str) -> float:
+    """Return the largest W/VA/PF consistency mismatch percentage."""
+    return float(
+        getattr(state, "metric_consistency_score_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def metric_consistency_status_value(state: Any, circuit_id: str) -> str:
+    """Return the W/VA/PF metric consistency status."""
+    return str(
+        getattr(state, "metric_consistency_status_by_circuit", {}).get(
+            circuit_id,
+            "missing_metrics",
+        )
+    )
+
+
 def balance_power_value(state: Any, circuit_id: str) -> float:
     """Return unmonitored mains balance power in watts."""
     return float(
@@ -737,6 +757,20 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Leg Imbalance Status",
         value_fn=leg_imbalance_status_value,
         attributes_fn=_mapping_attributes("leg_imbalance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="metric_consistency_score",
+        name_suffix="Metric Consistency Score",
+        value_fn=metric_consistency_score_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("metric_consistency_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="metric_consistency_status",
+        name_suffix="Metric Consistency Status",
+        value_fn=metric_consistency_status_value,
+        attributes_fn=_mapping_attributes("metric_consistency_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="balance_power",

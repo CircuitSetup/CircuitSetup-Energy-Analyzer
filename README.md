@@ -189,6 +189,22 @@ dominant leg, both leg wattages, optional currents/voltages, and the threshold
 used. Notifications are created only after repeated over-threshold observations
 and are labeled as possible issues.
 
+## Power Metric Consistency
+
+When a circuit has voltage, current, apparent power, real power, and/or power
+factor sensors, the analyzer compares the reported metrics with the
+relationships expected from AC power measurement. It checks whether measured VA
+matches voltage times current, and whether reported power factor agrees with
+real power divided by apparent power. For dual-phase circuits with per-leg
+voltage and current, it sums each leg's V x A instead of relying only on the
+combined current.
+
+This is a CircuitSetup/ATM90E32 data-quality diagnostic, not an energy chart.
+A mismatch can point to source-entity mixups, CT/channel pairing mistakes,
+incorrect units, stale/missing optional sensors, or calibration problems. The
+diagnostic entities expose the expected VA, reported VA, VA percent difference,
+expected PF, reported PF, PF difference, and tolerance values.
+
 ## Mains Balance
 
 For mains/NILM circuits, the analyzer calculates an Emporia-style Balance view:
@@ -288,6 +304,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_capacity_status`
 - `sensor.<circuit>_leg_imbalance`
 - `sensor.<circuit>_leg_imbalance_status`
+- `sensor.<circuit>_metric_consistency_score`
+- `sensor.<circuit>_metric_consistency_status`
 - `sensor.<circuit>_balance_power`
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`

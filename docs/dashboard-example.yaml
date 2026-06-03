@@ -74,6 +74,8 @@ sections:
           - entity: sensor.hvac_capacity_status
           - entity: sensor.hvac_leg_imbalance
           - entity: sensor.hvac_leg_imbalance_status
+          - entity: sensor.hvac_metric_consistency_score
+          - entity: sensor.hvac_metric_consistency_status
       - type: entities
         title: Mains
         entities:
@@ -168,6 +170,11 @@ sections:
         entities:
           - entity: sensor.hvac_leg_imbalance
           - entity: sensor.hvac_leg_imbalance_status
+      - type: entities
+        title: HVAC metric consistency
+        entities:
+          - entity: sensor.hvac_metric_consistency_score
+          - entity: sensor.hvac_metric_consistency_status
       - type: entities
         title: Mains balance
         entities:

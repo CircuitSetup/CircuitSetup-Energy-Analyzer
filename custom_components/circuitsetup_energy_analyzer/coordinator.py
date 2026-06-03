@@ -54,6 +54,10 @@ from .goals import (
     EnergyGoalSettings,
     evaluate_daily_energy_goal,
 )
+from .metric_consistency import (
+    MetricConsistencyResult,
+    evaluate_metric_consistency,
+)
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -221,6 +225,13 @@ class AnalyzerState:
     leg_imbalance_percent_by_circuit: dict[str, float] = field(default_factory=dict)
     leg_imbalance_status_by_circuit: dict[str, str] = field(default_factory=dict)
     leg_imbalance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    metric_consistency_score_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    metric_consistency_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    metric_consistency_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     balance_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -498,6 +509,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(leg_imbalance_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(leg_imbalance_alert)
+
+            self._observe_metric_consistency(config, sample)
 
             standby_alert = self._observe_standby(config, sample, now)
             if standby_alert is not None:
@@ -2821,6 +2834,32 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_metric_consistency(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+    ) -> None:
+        result = evaluate_metric_consistency(
+            real_power_w=getattr(sample, "real_power", None),
+            apparent_power_va=getattr(sample, "apparent_power", None),
+            power_factor=getattr(sample, "power_factor", None),
+            voltage_v=getattr(sample, "voltage", None),
+            current_a=getattr(sample, "current", None),
+            leg_a_voltage_v=getattr(sample, "leg_a_voltage", None),
+            leg_a_current_a=getattr(sample, "leg_a_current", None),
+            leg_b_voltage_v=getattr(sample, "leg_b_voltage", None),
+            leg_b_current_a=getattr(sample, "leg_b_current", None),
+        )
+        self.state.metric_consistency_score_by_circuit[config.circuit_id] = (
+            result.mismatch_score_percent
+        )
+        self.state.metric_consistency_status_by_circuit[config.circuit_id] = (
+            result.status
+        )
+        self.state.metric_consistency_evidence_by_circuit[config.circuit_id] = (
+            _metric_consistency_evidence_payload(result)
+        )
+
     def _observe_standby(
         self: Self,
         config: CircuitConfig,
@@ -3404,6 +3443,28 @@ def _leg_imbalance_evidence_payload(
         "right_voltage_v": result.right_voltage_v,
         "voltage_difference_v": result.voltage_difference_v,
         "dominant_leg": result.dominant_leg,
+    }
+
+
+def _metric_consistency_evidence_payload(
+    result: MetricConsistencyResult,
+) -> dict[str, Any]:
+    return {
+        "status": result.status,
+        "mismatch_score_percent": result.mismatch_score_percent,
+        "expected_apparent_power_va": result.expected_apparent_power_va,
+        "reported_apparent_power_va": result.reported_apparent_power_va,
+        "apparent_power_difference_percent": (
+            result.apparent_power_difference_percent
+        ),
+        "apparent_power_tolerance_percent": (
+            result.apparent_power_tolerance_percent
+        ),
+        "apparent_power_source": result.apparent_power_source,
+        "expected_power_factor": result.expected_power_factor,
+        "reported_power_factor": result.reported_power_factor,
+        "power_factor_difference": result.power_factor_difference,
+        "power_factor_tolerance": result.power_factor_tolerance,
     }
 
 

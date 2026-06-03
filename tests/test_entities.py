@@ -54,6 +54,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         learning_progress_value,
         leg_imbalance_status_value,
         leg_imbalance_value,
+        metric_consistency_score_value,
+        metric_consistency_status_value,
         monitored_coverage_value,
         monitored_power_value,
         nilm_signature_count_value,
@@ -165,6 +167,15 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
                 "right_real_power_w": 1200.0,
             }
         },
+        metric_consistency_score_by_circuit={"fridge": 50.0},
+        metric_consistency_status_by_circuit={"fridge": "apparent_power_mismatch"},
+        metric_consistency_evidence_by_circuit={
+            "fridge": {
+                "status": "apparent_power_mismatch",
+                "expected_apparent_power_va": 1200.0,
+                "reported_apparent_power_va": 600.0,
+            }
+        },
         balance_power_w_by_circuit={"fridge": 2300.0},
         monitored_power_w_by_circuit={"fridge": 2700.0},
         monitored_coverage_percent_by_circuit={"fridge": 54.0},
@@ -246,6 +257,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert capacity_status_value(state, "fridge") == "over_limit"
     assert leg_imbalance_value(state, "fridge") == 66.7
     assert leg_imbalance_status_value(state, "fridge") == "imbalanced"
+    assert metric_consistency_score_value(state, "fridge") == 50.0
+    assert (
+        metric_consistency_status_value(state, "fridge")
+        == "apparent_power_mismatch"
+    )
     assert balance_power_value(state, "fridge") == 2300.0
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
@@ -298,6 +314,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert capacity_status_value(state, "unknown") == "unconfigured"
     assert leg_imbalance_value(state, "unknown") == 0.0
     assert leg_imbalance_status_value(state, "unknown") == "not_dual_phase"
+    assert metric_consistency_score_value(state, "unknown") == 0.0
+    assert metric_consistency_status_value(state, "unknown") == "missing_metrics"
     assert balance_power_value(state, "unknown") == 0.0
     assert monitored_power_value(state, "unknown") == 0.0
     assert monitored_coverage_value(state, "unknown") == 0.0
@@ -394,6 +412,12 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "left_real_power_w": 2400.0,
         "right_real_power_w": 1200.0,
     }
+    metric_consistency_evidence = {
+        "status": "apparent_power_mismatch",
+        "mismatch_score_percent": 50.0,
+        "expected_apparent_power_va": 1200.0,
+        "reported_apparent_power_va": 600.0,
+    }
     balance_evidence = {
         "status": "tracking",
         "balance_power_w": 2300.0,
@@ -432,6 +456,9 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         demand_evidence_by_circuit={"fridge": demand_evidence},
         capacity_evidence_by_circuit={"fridge": capacity_evidence},
         leg_imbalance_evidence_by_circuit={"fridge": leg_imbalance_evidence},
+        metric_consistency_evidence_by_circuit={
+            "fridge": metric_consistency_evidence
+        },
         balance_evidence_by_circuit={"fridge": balance_evidence},
         utility_comparison_evidence_by_circuit={
             "fridge": utility_comparison_evidence
@@ -582,6 +609,18 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["leg_imbalance_status"],
     ).extra_state_attributes == leg_imbalance_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["metric_consistency_score"],
+    ).extra_state_attributes == metric_consistency_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["metric_consistency_status"],
+    ).extra_state_attributes == metric_consistency_evidence
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -743,6 +782,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Circuit Capacity Status",
         "Kitchen Fridge Leg Imbalance",
         "Kitchen Fridge Leg Imbalance Status",
+        "Kitchen Fridge Metric Consistency Score",
+        "Kitchen Fridge Metric Consistency Status",
         "Kitchen Fridge Balance Power",
         "Kitchen Fridge Monitored Power",
         "Kitchen Fridge Monitored Coverage",
@@ -796,6 +837,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_capacity_status",
         "entry-1_fridge_leg_imbalance",
         "entry-1_fridge_leg_imbalance_status",
+        "entry-1_fridge_metric_consistency_score",
+        "entry-1_fridge_metric_consistency_status",
         "entry-1_fridge_balance_power",
         "entry-1_fridge_monitored_power",
         "entry-1_fridge_monitored_coverage",
