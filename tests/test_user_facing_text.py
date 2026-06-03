@@ -26,6 +26,7 @@ EXPECTED_OPTIONS_LABELS = {
 
 EXPECTED_SERVICE_FIELD_NAMES = {
     "alert_id": "Alert ID",
+    "always_on_alert_w": "Always On Alert W",
     "circuit_id": "Circuit ID",
     "daily_spike_ratio": "Daily Spike Ratio",
     "demand_limit_w": "Demand Limit W",
@@ -37,8 +38,10 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
     "source_signature_id": "Source Signature ID",
+    "standby_threshold_w": "Standby Threshold W",
     "target_signature_id": "Target Signature ID",
     "window_days": "Window Days",
+    "window_hours": "Window Hours",
     "window_minutes": "Window Minutes",
 }
 

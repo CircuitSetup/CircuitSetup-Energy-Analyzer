@@ -54,6 +54,7 @@ from .power_quality import (
     select_power_quality_evidence,
 )
 from .profiles import get_profile_definition
+from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
 from .ux import (
@@ -148,6 +149,13 @@ class AnalyzerState:
     balance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    always_on_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    standby_threshold_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    standby_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    always_on_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    standby_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
 
 
 def process_events_into_state(
@@ -237,6 +245,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._standby_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -326,6 +338,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(demand_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(demand_alert)
+
+            standby_alert = self._observe_standby(config, sample, now)
+            if standby_alert is not None:
+                alerts.append(standby_alert)
+                self.store_data.alerts.append(standby_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(standby_alert)
 
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
@@ -474,6 +493,39 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
+    async def async_set_standby_settings(
+        self: Self,
+        circuit_id: str,
+        window_hours: Any = None,
+        standby_threshold_w: Any = None,
+        always_on_alert_w: Any = None,
+    ) -> None:
+        """Persist Always On and standby settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._standby_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "window_hours": _positive_int_value(
+                window_hours,
+                default=current.window_hours,
+            ),
+            "standby_threshold_w": _positive_float_value(
+                standby_threshold_w,
+                default=current.standby_threshold_w,
+            ),
+        }
+        alert_w = _optional_positive_float_value(
+            always_on_alert_w,
+            default=current.always_on_alert_w,
+        )
+        if alert_w is not None:
+            settings["always_on_alert_w"] = alert_w
+        self.store_data.standby_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
     async def async_start_maintenance(
         self: Self,
         circuit_id: str,
@@ -592,6 +644,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.state.demand_limit_usage_by_circuit.get(circuit_id, 0.0)
             ),
             "demand_evidence": self.state.demand_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "always_on_power_w": self.state.always_on_power_w_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "standby_threshold_w": self.state.standby_threshold_w_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "standby_status": self.state.standby_status_by_circuit.get(
+                circuit_id,
+                "learning",
+            ),
+            "always_on_limit_usage_percent": (
+                self.state.always_on_limit_usage_by_circuit.get(circuit_id, 0.0)
+            ),
+            "standby_evidence": self.state.standby_evidence_by_circuit.get(
                 circuit_id,
                 {},
             ),
@@ -1197,6 +1268,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._demand_alert_policies[key] = policy
         return policy
 
+    def _standby_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._standby_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._standby_alert_policies[key] = policy
+        return policy
+
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
         alert = self._alert_for_id(alert_id)
         if alert is None:
@@ -1261,6 +1351,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.events = retained_events
         self._prune_energy_usage(now)
         self._prune_demand(now)
+        self._prune_standby(now)
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -1290,6 +1381,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     for peak in daily_peaks
                     if isinstance(peak, dict)
                     and str(peak.get("date", "")) >= cutoff
+                ]
+
+    def _prune_standby(self: Self, now: datetime) -> None:
+        for circuit_id, history in self.store_data.standby_by_circuit.items():
+            retention_mode = self._retention_mode_for_circuit(circuit_id)
+            cutoff = now - RETENTION_WINDOWS[retention_mode]
+            samples = history.get("samples", [])
+            if isinstance(samples, list):
+                history["samples"] = [
+                    sample
+                    for sample in samples
+                    if _sample_timestamp_is_at_or_after(sample, cutoff)
                 ]
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
@@ -1514,6 +1617,70 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_standby(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        if (
+            config.power_flow is PowerFlowMode.GENERATION
+            or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
+        ):
+            self._clear_standby_state(config.circuit_id)
+            return None
+
+        power_w = _demand_power_w(sample)
+        settings = self._standby_settings_for_config(config, config.circuit_id)
+        result = record_standby_sample(
+            self.store_data.standby_by_circuit.setdefault(config.circuit_id, {}),
+            circuit_id=config.circuit_id,
+            timestamp=now,
+            real_power_w=power_w,
+            settings=settings,
+        )
+        if result is None:
+            return None
+
+        self.state.always_on_power_w_by_circuit[config.circuit_id] = (
+            result.always_on_power_w
+        )
+        self.state.standby_threshold_w_by_circuit[config.circuit_id] = (
+            result.standby_threshold_w
+        )
+        self.state.standby_status_by_circuit[config.circuit_id] = result.status
+        self.state.always_on_limit_usage_by_circuit[config.circuit_id] = (
+            result.always_on_limit_usage
+        )
+        self.state.standby_evidence_by_circuit[config.circuit_id] = (
+            _standby_evidence_payload(result)
+        )
+
+        if result.limit_exceeded is None:
+            return None
+
+        self._mark_store_dirty()
+        evidence = result.limit_exceeded
+        policy = self._standby_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            evidence.always_on_power_w / evidence.always_on_alert_w
+            if evidence.always_on_alert_w > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="always_on_power",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=evidence.always_on_power_w,
+                baseline_value=evidence.always_on_alert_w,
+                message=_standby_limit_message(config, evidence),
+                features=evidence.features,
+            )
+        )
+
     def _energy_usage_settings_for_config(
         self: Self,
         config: CircuitConfig | None,
@@ -1561,6 +1728,37 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
+    def _standby_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> StandbySettings:
+        overrides = self.store_data.standby_settings_by_circuit.get(circuit_id, {})
+        default_window_hours = (
+            config.standby_window_hours if config is not None else 24
+        )
+        default_threshold_w = config.standby_threshold_w if config is not None else 8.0
+        default_alert_w = config.always_on_alert_w if config is not None else None
+        default_min_samples = config.standby_min_samples if config is not None else 24
+        return StandbySettings(
+            window_hours=_positive_int_value(
+                overrides.get("window_hours"),
+                default=default_window_hours,
+            ),
+            standby_threshold_w=_positive_float_value(
+                overrides.get("standby_threshold_w"),
+                default=default_threshold_w,
+            ),
+            always_on_alert_w=_optional_positive_float_value(
+                overrides.get("always_on_alert_w"),
+                default=default_alert_w,
+            ),
+            min_samples=_positive_int_value(
+                overrides.get("min_samples"),
+                default=default_min_samples,
+            ),
+        )
+
     def _real_power_fallback_evidence(
         self: Self,
         scores: Iterable[Any],
@@ -1590,6 +1788,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.reactive_power_drift_by_circuit.pop(circuit_id, None)
         self.state.apparent_power_drift_by_circuit.pop(circuit_id, None)
         self.state.power_factor_drift_by_circuit.pop(circuit_id, None)
+
+    def _clear_standby_state(self: Self, circuit_id: str) -> None:
+        self.state.always_on_power_w_by_circuit.pop(circuit_id, None)
+        self.state.standby_threshold_w_by_circuit.pop(circuit_id, None)
+        self.state.standby_status_by_circuit.pop(circuit_id, None)
+        self.state.always_on_limit_usage_by_circuit.pop(circuit_id, None)
+        self.state.standby_evidence_by_circuit.pop(circuit_id, None)
 
     def _update_power_quality_state(
         self: Self,
@@ -1734,12 +1939,53 @@ def _demand_evidence_payload(result: Any) -> dict[str, Any]:
     }
 
 
+def _standby_limit_message(
+    config: CircuitConfig,
+    evidence: StandbyLimitEvidence,
+) -> str:
+    return (
+        f"Possible issue: {config.name} Always On is "
+        f"{_format_w(evidence.always_on_power_w)} W over the last "
+        f"{evidence.window_hours} hours, above the configured "
+        f"{_format_w(evidence.always_on_alert_w)} W limit."
+    )
+
+
+def _standby_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "always_on_power_w": result.always_on_power_w,
+        "current_power_w": result.current_power_w,
+        "standby_threshold_w": result.standby_threshold_w,
+        "sample_count": result.sample_count,
+        "window_hours": result.window_hours,
+        "always_on_alert_w": result.always_on_alert_w,
+        "always_on_limit_usage_percent": result.always_on_limit_usage,
+        "status": result.status,
+    }
+
+
 def _format_kwh(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def _format_w(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
+    if not isinstance(sample, dict):
+        return False
+    sample_time = _datetime_or_none(sample.get("timestamp"))
+    return sample_time is not None and sample_time >= cutoff
 
 
 def _alert_feature(alert: AlertEvidence) -> str:
@@ -2013,6 +2259,28 @@ def _circuit_config_from_raw(
             raw_circuit,
             "demand_limit_w",
             "demand_limit",
+        ),
+        standby_window_hours=_positive_int_from_raw(
+            raw_circuit,
+            "standby_window_hours",
+            "standby_window",
+            default=24,
+        ),
+        standby_threshold_w=_positive_float_from_raw(
+            raw_circuit,
+            "standby_threshold_w",
+            "standby_threshold",
+            default=8.0,
+        ),
+        always_on_alert_w=_optional_positive_float_from_raw(
+            raw_circuit,
+            "always_on_alert_w",
+            "always_on_limit_w",
+        ),
+        standby_min_samples=_positive_int_from_raw(
+            raw_circuit,
+            "standby_min_samples",
+            default=24,
         ),
     )
 

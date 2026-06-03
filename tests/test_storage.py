@@ -52,6 +52,20 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     demand_settings_by_circuit = {
         "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
     }
+    standby_settings_by_circuit = {
+        "office": {
+            "window_hours": 24,
+            "standby_threshold_w": 8.0,
+            "always_on_alert_w": 25.0,
+        }
+    }
+    standby_by_circuit = {
+        "office": {
+            "samples": [
+                {"timestamp": now.isoformat(), "real_power_w": 6.0},
+            ],
+        }
+    }
     demand_by_circuit = {
         "hvac": {
             "samples": [
@@ -79,6 +93,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         energy_usage_by_circuit=energy_usage_by_circuit,
         demand_settings_by_circuit=demand_settings_by_circuit,
         demand_by_circuit=demand_by_circuit,
+        standby_settings_by_circuit=standby_settings_by_circuit,
+        standby_by_circuit=standby_by_circuit,
     )
 
     pruned = prune_events(data, RetentionMode.LIGHTWEIGHT, now)
@@ -97,6 +113,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
     assert pruned.demand_settings_by_circuit is data.demand_settings_by_circuit
     assert pruned.demand_by_circuit is data.demand_by_circuit
+    assert pruned.standby_settings_by_circuit is data.standby_settings_by_circuit
+    assert pruned.standby_by_circuit is data.standby_by_circuit
     assert data.events == [old, recent]
 
 
@@ -203,6 +221,18 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         demand_settings_by_circuit={
             "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
         },
+        standby_settings_by_circuit={
+            "office": {
+                "window_hours": 24,
+                "standby_threshold_w": 8.0,
+                "always_on_alert_w": 25.0,
+            }
+        },
+        standby_by_circuit={
+            "office": {
+                "samples": [{"timestamp": now.isoformat(), "real_power_w": 6.0}],
+            }
+        },
         demand_by_circuit={
             "hvac": {
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
@@ -243,6 +273,14 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     }
     assert restored.demand_by_circuit["hvac"]["daily_peaks"] == [
         {"date": "2026-06-02", "peak_demand_w": 3200.0}
+    ]
+    assert restored.standby_settings_by_circuit["office"] == {
+        "window_hours": 24,
+        "standby_threshold_w": 8.0,
+        "always_on_alert_w": 25.0,
+    }
+    assert restored.standby_by_circuit["office"]["samples"] == [
+        {"timestamp": now.isoformat(), "real_power_w": 6.0}
     ]
     assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [

@@ -2465,6 +2465,128 @@ async def test_runtime_calculates_mains_balance_from_monitored_circuits() -> Non
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 8, 0, tzinfo=UTC)
+    holder = {"time": now, "power": 46.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.office_power"
+            return SimpleNamespace(
+                state=str(holder["power"]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "single_phase",
+                    "appliance_profile": "mixed",
+                    "standby_threshold_w": 8.0,
+                    "always_on_alert_w": 25.0,
+                    "standby_min_samples": 6,
+                    "sensors": [
+                        {"entity_id": "sensor.office_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            standby_by_circuit={
+                "office": {
+                    "samples": [
+                        {
+                            "timestamp": f"2026-06-03T{hour:02d}:00:00+00:00",
+                            "real_power_w": 45.0,
+                        }
+                        for hour in range(8)
+                    ]
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "always_on_power"
+    assert "Office Always On is 45 W" in alert.message
+    assert "configured 25 W limit" in alert.message
+    assert coordinator.state.always_on_power_w_by_circuit["office"] == 45.0
+    assert coordinator.state.standby_status_by_circuit["office"] == "on"
+    assert coordinator.state.always_on_limit_usage_by_circuit["office"] == 180.0
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_standby_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_standby_settings(
+        "office",
+        window_hours=48,
+        standby_threshold_w=10.0,
+        always_on_alert_w=30.0,
+    )
+
+    assert saved
+    assert coordinator.store_data.standby_settings_by_circuit["office"] == {
+        "window_hours": 48,
+        "standby_threshold_w": 10.0,
+        "always_on_alert_w": 30.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

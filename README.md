@@ -76,6 +76,20 @@ solar configuration, or multiplier problems.
 Generation circuits, such as solar inverter channels, are excluded from the
 monitored load sum so they do not look like household consumption.
 
+## Always On And Standby Tracking
+
+For circuits with real-power sensors, the analyzer estimates an Always On load
+from the low-power portion of the recent sample window. The default window is
+24 hours, with an 8 W standby threshold used to label the latest state as off,
+standby, or on.
+
+Always On diagnostics are exposed for every configured load circuit. Alerts are
+optional: set an `always_on_alert_w` limit with the `set_standby_settings`
+service when a circuit has a known acceptable standby load. If the estimated
+Always On load repeatedly exceeds that configured limit, the notification
+reports the observed watts, window, and configured limit as possible-issue
+evidence.
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
@@ -113,5 +127,9 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`
 - `sensor.<circuit>_balance_status`
+- `sensor.<circuit>_always_on_power`
+- `sensor.<circuit>_standby_threshold`
+- `sensor.<circuit>_standby_status`
+- `sensor.<circuit>_always_on_limit_usage`
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator, HVAC, and Mains NILM cards.

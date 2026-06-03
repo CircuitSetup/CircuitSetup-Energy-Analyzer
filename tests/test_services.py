@@ -253,6 +253,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_SET_CIRCUIT_SENSITIVITY,
         SERVICE_SET_DEMAND_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
+        SERVICE_SET_STANDBY_SETTINGS,
         SERVICE_START_MAINTENANCE,
         async_setup_services,
     )
@@ -304,6 +305,25 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 (
                     "async_set_demand_settings",
                     (circuit_id, window_minutes, demand_limit_w),
+                )
+            )
+
+        async def async_set_standby_settings(
+            self,
+            circuit_id: str,
+            window_hours: object = None,
+            standby_threshold_w: object = None,
+            always_on_alert_w: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_standby_settings",
+                    (
+                        circuit_id,
+                        window_hours,
+                        standby_threshold_w,
+                        always_on_alert_w,
+                    ),
                 )
             )
 
@@ -385,6 +405,16 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_STANDBY_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "window_hours": 24,
+                "standby_threshold_w": 8.0,
+                "always_on_alert_w": 25.0,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
         SimpleNamespace(
             data={
@@ -421,6 +451,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_circuit_sensitivity", ("fridge", "quiet")),
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
+        ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),
         ("async_mark_alert_expected", ("alert-1",)),

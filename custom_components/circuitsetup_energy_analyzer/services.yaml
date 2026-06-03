@@ -181,6 +181,47 @@ set_demand_settings:
           min: 1
           max: 100000
           mode: box
+set_standby_settings:
+  name: Set standby settings
+  description: Set Always On and standby tracking for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    window_hours:
+      name: Window Hours
+      description: Rolling Always On analysis window in hours for the circuit.
+      required: false
+      example: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          mode: box
+    standby_threshold_w:
+      name: Standby Threshold W
+      description: Power at or below this wattage is treated as standby.
+      required: false
+      example: 8
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    always_on_alert_w:
+      name: Always On Alert W
+      description: Optional Always On wattage limit for possible-issue alerts.
+      required: false
+      example: 25
+      selector:
+        number:
+          min: 1
+          max: 100000
+          mode: box
 start_maintenance:
   name: Start maintenance
   description: Pause appliance alert notifications while a circuit is being serviced.

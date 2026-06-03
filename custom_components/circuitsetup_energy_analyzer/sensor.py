@@ -278,6 +278,34 @@ def balance_status_value(state: Any, circuit_id: str) -> str:
     return str(status or "missing_mains")
 
 
+def always_on_power_value(state: Any, circuit_id: str) -> float:
+    """Return estimated Always On power for a circuit."""
+    return float(
+        getattr(state, "always_on_power_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def standby_threshold_value(state: Any, circuit_id: str) -> float:
+    """Return the configured standby threshold in watts."""
+    return float(
+        getattr(state, "standby_threshold_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def standby_status_value(state: Any, circuit_id: str) -> str:
+    """Return the current standby tracker status."""
+    return str(
+        getattr(state, "standby_status_by_circuit", {}).get(circuit_id, "learning")
+    )
+
+
+def always_on_limit_usage_value(state: Any, circuit_id: str) -> float:
+    """Return estimated Always On power as a percent of the configured limit."""
+    return float(
+        getattr(state, "always_on_limit_usage_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
 def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
@@ -482,6 +510,36 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Balance Status",
         value_fn=balance_status_value,
         attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="always_on_power",
+        name_suffix="Always On Power",
+        value_fn=always_on_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="standby_threshold",
+        name_suffix="Standby Threshold",
+        value_fn=standby_threshold_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="standby_status",
+        name_suffix="Standby Status",
+        value_fn=standby_status_value,
+        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="always_on_limit_usage",
+        name_suffix="Always On Limit Usage",
+        value_fn=always_on_limit_usage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
     ),
 )
 

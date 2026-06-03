@@ -16,6 +16,7 @@ SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_DEMAND_SETTINGS = "set_demand_settings"
+SERVICE_SET_STANDBY_SETTINGS = "set_standby_settings"
 SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
@@ -33,6 +34,9 @@ ATTR_WINDOW_DAYS = "window_days"
 ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
 ATTR_WINDOW_MINUTES = "window_minutes"
 ATTR_DEMAND_LIMIT_W = "demand_limit_w"
+ATTR_WINDOW_HOURS = "window_hours"
+ATTR_STANDBY_THRESHOLD_W = "standby_threshold_w"
+ATTR_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 ATTR_NOTE = "note"
 ATTR_RELEARN = "relearn"
 ATTR_RELEARN_ON_END = "relearn_on_end"
@@ -83,6 +87,10 @@ DEMAND_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_WINDOW_MINUTES, ATTR_DEMAND_LIMIT_W),
 )
+STANDBY_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_WINDOW_HOURS, ATTR_STANDBY_THRESHOLD_W, ATTR_ALWAYS_ON_ALERT_W),
+)
 MAINTENANCE_START_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_NOTE, ATTR_DURATION, ATTR_RELEARN_ON_END),
@@ -118,6 +126,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_DEMAND_SETTINGS: DEMAND_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_STANDBY_SETTINGS: STANDBY_SETTINGS_SERVICE_SCHEMA,
     SERVICE_START_MAINTENANCE: MAINTENANCE_START_SERVICE_SCHEMA,
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
@@ -247,6 +256,15 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_WINDOW_MINUTES),
                 data.get(ATTR_DEMAND_LIMIT_W),
+            )
+        elif service == SERVICE_SET_STANDBY_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_standby_settings",
+                circuit_id,
+                data.get(ATTR_WINDOW_HOURS),
+                data.get(ATTR_STANDBY_THRESHOLD_W),
+                data.get(ATTR_ALWAYS_ON_ALERT_W),
             )
         elif service == SERVICE_START_MAINTENANCE:
             await _call_if_present(

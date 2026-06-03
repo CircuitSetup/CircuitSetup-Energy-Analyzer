@@ -117,6 +117,13 @@ sections:
           - entity: sensor.refrigerator_energy_usage_share
           - entity: sensor.refrigerator_energy_usage_status
       - type: entities
+        title: Refrigerator standby
+        entities:
+          - entity: sensor.refrigerator_always_on_power
+          - entity: sensor.refrigerator_standby_threshold
+          - entity: sensor.refrigerator_standby_status
+          - entity: sensor.refrigerator_always_on_limit_usage
+      - type: entities
         title: HVAC demand
         entities:
           - entity: sensor.hvac_current_demand

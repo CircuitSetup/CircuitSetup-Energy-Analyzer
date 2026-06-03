@@ -115,6 +115,18 @@
       },
       "balance_status": {
         "name": "Balance status"
+      },
+      "always_on_power": {
+        "name": "Always On power"
+      },
+      "standby_threshold": {
+        "name": "Standby threshold"
+      },
+      "standby_status": {
+        "name": "Standby status"
+      },
+      "always_on_limit_usage": {
+        "name": "Always On limit usage"
       }
     },
     "binary_sensor": {
