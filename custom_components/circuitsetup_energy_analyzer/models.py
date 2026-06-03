@@ -109,6 +109,8 @@ class CircuitConfig:
     power_flow: PowerFlowMode = PowerFlowMode.LOAD
     energy_usage_window_days: int = 7
     daily_energy_spike_ratio: float = 0.25
+    daily_energy_goal_kwh: float | None = None
+    energy_goal_alert_ratio: float = 1.0
     billing_cycle_start_day: int = 1
     billing_cycle_budget_kwh: float | None = None
     billing_cycle_budget_alert_ratio: float = 1.0

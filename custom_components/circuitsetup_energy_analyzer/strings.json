@@ -92,6 +92,12 @@
       "energy_usage_status": {
         "name": "Energy usage status"
       },
+      "energy_goal_usage": {
+        "name": "Energy goal usage"
+      },
+      "energy_goal_status": {
+        "name": "Energy goal status"
+      },
       "current_demand": {
         "name": "Current demand"
       },

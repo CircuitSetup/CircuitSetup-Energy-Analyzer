@@ -43,6 +43,9 @@ class FeatureStoreData:
     energy_usage_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    energy_goal_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     energy_usage_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     billing_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
@@ -171,6 +174,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "energy_usage_settings_by_circuit": _dict_of_dicts(
             data.energy_usage_settings_by_circuit
         ),
+        "energy_goal_settings_by_circuit": _dict_of_dicts(
+            data.energy_goal_settings_by_circuit
+        ),
         "energy_usage_by_circuit": _dict_of_dicts(data.energy_usage_by_circuit),
         "billing_settings_by_circuit": _dict_of_dicts(
             data.billing_settings_by_circuit
@@ -217,6 +223,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         energy_usage_settings_by_circuit=_dict_of_dicts(
             raw.get("energy_usage_settings_by_circuit", {}),
         ),
+        energy_goal_settings_by_circuit=_dict_of_dicts(
+            raw.get("energy_goal_settings_by_circuit", {}),
+        ),
         energy_usage_by_circuit=_dict_of_dicts(
             raw.get("energy_usage_by_circuit", {}),
         ),
@@ -255,6 +264,7 @@ def prune_events(
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
         energy_usage_settings_by_circuit=data.energy_usage_settings_by_circuit,
+        energy_goal_settings_by_circuit=data.energy_goal_settings_by_circuit,
         energy_usage_by_circuit=data.energy_usage_by_circuit,
         billing_settings_by_circuit=data.billing_settings_by_circuit,
         billing_by_circuit=data.billing_by_circuit,

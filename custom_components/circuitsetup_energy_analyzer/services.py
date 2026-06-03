@@ -16,6 +16,7 @@ SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
+SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
 SERVICE_SET_BILLING_CYCLE_SETTINGS = "set_billing_cycle_settings"
 SERVICE_SET_COST_SETTINGS = "set_cost_settings"
 SERVICE_SET_DEMAND_SETTINGS = "set_demand_settings"
@@ -35,6 +36,8 @@ ATTR_LABEL = "label"
 ATTR_PRESET = "preset"
 ATTR_WINDOW_DAYS = "window_days"
 ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
+ATTR_DAILY_GOAL_KWH = "daily_goal_kwh"
+ATTR_GOAL_ALERT_RATIO = "goal_alert_ratio"
 ATTR_CYCLE_START_DAY = "cycle_start_day"
 ATTR_BUDGET_KWH = "budget_kwh"
 ATTR_BUDGET_ALERT_RATIO = "budget_alert_ratio"
@@ -95,6 +98,10 @@ ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_WINDOW_DAYS, ATTR_DAILY_SPIKE_RATIO),
 )
+ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_DAILY_GOAL_KWH, ATTR_GOAL_ALERT_RATIO),
+)
 BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_CYCLE_START_DAY, ATTR_BUDGET_KWH, ATTR_BUDGET_ALERT_RATIO),
@@ -154,6 +161,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_BILLING_CYCLE_SETTINGS: BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_COST_SETTINGS: COST_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_DEMAND_SETTINGS: DEMAND_SETTINGS_SERVICE_SCHEMA,
@@ -281,6 +289,14 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_WINDOW_DAYS),
                 data.get(ATTR_DAILY_SPIKE_RATIO),
+            )
+        elif service == SERVICE_SET_ENERGY_GOAL_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_energy_goal_settings",
+                circuit_id,
+                data.get(ATTR_DAILY_GOAL_KWH),
+                data.get(ATTR_GOAL_ALERT_RATIO),
             )
         elif service == SERVICE_SET_DEMAND_SETTINGS:
             await _call_if_present(

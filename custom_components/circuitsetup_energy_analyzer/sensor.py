@@ -221,6 +221,23 @@ def energy_usage_status_value(state: Any, circuit_id: str) -> str:
     return "learning"
 
 
+def energy_goal_usage_value(state: Any, circuit_id: str) -> float:
+    """Return today's usage as a percent of the configured daily goal."""
+    return float(
+        getattr(state, "energy_goal_usage_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def energy_goal_status_value(state: Any, circuit_id: str) -> str:
+    """Return the daily energy goal tracker status."""
+    return str(
+        getattr(state, "energy_goal_status_by_circuit", {}).get(
+            circuit_id,
+            "unconfigured",
+        )
+    )
+
+
 def current_demand_value(state: Any, circuit_id: str) -> float:
     """Return the current rolling demand average in watts."""
     return float(
@@ -519,6 +536,20 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Energy Usage Status",
         value_fn=energy_usage_status_value,
         attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="energy_goal_usage",
+        name_suffix="Energy Goal Usage",
+        value_fn=energy_goal_usage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("energy_goal_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="energy_goal_status",
+        name_suffix="Energy Goal Status",
+        value_fn=energy_goal_status_value,
+        attributes_fn=_mapping_attributes("energy_goal_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="current_demand",

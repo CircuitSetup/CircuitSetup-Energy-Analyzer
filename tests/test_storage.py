@@ -49,6 +49,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     energy_usage_settings_by_circuit = {
         "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
     }
+    energy_goal_settings_by_circuit = {
+        "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
+    }
     demand_settings_by_circuit = {
         "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
     }
@@ -90,6 +93,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         maintenance_by_circuit=maintenance_by_circuit,
         alert_feedback=alert_feedback,
         energy_usage_settings_by_circuit=energy_usage_settings_by_circuit,
+        energy_goal_settings_by_circuit=energy_goal_settings_by_circuit,
         energy_usage_by_circuit=energy_usage_by_circuit,
         demand_settings_by_circuit=demand_settings_by_circuit,
         demand_by_circuit=demand_by_circuit,
@@ -109,6 +113,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert (
         pruned.energy_usage_settings_by_circuit
         is data.energy_usage_settings_by_circuit
+    )
+    assert (
+        pruned.energy_goal_settings_by_circuit
+        is data.energy_goal_settings_by_circuit
     )
     assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
     assert pruned.demand_settings_by_circuit is data.demand_settings_by_circuit
@@ -218,6 +226,9 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         energy_usage_settings_by_circuit={
             "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
         },
+        energy_goal_settings_by_circuit={
+            "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
+        },
         billing_settings_by_circuit={
             "fridge": {
                 "cycle_start_day": 15,
@@ -302,6 +313,10 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.energy_usage_settings_by_circuit["fridge"] == {
         "window_days": 14,
         "daily_spike_ratio": 0.2,
+    }
+    assert restored.energy_goal_settings_by_circuit["fridge"] == {
+        "daily_goal_kwh": 12.0,
+        "goal_alert_ratio": 1.0,
     }
     assert restored.billing_settings_by_circuit["fridge"] == {
         "cycle_start_day": 15,

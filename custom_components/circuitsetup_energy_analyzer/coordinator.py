@@ -32,6 +32,11 @@ from .cost import CostSettings, record_cost_sample
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
+from .goals import (
+    EnergyGoalEvidence,
+    EnergyGoalSettings,
+    evaluate_daily_energy_goal,
+)
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -139,6 +144,11 @@ class AnalyzerState:
     daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
     energy_usage_share_by_circuit: dict[str, float] = field(default_factory=dict)
     energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    energy_goal_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    energy_goal_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    energy_goal_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -267,6 +277,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._goal_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._billing_alert_policies: dict[
             tuple[str, str],
             ConservativeAlertPolicy,
@@ -359,6 +370,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(usage_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(usage_alert)
+
+            goal_alert = self._observe_energy_goal(config, now)
+            if goal_alert is not None:
+                alerts.append(goal_alert)
+                self.store_data.alerts.append(goal_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(goal_alert)
 
             billing_alert = self._observe_billing_cycle(config, sample, now)
             if billing_alert is not None:
@@ -498,6 +516,38 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.energy_usage_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_energy_goal_settings(
+        self: Self,
+        circuit_id: str,
+        daily_goal_kwh: Any = None,
+        goal_alert_ratio: Any = None,
+    ) -> None:
+        """Persist daily energy goal settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._energy_goal_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "goal_alert_ratio": _positive_float_value(
+                goal_alert_ratio,
+                default=current.goal_alert_ratio,
+            ),
+        }
+        if daily_goal_kwh is None:
+            if current.daily_goal_kwh is not None:
+                settings["daily_goal_kwh"] = current.daily_goal_kwh
+        else:
+            goal_kwh = _optional_positive_float_value(
+                daily_goal_kwh,
+                default=None,
+            )
+            settings["daily_goal_kwh"] = goal_kwh if goal_kwh is not None else 0.0
+        self.store_data.energy_goal_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_energy_goal_state_for_circuit(circuit_id, now)
         self._refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
@@ -750,6 +800,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 0.0,
             ),
             "energy_usage_evidence": self.state.energy_usage_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "energy_goal_usage_percent": (
+                self.state.energy_goal_usage_by_circuit.get(circuit_id, 0.0)
+            ),
+            "energy_goal_status": self.state.energy_goal_status_by_circuit.get(
+                circuit_id,
+                "unconfigured",
+            ),
+            "energy_goal_evidence": self.state.energy_goal_evidence_by_circuit.get(
                 circuit_id,
                 {},
             ),
@@ -1405,6 +1466,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._usage_alert_policies[key] = policy
         return policy
 
+    def _goal_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._goal_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._goal_alert_policies[key] = policy
+        return policy
+
     def _billing_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
@@ -1735,6 +1815,80 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_energy_goal(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        usage_evidence = self.state.energy_usage_evidence_by_circuit.get(
+            config.circuit_id,
+            {},
+        )
+        if not isinstance(usage_evidence, dict):
+            return None
+        if usage_evidence.get("date") != now.date().isoformat():
+            return None
+
+        result = self._refresh_energy_goal_state_for_circuit(config.circuit_id, now)
+        if result.goal_exceeded is None:
+            return None
+
+        evidence = result.goal_exceeded
+        policy = self._goal_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            evidence.daily_usage_kwh / evidence.alert_threshold_kwh
+            if evidence.alert_threshold_kwh > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="daily_energy_goal",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=evidence.daily_usage_kwh,
+                baseline_value=evidence.daily_goal_kwh,
+                message=_energy_goal_message(config, evidence),
+                features=evidence.features,
+            )
+        )
+
+    def _refresh_energy_goal_state_for_circuit(
+        self: Self,
+        circuit_id: str,
+        now: datetime,
+    ) -> Any:
+        usage_evidence = self.state.energy_usage_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        date = (
+            str(usage_evidence.get("date"))
+            if isinstance(usage_evidence, dict) and usage_evidence.get("date")
+            else now.date().isoformat()
+        )
+        result = evaluate_daily_energy_goal(
+            circuit_id=circuit_id,
+            date=date,
+            daily_usage_kwh=self.state.daily_energy_usage_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            settings=self._energy_goal_settings_for_config(
+                self._config_for_circuit(circuit_id),
+                circuit_id,
+            ),
+        )
+        self.state.energy_goal_usage_by_circuit[circuit_id] = (
+            result.goal_usage_percent
+        )
+        self.state.energy_goal_status_by_circuit[circuit_id] = result.status
+        self.state.energy_goal_evidence_by_circuit[circuit_id] = (
+            _energy_goal_evidence_payload(result)
+        )
+        return result
+
     def _observe_billing_cycle(
         self: Self,
         config: CircuitConfig,
@@ -1968,6 +2122,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             daily_spike_ratio=_positive_float_value(
                 overrides.get("daily_spike_ratio"),
                 default=default_spike_ratio,
+            ),
+        )
+
+    def _energy_goal_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> EnergyGoalSettings:
+        overrides = self.store_data.energy_goal_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_goal_kwh = (
+            config.daily_energy_goal_kwh if config is not None else None
+        )
+        default_alert_ratio = (
+            config.energy_goal_alert_ratio if config is not None else 1.0
+        )
+        if "daily_goal_kwh" in overrides:
+            goal_kwh = _optional_positive_float_value(
+                overrides.get("daily_goal_kwh"),
+                default=None,
+            )
+        else:
+            goal_kwh = default_goal_kwh
+        return EnergyGoalSettings(
+            daily_goal_kwh=goal_kwh,
+            goal_alert_ratio=_positive_float_value(
+                overrides.get("goal_alert_ratio"),
+                default=default_alert_ratio,
             ),
         )
 
@@ -2244,6 +2428,30 @@ def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
                 else "learning"
             )
         ),
+    }
+
+
+def _energy_goal_message(
+    config: CircuitConfig,
+    evidence: EnergyGoalEvidence,
+) -> str:
+    return (
+        f"Energy goal notice: {config.name} used "
+        f"{_format_kwh(evidence.daily_usage_kwh)} kWh today, which is "
+        f"{evidence.goal_usage_percent}% of its configured "
+        f"{_format_kwh(evidence.daily_goal_kwh)} kWh daily goal."
+    )
+
+
+def _energy_goal_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "date": result.date,
+        "daily_usage_kwh": result.daily_usage_kwh,
+        "daily_goal_kwh": result.daily_goal_kwh,
+        "goal_usage_percent": result.goal_usage_percent,
+        "alert_threshold_kwh": result.alert_threshold_kwh,
+        "goal_alert_ratio": result.goal_alert_ratio,
+        "status": result.status,
     }
 
 
@@ -2631,6 +2839,17 @@ def _circuit_config_from_raw(
             "daily_energy_spike_ratio",
             "usage_spike_ratio",
             default=0.25,
+        ),
+        daily_energy_goal_kwh=_optional_positive_float_from_raw(
+            raw_circuit,
+            "daily_energy_goal_kwh",
+            "daily_goal_kwh",
+        ),
+        energy_goal_alert_ratio=_positive_float_from_raw(
+            raw_circuit,
+            "energy_goal_alert_ratio",
+            "goal_alert_ratio",
+            default=1.0,
         ),
         billing_cycle_start_day=_positive_int_from_raw(
             raw_circuit,

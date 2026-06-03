@@ -161,6 +161,39 @@ set_energy_usage_settings:
           max: 1
           step: 0.01
           mode: box
+set_energy_goal_settings:
+  name: Set energy goal settings
+  description: Set daily kWh goal tracking for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    daily_goal_kwh:
+      name: Daily Goal kWh
+      description: Daily kWh target for this circuit; use 0 to clear it.
+      required: false
+      example: 12
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 0.1
+          mode: box
+    goal_alert_ratio:
+      name: Goal Alert Ratio
+      description: Goal share that can trigger daily energy goal notices.
+      required: false
+      example: 1.0
+      selector:
+        number:
+          min: 0.01
+          max: 2
+          step: 0.01
+          mode: box
 set_demand_settings:
   name: Set demand settings
   description: Set rolling demand tracking for one configured circuit.

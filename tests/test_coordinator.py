@@ -1892,6 +1892,12 @@ async def test_export_diagnostics_includes_ux_state() -> None:
     coordinator.state.nilm_review_by_circuit["fridge"] = [
         {"signature_id": "on-1", "review_state": "new"}
     ]
+    coordinator.state.energy_goal_usage_by_circuit["fridge"] = 102.5
+    coordinator.state.energy_goal_status_by_circuit["fridge"] = "over_goal"
+    coordinator.state.energy_goal_evidence_by_circuit["fridge"] = {
+        "status": "over_goal",
+        "daily_goal_kwh": 12.0,
+    }
 
     await coordinator.async_export_diagnostics("fridge")
 
@@ -1914,6 +1920,12 @@ async def test_export_diagnostics_includes_ux_state() -> None:
     assert coordinator.last_exported_diagnostics["nilm_review"] == [
         {"signature_id": "on-1", "review_state": "new"}
     ]
+    assert coordinator.last_exported_diagnostics["energy_goal_usage_percent"] == 102.5
+    assert coordinator.last_exported_diagnostics["energy_goal_status"] == "over_goal"
+    assert coordinator.last_exported_diagnostics["energy_goal_evidence"] == {
+        "status": "over_goal",
+        "daily_goal_kwh": 12.0,
+    }
 
 
 @pytest.mark.asyncio
@@ -2280,6 +2292,132 @@ async def test_runtime_persists_energy_usage_settings() -> None:
     assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
         "window_days": 14,
         "daily_spike_ratio": 0.2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    holder = {"time": now, "energy": 112.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_energy"
+            return SimpleNamespace(
+                state=str(holder["energy"]),
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            energy_goal_settings_by_circuit={
+                "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
+            },
+            energy_usage_by_circuit={
+                "fridge": {
+                    "last_energy_kwh": 100.0,
+                    "last_sample_at": "2026-06-03T00:00:00+00:00",
+                    "days": [],
+                }
+            },
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        holder["energy"] += 0.1
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "daily_energy_goal"
+    assert "daily goal" in alert.message
+    assert alert.observed_value == 12.3
+    assert alert.baseline_value == 12.0
+    assert coordinator.state.energy_goal_usage_by_circuit["fridge"] == 102.5
+    assert coordinator.state.energy_goal_status_by_circuit["fridge"] == "over_goal"
+    assert coordinator.state.energy_goal_evidence_by_circuit["fridge"] == {
+        "date": "2026-06-03",
+        "daily_usage_kwh": 12.3,
+        "daily_goal_kwh": 12.0,
+        "goal_usage_percent": 102.5,
+        "alert_threshold_kwh": 12.0,
+        "goal_alert_ratio": 1.0,
+        "status": "over_goal",
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_energy_goal_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_energy_goal_settings(
+        "fridge",
+        daily_goal_kwh=12.0,
+        goal_alert_ratio=1.0,
+    )
+
+    assert saved
+    assert coordinator.store_data.energy_goal_settings_by_circuit["fridge"] == {
+        "daily_goal_kwh": 12.0,
+        "goal_alert_ratio": 1.0,
     }
 
 

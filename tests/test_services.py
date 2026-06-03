@@ -255,6 +255,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_SET_CIRCUIT_SENSITIVITY,
         SERVICE_SET_COST_SETTINGS,
         SERVICE_SET_DEMAND_SETTINGS,
+        SERVICE_SET_ENERGY_GOAL_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
         SERVICE_SET_STANDBY_SETTINGS,
         SERVICE_START_MAINTENANCE,
@@ -295,6 +296,19 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 (
                     "async_set_energy_usage_settings",
                     (circuit_id, window_days, daily_spike_ratio),
+                )
+            )
+
+        async def async_set_energy_goal_settings(
+            self,
+            circuit_id: str,
+            daily_goal_kwh: object = None,
+            goal_alert_ratio: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_energy_goal_settings",
+                    (circuit_id, daily_goal_kwh, goal_alert_ratio),
                 )
             )
 
@@ -448,6 +462,15 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_ENERGY_GOAL_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "daily_goal_kwh": 12.0,
+                "goal_alert_ratio": 1.0,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_DEMAND_SETTINGS)](
         SimpleNamespace(
             data={
@@ -529,6 +552,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     assert coordinator.calls == [
         ("async_set_circuit_sensitivity", ("fridge", "quiet")),
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
+        ("async_set_energy_goal_settings", ("fridge", 12.0, 1.0)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
         ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
         (

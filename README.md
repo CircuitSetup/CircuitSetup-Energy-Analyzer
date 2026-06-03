@@ -4,6 +4,17 @@ CircuitSetup Energy Analyzer is a Home Assistant custom integration for analyzin
 
 The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, mixed circuits, and opt-in experimental mains NILM discovery. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
 
+## Home Assistant Energy Dashboard Boundary
+
+Use Home Assistant's built-in Energy Dashboard for normal energy history,
+individual-device energy charts, device hierarchies, tariffs, cost display, and
+energy dashboard cards. This integration should not recreate those views.
+
+CircuitSetup Energy Analyzer adds behavior around that foundation: circuit and
+appliance diagnostics, CircuitSetup/ATM90E32 data-quality checks, power-quality
+relationship evidence, conservative repeated notifications, and optional
+CircuitSetup-specific exports.
+
 ## Installation
 
 This repository is structured for HACS as a custom integration. The integration files live under `custom_components/circuitsetup_energy_analyzer`.
@@ -51,6 +62,18 @@ total, the threshold, and the percentage of the learned window used today.
 
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
+
+## Daily Energy Goals
+
+For circuits with cumulative energy sensors, the analyzer can add a repeated
+notification layer around a user-defined daily kWh goal. Use Home Assistant's
+Energy Dashboard for the normal chart/history view; this feature is only for
+per-circuit goal evidence and notices.
+
+Use the `set_energy_goal_settings` service to set a `daily_goal_kwh` and an
+optional `goal_alert_ratio`. By default, goal notices trigger at 100% of the
+daily goal after repeated observations. Setting the ratio below 1.0 can warn
+before the goal is reached, while setting the daily goal to 0 clears the goal.
 
 ## Billing Cycle Forecasts
 
@@ -158,6 +181,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_daily_energy_usage`
 - `sensor.<circuit>_energy_usage_share`
 - `sensor.<circuit>_energy_usage_status`
+- `sensor.<circuit>_energy_goal_usage`
+- `sensor.<circuit>_energy_goal_status`
 - `sensor.<circuit>_billing_cycle_usage`
 - `sensor.<circuit>_billing_cycle_forecast`
 - `sensor.<circuit>_billing_cycle_budget_usage`
