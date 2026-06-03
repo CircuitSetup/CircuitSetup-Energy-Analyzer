@@ -760,6 +760,129 @@ async def test_runtime_dual_phase_aggregates_leg_power() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.hvac_l1_power": "2400",
+                "sensor.hvac_l2_power": "1200",
+                "sensor.hvac_l1_current": "20",
+                "sensor.hvac_l2_current": "10",
+                "sensor.hvac_l1_voltage": "121",
+                "sensor.hvac_l2_voltage": "119",
+            }
+            units = {
+                "sensor.hvac_l1_power": "W",
+                "sensor.hvac_l2_power": "W",
+                "sensor.hvac_l1_current": "A",
+                "sensor.hvac_l2_current": "A",
+                "sensor.hvac_l1_voltage": "V",
+                "sensor.hvac_l2_voltage": "V",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.hvac_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l1_current",
+                            "role": "current",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l2_current",
+                            "role": "current",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l1_voltage",
+                            "role": "voltage",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l2_voltage",
+                            "role": "voltage",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "dual_phase_leg_imbalance"
+    assert alert.repeated_count == 3
+    assert alert.observed_value == 0.667
+    assert alert.baseline_value == 0.5
+    assert "Possible issue: HVAC split-phase legs are imbalanced" in alert.message
+    assert coordinator.state.leg_imbalance_percent_by_circuit["hvac"] == 66.7
+    assert coordinator.state.leg_imbalance_status_by_circuit["hvac"] == "imbalanced"
+    assert coordinator.state.leg_imbalance_evidence_by_circuit["hvac"] == {
+        "status": "imbalanced",
+        "leg_imbalance_ratio": 0.667,
+        "leg_imbalance_percent": 66.7,
+        "threshold_ratio": 0.5,
+        "threshold_percent": 50.0,
+        "minimum_total_power_w": 500.0,
+        "left_real_power_w": 2400.0,
+        "right_real_power_w": 1200.0,
+        "left_current_a": 20.0,
+        "right_current_a": 10.0,
+        "left_voltage_v": 121.0,
+        "right_voltage_v": 119.0,
+        "voltage_difference_v": 2.0,
+        "dominant_leg": "a",
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_dual_phase_generation_preserves_export_direction() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

@@ -174,6 +174,21 @@ These diagnostics are operational evidence only. They do not verify breaker,
 wire, plug, appliance, or electrical-code suitability; use a qualified
 electrician for circuit sizing and safety decisions.
 
+## Dual-Phase Leg Imbalance
+
+For dual-phase circuits with leg A and leg B real-power sensors, the analyzer
+tracks how far apart the two legs are while the appliance is drawing meaningful
+power. This is useful for HVAC, water heaters, pool pumps, ovens, EV chargers,
+and other 240 V loads where a large persistent difference can point to CT
+pairing/orientation mistakes, phase mapping problems, or a load behavior change.
+
+The default threshold is 50% imbalance and the default minimum observed load is
+500 W total, so small control-board or idle draw is tracked but does not create
+alerts. Diagnostic entities expose the current imbalance percentage, status,
+dominant leg, both leg wattages, optional currents/voltages, and the threshold
+used. Notifications are created only after repeated over-threshold observations
+and are labeled as possible issues.
+
 ## Mains Balance
 
 For mains/NILM circuits, the analyzer calculates an Emporia-style Balance view:
@@ -271,6 +286,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_demand_status`
 - `sensor.<circuit>_capacity_usage`
 - `sensor.<circuit>_capacity_status`
+- `sensor.<circuit>_leg_imbalance`
+- `sensor.<circuit>_leg_imbalance_status`
 - `sensor.<circuit>_balance_power`
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`

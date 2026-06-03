@@ -72,6 +72,8 @@ sections:
           - entity: sensor.hvac_demand_status
           - entity: sensor.hvac_capacity_usage
           - entity: sensor.hvac_capacity_status
+          - entity: sensor.hvac_leg_imbalance
+          - entity: sensor.hvac_leg_imbalance_status
       - type: entities
         title: Mains
         entities:
@@ -161,6 +163,11 @@ sections:
         entities:
           - entity: sensor.hvac_capacity_usage
           - entity: sensor.hvac_capacity_status
+      - type: entities
+        title: HVAC split phase
+        entities:
+          - entity: sensor.hvac_leg_imbalance
+          - entity: sensor.hvac_leg_imbalance_status
       - type: entities
         title: Mains balance
         entities:

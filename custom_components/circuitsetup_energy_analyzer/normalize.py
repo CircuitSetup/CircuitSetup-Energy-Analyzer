@@ -33,6 +33,14 @@ class NormalizedCircuitSample(CircuitSample):
     raw_real_power: float | None = None
     power_flow: PowerFlowMode = PowerFlowMode.LOAD
     power_flow_direction: str | None = None
+    leg_a_real_power: float | None = None
+    leg_b_real_power: float | None = None
+    leg_a_current: float | None = None
+    leg_b_current: float | None = None
+    leg_a_voltage: float | None = None
+    leg_b_voltage: float | None = None
+    leg_power_imbalance_ratio: float | None = None
+    voltage_difference: float | None = None
 
     @property
     def real_power_w(self) -> float | None:

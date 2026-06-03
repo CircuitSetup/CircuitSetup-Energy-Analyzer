@@ -322,6 +322,23 @@ def capacity_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def leg_imbalance_value(state: Any, circuit_id: str) -> float:
+    """Return split-phase leg imbalance as a percentage."""
+    return float(
+        getattr(state, "leg_imbalance_percent_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def leg_imbalance_status_value(state: Any, circuit_id: str) -> str:
+    """Return the split-phase leg imbalance tracker status."""
+    return str(
+        getattr(state, "leg_imbalance_status_by_circuit", {}).get(
+            circuit_id,
+            "not_dual_phase",
+        )
+    )
+
+
 def balance_power_value(state: Any, circuit_id: str) -> float:
     """Return unmonitored mains balance power in watts."""
     return float(
@@ -706,6 +723,20 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Circuit Capacity Status",
         value_fn=capacity_status_value,
         attributes_fn=_mapping_attributes("capacity_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="leg_imbalance",
+        name_suffix="Leg Imbalance",
+        value_fn=leg_imbalance_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("leg_imbalance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="leg_imbalance_status",
+        name_suffix="Leg Imbalance Status",
+        value_fn=leg_imbalance_status_value,
+        attributes_fn=_mapping_attributes("leg_imbalance_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="balance_power",

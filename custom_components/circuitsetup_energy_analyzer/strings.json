@@ -131,6 +131,12 @@
       "capacity_status": {
         "name": "Circuit capacity status"
       },
+      "leg_imbalance": {
+        "name": "Leg imbalance"
+      },
+      "leg_imbalance_status": {
+        "name": "Leg imbalance status"
+      },
       "balance_power": {
         "name": "Balance power"
       },
