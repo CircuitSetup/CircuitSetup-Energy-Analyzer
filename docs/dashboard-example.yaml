@@ -70,6 +70,8 @@ sections:
           - entity: sensor.hvac_peak_demand
           - entity: sensor.hvac_demand_limit_usage
           - entity: sensor.hvac_demand_status
+          - entity: sensor.hvac_capacity_usage
+          - entity: sensor.hvac_capacity_status
       - type: entities
         title: Mains
         entities:
@@ -154,6 +156,11 @@ sections:
           - entity: sensor.hvac_peak_demand
           - entity: sensor.hvac_demand_limit_usage
           - entity: sensor.hvac_demand_status
+      - type: entities
+        title: HVAC capacity
+        entities:
+          - entity: sensor.hvac_capacity_usage
+          - entity: sensor.hvac_capacity_status
       - type: entities
         title: Mains balance
         entities:

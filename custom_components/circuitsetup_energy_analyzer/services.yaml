@@ -225,6 +225,39 @@ set_demand_settings:
           min: 1
           max: 100000
           mode: box
+set_capacity_settings:
+  name: Set capacity settings
+  description: Set breaker amp capacity tracking for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as ev or hvac.
+      required: true
+      example: ev
+      selector:
+        text:
+    breaker_amps:
+      name: Breaker Amps
+      description: Breaker or circuit rating in amps used for capacity diagnostics.
+      required: false
+      example: 40
+      selector:
+        number:
+          min: 1
+          max: 400
+          step: 0.1
+          mode: box
+    warning_ratio:
+      name: Warning Ratio
+      description: Share of breaker amps that can trigger repeated capacity alerts.
+      required: false
+      example: 0.8
+      selector:
+        number:
+          min: 0.01
+          max: 1
+          step: 0.01
+          mode: box
 set_activity_alert_settings:
   name: Set activity alert settings
   description: Set user-configured activity alert limits for one circuit.

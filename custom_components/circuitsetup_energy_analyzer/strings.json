@@ -125,6 +125,12 @@
       "demand_status": {
         "name": "Demand status"
       },
+      "capacity_usage": {
+        "name": "Circuit capacity usage"
+      },
+      "capacity_status": {
+        "name": "Circuit capacity status"
+      },
       "balance_power": {
         "name": "Balance power"
       },

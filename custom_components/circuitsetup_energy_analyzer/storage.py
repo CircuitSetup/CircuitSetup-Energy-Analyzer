@@ -60,6 +60,9 @@ class FeatureStoreData:
         default_factory=dict
     )
     demand_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    capacity_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     utility_comparison_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -195,6 +198,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "cost_by_circuit": _dict_of_dicts(data.cost_by_circuit),
         "demand_settings_by_circuit": _dict_of_dicts(data.demand_settings_by_circuit),
         "demand_by_circuit": _dict_of_dicts(data.demand_by_circuit),
+        "capacity_settings_by_circuit": _dict_of_dicts(
+            data.capacity_settings_by_circuit
+        ),
         "utility_comparison_settings_by_circuit": _dict_of_dicts(
             data.utility_comparison_settings_by_circuit
         ),
@@ -256,6 +262,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("demand_settings_by_circuit", {}),
         ),
         demand_by_circuit=_dict_of_dicts(raw.get("demand_by_circuit", {})),
+        capacity_settings_by_circuit=_dict_of_dicts(
+            raw.get("capacity_settings_by_circuit", {}),
+        ),
         utility_comparison_settings_by_circuit=_dict_of_dicts(
             raw.get("utility_comparison_settings_by_circuit", {}),
         ),
@@ -293,6 +302,7 @@ def prune_events(
         cost_by_circuit=data.cost_by_circuit,
         demand_settings_by_circuit=data.demand_settings_by_circuit,
         demand_by_circuit=data.demand_by_circuit,
+        capacity_settings_by_circuit=data.capacity_settings_by_circuit,
         utility_comparison_settings_by_circuit=(
             data.utility_comparison_settings_by_circuit
         ),

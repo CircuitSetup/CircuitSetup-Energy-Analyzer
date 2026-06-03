@@ -147,6 +147,7 @@ def test_nilm_label_schema_raises_for_missing_required_field() -> None:
 def test_user_experience_service_schemas_validate_required_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         ALERT_FEEDBACK_SERVICE_SCHEMA,
+        CAPACITY_SETTINGS_SERVICE_SCHEMA,
         MAINTENANCE_END_SERVICE_SCHEMA,
         MAINTENANCE_START_SERVICE_SCHEMA,
         NILM_MERGE_SERVICE_SCHEMA,
@@ -204,6 +205,9 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         "measured_energy_entities": ["sensor.panel_import_energy"],
         "tolerance_percent": 8.5,
     }
+    assert CAPACITY_SETTINGS_SERVICE_SCHEMA(
+        {"circuit_id": "ev", "breaker_amps": 40.0, "warning_ratio": 0.8}
+    ) == {"circuit_id": "ev", "breaker_amps": 40.0, "warning_ratio": 0.8}
 
     with pytest.raises(vol.Invalid):
         SENSITIVITY_SERVICE_SCHEMA({"circuit_id": "fridge"})
@@ -267,6 +271,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MERGE_NILM_SIGNATURES,
         SERVICE_SET_ACTIVITY_ALERT_SETTINGS,
         SERVICE_SET_BILLING_CYCLE_SETTINGS,
+        SERVICE_SET_CAPACITY_SETTINGS,
         SERVICE_SET_CIRCUIT_SENSITIVITY,
         SERVICE_SET_COST_SETTINGS,
         SERVICE_SET_DEMAND_SETTINGS,
@@ -416,6 +421,19 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                         standby_threshold_w,
                         always_on_alert_w,
                     ),
+                )
+            )
+
+        async def async_set_capacity_settings(
+            self,
+            circuit_id: str,
+            breaker_amps: object = None,
+            warning_ratio: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_capacity_settings",
+                    (circuit_id, breaker_amps, warning_ratio),
                 )
             )
 
@@ -571,6 +589,15 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_CAPACITY_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "breaker_amps": 20.0,
+                "warning_ratio": 0.8,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_UTILITY_COMPARISON_SETTINGS)](
         SimpleNamespace(
             data={
@@ -628,6 +655,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             ("fridge", 1, 0.20, 0.30, "17:00", "21:00", "0,1,2,3,4", "Peak"),
         ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
+        ("async_set_capacity_settings", ("fridge", 20.0, 0.8)),
         (
             "async_set_utility_comparison_settings",
             (

@@ -2972,6 +2972,125 @@ async def test_runtime_persists_demand_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    holder = {"time": now, "current": 34.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.ev_current"
+            return SimpleNamespace(
+                state=str(holder["current"]),
+                attributes={"unit_of_measurement": "A"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ev",
+                    "name": "EV Charger",
+                    "mode": "single_phase",
+                    "appliance_profile": "ev_charger",
+                    "sensors": [
+                        {"entity_id": "sensor.ev_current", "role": "current"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={
+                "ev": {"breaker_amps": 40.0, "warning_ratio": 0.8}
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "circuit_capacity"
+    assert alert.repeated_count == 3
+    assert alert.observed_value == 34.0
+    assert alert.baseline_value == 32.0
+    assert "EV Charger current is 34 A" in alert.message
+    assert coordinator.state.capacity_usage_by_circuit["ev"] == 85.0
+    assert coordinator.state.capacity_status_by_circuit["ev"] == "over_limit"
+    assert coordinator.state.capacity_evidence_by_circuit["ev"] == {
+        "status": "over_limit",
+        "current_amps": 34.0,
+        "breaker_amps": 40.0,
+        "warning_threshold_amps": 32.0,
+        "capacity_usage_percent": 85.0,
+        "warning_ratio": 0.8,
+        "current_source": "current_sensor",
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_capacity_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ev",
+                    "name": "EV Charger",
+                    "mode": "single_phase",
+                    "appliance_profile": "ev_charger",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_capacity_settings(
+        "ev",
+        breaker_amps=40.0,
+        warning_ratio=0.8,
+    )
+
+    assert saved
+    assert coordinator.store_data.capacity_settings_by_circuit["ev"] == {
+        "breaker_amps": 40.0,
+        "warning_ratio": 0.8,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_calculates_mains_balance_from_monitored_circuits() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

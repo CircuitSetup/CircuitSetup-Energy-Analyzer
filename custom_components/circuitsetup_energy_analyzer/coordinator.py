@@ -18,6 +18,11 @@ from .billing import (
     BillingCycleSettings,
     record_billing_cycle_usage,
 )
+from .capacity import (
+    DEFAULT_CAPACITY_WARNING_RATIO,
+    CapacitySettings,
+    evaluate_circuit_capacity,
+)
 from .const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -204,6 +209,11 @@ class AnalyzerState:
     demand_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    capacity_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    capacity_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    capacity_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     balance_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     monitored_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     monitored_coverage_percent_by_circuit: dict[str, float] = field(
@@ -324,6 +334,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ConservativeAlertPolicy,
         ] = {}
         self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._capacity_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._standby_alert_policies: dict[
             tuple[str, str],
             ConservativeAlertPolicy,
@@ -457,6 +471,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(demand_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(demand_alert)
+
+            capacity_alert = self._observe_capacity(config, sample, now)
+            if capacity_alert is not None:
+                alerts.append(capacity_alert)
+                self.store_data.alerts.append(capacity_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(capacity_alert)
 
             standby_alert = self._observe_standby(config, sample, now)
             if standby_alert is not None:
@@ -758,6 +779,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
+    async def async_set_capacity_settings(
+        self: Self,
+        circuit_id: str,
+        breaker_amps: Any = None,
+        warning_ratio: Any = None,
+    ) -> None:
+        """Persist circuit capacity settings for one circuit."""
+        current = self._capacity_settings_for_config(circuit_id)
+        settings: dict[str, Any] = {
+            "warning_ratio": _positive_float_value(
+                warning_ratio,
+                default=current.warning_ratio,
+            ),
+        }
+        capacity_amps = _optional_positive_float_value(
+            breaker_amps,
+            default=current.breaker_amps,
+        )
+        if capacity_amps is not None:
+            settings["breaker_amps"] = capacity_amps
+        self.store_data.capacity_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
     async def async_set_standby_settings(
         self: Self,
         circuit_id: str,
@@ -1003,6 +1051,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.state.demand_limit_usage_by_circuit.get(circuit_id, 0.0)
             ),
             "demand_evidence": self.state.demand_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "capacity_usage_percent": self.state.capacity_usage_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "capacity_status": self.state.capacity_status_by_circuit.get(
+                circuit_id,
+                "unconfigured",
+            ),
+            "capacity_evidence": self.state.capacity_evidence_by_circuit.get(
                 circuit_id,
                 {},
             ),
@@ -1781,6 +1841,46 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         return tuple(entity_ids)
 
+    def _capacity_current_a(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> float | None:
+        if config.mode is CircuitMode.DUAL_PHASE:
+            leg_currents = self._dual_phase_leg_currents(config, now)
+            if leg_currents:
+                return max(leg_currents)
+        current = getattr(sample, "current", None)
+        if current is None:
+            return None
+        if config.mode is CircuitMode.DUAL_PHASE and current > 0.0:
+            return float(current) / 2.0
+        return float(current)
+
+    def _dual_phase_leg_currents(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> tuple[float, ...]:
+        states = self._source_states_for(config, now)
+        currents: list[float] = []
+        for sensor in config.sensors:
+            if sensor.role is not SensorRole.CURRENT:
+                continue
+            if _normalized_leg(sensor.leg) is None:
+                continue
+            source = states.get(sensor.entity_id)
+            if source is None:
+                continue
+            try:
+                value = float(source.state)
+            except ValueError:
+                continue
+            if value > 0.0:
+                currents.append(value)
+        return tuple(currents)
+
     def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
         return normalize_sensitivity(
             self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
@@ -1873,6 +1973,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._demand_alert_policies[key] = policy
+        return policy
+
+    def _capacity_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._capacity_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._capacity_alert_policies[key] = policy
         return policy
 
     def _standby_alert_policy_for_circuit(
@@ -2564,6 +2683,49 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_capacity(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        result = evaluate_circuit_capacity(
+            circuit_id=config.circuit_id,
+            current_amps=self._capacity_current_a(config, sample, now),
+            real_power_w=_capacity_power_w(sample),
+            voltage_v=_capacity_voltage_v(config, sample),
+            settings=self._capacity_settings_for_config(config.circuit_id),
+        )
+        self.state.capacity_usage_by_circuit[config.circuit_id] = (
+            result.capacity_usage_percent
+        )
+        self.state.capacity_status_by_circuit[config.circuit_id] = result.status
+        self.state.capacity_evidence_by_circuit[config.circuit_id] = (
+            _capacity_evidence_payload(result)
+        )
+        if result.status != "over_limit":
+            return None
+
+        policy = self._capacity_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            result.current_amps / result.warning_threshold_amps
+            if result.warning_threshold_amps > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="circuit_capacity",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=result.current_amps,
+                baseline_value=result.warning_threshold_amps,
+                message=_capacity_limit_message(config, result),
+                features=result.features or {},
+            )
+        )
+
     def _observe_standby(
         self: Self,
         config: CircuitConfig,
@@ -2774,6 +2936,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             demand_limit_w=_optional_positive_float_value(
                 overrides.get("demand_limit_w"),
                 default=default_limit_w,
+            ),
+        )
+
+    def _capacity_settings_for_config(self: Self, circuit_id: str) -> CapacitySettings:
+        overrides = self.store_data.capacity_settings_by_circuit.get(circuit_id, {})
+        return CapacitySettings(
+            breaker_amps=_optional_positive_float_value(
+                overrides.get("breaker_amps"),
+                default=None,
+            ),
+            warning_ratio=_positive_float_value(
+                overrides.get("warning_ratio"),
+                default=DEFAULT_CAPACITY_WARNING_RATIO,
             ),
         )
 
@@ -3079,6 +3254,29 @@ def _demand_evidence_payload(result: Any) -> dict[str, Any]:
     }
 
 
+def _capacity_limit_message(config: CircuitConfig, result: Any) -> str:
+    return (
+        f"Possible issue: {config.name} current is "
+        f"{_format_amps(result.current_amps)} A, which is "
+        f"{_format_percent(result.capacity_usage_percent)}% of the configured "
+        f"{_format_amps(result.breaker_amps)} A circuit capacity. This is above "
+        f"the configured {_format_percent(result.warning_ratio * 100)}% warning "
+        f"level ({_format_amps(result.warning_threshold_amps)} A)."
+    )
+
+
+def _capacity_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "status": result.status,
+        "current_amps": result.current_amps,
+        "breaker_amps": result.breaker_amps,
+        "warning_threshold_amps": result.warning_threshold_amps,
+        "capacity_usage_percent": result.capacity_usage_percent,
+        "warning_ratio": result.warning_ratio,
+        "current_source": result.current_source,
+    }
+
+
 def _standby_limit_message(
     config: CircuitConfig,
     evidence: StandbyLimitEvidence,
@@ -3138,6 +3336,10 @@ def _format_kwh(value: float) -> str:
 
 
 def _format_percent(value: float) -> str:
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _format_amps(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
@@ -3224,6 +3426,21 @@ def _demand_power_w(sample: Any) -> float | None:
     if power_flow is PowerFlowMode.MAINS_NET:
         return max(float(power), 0.0)
     return max(float(power), 0.0)
+
+
+def _capacity_power_w(sample: Any) -> float | None:
+    power = getattr(sample, "real_power", None)
+    if power is None:
+        return None
+    return abs(float(power))
+
+
+def _capacity_voltage_v(config: CircuitConfig, sample: Any) -> float | None:
+    voltage = getattr(sample, "voltage", None)
+    if voltage is None:
+        return None
+    multiplier = 2.0 if config.mode is CircuitMode.DUAL_PHASE else 1.0
+    return abs(float(voltage)) * multiplier
 
 
 def _power_flow_direction(

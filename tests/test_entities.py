@@ -33,6 +33,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         billing_cycle_forecast_value,
         billing_cycle_status_value,
         billing_cycle_usage_value,
+        capacity_status_value,
+        capacity_usage_value,
         cost_current_rate_value,
         cost_cycle_forecast_value,
         cost_cycle_value,
@@ -147,6 +149,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         demand_evidence_by_circuit={
             "fridge": {"status": "tracking", "demand_limit_w": 4000.0}
         },
+        capacity_usage_by_circuit={"fridge": 85.0},
+        capacity_status_by_circuit={"fridge": "over_limit"},
+        capacity_evidence_by_circuit={
+            "fridge": {"status": "over_limit", "breaker_amps": 40.0}
+        },
         balance_power_w_by_circuit={"fridge": 2300.0},
         monitored_power_w_by_circuit={"fridge": 2700.0},
         monitored_coverage_percent_by_circuit={"fridge": 54.0},
@@ -224,6 +231,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert peak_demand_value(state, "fridge") == 3200.0
     assert demand_limit_usage_value(state, "fridge") == 80.0
     assert demand_status_value(state, "fridge") == "tracking"
+    assert capacity_usage_value(state, "fridge") == 85.0
+    assert capacity_status_value(state, "fridge") == "over_limit"
     assert balance_power_value(state, "fridge") == 2300.0
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
@@ -272,6 +281,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert peak_demand_value(state, "unknown") == 0.0
     assert demand_limit_usage_value(state, "unknown") == 0.0
     assert demand_status_value(state, "unknown") == "unconfigured"
+    assert capacity_usage_value(state, "unknown") == 0.0
+    assert capacity_status_value(state, "unknown") == "unconfigured"
     assert balance_power_value(state, "unknown") == 0.0
     assert monitored_power_value(state, "unknown") == 0.0
     assert monitored_coverage_value(state, "unknown") == 0.0
@@ -357,6 +368,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "current_demand_w": 2400.0,
         "demand_limit_w": 2000.0,
     }
+    capacity_evidence = {
+        "status": "over_limit",
+        "capacity_usage_percent": 85.0,
+        "breaker_amps": 40.0,
+    }
     balance_evidence = {
         "status": "tracking",
         "balance_power_w": 2300.0,
@@ -393,6 +409,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         energy_goal_evidence_by_circuit={"fridge": energy_goal_evidence},
         run_cycle_evidence_by_circuit={"fridge": run_cycle_evidence},
         demand_evidence_by_circuit={"fridge": demand_evidence},
+        capacity_evidence_by_circuit={"fridge": capacity_evidence},
         balance_evidence_by_circuit={"fridge": balance_evidence},
         utility_comparison_evidence_by_circuit={
             "fridge": utility_comparison_evidence
@@ -519,6 +536,18 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["demand_status"],
     ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["capacity_usage"],
+    ).extra_state_attributes == capacity_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["capacity_status"],
+    ).extra_state_attributes == capacity_evidence
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -676,6 +705,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Peak Demand",
         "Kitchen Fridge Demand Limit Usage",
         "Kitchen Fridge Demand Status",
+        "Kitchen Fridge Circuit Capacity Usage",
+        "Kitchen Fridge Circuit Capacity Status",
         "Kitchen Fridge Balance Power",
         "Kitchen Fridge Monitored Power",
         "Kitchen Fridge Monitored Coverage",
@@ -725,6 +756,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_peak_demand",
         "entry-1_fridge_demand_limit_usage",
         "entry-1_fridge_demand_status",
+        "entry-1_fridge_capacity_usage",
+        "entry-1_fridge_capacity_status",
         "entry-1_fridge_balance_power",
         "entry-1_fridge_monitored_power",
         "entry-1_fridge_monitored_coverage",

@@ -155,6 +155,25 @@ optional demand limit in watts. When a limit is configured, the analyzer sends a
 possible issue notification only after repeated rolling-demand observations stay
 above that limit.
 
+## Circuit Capacity Tracking
+
+For circuits with current sensors, the analyzer can compare measured amps with
+a user-configured breaker or circuit rating. This is useful for EV chargers,
+HVAC, pool pumps, water heaters, ovens, workshops, and other loads where amps
+are easier to reason about than watts. If a current sensor is unavailable, the
+analyzer can estimate current from real power and voltage when both are present.
+
+Use the `set_capacity_settings` service to set `breaker_amps` and an optional
+`warning_ratio` for a circuit. The default warning ratio is 0.8, so a 40 A
+circuit warns at 32 A after repeated observations. Diagnostic entities show
+capacity usage percentage and status. Alerts report the observed amps, the
+configured circuit rating, the warning threshold, and whether the value came
+from a current sensor or a power/voltage estimate.
+
+These diagnostics are operational evidence only. They do not verify breaker,
+wire, plug, appliance, or electrical-code suitability; use a qualified
+electrician for circuit sizing and safety decisions.
+
 ## Mains Balance
 
 For mains/NILM circuits, the analyzer calculates an Emporia-style Balance view:
@@ -250,6 +269,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_peak_demand`
 - `sensor.<circuit>_demand_limit_usage`
 - `sensor.<circuit>_demand_status`
+- `sensor.<circuit>_capacity_usage`
+- `sensor.<circuit>_capacity_status`
 - `sensor.<circuit>_balance_power`
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`

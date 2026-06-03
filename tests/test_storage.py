@@ -55,6 +55,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     demand_settings_by_circuit = {
         "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
     }
+    capacity_settings_by_circuit = {
+        "ev": {"breaker_amps": 40.0, "warning_ratio": 0.8}
+    }
     utility_comparison_settings_by_circuit = {
         "mains": {
             "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -104,6 +107,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         energy_usage_by_circuit=energy_usage_by_circuit,
         demand_settings_by_circuit=demand_settings_by_circuit,
         demand_by_circuit=demand_by_circuit,
+        capacity_settings_by_circuit=capacity_settings_by_circuit,
         utility_comparison_settings_by_circuit=(
             utility_comparison_settings_by_circuit
         ),
@@ -131,6 +135,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
     assert pruned.demand_settings_by_circuit is data.demand_settings_by_circuit
     assert pruned.demand_by_circuit is data.demand_by_circuit
+    assert pruned.capacity_settings_by_circuit is data.capacity_settings_by_circuit
     assert (
         pruned.utility_comparison_settings_by_circuit
         is data.utility_comparison_settings_by_circuit
@@ -285,6 +290,9 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         demand_settings_by_circuit={
             "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
         },
+        capacity_settings_by_circuit={
+            "ev": {"breaker_amps": 40.0, "warning_ratio": 0.8}
+        },
         utility_comparison_settings_by_circuit={
             "mains": {
                 "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -369,6 +377,10 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.demand_by_circuit["hvac"]["daily_peaks"] == [
         {"date": "2026-06-02", "peak_demand_w": 3200.0}
     ]
+    assert restored.capacity_settings_by_circuit["ev"] == {
+        "breaker_amps": 40.0,
+        "warning_ratio": 0.8,
+    }
     assert restored.utility_comparison_settings_by_circuit["mains"] == {
         "utility_energy_entity": "sensor.opower_current_bill_usage",
         "measured_energy_entities": ["sensor.panel_import_energy"],

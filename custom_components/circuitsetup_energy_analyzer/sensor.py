@@ -307,6 +307,21 @@ def demand_status_value(state: Any, circuit_id: str) -> str:
     return "unconfigured"
 
 
+def capacity_usage_value(state: Any, circuit_id: str) -> float:
+    """Return current circuit load as a percent of configured capacity."""
+    return float(getattr(state, "capacity_usage_by_circuit", {}).get(circuit_id, 0.0))
+
+
+def capacity_status_value(state: Any, circuit_id: str) -> str:
+    """Return the circuit capacity tracker status."""
+    return str(
+        getattr(state, "capacity_status_by_circuit", {}).get(
+            circuit_id,
+            "unconfigured",
+        )
+    )
+
+
 def balance_power_value(state: Any, circuit_id: str) -> float:
     """Return unmonitored mains balance power in watts."""
     return float(
@@ -677,6 +692,20 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Demand Status",
         value_fn=demand_status_value,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="capacity_usage",
+        name_suffix="Circuit Capacity Usage",
+        value_fn=capacity_usage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("capacity_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="capacity_status",
+        name_suffix="Circuit Capacity Status",
+        value_fn=capacity_status_value,
+        attributes_fn=_mapping_attributes("capacity_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="balance_power",
