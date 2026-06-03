@@ -225,6 +225,27 @@ set_demand_settings:
           min: 1
           max: 100000
           mode: box
+set_activity_alert_settings:
+  name: Set activity alert settings
+  description: Set user-configured activity alert limits for one circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    max_active_minutes:
+      name: Max Active Minutes
+      description: Notify when the circuit stays active longer than this many minutes.
+      required: false
+      example: 45
+      selector:
+        number:
+          min: 1
+          max: 10080
+          mode: box
 set_billing_cycle_settings:
   name: Set billing cycle settings
   description: Set billing-cycle usage forecasting for one configured circuit.

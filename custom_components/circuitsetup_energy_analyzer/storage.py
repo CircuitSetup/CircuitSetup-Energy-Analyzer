@@ -46,6 +46,9 @@ class FeatureStoreData:
     energy_goal_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    activity_alert_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     energy_usage_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     billing_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
@@ -177,6 +180,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "energy_goal_settings_by_circuit": _dict_of_dicts(
             data.energy_goal_settings_by_circuit
         ),
+        "activity_alert_settings_by_circuit": _dict_of_dicts(
+            data.activity_alert_settings_by_circuit
+        ),
         "energy_usage_by_circuit": _dict_of_dicts(data.energy_usage_by_circuit),
         "billing_settings_by_circuit": _dict_of_dicts(
             data.billing_settings_by_circuit
@@ -226,6 +232,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         energy_goal_settings_by_circuit=_dict_of_dicts(
             raw.get("energy_goal_settings_by_circuit", {}),
         ),
+        activity_alert_settings_by_circuit=_dict_of_dicts(
+            raw.get("activity_alert_settings_by_circuit", {}),
+        ),
         energy_usage_by_circuit=_dict_of_dicts(
             raw.get("energy_usage_by_circuit", {}),
         ),
@@ -265,6 +274,9 @@ def prune_events(
         alert_feedback=data.alert_feedback,
         energy_usage_settings_by_circuit=data.energy_usage_settings_by_circuit,
         energy_goal_settings_by_circuit=data.energy_goal_settings_by_circuit,
+        activity_alert_settings_by_circuit=(
+            data.activity_alert_settings_by_circuit
+        ),
         energy_usage_by_circuit=data.energy_usage_by_circuit,
         billing_settings_by_circuit=data.billing_settings_by_circuit,
         billing_by_circuit=data.billing_by_circuit,
@@ -310,8 +322,17 @@ class FeatureStore:
         return self.data
 
 
-def _features_to_dict(features: Any) -> dict[str, float]:
-    return {str(key): float(value) for key, value in dict(features).items()}
+def _features_to_dict(features: Any) -> dict[str, Any]:
+    return {
+        str(key): _json_safe_feature_value(value)
+        for key, value in dict(features).items()
+    }
+
+
+def _json_safe_feature_value(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    return str(value)
 
 
 def _dict_of_dicts(values: Any) -> dict[str, dict[str, Any]]:

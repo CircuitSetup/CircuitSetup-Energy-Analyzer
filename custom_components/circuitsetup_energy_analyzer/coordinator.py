@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
 from . import notifications, repairs
+from .activity_alerts import ActivityAlertSettings, evaluate_activity_alert
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .balance import BalanceInput, calculate_balance
@@ -313,6 +314,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ConservativeAlertPolicy,
         ] = {}
         self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._activity_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -410,6 +415,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(cycle_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(cycle_alert)
+
+            activity_alert = self._observe_activity_alert(config, now)
+            if activity_alert is not None:
+                alerts.append(activity_alert)
+                self.store_data.alerts.append(activity_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(activity_alert)
 
             billing_alert = self._observe_billing_cycle(config, sample, now)
             if billing_alert is not None:
@@ -581,6 +593,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._mark_store_dirty()
         now = self._now_fn()
         self._refresh_energy_goal_state_for_circuit(circuit_id, now)
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_activity_alert_settings(
+        self: Self,
+        circuit_id: str,
+        max_active_minutes: Any = None,
+    ) -> None:
+        """Persist user-configured activity alert settings for one circuit."""
+        current = self._activity_alert_settings_for_config(None, circuit_id)
+        max_minutes = _optional_positive_float_value(
+            max_active_minutes,
+            default=current.max_active_minutes,
+        )
+        settings: dict[str, Any] = {}
+        if max_minutes is not None:
+            settings["max_active_minutes"] = max_minutes
+        self.store_data.activity_alert_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
@@ -1640,6 +1673,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._cycle_alert_policies[key] = policy
         return policy
 
+    def _activity_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._activity_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._activity_alert_policies[key] = policy
+        return policy
+
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
         alert = self._alert_for_id(alert_id)
         if alert is None:
@@ -2048,6 +2100,60 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if baseline is not None:
                 baselines[feature] = baseline
         return baselines
+
+    def _observe_activity_alert(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        summary = summarize_circuit_cycles(
+            self.store_data.events,
+            circuit_id=config.circuit_id,
+            now=now,
+        )
+        evidence = evaluate_activity_alert(
+            circuit_id=config.circuit_id,
+            circuit_name=config.name,
+            summary=summary,
+            settings=self._activity_alert_settings_for_config(
+                config,
+                config.circuit_id,
+            ),
+        )
+        if evidence is None:
+            return None
+
+        policy = self._activity_alert_policy_for_circuit(config.circuit_id)
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature=evidence.feature,
+                score=evidence.score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=evidence.observed_value,
+                baseline_value=evidence.baseline_value,
+                message=evidence.message,
+                features=evidence.features,
+            )
+        )
+
+    def _activity_alert_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> ActivityAlertSettings:
+        del config
+        overrides = self.store_data.activity_alert_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        return ActivityAlertSettings(
+            max_active_minutes=_optional_positive_float_value(
+                overrides.get("max_active_minutes"),
+                default=None,
+            )
+        )
 
     def _observe_billing_cycle(
         self: Self,

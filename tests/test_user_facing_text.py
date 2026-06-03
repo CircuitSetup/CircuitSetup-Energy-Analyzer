@@ -38,6 +38,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "duration": "Duration",
     "goal_alert_ratio": "Goal Alert Ratio",
     "label": "Label",
+    "max_active_minutes": "Max Active Minutes",
     "note": "Note",
     "preset": "Preset",
     "relearn": "Relearn",

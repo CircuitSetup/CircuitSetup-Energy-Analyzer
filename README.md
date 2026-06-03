@@ -98,6 +98,11 @@ create possible-issue notifications. The alert evidence reports the observed
 timing, learned baseline, sample count, and confidence. It does not diagnose a
 specific failed part.
 
+For user-defined activity alerts, use the `set_activity_alert_settings` service
+to set a `max_active_minutes` value. This is useful for appliance-style "left
+on too long" notices, such as a pump, oven, dryer, or refrigerator compressor
+run that exceeds a user-selected duration.
+
 ## Billing Cycle Forecasts
 
 The analyzer can also track circuit usage against a utility-style billing

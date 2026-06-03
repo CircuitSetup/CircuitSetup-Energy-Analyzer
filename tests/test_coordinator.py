@@ -2438,6 +2438,120 @@ async def test_runtime_persists_energy_goal_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_power"
+            return SimpleNamespace(
+                state="0",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(minutes=45),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                )
+            ],
+            activity_alert_settings_by_circuit={
+                "fridge": {"max_active_minutes": 30.0}
+            },
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "activity_left_on"
+    assert alert.repeated_count == 3
+    assert alert.observed_value >= 45.0
+    assert alert.baseline_value == 30.0
+    assert "Kitchen Fridge has been active" in alert.message
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_activity_alert_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_activity_alert_settings(
+        "fridge",
+        max_active_minutes=45.0,
+    )
+
+    assert coordinator.store_data.activity_alert_settings_by_circuit["fridge"] == {
+        "max_active_minutes": 45.0
+    }
+    assert saved[-1].activity_alert_settings_by_circuit["fridge"] == {
+        "max_active_minutes": 45.0
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_reports_energy_dashboard_readiness() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

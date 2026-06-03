@@ -251,6 +251,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
         SERVICE_MERGE_NILM_SIGNATURES,
+        SERVICE_SET_ACTIVITY_ALERT_SETTINGS,
         SERVICE_SET_BILLING_CYCLE_SETTINGS,
         SERVICE_SET_CIRCUIT_SENSITIVITY,
         SERVICE_SET_COST_SETTINGS,
@@ -322,6 +323,18 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 (
                     "async_set_demand_settings",
                     (circuit_id, window_minutes, demand_limit_w),
+                )
+            )
+
+        async def async_set_activity_alert_settings(
+            self,
+            circuit_id: str,
+            max_active_minutes: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_activity_alert_settings",
+                    (circuit_id, max_active_minutes),
                 )
             )
 
@@ -480,6 +493,14 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_ACTIVITY_ALERT_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "max_active_minutes": 45,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_BILLING_CYCLE_SETTINGS)](
         SimpleNamespace(
             data={
@@ -554,6 +575,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_energy_goal_settings", ("fridge", 12.0, 1.0)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
+        ("async_set_activity_alert_settings", ("fridge", 45)),
         ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
         (
             "async_set_cost_settings",
