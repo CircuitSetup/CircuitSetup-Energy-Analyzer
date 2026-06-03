@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from math import floor
 from typing import Any
 
-DEFAULT_STANDBY_WINDOW_HOURS = 24
+DEFAULT_STANDBY_WINDOW_HOURS = 48
 DEFAULT_STANDBY_THRESHOLD_W = 8.0
 
 
@@ -90,7 +89,9 @@ def record_standby_sample(
             always_on_alert_w=_positive_float_or_none(settings.always_on_alert_w),
         )
 
-    always_on = _low_bin([float(sample["real_power_w"]) for sample in samples])
+    always_on = _low_watermark(
+        [float(sample["real_power_w"]) for sample in samples]
+    )
     status = _status(current_power, standby_threshold)
     alert_w = _positive_float_or_none(settings.always_on_alert_w)
     limit_usage = (
@@ -201,12 +202,10 @@ def _prune_samples(
     ]
 
 
-def _low_bin(values: list[float]) -> float:
+def _low_watermark(values: list[float]) -> float:
     if not values:
         return 0.0
-    sorted_values = sorted(values)
-    index = min(max(floor((len(sorted_values) - 1) * 0.01), 0), len(sorted_values) - 1)
-    return _round_w(sorted_values[index])
+    return _round_w(min(values))
 
 
 def _status(current_power_w: float, standby_threshold_w: float) -> str:

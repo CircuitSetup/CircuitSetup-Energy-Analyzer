@@ -124,7 +124,7 @@ class CircuitConfig:
     tou_name: str = "Peak"
     demand_window_minutes: int = 15
     demand_limit_w: float | None = None
-    standby_window_hours: int = 24
+    standby_window_hours: int = 48
     standby_threshold_w: float = 8.0
     always_on_alert_w: float | None = None
     standby_min_samples: int = 24

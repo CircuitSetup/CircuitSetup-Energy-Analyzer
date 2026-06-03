@@ -3177,6 +3177,34 @@ async def test_runtime_persists_standby_settings() -> None:
     }
 
 
+def test_standby_settings_default_to_two_day_low_watermark_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [],
+                }
+            ],
+        },
+    )
+
+    settings = coordinator._standby_settings_for_config(
+        coordinator.circuit_configs[0],
+        "office",
+    )
+
+    assert settings.window_hours == 48
+
+
 @pytest.mark.asyncio
 async def test_runtime_tracks_billing_cycle_and_notifies_budget(
     monkeypatch,

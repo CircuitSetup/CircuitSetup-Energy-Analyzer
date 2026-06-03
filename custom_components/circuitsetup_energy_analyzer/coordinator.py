@@ -2532,7 +2532,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> StandbySettings:
         overrides = self.store_data.standby_settings_by_circuit.get(circuit_id, {})
         default_window_hours = (
-            config.standby_window_hours if config is not None else 24
+            config.standby_window_hours if config is not None else 48
         )
         default_threshold_w = config.standby_threshold_w if config is not None else 8.0
         default_alert_w = config.always_on_alert_w if config is not None else None
@@ -3185,7 +3185,7 @@ def _circuit_config_from_raw(
             raw_circuit,
             "standby_window_hours",
             "standby_window",
-            default=24,
+            default=48,
         ),
         standby_threshold_w=_positive_float_from_raw(
             raw_circuit,

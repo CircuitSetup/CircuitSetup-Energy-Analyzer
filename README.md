@@ -170,9 +170,9 @@ monitored load sum so they do not look like household consumption.
 ## Always On And Standby Tracking
 
 For circuits with real-power sensors, the analyzer estimates an Always On load
-from the low-power portion of the recent sample window. The default window is
-24 hours, with an 8 W standby threshold used to label the latest state as off,
-standby, or on.
+from the lowest measured power in the recent sample window. The default window
+is 48 hours, with an 8 W standby threshold used to label the latest state as
+off, standby, or on.
 
 Always On diagnostics are exposed for every configured load circuit. Alerts are
 optional: set an `always_on_alert_w` limit with the `set_standby_settings`
