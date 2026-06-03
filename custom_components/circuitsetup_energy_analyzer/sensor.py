@@ -125,6 +125,16 @@ def data_quality_checklist_value(state: Any, circuit_id: str) -> str:
     return "ok"
 
 
+def energy_dashboard_status_value(state: Any, circuit_id: str) -> str:
+    """Return whether circuit sources are ready for HA Energy Dashboard."""
+    return str(
+        getattr(state, "energy_dashboard_status_by_circuit", {}).get(
+            circuit_id,
+            "needs_energy_source",
+        )
+    )
+
+
 def alert_evidence_value(state: Any, circuit_id: str) -> str:
     """Return the feature named in the latest alert evidence."""
     evidence = getattr(state, "alert_evidence_by_circuit", {}).get(circuit_id, {})
@@ -460,6 +470,12 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Data Quality Checklist",
         value_fn=data_quality_checklist_value,
         attributes_fn=_mapping_attributes("data_quality_checklist_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="energy_dashboard_status",
+        name_suffix="Energy Dashboard Status",
+        value_fn=energy_dashboard_status_value,
+        attributes_fn=_mapping_attributes("energy_dashboard_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="alert_evidence",

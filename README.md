@@ -15,6 +15,11 @@ appliance diagnostics, CircuitSetup/ATM90E32 data-quality checks, power-quality
 relationship evidence, conservative repeated notifications, and optional
 CircuitSetup-specific exports.
 
+The `energy_dashboard_status` diagnostic sensor checks whether a circuit's
+configured energy or power source has metadata that Home Assistant's Energy
+Dashboard can use. Its attributes list ready entities, metadata issues, and the
+recommended handoff action.
+
 ## Installation
 
 This repository is structured for HACS as a custom integration. The integration files live under `custom_components/circuitsetup_energy_analyzer`.
@@ -176,6 +181,7 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_last_event`
 - `binary_sensor.<circuit>_learning`
 - `binary_sensor.<circuit>_data_quality_problem`
+- `sensor.<circuit>_energy_dashboard_status`
 - `sensor.<circuit>_nilm_discovered_signatures`
 - `sensor.<circuit>_nilm_unmatched_load_percentage`
 - `sensor.<circuit>_daily_energy_usage`

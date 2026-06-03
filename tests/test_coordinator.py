@@ -2422,6 +2422,60 @@ async def test_runtime_persists_energy_goal_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_reports_energy_dashboard_readiness() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_energy"
+            return SimpleNamespace(
+                state="42",
+                attributes={
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "state_class": "total_increasing",
+                },
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.energy_dashboard_status_by_circuit["fridge"] == "ready"
+    assert coordinator.state.energy_dashboard_evidence_by_circuit["fridge"] == {
+        "status": "ready",
+        "ready_energy_entities": ["sensor.fridge_energy"],
+        "ready_power_entities": [],
+        "issues": [],
+        "guidance": (
+            "Add the ready energy entity to Home Assistant's Energy Dashboard "
+            "as an individual device."
+        ),
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

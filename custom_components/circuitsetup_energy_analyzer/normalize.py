@@ -22,6 +22,8 @@ class SourceState:
     state: str
     unit: str | None
     last_updated: datetime
+    device_class: str | None = None
+    state_class: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

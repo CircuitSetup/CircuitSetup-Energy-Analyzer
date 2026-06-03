@@ -68,6 +68,9 @@
       "data_quality_checklist": {
         "name": "Data quality checklist"
       },
+      "energy_dashboard_status": {
+        "name": "Energy Dashboard status"
+      },
       "alert_evidence": {
         "name": "Alert evidence"
       },

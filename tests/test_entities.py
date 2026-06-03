@@ -42,6 +42,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         data_quality_checklist_value,
         demand_limit_usage_value,
         demand_status_value,
+        energy_dashboard_status_value,
         energy_goal_status_value,
         energy_goal_usage_value,
         energy_usage_share_value,
@@ -113,6 +114,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
                 "required_sensors_present": False,
             },
         },
+        energy_dashboard_status_by_circuit={"fridge": "ready"},
+        energy_dashboard_evidence_by_circuit={
+            "fridge": {"status": "ready", "ready_energy_entities": []}
+        },
         alert_evidence_by_circuit={"fridge": {"feature": "reactive_power"}},
         sensitivity_by_circuit={"fridge": "quiet"},
         daily_energy_usage_by_circuit={"fridge": 12.9},
@@ -182,6 +187,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert learning_progress_value(state, "ready") == 100.0
     assert data_quality_checklist_value(state, "fridge") == "ok"
     assert data_quality_checklist_value(state, "well_pump") == "problem"
+    assert energy_dashboard_status_value(state, "fridge") == "ready"
     assert alert_evidence_value(state, "fridge") == "reactive_power"
     assert sensitivity_value(state, "fridge") == "quiet"
     assert daily_energy_usage_value(state, "fridge") == 12.9
@@ -223,6 +229,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert readiness_value(state, "unknown") == "ready"
     assert learning_progress_value(state, "unknown") == 0.0
     assert data_quality_checklist_value(state, "unknown") == "problem"
+    assert energy_dashboard_status_value(state, "unknown") == "needs_energy_source"
     assert alert_evidence_value(state, "unknown") == ""
     assert sensitivity_value(state, "unknown") == "balanced"
     assert daily_energy_usage_value(state, "unknown") == 0.0
@@ -292,6 +299,10 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "pending_feature_samples": {"reactive_power": 3},
     }
     checklist = {"quality_issues": [], "required_sensors_present": True}
+    energy_dashboard = {
+        "status": "ready",
+        "ready_energy_entities": ["sensor.fridge_energy"],
+    }
     evidence = {"feature": "reactive_power", "change_ratio": 0.42}
     energy_evidence = {
         "status": "tracking",
@@ -332,6 +343,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         readiness_by_circuit={"fridge": readiness},
         learning_progress_by_circuit={"fridge": progress},
         data_quality_checklist_by_circuit={"fridge": checklist},
+        energy_dashboard_evidence_by_circuit={"fridge": energy_dashboard},
         alert_evidence_by_circuit={"fridge": evidence},
         sensitivity_by_circuit={"fridge": "quiet"},
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
@@ -364,6 +376,12 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["data_quality_checklist"],
     ).extra_state_attributes == checklist
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["energy_dashboard_status"],
+    ).extra_state_attributes == energy_dashboard
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -552,6 +570,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Readiness",
         "Kitchen Fridge Learning Progress",
         "Kitchen Fridge Data Quality Checklist",
+        "Kitchen Fridge Energy Dashboard Status",
         "Kitchen Fridge Alert Evidence",
         "Kitchen Fridge Sensitivity",
         "Kitchen Fridge Power Quality Score",
@@ -594,6 +613,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_readiness",
         "entry-1_fridge_learning_progress",
         "entry-1_fridge_data_quality_checklist",
+        "entry-1_fridge_energy_dashboard_status",
         "entry-1_fridge_alert_evidence",
         "entry-1_fridge_sensitivity",
         "entry-1_fridge_power_quality_score",
@@ -654,6 +674,7 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
         "mains",
         "mains",
         "mains",

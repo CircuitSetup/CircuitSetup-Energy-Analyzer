@@ -30,6 +30,10 @@ from .const import (
 )
 from .cost import CostSettings, record_cost_sample
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
+from .energy_dashboard import (
+    evaluate_energy_dashboard_readiness,
+    readiness_payload,
+)
 from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
 from .goals import (
@@ -133,6 +137,10 @@ class AnalyzerState:
         default_factory=dict
     )
     data_quality_checklist_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    energy_dashboard_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    energy_dashboard_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     alert_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -1025,6 +1033,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ):
             checklist = dict(self.state.data_quality_checklist_by_circuit[circuit_id])
         self.state.data_quality_checklist_by_circuit[circuit_id] = checklist
+        dashboard_readiness = evaluate_energy_dashboard_readiness(
+            config,
+            self._source_states_for(config, now),
+        )
+        self.state.energy_dashboard_status_by_circuit[circuit_id] = (
+            dashboard_readiness.status
+        )
+        self.state.energy_dashboard_evidence_by_circuit[circuit_id] = (
+            readiness_payload(dashboard_readiness)
+        )
 
         learning = self.state.learning_by_circuit.get(circuit_id, True)
         suppression_reason = self._suppression_reason(circuit_id, learning)
@@ -1677,6 +1695,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 state=str(getattr(raw_state, "state", "")),
                 unit=attributes.get("unit_of_measurement") or sensor.unit,
                 last_updated=getattr(raw_state, "last_updated", now) or now,
+                device_class=attributes.get("device_class"),
+                state_class=attributes.get("state_class"),
             )
         return states
 
