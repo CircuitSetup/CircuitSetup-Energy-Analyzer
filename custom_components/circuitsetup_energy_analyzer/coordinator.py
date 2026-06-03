@@ -63,6 +63,7 @@ from .goals import (
     EnergyGoalSettings,
     evaluate_daily_energy_goal,
 )
+from .load_shift import FlexibleLoadInput, evaluate_solar_load_shift
 from .metric_consistency import (
     MetricConsistencyResult,
     evaluate_metric_consistency,
@@ -123,6 +124,15 @@ from .ux import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
+    {
+        ApplianceProfile.EV_CHARGER,
+        ApplianceProfile.HVAC,
+        ApplianceProfile.POOL_PUMP,
+        ApplianceProfile.WATER_HEATER,
+    }
+)
 
 try:
     from homeassistant.components.recorder.statistics import (
@@ -277,9 +287,19 @@ class AnalyzerState:
     solar_powered_percent_by_circuit: dict[str, float] = field(default_factory=dict)
     solar_surplus_w_by_circuit: dict[str, float] = field(default_factory=dict)
     solar_load_shift_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_flexible_load_power_w_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    solar_flexible_load_coverage_percent_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
     solar_flow_status_by_circuit: dict[str, str] = field(default_factory=dict)
     solar_surplus_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    solar_load_shift_status_by_circuit: dict[str, str] = field(default_factory=dict)
     solar_flow_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    solar_load_shift_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     utility_comparison_difference_kwh_by_circuit: dict[str, float] = field(
@@ -1838,6 +1858,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if config.power_flow is PowerFlowMode.GENERATION
             or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
         ]
+        flexible_loads = [
+            FlexibleLoadInput(
+                circuit_id=config.circuit_id,
+                name=config.name,
+                appliance_profile=config.appliance_profile.value,
+                real_power_w=sample.real_power,
+            )
+            for config, sample in samples
+            if _is_flexible_solar_load(config)
+        ]
         for config, sample in mains_items:
             result = calculate_solar_flow(
                 mains=SolarFlowInput(
@@ -1845,6 +1875,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     real_power_w=sample.real_power,
                 ),
                 generation=generation,
+            )
+            load_shift = evaluate_solar_load_shift(
+                solar_load_shift_available_w=result.load_shift_available_w,
+                solar_surplus_status=result.solar_surplus_status,
+                grid_import_w=result.grid_import_w,
+                flexible_loads=flexible_loads,
             )
             circuit_id = config.circuit_id
             self.state.solar_generation_w_by_circuit[circuit_id] = (
@@ -1871,15 +1907,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state.solar_load_shift_w_by_circuit[circuit_id] = (
                 result.load_shift_available_w
             )
+            self.state.solar_flexible_load_power_w_by_circuit[circuit_id] = (
+                load_shift.active_flexible_load_power_w
+            )
+            self.state.solar_flexible_load_coverage_percent_by_circuit[circuit_id] = (
+                load_shift.solar_coverage_percent
+            )
             self.state.solar_flow_status_by_circuit[circuit_id] = result.status
             self.state.solar_surplus_status_by_circuit[circuit_id] = (
                 result.solar_surplus_status
+            )
+            self.state.solar_load_shift_status_by_circuit[circuit_id] = (
+                load_shift.status
             )
             self.state.solar_flow_evidence_by_circuit[circuit_id] = {
                 **result.features,
                 "status": result.status,
                 "solar_surplus_status": result.solar_surplus_status,
             }
+            self.state.solar_load_shift_evidence_by_circuit[circuit_id] = (
+                load_shift.features
+            )
 
     async def _observe_utility_comparisons(
         self: Self,
@@ -3880,6 +3928,14 @@ def _utility_comparison_evidence_payload(result: Any) -> dict[str, Any]:
         "absolute_difference_percent": result.absolute_difference_percent,
         "tolerance_percent": result.tolerance_percent,
     }
+
+
+def _is_flexible_solar_load(config: CircuitConfig) -> bool:
+    return (
+        config.power_flow is PowerFlowMode.LOAD
+        and config.mode is not CircuitMode.MAINS_NILM
+        and config.appliance_profile in FLEXIBLE_SOLAR_LOAD_PROFILES
+    )
 
 
 def _format_kwh(value: float) -> str:

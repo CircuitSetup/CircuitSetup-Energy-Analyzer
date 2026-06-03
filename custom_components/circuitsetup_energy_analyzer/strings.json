@@ -194,6 +194,15 @@
       "solar_load_shift_power": {
         "name": "Solar load shift power"
       },
+      "solar_flexible_load_power": {
+        "name": "Solar flexible load power"
+      },
+      "solar_flexible_load_coverage": {
+        "name": "Solar flexible load coverage"
+      },
+      "solar_load_shift_status": {
+        "name": "Solar load shift status"
+      },
       "solar_surplus_status": {
         "name": "Solar surplus status"
       },

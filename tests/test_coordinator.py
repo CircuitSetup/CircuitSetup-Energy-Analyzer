@@ -3588,6 +3588,8 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
             values = {
                 "sensor.mains_power": "-500",
                 "sensor.solar_power": "-2000",
+                "sensor.pool_pump_power": "800",
+                "sensor.water_heater_power": "0",
             }
             return SimpleNamespace(
                 state=values[entity_id],
@@ -3618,6 +3620,30 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
                         {"entity_id": "sensor.solar_power", "role": "real_power"},
                     ],
                 },
+                {
+                    "circuit_id": "pool",
+                    "name": "Pool Pump",
+                    "mode": "dual_phase",
+                    "appliance_profile": "pool_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.pool_pump_power",
+                            "role": "real_power",
+                        },
+                    ],
+                },
+                {
+                    "circuit_id": "water_heater",
+                    "name": "Water Heater",
+                    "mode": "dual_phase",
+                    "appliance_profile": "water_heater",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.water_heater_power",
+                            "role": "real_power",
+                        },
+                    ],
+                },
             ],
         },
         now_fn=lambda: now,
@@ -3638,6 +3664,18 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
         coordinator.state.solar_surplus_status_by_circuit["mains"]
         == "surplus_available"
     )
+    assert (
+        coordinator.state.solar_flexible_load_power_w_by_circuit["mains"]
+        == 800.0
+    )
+    assert (
+        coordinator.state.solar_flexible_load_coverage_percent_by_circuit["mains"]
+        == 100.0
+    )
+    assert (
+        coordinator.state.solar_load_shift_status_by_circuit["mains"]
+        == "active_solar_supported"
+    )
     assert coordinator.state.solar_flow_evidence_by_circuit["mains"] == {
         "mains_net_power_w": -500.0,
         "solar_generation_w": 2000.0,
@@ -3654,6 +3692,33 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
         "generation_circuit_count": 1.0,
         "status": "exporting",
         "solar_surplus_status": "surplus_available",
+    }
+    assert coordinator.state.solar_load_shift_evidence_by_circuit["mains"] == {
+        "status": "active_solar_supported",
+        "solar_surplus_status": "surplus_available",
+        "active_flexible_load_power_w": 800.0,
+        "solar_load_shift_available_w": 500.0,
+        "grid_import_w": 0.0,
+        "solar_coverage_percent": 100.0,
+        "active_flexible_load_count": 1,
+        "idle_flexible_load_count": 1,
+        "unavailable_flexible_load_count": 0,
+        "candidate_loads": [
+            {
+                "circuit_id": "pool",
+                "name": "Pool Pump",
+                "appliance_profile": "pool_pump",
+                "current_power_w": 800.0,
+                "state": "active",
+            },
+            {
+                "circuit_id": "water_heater",
+                "name": "Water Heater",
+                "appliance_profile": "water_heater",
+                "current_power_w": 0.0,
+                "state": "idle",
+            },
+        ],
     }
 
 

@@ -493,12 +493,43 @@ def solar_load_shift_power_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def solar_flexible_load_power_value(state: Any, circuit_id: str) -> float:
+    """Return current power used by configured flexible solar loads."""
+    return float(
+        getattr(state, "solar_flexible_load_power_w_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def solar_flexible_load_coverage_value(state: Any, circuit_id: str) -> float:
+    """Return percent of active flexible load estimated to be solar-covered."""
+    return float(
+        getattr(
+            state,
+            "solar_flexible_load_coverage_percent_by_circuit",
+            {},
+        ).get(circuit_id, 0.0)
+    )
+
+
 def solar_surplus_status_value(state: Any, circuit_id: str) -> str:
     """Return the solar surplus/load-shift diagnostic status."""
     return str(
         getattr(state, "solar_surplus_status_by_circuit", {}).get(
             circuit_id,
             "missing_mains",
+        )
+    )
+
+
+def solar_load_shift_status_value(state: Any, circuit_id: str) -> str:
+    """Return whether flexible loads are solar-covered or waiting for surplus."""
+    return str(
+        getattr(state, "solar_load_shift_status_by_circuit", {}).get(
+            circuit_id,
+            "not_applicable",
         )
     )
 
@@ -1011,6 +1042,28 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_flexible_load_power",
+        name_suffix="Solar Flexible Load Power",
+        value_fn=solar_flexible_load_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_flexible_load_coverage",
+        name_suffix="Solar Flexible Load Coverage",
+        value_fn=solar_flexible_load_coverage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_load_shift_status",
+        name_suffix="Solar Load Shift Status",
+        value_fn=solar_load_shift_status_value,
+        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="solar_surplus_status",

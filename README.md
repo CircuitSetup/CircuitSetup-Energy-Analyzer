@@ -261,6 +261,14 @@ management tools, but it is read-only: use ordinary Home Assistant automations
 if you want to turn on an EV charger, water heater, pool pump, or other
 flexible load.
 
+For configured EV charger, HVAC, pool pump, and water heater circuits, the
+analyzer also estimates instantaneous net solar support for active flexible
+loads and whether idle flexible loads are surplus candidates. The evidence
+lists candidate circuits, active/idle/unavailable state, current power,
+estimated solar coverage, and status such as `active_solar_supported`,
+`active_grid_supported`, `surplus_candidate`, `solar_flow_unavailable`, or
+`waiting_for_surplus`.
+
 If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
@@ -380,6 +388,9 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_solar_flow_status`
 - `sensor.<circuit>_solar_surplus_power`
 - `sensor.<circuit>_solar_load_shift_power`
+- `sensor.<circuit>_solar_flexible_load_power`
+- `sensor.<circuit>_solar_flexible_load_coverage`
+- `sensor.<circuit>_solar_load_shift_status`
 - `sensor.<circuit>_solar_surplus_status`
 - `sensor.<circuit>_utility_comparison_difference`
 - `sensor.<circuit>_utility_comparison_status`
