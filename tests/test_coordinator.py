@@ -3576,6 +3576,77 @@ async def test_runtime_calculates_mains_balance_from_monitored_circuits() -> Non
 
 
 @pytest.mark.asyncio
+async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_power": "-500",
+                "sensor.solar_power": "-2000",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.solar_generation_w_by_circuit["mains"] == 2000.0
+    assert coordinator.state.solar_site_consumption_w_by_circuit["mains"] == 1500.0
+    assert coordinator.state.solar_grid_import_w_by_circuit["mains"] == 0.0
+    assert coordinator.state.solar_grid_export_w_by_circuit["mains"] == 500.0
+    assert coordinator.state.solar_self_consumption_percent_by_circuit["mains"] == 75.0
+    assert coordinator.state.solar_powered_percent_by_circuit["mains"] == 100.0
+    assert coordinator.state.solar_flow_status_by_circuit["mains"] == "exporting"
+    assert coordinator.state.solar_flow_evidence_by_circuit["mains"] == {
+        "mains_net_power_w": -500.0,
+        "solar_generation_w": 2000.0,
+        "grid_import_w": 0.0,
+        "grid_export_w": 500.0,
+        "site_consumption_w": 1500.0,
+        "solar_used_on_site_w": 1500.0,
+        "self_consumption_percent": 75.0,
+        "solar_powered_percent": 100.0,
+        "generation_circuit_count": 1.0,
+        "status": "exporting",
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

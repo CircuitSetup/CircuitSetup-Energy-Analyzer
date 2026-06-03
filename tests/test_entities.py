@@ -75,6 +75,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         run_cycle_runtime_value,
         run_cycle_status_value,
         sensitivity_value,
+        solar_flow_status_value,
+        solar_generation_power_value,
+        solar_grid_export_power_value,
+        solar_grid_import_power_value,
+        solar_powered_value,
+        solar_self_consumption_value,
+        solar_site_consumption_power_value,
         standby_status_value,
         standby_threshold_value,
         utility_comparison_difference_value,
@@ -201,6 +208,20 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         balance_evidence_by_circuit={
             "fridge": {"status": "tracking", "balance_power_w": 2300.0}
         },
+        solar_generation_w_by_circuit={"fridge": 2000.0},
+        solar_site_consumption_w_by_circuit={"fridge": 1500.0},
+        solar_grid_import_w_by_circuit={"fridge": 0.0},
+        solar_grid_export_w_by_circuit={"fridge": 500.0},
+        solar_self_consumption_percent_by_circuit={"fridge": 75.0},
+        solar_powered_percent_by_circuit={"fridge": 100.0},
+        solar_flow_status_by_circuit={"fridge": "exporting"},
+        solar_flow_evidence_by_circuit={
+            "fridge": {
+                "status": "exporting",
+                "solar_generation_w": 2000.0,
+                "site_consumption_w": 1500.0,
+            }
+        },
         utility_comparison_difference_kwh_by_circuit={"fridge": 15.0},
         utility_comparison_difference_percent_by_circuit={"fridge": 12.5},
         utility_comparison_status_by_circuit={"fridge": "mismatch"},
@@ -288,6 +309,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
     assert balance_status_value(state, "fridge") == "tracking"
+    assert solar_generation_power_value(state, "fridge") == 2000.0
+    assert solar_site_consumption_power_value(state, "fridge") == 1500.0
+    assert solar_grid_import_power_value(state, "fridge") == 0.0
+    assert solar_grid_export_power_value(state, "fridge") == 500.0
+    assert solar_self_consumption_value(state, "fridge") == 75.0
+    assert solar_powered_value(state, "fridge") == 100.0
+    assert solar_flow_status_value(state, "fridge") == "exporting"
     assert utility_comparison_difference_value(state, "fridge") == 12.5
     assert utility_comparison_status_value(state, "fridge") == "mismatch"
     assert billing_cycle_usage_value(state, "fridge") == 100.0
@@ -346,6 +374,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_power_value(state, "unknown") == 0.0
     assert monitored_coverage_value(state, "unknown") == 0.0
     assert balance_status_value(state, "unknown") == "missing_mains"
+    assert solar_generation_power_value(state, "unknown") == 0.0
+    assert solar_site_consumption_power_value(state, "unknown") == 0.0
+    assert solar_grid_import_power_value(state, "unknown") == 0.0
+    assert solar_grid_export_power_value(state, "unknown") == 0.0
+    assert solar_self_consumption_value(state, "unknown") == 0.0
+    assert solar_powered_value(state, "unknown") == 0.0
+    assert solar_flow_status_value(state, "unknown") == "missing_mains"
     assert utility_comparison_difference_value(state, "unknown") == 0.0
     assert utility_comparison_status_value(state, "unknown") == "unconfigured"
     assert billing_cycle_usage_value(state, "unknown") == 0.0
@@ -454,6 +489,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "balance_power_w": 2300.0,
         "monitored_coverage_percent": 54.0,
     }
+    solar_flow_evidence = {
+        "status": "exporting",
+        "solar_generation_w": 2000.0,
+        "site_consumption_w": 1500.0,
+    }
     utility_comparison_evidence = {
         "status": "mismatch",
         "utility_kwh": 120.0,
@@ -492,6 +532,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
             "fridge": metric_consistency_evidence
         },
         balance_evidence_by_circuit={"fridge": balance_evidence},
+        solar_flow_evidence_by_circuit={"fridge": solar_flow_evidence},
         utility_comparison_evidence_by_circuit={
             "fridge": utility_comparison_evidence
         },
@@ -705,6 +746,48 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["solar_generation_power"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_site_consumption_power"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_grid_import_power"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_grid_export_power"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_self_consumption"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_powered"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_flow_status"],
+    ).extra_state_attributes == solar_flow_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["utility_comparison_difference"],
     ).extra_state_attributes == utility_comparison_evidence
     assert CircuitAnalyzerSensor(
@@ -848,6 +931,13 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Monitored Power",
         "Kitchen Fridge Monitored Coverage",
         "Kitchen Fridge Balance Status",
+        "Kitchen Fridge Solar Generation Power",
+        "Kitchen Fridge Solar Site Consumption Power",
+        "Kitchen Fridge Solar Grid Import Power",
+        "Kitchen Fridge Solar Grid Export Power",
+        "Kitchen Fridge Solar Self Consumption",
+        "Kitchen Fridge Solar Powered",
+        "Kitchen Fridge Solar Flow Status",
         "Kitchen Fridge Utility Comparison Difference",
         "Kitchen Fridge Utility Comparison Status",
         "Kitchen Fridge Billing Cycle Usage",
@@ -907,6 +997,13 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_monitored_power",
         "entry-1_fridge_monitored_coverage",
         "entry-1_fridge_balance_status",
+        "entry-1_fridge_solar_generation_power",
+        "entry-1_fridge_solar_site_consumption_power",
+        "entry-1_fridge_solar_grid_import_power",
+        "entry-1_fridge_solar_grid_export_power",
+        "entry-1_fridge_solar_self_consumption",
+        "entry-1_fridge_solar_powered",
+        "entry-1_fridge_solar_flow_status",
         "entry-1_fridge_utility_comparison_difference",
         "entry-1_fridge_utility_comparison_status",
         "entry-1_fridge_billing_cycle_usage",

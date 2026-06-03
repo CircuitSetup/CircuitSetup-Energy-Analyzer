@@ -421,6 +421,64 @@ def balance_status_value(state: Any, circuit_id: str) -> str:
     return str(status or "missing_mains")
 
 
+def solar_generation_power_value(state: Any, circuit_id: str) -> float:
+    """Return instantaneous solar generation in watts."""
+    return float(
+        getattr(state, "solar_generation_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_site_consumption_power_value(state: Any, circuit_id: str) -> float:
+    """Return instantaneous site consumption from solar plus signed grid power."""
+    return float(
+        getattr(state, "solar_site_consumption_w_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def solar_grid_import_power_value(state: Any, circuit_id: str) -> float:
+    """Return instantaneous grid import power in watts."""
+    return float(
+        getattr(state, "solar_grid_import_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_grid_export_power_value(state: Any, circuit_id: str) -> float:
+    """Return instantaneous grid export power in watts."""
+    return float(
+        getattr(state, "solar_grid_export_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_self_consumption_value(state: Any, circuit_id: str) -> float:
+    """Return percent of generated solar consumed on site."""
+    return float(
+        getattr(state, "solar_self_consumption_percent_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def solar_powered_value(state: Any, circuit_id: str) -> float:
+    """Return percent of current site load powered by solar."""
+    return float(
+        getattr(state, "solar_powered_percent_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_flow_status_value(state: Any, circuit_id: str) -> str:
+    """Return the instantaneous solar-flow diagnostic status."""
+    return str(
+        getattr(state, "solar_flow_status_by_circuit", {}).get(
+            circuit_id,
+            "missing_mains",
+        )
+    )
+
+
 def utility_comparison_difference_value(state: Any, circuit_id: str) -> float:
     """Return measured-vs-utility kWh difference as a percentage."""
     return float(
@@ -859,6 +917,60 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Balance Status",
         value_fn=balance_status_value,
         attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_generation_power",
+        name_suffix="Solar Generation Power",
+        value_fn=solar_generation_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_site_consumption_power",
+        name_suffix="Solar Site Consumption Power",
+        value_fn=solar_site_consumption_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_grid_import_power",
+        name_suffix="Solar Grid Import Power",
+        value_fn=solar_grid_import_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_grid_export_power",
+        name_suffix="Solar Grid Export Power",
+        value_fn=solar_grid_export_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_self_consumption",
+        name_suffix="Solar Self Consumption",
+        value_fn=solar_self_consumption_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_powered",
+        name_suffix="Solar Powered",
+        value_fn=solar_powered_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_flow_status",
+        name_suffix="Solar Flow Status",
+        value_fn=solar_flow_status_value,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="utility_comparison_difference",

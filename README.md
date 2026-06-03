@@ -238,6 +238,25 @@ solar configuration, or multiplier problems.
 Generation circuits, such as solar inverter channels, are excluded from the
 monitored load sum so they do not look like household consumption.
 
+## Solar Flow Diagnostics
+
+For homes with a signed mains/net power circuit and one or more solar inverter
+circuits, the analyzer calculates instantaneous solar-flow evidence. It uses
+the same convention as common solar monitoring tools: grid import is positive,
+grid export is negative, and site consumption is solar generation plus signed
+grid power.
+
+Diagnostic entities expose current solar generation, estimated site
+consumption, grid import, grid export, solar self-consumption percentage, and
+the percentage of current site load powered by solar. This is intended as
+CircuitSetup setup and sign-convention evidence. Use Home Assistant's Energy
+Dashboard solar cards for normal historical solar, return-to-grid, and
+self-sufficiency views.
+
+If export is much larger than measured solar generation, the solar-flow status
+reports `inconsistent_export`, which can point to CT orientation, missing
+generation channels, battery export, or a solar/mains mapping problem.
+
 ## Utility And Opower Comparison
 
 For aggregate circuits, the analyzer can compare a utility-reported kWh sensor
@@ -335,6 +354,13 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_monitored_power`
 - `sensor.<circuit>_monitored_coverage`
 - `sensor.<circuit>_balance_status`
+- `sensor.<circuit>_solar_generation_power`
+- `sensor.<circuit>_solar_site_consumption_power`
+- `sensor.<circuit>_solar_grid_import_power`
+- `sensor.<circuit>_solar_grid_export_power`
+- `sensor.<circuit>_solar_self_consumption`
+- `sensor.<circuit>_solar_powered`
+- `sensor.<circuit>_solar_flow_status`
 - `sensor.<circuit>_utility_comparison_difference`
 - `sensor.<circuit>_utility_comparison_status`
 - `sensor.<circuit>_always_on_power`

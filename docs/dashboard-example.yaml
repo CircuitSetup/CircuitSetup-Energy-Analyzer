@@ -94,6 +94,9 @@ sections:
           - entity: sensor.mains_monitored_power
           - entity: sensor.mains_monitored_coverage
           - entity: sensor.mains_balance_status
+          - entity: sensor.mains_solar_generation_power
+          - entity: sensor.mains_solar_site_consumption_power
+          - entity: sensor.mains_solar_flow_status
           - entity: sensor.mains_current_demand
           - entity: sensor.mains_peak_demand
           - entity: sensor.mains_demand_peak_rank
@@ -205,6 +208,16 @@ sections:
           - entity: sensor.mains_monitored_power
           - entity: sensor.mains_monitored_coverage
           - entity: sensor.mains_balance_status
+      - type: entities
+        title: Solar flow
+        entities:
+          - entity: sensor.mains_solar_generation_power
+          - entity: sensor.mains_solar_site_consumption_power
+          - entity: sensor.mains_solar_grid_import_power
+          - entity: sensor.mains_solar_grid_export_power
+          - entity: sensor.mains_solar_self_consumption
+          - entity: sensor.mains_solar_powered
+          - entity: sensor.mains_solar_flow_status
       - type: entities
         title: Utility comparison
         entities:

@@ -167,6 +167,27 @@
       "balance_status": {
         "name": "Balance status"
       },
+      "solar_generation_power": {
+        "name": "Solar generation power"
+      },
+      "solar_site_consumption_power": {
+        "name": "Solar site consumption power"
+      },
+      "solar_grid_import_power": {
+        "name": "Solar grid import power"
+      },
+      "solar_grid_export_power": {
+        "name": "Solar grid export power"
+      },
+      "solar_self_consumption": {
+        "name": "Solar self consumption"
+      },
+      "solar_powered": {
+        "name": "Solar powered"
+      },
+      "solar_flow_status": {
+        "name": "Solar flow status"
+      },
       "utility_comparison_difference": {
         "name": "Utility comparison difference"
       },

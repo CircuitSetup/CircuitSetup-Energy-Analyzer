@@ -101,6 +101,7 @@ from .power_quality import (
     select_power_quality_evidence,
 )
 from .profiles import get_profile_definition
+from .solar_flow import SolarFlowInput, calculate_solar_flow
 from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -257,6 +258,18 @@ class AnalyzerState:
     )
     balance_status_by_circuit: dict[str, str] = field(default_factory=dict)
     balance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    solar_generation_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_site_consumption_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_grid_import_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_grid_export_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_self_consumption_percent_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    solar_powered_percent_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_flow_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    solar_flow_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     utility_comparison_difference_kwh_by_circuit: dict[str, float] = field(
@@ -538,6 +551,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
         self._refresh_balance_state(samples)
+        self._refresh_solar_flow_state(samples)
         for utility_alert in self._observe_utility_comparisons(now):
             alerts.append(utility_alert)
             self.store_data.alerts.append(utility_alert)
@@ -1764,6 +1778,61 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             self.state.balance_status_by_circuit[circuit_id] = result.status
             self.state.balance_evidence_by_circuit[circuit_id] = {
+                **result.features,
+                "status": result.status,
+            }
+
+    def _refresh_solar_flow_state(
+        self: Self,
+        samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
+    ) -> None:
+        mains_items = [
+            (config, sample)
+            for config, sample in samples
+            if config.mode is CircuitMode.MAINS_NILM
+            or config.appliance_profile is ApplianceProfile.MAINS_NILM
+        ]
+        if not mains_items:
+            return
+
+        generation = [
+            SolarFlowInput(
+                circuit_id=config.circuit_id,
+                real_power_w=sample.real_power,
+            )
+            for config, sample in samples
+            if config.power_flow is PowerFlowMode.GENERATION
+            or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
+        ]
+        for config, sample in mains_items:
+            result = calculate_solar_flow(
+                mains=SolarFlowInput(
+                    circuit_id=config.circuit_id,
+                    real_power_w=sample.real_power,
+                ),
+                generation=generation,
+            )
+            circuit_id = config.circuit_id
+            self.state.solar_generation_w_by_circuit[circuit_id] = (
+                result.solar_generation_w
+            )
+            self.state.solar_site_consumption_w_by_circuit[circuit_id] = (
+                result.site_consumption_w
+            )
+            self.state.solar_grid_import_w_by_circuit[circuit_id] = (
+                result.grid_import_w
+            )
+            self.state.solar_grid_export_w_by_circuit[circuit_id] = (
+                result.grid_export_w
+            )
+            self.state.solar_self_consumption_percent_by_circuit[circuit_id] = (
+                result.self_consumption_percent
+            )
+            self.state.solar_powered_percent_by_circuit[circuit_id] = (
+                result.solar_powered_percent
+            )
+            self.state.solar_flow_status_by_circuit[circuit_id] = result.status
+            self.state.solar_flow_evidence_by_circuit[circuit_id] = {
                 **result.features,
                 "status": result.status,
             }
