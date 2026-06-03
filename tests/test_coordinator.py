@@ -1604,6 +1604,37 @@ async def test_export_diagnostics_includes_power_quality_runtime_state() -> None
 
 
 @pytest.mark.asyncio
+async def test_export_history_csv_stores_retained_history_snapshot() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "fridge": {"days": [{"date": "2026-06-01", "usage_kwh": 8.5}]}
+            },
+            demand_by_circuit={
+                "fridge": {
+                    "daily_peaks": [
+                        {"date": "2026-06-01", "peak_demand_w": 3200.0}
+                    ]
+                }
+            },
+        ),
+    )
+
+    await coordinator.async_export_history_csv("fridge")
+
+    assert coordinator.last_exported_history_csv.startswith(
+        "circuit_id,timestamp,period_start,period_end,metric,value,unit,source"
+    )
+    assert "daily_energy_usage" in coordinator.last_exported_history_csv
+    assert "peak_demand" in coordinator.last_exported_history_csv
+
+
+@pytest.mark.asyncio
 async def test_runtime_populates_readiness_health_and_checklist_state() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

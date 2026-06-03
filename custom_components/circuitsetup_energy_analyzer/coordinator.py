@@ -31,6 +31,7 @@ from .const import (
 from .cost import CostSettings, record_cost_sample
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .events import CircuitEventDetector
+from .exporting import build_circuit_history_csv
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -285,6 +286,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.paused_circuits: set[str] = set()
         self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
+        self.last_exported_history_csv: str = ""
         self.mapping_checks_run = 0
         self.state = AnalyzerState()
         self.source_entities: tuple[str, ...] = ()
@@ -813,6 +815,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 {},
             ),
         }
+        self.async_set_updated_data(self.state)
+
+    async def async_export_history_csv(self: Self, circuit_id: str) -> None:
+        """Store retained analyzer history for one circuit as CSV text."""
+        self.last_exported_history_csv = build_circuit_history_csv(
+            self.store_data,
+            circuit_id,
+        )
         self.async_set_updated_data(self.state)
 
     async def async_run_mapping_checks(self: Self) -> None:

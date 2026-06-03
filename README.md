@@ -77,6 +77,20 @@ cost, and whether the circuit is currently in the TOU period. These values are
 estimates and do not include fixed fees, demand charges, taxes, tiered rates,
 or every utility billing rule.
 
+## History CSV Export
+
+Use the `export_history_csv` service to build a CSV snapshot of retained
+analyzer history for one configured circuit. The v1 export includes daily kWh
+usage rows, daily demand peaks, standby samples, billing-cycle usage, and
+cost-cycle rows when those features have retained data for the selected
+circuit.
+
+The export is generated from the integration's retained analyzer history, not
+from Home Assistant's full recorder database. The current service stores the
+latest CSV snapshot in runtime state so future UI, diagnostics, or download
+surfaces can reuse the same export builder without writing arbitrary files from
+a service call.
+
 ## Peak Demand Tracking
 
 The analyzer also tracks rolling power demand for each circuit with real-power

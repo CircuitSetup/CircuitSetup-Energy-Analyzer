@@ -10,6 +10,7 @@ SERVICE_RELEARN_BASELINE = "relearn_baseline"
 SERVICE_PAUSE_ALERTS = "pause_alerts"
 SERVICE_ACKNOWLEDGE_ALERT = "acknowledge_alert"
 SERVICE_EXPORT_DIAGNOSTICS = "export_diagnostics"
+SERVICE_EXPORT_HISTORY_CSV = "export_history_csv"
 SERVICE_RUN_MAPPING_CHECKS = "run_mapping_checks"
 SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
@@ -147,6 +148,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     ),
     SERVICE_ACKNOWLEDGE_ALERT: _schema(required=(ATTR_ALERT_ID,)),
     SERVICE_EXPORT_DIAGNOSTICS: CIRCUIT_SERVICE_SCHEMA,
+    SERVICE_EXPORT_HISTORY_CSV: CIRCUIT_SERVICE_SCHEMA,
     SERVICE_RUN_MAPPING_CHECKS: None,
     SERVICE_LABEL_NILM_SIGNATURE: NILM_LABEL_SERVICE_SCHEMA,
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
@@ -248,6 +250,8 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         elif service == SERVICE_EXPORT_DIAGNOSTICS:
             await _call_if_present(coordinator, "async_export_diagnostics", circuit_id)
+        elif service == SERVICE_EXPORT_HISTORY_CSV:
+            await _call_if_present(coordinator, "async_export_history_csv", circuit_id)
         elif service == SERVICE_LABEL_NILM_SIGNATURE:
             await _call_if_present(
                 coordinator,

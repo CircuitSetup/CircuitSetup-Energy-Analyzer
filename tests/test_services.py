@@ -246,6 +246,7 @@ async def test_setup_and_unload_services_with_fake_hass() -> None:
 async def test_user_experience_services_dispatch_to_loaded_coordinators() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_END_MAINTENANCE,
+        SERVICE_EXPORT_HISTORY_CSV,
         SERVICE_MARK_ALERT_EXPECTED,
         SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
@@ -375,6 +376,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 )
             )
 
+        async def async_export_history_csv(self, circuit_id: str) -> None:
+            self.calls.append(("async_export_history_csv", (circuit_id,)))
+
         async def async_start_maintenance(
             self,
             circuit_id: str,
@@ -487,6 +491,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_EXPORT_HISTORY_CSV)](
+        SimpleNamespace(data={"circuit_id": "fridge"})
+    )
     await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
         SimpleNamespace(
             data={
@@ -529,6 +536,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             ("fridge", 1, 0.20, 0.30, "17:00", "21:00", "0,1,2,3,4", "Peak"),
         ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
+        ("async_export_history_csv", ("fridge",)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),
         ("async_mark_alert_expected", ("alert-1",)),
@@ -549,6 +557,7 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_ACKNOWLEDGE_ALERT,
         SERVICE_EXPORT_DIAGNOSTICS,
+        SERVICE_EXPORT_HISTORY_CSV,
         SERVICE_IGNORE_NILM_SIGNATURE,
         SERVICE_LABEL_NILM_SIGNATURE,
         SERVICE_PAUSE_ALERTS,
@@ -584,6 +593,9 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
             )
         },
         alerts=[alert],
+        energy_usage_by_circuit={
+            "fridge": {"days": [{"date": "2026-06-01", "usage_kwh": 8.5}]}
+        },
         nilm_signatures={"mains": [{"signature_id": "signature_1"}]},
     )
     coordinator = EnergyAnalyzerCoordinator(
@@ -613,6 +625,9 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
     await hass.services.registered[(DOMAIN, SERVICE_EXPORT_DIAGNOSTICS)](
         SimpleNamespace(data={"circuit_id": "fridge"})
     )
+    await hass.services.registered[(DOMAIN, SERVICE_EXPORT_HISTORY_CSV)](
+        SimpleNamespace(data={"circuit_id": "fridge"})
+    )
     await hass.services.registered[(DOMAIN, SERVICE_RUN_MAPPING_CHECKS)](
         SimpleNamespace(data={})
     )
@@ -634,6 +649,7 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
     assert coordinator.store_data.alerts == []
     assert coordinator.state.active_alerts_by_circuit == {}
     assert coordinator.last_exported_diagnostics["circuit_id"] == "fridge"
+    assert "daily_energy_usage" in coordinator.last_exported_history_csv
     assert coordinator.mapping_checks_run == 1
     assert coordinator.store_data.nilm_signatures["mains"][0]["user_label"] == (
         "Microwave"

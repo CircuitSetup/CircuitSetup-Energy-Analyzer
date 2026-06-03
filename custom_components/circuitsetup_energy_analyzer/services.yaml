@@ -49,6 +49,17 @@ export_diagnostics:
       example: mains
       selector:
         text:
+export_history_csv:
+  name: Export history CSV
+  description: Export retained analyzer history for a configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
 run_mapping_checks:
   name: Run mapping checks
   description: Run configured source-entity mapping checks.
