@@ -124,6 +124,13 @@ sections:
           - entity: sensor.refrigerator_billing_cycle_budget_usage
           - entity: sensor.refrigerator_billing_cycle_status
       - type: entities
+        title: Refrigerator cost
+        entities:
+          - entity: sensor.refrigerator_cost_current_rate
+          - entity: sensor.refrigerator_cost_cycle
+          - entity: sensor.refrigerator_cost_cycle_forecast
+          - entity: sensor.refrigerator_cost_status
+      - type: entities
         title: Refrigerator standby
         entities:
           - entity: sensor.refrigerator_always_on_power

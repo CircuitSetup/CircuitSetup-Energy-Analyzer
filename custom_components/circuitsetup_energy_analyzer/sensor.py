@@ -318,6 +318,35 @@ def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def cost_current_rate_value(state: Any, circuit_id: str) -> float:
+    """Return the active cost rate for a circuit."""
+    return float(
+        getattr(state, "cost_current_rate_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def cost_cycle_value(state: Any, circuit_id: str) -> float:
+    """Return current billing-cycle cost estimate."""
+    return float(getattr(state, "cost_cycle_by_circuit", {}).get(circuit_id, 0.0))
+
+
+def cost_cycle_forecast_value(state: Any, circuit_id: str) -> float:
+    """Return projected end-of-cycle cost estimate."""
+    return float(
+        getattr(state, "cost_cycle_forecast_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def cost_status_value(state: Any, circuit_id: str) -> str:
+    """Return the cost tracker status."""
+    return str(
+        getattr(state, "cost_status_by_circuit", {}).get(
+            circuit_id,
+            "unconfigured",
+        )
+    )
+
+
 def always_on_power_value(state: Any, circuit_id: str) -> float:
     """Return estimated Always On power for a circuit."""
     return float(
@@ -580,6 +609,33 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Billing Cycle Status",
         value_fn=billing_cycle_status_value,
         attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="cost_current_rate",
+        name_suffix="Cost Current Rate",
+        value_fn=cost_current_rate_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="cost_cycle",
+        name_suffix="Cost Cycle",
+        value_fn=cost_cycle_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="cost_cycle_forecast",
+        name_suffix="Cost Cycle Forecast",
+        value_fn=cost_cycle_forecast_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="cost_status",
+        name_suffix="Cost Status",
+        value_fn=cost_status_value,
+        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="always_on_power",

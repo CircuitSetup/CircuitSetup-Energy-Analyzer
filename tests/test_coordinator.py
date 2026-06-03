@@ -2714,6 +2714,124 @@ async def test_runtime_persists_billing_cycle_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_time_of_use_cost() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 8, 18, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.hvac_energy"
+            return SimpleNamespace(
+                state="104",
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "cost_cycle_start_day": 1,
+                    "default_rate_per_kwh": 0.10,
+                    "tou_rate_per_kwh": 0.30,
+                    "tou_start": "17:00",
+                    "tou_end": "21:00",
+                    "tou_weekdays": "0,1,2,3,4",
+                    "tou_name": "Peak",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            cost_by_circuit={
+                "hvac": {
+                    "cycle_start": "2026-06-01",
+                    "cycle_end": "2026-07-01",
+                    "cycle_cost": 5.0,
+                    "last_energy_kwh": 100.0,
+                    "last_sample_at": "2026-06-08T16:30:00+00:00",
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.cost_current_rate_by_circuit["hvac"] == 0.30
+    assert coordinator.state.cost_cycle_by_circuit["hvac"] == 6.2
+    assert coordinator.state.cost_cycle_forecast_by_circuit["hvac"] == 23.25
+    assert coordinator.state.cost_status_by_circuit["hvac"] == "tou_peak"
+    assert coordinator.state.cost_evidence_by_circuit["hvac"]["active_rate_name"] == (
+        "Peak"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_cost_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_cost_settings(
+        "fridge",
+        cycle_start_day=1,
+        default_rate_per_kwh=0.20,
+        tou_rate_per_kwh=0.30,
+        tou_start="17:00",
+        tou_end="21:00",
+        tou_weekdays="0,1,2,3,4",
+        tou_name="Peak",
+    )
+
+    assert saved
+    assert coordinator.store_data.cost_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 1,
+        "default_rate_per_kwh": 0.20,
+        "tou_rate_per_kwh": 0.30,
+        "tou_start": "17:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

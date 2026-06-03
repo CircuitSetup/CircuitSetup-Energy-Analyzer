@@ -252,6 +252,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MERGE_NILM_SIGNATURES,
         SERVICE_SET_BILLING_CYCLE_SETTINGS,
         SERVICE_SET_CIRCUIT_SENSITIVITY,
+        SERVICE_SET_COST_SETTINGS,
         SERVICE_SET_DEMAND_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
         SERVICE_SET_STANDBY_SETTINGS,
@@ -324,6 +325,33 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                         cycle_start_day,
                         budget_kwh,
                         budget_alert_ratio,
+                    ),
+                )
+            )
+
+        async def async_set_cost_settings(
+            self,
+            circuit_id: str,
+            cycle_start_day: object = None,
+            default_rate_per_kwh: object = None,
+            tou_rate_per_kwh: object = None,
+            tou_start: object = None,
+            tou_end: object = None,
+            tou_weekdays: object = None,
+            tou_name: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_cost_settings",
+                    (
+                        circuit_id,
+                        cycle_start_day,
+                        default_rate_per_kwh,
+                        tou_rate_per_kwh,
+                        tou_start,
+                        tou_end,
+                        tou_weekdays,
+                        tou_name,
                     ),
                 )
             )
@@ -435,6 +463,20 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_COST_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "fridge",
+                "cycle_start_day": 1,
+                "default_rate_per_kwh": 0.20,
+                "tou_rate_per_kwh": 0.30,
+                "tou_start": "17:00",
+                "tou_end": "21:00",
+                "tou_weekdays": "0,1,2,3,4",
+                "tou_name": "Peak",
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_STANDBY_SETTINGS)](
         SimpleNamespace(
             data={
@@ -482,6 +524,10 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
         ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
+        (
+            "async_set_cost_settings",
+            ("fridge", 1, 0.20, 0.30, "17:00", "21:00", "0,1,2,3,4", "Peak"),
+        ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),

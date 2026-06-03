@@ -128,6 +128,18 @@
       "billing_cycle_status": {
         "name": "Billing cycle status"
       },
+      "cost_current_rate": {
+        "name": "Cost current rate"
+      },
+      "cost_cycle": {
+        "name": "Cost cycle"
+      },
+      "cost_cycle_forecast": {
+        "name": "Cost cycle forecast"
+      },
+      "cost_status": {
+        "name": "Cost status"
+      },
       "always_on_power": {
         "name": "Always On power"
       },

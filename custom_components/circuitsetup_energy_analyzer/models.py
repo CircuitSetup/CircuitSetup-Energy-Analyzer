@@ -113,6 +113,13 @@ class CircuitConfig:
     billing_cycle_budget_kwh: float | None = None
     billing_cycle_budget_alert_ratio: float = 1.0
     billing_cycle_min_elapsed_days: int = 3
+    cost_cycle_start_day: int = 1
+    default_rate_per_kwh: float | None = None
+    tou_rate_per_kwh: float | None = None
+    tou_start: str | None = None
+    tou_end: str | None = None
+    tou_weekdays: tuple[int, ...] = ()
+    tou_name: str = "Peak"
     demand_window_minutes: int = 15
     demand_limit_w: float | None = None
     standby_window_hours: int = 24

@@ -234,6 +234,26 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 "last_sample_at": now.isoformat(),
             }
         },
+        cost_settings_by_circuit={
+            "fridge": {
+                "cycle_start_day": 1,
+                "default_rate_per_kwh": 0.2,
+                "tou_rate_per_kwh": 0.3,
+                "tou_start": "17:00",
+                "tou_end": "21:00",
+                "tou_weekdays": "0,1,2,3,4",
+                "tou_name": "Peak",
+            }
+        },
+        cost_by_circuit={
+            "fridge": {
+                "cycle_start": "2026-06-01",
+                "cycle_end": "2026-07-01",
+                "cycle_cost": 18.0,
+                "last_energy_kwh": 112.5,
+                "last_sample_at": now.isoformat(),
+            }
+        },
         demand_settings_by_circuit={
             "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
         },
@@ -289,6 +309,16 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "budget_alert_ratio": 0.9,
     }
     assert restored.billing_by_circuit["fridge"]["cycle_usage_kwh"] == 42.0
+    assert restored.cost_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 1,
+        "default_rate_per_kwh": 0.2,
+        "tou_rate_per_kwh": 0.3,
+        "tou_start": "17:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+    }
+    assert restored.cost_by_circuit["fridge"]["cycle_cost"] == 18.0
     assert restored.demand_settings_by_circuit["hvac"] == {
         "window_minutes": 15,
         "demand_limit_w": 4500.0,

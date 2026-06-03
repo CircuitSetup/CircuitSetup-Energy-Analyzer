@@ -223,6 +223,77 @@ set_billing_cycle_settings:
           max: 2
           step: 0.01
           mode: box
+set_cost_settings:
+  name: Set cost settings
+  description: Set flat-rate and Time-of-Use cost tracking for one circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: fridge
+      selector:
+        text:
+    cycle_start_day:
+      name: Cycle Start Day
+      description: Day of the month when the utility billing cycle starts.
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    default_rate_per_kwh:
+      name: Default Rate Per kWh
+      description: Default electricity cost rate applied outside TOU periods.
+      required: false
+      example: 0.20
+      selector:
+        number:
+          min: 0.0001
+          max: 1000
+          step: 0.0001
+          mode: box
+    tou_rate_per_kwh:
+      name: TOU Rate Per kWh
+      description: Optional Time-of-Use cost rate for the configured period.
+      required: false
+      example: 0.30
+      selector:
+        number:
+          min: 0.0001
+          max: 1000
+          step: 0.0001
+          mode: box
+    tou_start:
+      name: TOU Start
+      description: Time-of-Use period start time in 24-hour HH:MM format.
+      required: false
+      example: "17:00"
+      selector:
+        text:
+    tou_end:
+      name: TOU End
+      description: Time-of-Use period end time in 24-hour HH:MM format.
+      required: false
+      example: "21:00"
+      selector:
+        text:
+    tou_weekdays:
+      name: TOU Weekdays
+      description: Optional comma-separated weekdays where Monday is 0.
+      required: false
+      example: "0,1,2,3,4"
+      selector:
+        text:
+    tou_name:
+      name: TOU Name
+      description: Friendly name for the Time-of-Use rate period.
+      required: false
+      example: Peak
+      selector:
+        text:
 set_standby_settings:
   name: Set standby settings
   description: Set Always On and standby tracking for one configured circuit.

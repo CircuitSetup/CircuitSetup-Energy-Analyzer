@@ -64,6 +64,19 @@ optional kWh budget for a circuit. When a budget is configured, projected
 over-budget notifications require repeated evidence and include the current
 usage, projected usage, configured budget, and billing-cycle dates.
 
+## Cost And Time-of-Use Tracking
+
+For circuits with cumulative energy sensors, the analyzer can estimate
+billing-cycle cost from a configured electricity rate. The v1 cost model
+supports a default per-kWh rate and one optional Time-of-Use period with a
+different rate, time window, weekday list, and friendly name.
+
+Use the `set_cost_settings` service to configure rates for a circuit. Cost
+diagnostics show the active rate, current-cycle cost, projected end-of-cycle
+cost, and whether the circuit is currently in the TOU period. These values are
+estimates and do not include fixed fees, demand charges, taxes, tiered rates,
+or every utility billing rule.
+
 ## Peak Demand Tracking
 
 The analyzer also tracks rolling power demand for each circuit with real-power
@@ -135,6 +148,10 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_billing_cycle_forecast`
 - `sensor.<circuit>_billing_cycle_budget_usage`
 - `sensor.<circuit>_billing_cycle_status`
+- `sensor.<circuit>_cost_current_rate`
+- `sensor.<circuit>_cost_cycle`
+- `sensor.<circuit>_cost_cycle_forecast`
+- `sensor.<circuit>_cost_status`
 - `sensor.<circuit>_current_demand`
 - `sensor.<circuit>_peak_demand`
 - `sensor.<circuit>_demand_limit_usage`

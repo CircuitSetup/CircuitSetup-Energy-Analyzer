@@ -33,6 +33,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         billing_cycle_forecast_value,
         billing_cycle_status_value,
         billing_cycle_usage_value,
+        cost_current_rate_value,
+        cost_cycle_forecast_value,
+        cost_cycle_value,
+        cost_status_value,
         current_demand_value,
         daily_energy_usage_value,
         data_quality_checklist_value,
@@ -137,6 +141,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
                 "projected_cycle_kwh": 300.0,
             }
         },
+        cost_current_rate_by_circuit={"fridge": 0.3},
+        cost_cycle_by_circuit={"fridge": 6.2},
+        cost_cycle_forecast_by_circuit={"fridge": 18.6},
+        cost_status_by_circuit={"fridge": "tou_peak"},
+        cost_evidence_by_circuit={
+            "fridge": {"status": "tou_peak", "active_rate_name": "Peak"}
+        },
         always_on_power_w_by_circuit={"fridge": 45.0},
         standby_threshold_w_by_circuit={"fridge": 8.0},
         standby_status_by_circuit={"fridge": "standby"},
@@ -181,6 +192,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert billing_cycle_forecast_value(state, "fridge") == 300.0
     assert billing_cycle_budget_usage_value(state, "fridge") == 40.0
     assert billing_cycle_status_value(state, "fridge") == "projected_over_budget"
+    assert cost_current_rate_value(state, "fridge") == 0.3
+    assert cost_cycle_value(state, "fridge") == 6.2
+    assert cost_cycle_forecast_value(state, "fridge") == 18.6
+    assert cost_status_value(state, "fridge") == "tou_peak"
     assert always_on_power_value(state, "fridge") == 45.0
     assert standby_threshold_value(state, "fridge") == 8.0
     assert standby_status_value(state, "fridge") == "standby"
@@ -216,6 +231,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert billing_cycle_forecast_value(state, "unknown") == 0.0
     assert billing_cycle_budget_usage_value(state, "unknown") == 0.0
     assert billing_cycle_status_value(state, "unknown") == "no_budget"
+    assert cost_current_rate_value(state, "unknown") == 0.0
+    assert cost_cycle_value(state, "unknown") == 0.0
+    assert cost_cycle_forecast_value(state, "unknown") == 0.0
+    assert cost_status_value(state, "unknown") == "unconfigured"
     assert always_on_power_value(state, "unknown") == 0.0
     assert standby_threshold_value(state, "unknown") == 0.0
     assert standby_status_value(state, "unknown") == "learning"
@@ -283,6 +302,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "cycle_usage_kwh": 100.0,
         "projected_cycle_kwh": 300.0,
     }
+    cost_evidence = {
+        "status": "tou_peak",
+        "active_rate_name": "Peak",
+        "current_rate_per_kwh": 0.3,
+    }
     standby_evidence = {
         "status": "standby",
         "always_on_power_w": 45.0,
@@ -298,6 +322,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         demand_evidence_by_circuit={"fridge": demand_evidence},
         balance_evidence_by_circuit={"fridge": balance_evidence},
         billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
+        cost_evidence_by_circuit={"fridge": cost_evidence},
         standby_evidence_by_circuit={"fridge": standby_evidence},
     )
     coordinator = SimpleNamespace(data=state)
@@ -428,6 +453,30 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["cost_current_rate"],
+    ).extra_state_attributes == cost_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["cost_cycle"],
+    ).extra_state_attributes == cost_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["cost_cycle_forecast"],
+    ).extra_state_attributes == cost_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["cost_status"],
+    ).extra_state_attributes == cost_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["always_on_power"],
     ).extra_state_attributes == standby_evidence
     assert CircuitAnalyzerSensor(
@@ -498,6 +547,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
             "Kitchen Fridge Billing Cycle Forecast",
             "Kitchen Fridge Billing Cycle Budget Usage",
             "Kitchen Fridge Billing Cycle Status",
+            "Kitchen Fridge Cost Current Rate",
+            "Kitchen Fridge Cost Cycle",
+            "Kitchen Fridge Cost Cycle Forecast",
+            "Kitchen Fridge Cost Status",
             "Kitchen Fridge Always On Power",
         "Kitchen Fridge Standby Threshold",
         "Kitchen Fridge Standby Status",
@@ -534,6 +587,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_billing_cycle_forecast",
         "entry-1_fridge_billing_cycle_budget_usage",
         "entry-1_fridge_billing_cycle_status",
+        "entry-1_fridge_cost_current_rate",
+        "entry-1_fridge_cost_cycle",
+        "entry-1_fridge_cost_cycle_forecast",
+        "entry-1_fridge_cost_status",
         "entry-1_fridge_always_on_power",
         "entry-1_fridge_standby_threshold",
         "entry-1_fridge_standby_status",
@@ -564,6 +621,10 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
         "mains",
         "mains",
         "mains",

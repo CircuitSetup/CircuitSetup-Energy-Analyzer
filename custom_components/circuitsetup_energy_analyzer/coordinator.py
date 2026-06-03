@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DOMAIN,
 )
+from .cost import CostSettings, record_cost_sample
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .events import CircuitEventDetector
 from .models import (
@@ -150,6 +151,11 @@ class AnalyzerState:
     billing_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    cost_current_rate_by_circuit: dict[str, float] = field(default_factory=dict)
+    cost_cycle_by_circuit: dict[str, float] = field(default_factory=dict)
+    cost_cycle_forecast_by_circuit: dict[str, float] = field(default_factory=dict)
+    cost_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    cost_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -359,6 +365,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
                 await self._notify_alert(billing_alert)
 
+            self._observe_cost(config, sample, now)
+
             demand_alert = self._observe_demand(config, sample, now)
             if demand_alert is not None:
                 alerts.append(demand_alert)
@@ -519,6 +527,54 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if budget is not None:
             settings["budget_kwh"] = budget
         self.store_data.billing_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_cost_settings(
+        self: Self,
+        circuit_id: str,
+        cycle_start_day: Any = None,
+        default_rate_per_kwh: Any = None,
+        tou_rate_per_kwh: Any = None,
+        tou_start: Any = None,
+        tou_end: Any = None,
+        tou_weekdays: Any = None,
+        tou_name: Any = None,
+    ) -> None:
+        """Persist cost and Time-of-Use settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._cost_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "cycle_start_day": _positive_int_value(
+                cycle_start_day,
+                default=current.cycle_start_day,
+            ),
+        }
+        default_rate = _optional_positive_float_value(
+            default_rate_per_kwh,
+            default=current.default_rate_per_kwh,
+        )
+        tou_rate = _optional_positive_float_value(
+            tou_rate_per_kwh,
+            default=current.tou_rate_per_kwh,
+        )
+        if default_rate is not None:
+            settings["default_rate_per_kwh"] = default_rate
+        if tou_rate is not None:
+            settings["tou_rate_per_kwh"] = tou_rate
+        settings["tou_start"] = str(tou_start or current.tou_start or "")
+        settings["tou_end"] = str(tou_end or current.tou_end or "")
+        weekdays = _weekday_csv_value(
+            tou_weekdays,
+            default=current.tou_weekdays,
+        )
+        if weekdays:
+            settings["tou_weekdays"] = weekdays
+        settings["tou_name"] = str(tou_name or current.tou_name or "Peak")
+        self.store_data.cost_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
@@ -711,6 +767,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "billing_cycle_evidence": (
                 self.state.billing_cycle_evidence_by_circuit.get(circuit_id, {})
             ),
+            "cost_current_rate_per_kwh": self.state.cost_current_rate_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "cost_cycle": self.state.cost_cycle_by_circuit.get(circuit_id, 0.0),
+            "cost_cycle_forecast": self.state.cost_cycle_forecast_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "cost_status": self.state.cost_status_by_circuit.get(
+                circuit_id,
+                "unconfigured",
+            ),
+            "cost_evidence": self.state.cost_evidence_by_circuit.get(circuit_id, {}),
             "current_demand_w": self.state.current_demand_w_by_circuit.get(
                 circuit_id,
                 0.0,
@@ -1714,6 +1784,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_cost(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> None:
+        settings = self._cost_settings_for_config(config, config.circuit_id)
+        result = record_cost_sample(
+            self.store_data.cost_by_circuit.setdefault(config.circuit_id, {}),
+            circuit_id=config.circuit_id,
+            timestamp=now,
+            energy_kwh=sample.energy,
+            settings=settings,
+        )
+        if result is None:
+            return
+
+        self._mark_store_dirty()
+        self.state.cost_current_rate_by_circuit[config.circuit_id] = (
+            result.current_rate_per_kwh
+        )
+        self.state.cost_cycle_by_circuit[config.circuit_id] = result.cycle_cost
+        self.state.cost_cycle_forecast_by_circuit[config.circuit_id] = (
+            result.projected_cycle_cost
+        )
+        self.state.cost_status_by_circuit[config.circuit_id] = result.status
+        self.state.cost_evidence_by_circuit[config.circuit_id] = (
+            _cost_evidence_payload(result)
+        )
+
     def _observe_demand(
         self: Self,
         config: CircuitConfig,
@@ -1896,6 +1996,41 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 overrides.get("min_elapsed_days"),
                 default=default_min_elapsed_days,
             ),
+        )
+
+    def _cost_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> CostSettings:
+        overrides = self.store_data.cost_settings_by_circuit.get(circuit_id, {})
+        default_start_day = config.cost_cycle_start_day if config is not None else 1
+        default_rate = config.default_rate_per_kwh if config is not None else None
+        default_tou_rate = config.tou_rate_per_kwh if config is not None else None
+        default_tou_start = config.tou_start if config is not None else None
+        default_tou_end = config.tou_end if config is not None else None
+        default_tou_weekdays = config.tou_weekdays if config is not None else ()
+        default_tou_name = config.tou_name if config is not None else "Peak"
+        return CostSettings(
+            cycle_start_day=_positive_int_value(
+                overrides.get("cycle_start_day"),
+                default=default_start_day,
+            ),
+            default_rate_per_kwh=_optional_positive_float_value(
+                overrides.get("default_rate_per_kwh"),
+                default=default_rate,
+            ),
+            tou_rate_per_kwh=_optional_positive_float_value(
+                overrides.get("tou_rate_per_kwh"),
+                default=default_tou_rate,
+            ),
+            tou_start=str(overrides.get("tou_start") or default_tou_start or ""),
+            tou_end=str(overrides.get("tou_end") or default_tou_end or ""),
+            tou_weekdays=_weekday_tuple_value(
+                overrides.get("tou_weekdays"),
+                default=default_tou_weekdays,
+            ),
+            tou_name=str(overrides.get("tou_name") or default_tou_name or "Peak"),
         )
 
     def _demand_settings_for_config(
@@ -2128,6 +2263,23 @@ def _billing_cycle_evidence_payload(result: Any) -> dict[str, Any]:
         "budget_alert_ratio": result.budget_alert_ratio,
         "budget_usage_percent": result.budget_usage_percent,
         "projected_budget_usage_percent": result.projected_budget_usage_percent,
+        "status": result.status,
+    }
+
+
+def _cost_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "cycle_start": result.cycle_start,
+        "cycle_end": result.cycle_end,
+        "cycle_start_day": result.cycle_start_day,
+        "current_rate_per_kwh": result.current_rate_per_kwh,
+        "active_rate_name": result.active_rate_name,
+        "delta_kwh": result.delta_kwh,
+        "delta_cost": result.delta_cost,
+        "cycle_cost": result.cycle_cost,
+        "projected_cycle_cost": result.projected_cycle_cost,
+        "elapsed_days": result.elapsed_days,
+        "cycle_days": result.cycle_days,
         "status": result.status,
     }
 
@@ -2492,6 +2644,26 @@ def _circuit_config_from_raw(
             "billing_cycle_min_elapsed_days",
             default=3,
         ),
+        cost_cycle_start_day=_positive_int_from_raw(
+            raw_circuit,
+            "cost_cycle_start_day",
+            "cycle_start_day",
+            default=1,
+        ),
+        default_rate_per_kwh=_optional_positive_float_from_raw(
+            raw_circuit,
+            "default_rate_per_kwh",
+            "cost_default_rate_per_kwh",
+        ),
+        tou_rate_per_kwh=_optional_positive_float_from_raw(
+            raw_circuit,
+            "tou_rate_per_kwh",
+            "cost_tou_rate_per_kwh",
+        ),
+        tou_start=_optional_string_from_raw(raw_circuit, "tou_start", "cost_tou_start"),
+        tou_end=_optional_string_from_raw(raw_circuit, "tou_end", "cost_tou_end"),
+        tou_weekdays=_weekday_tuple_value(raw_circuit.get("tou_weekdays")),
+        tou_name=str(raw_circuit.get("tou_name") or "Peak"),
         demand_window_minutes=_positive_int_from_raw(
             raw_circuit,
             "demand_window_minutes",
@@ -2620,12 +2792,48 @@ def _optional_positive_float_from_raw(
     return None
 
 
+def _optional_string_from_raw(raw: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = raw.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 def _positive_float_value(value: Any, *, default: float) -> float:
     try:
         parsed = float(value)
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
+
+
+def _weekday_tuple_value(
+    value: Any,
+    *,
+    default: tuple[int, ...] = (),
+) -> tuple[int, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        raw_items: Any = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        return default
+    weekdays: list[int] = []
+    for item in raw_items:
+        try:
+            weekday = int(str(item).strip())
+        except (TypeError, ValueError):
+            continue
+        if 0 <= weekday <= 6 and weekday not in weekdays:
+            weekdays.append(weekday)
+    return tuple(weekdays) if weekdays else default
+
+
+def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
+    return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
 
 
 def _optional_positive_float_value(

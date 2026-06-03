@@ -16,6 +16,7 @@ SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_BILLING_CYCLE_SETTINGS = "set_billing_cycle_settings"
+SERVICE_SET_COST_SETTINGS = "set_cost_settings"
 SERVICE_SET_DEMAND_SETTINGS = "set_demand_settings"
 SERVICE_SET_STANDBY_SETTINGS = "set_standby_settings"
 SERVICE_START_MAINTENANCE = "start_maintenance"
@@ -36,6 +37,12 @@ ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
 ATTR_CYCLE_START_DAY = "cycle_start_day"
 ATTR_BUDGET_KWH = "budget_kwh"
 ATTR_BUDGET_ALERT_RATIO = "budget_alert_ratio"
+ATTR_DEFAULT_RATE_PER_KWH = "default_rate_per_kwh"
+ATTR_TOU_RATE_PER_KWH = "tou_rate_per_kwh"
+ATTR_TOU_START = "tou_start"
+ATTR_TOU_END = "tou_end"
+ATTR_TOU_WEEKDAYS = "tou_weekdays"
+ATTR_TOU_NAME = "tou_name"
 ATTR_WINDOW_MINUTES = "window_minutes"
 ATTR_DEMAND_LIMIT_W = "demand_limit_w"
 ATTR_WINDOW_HOURS = "window_hours"
@@ -91,6 +98,18 @@ BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_CYCLE_START_DAY, ATTR_BUDGET_KWH, ATTR_BUDGET_ALERT_RATIO),
 )
+COST_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(
+        ATTR_CYCLE_START_DAY,
+        ATTR_DEFAULT_RATE_PER_KWH,
+        ATTR_TOU_RATE_PER_KWH,
+        ATTR_TOU_START,
+        ATTR_TOU_END,
+        ATTR_TOU_WEEKDAYS,
+        ATTR_TOU_NAME,
+    ),
+)
 DEMAND_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_WINDOW_MINUTES, ATTR_DEMAND_LIMIT_W),
@@ -134,6 +153,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_BILLING_CYCLE_SETTINGS: BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_COST_SETTINGS: COST_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_DEMAND_SETTINGS: DEMAND_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_STANDBY_SETTINGS: STANDBY_SETTINGS_SERVICE_SCHEMA,
     SERVICE_START_MAINTENANCE: MAINTENANCE_START_SERVICE_SCHEMA,
@@ -274,6 +294,19 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 data.get(ATTR_CYCLE_START_DAY),
                 data.get(ATTR_BUDGET_KWH),
                 data.get(ATTR_BUDGET_ALERT_RATIO),
+            )
+        elif service == SERVICE_SET_COST_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_cost_settings",
+                circuit_id,
+                data.get(ATTR_CYCLE_START_DAY),
+                data.get(ATTR_DEFAULT_RATE_PER_KWH),
+                data.get(ATTR_TOU_RATE_PER_KWH),
+                data.get(ATTR_TOU_START),
+                data.get(ATTR_TOU_END),
+                data.get(ATTR_TOU_WEEKDAYS),
+                data.get(ATTR_TOU_NAME),
             )
         elif service == SERVICE_SET_STANDBY_SETTINGS:
             await _call_if_present(

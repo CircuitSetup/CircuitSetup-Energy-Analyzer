@@ -48,6 +48,8 @@ class FeatureStoreData:
         default_factory=dict
     )
     billing_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    cost_settings_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    cost_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     demand_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -174,6 +176,8 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             data.billing_settings_by_circuit
         ),
         "billing_by_circuit": _dict_of_dicts(data.billing_by_circuit),
+        "cost_settings_by_circuit": _dict_of_dicts(data.cost_settings_by_circuit),
+        "cost_by_circuit": _dict_of_dicts(data.cost_by_circuit),
         "demand_settings_by_circuit": _dict_of_dicts(data.demand_settings_by_circuit),
         "demand_by_circuit": _dict_of_dicts(data.demand_by_circuit),
         "standby_settings_by_circuit": _dict_of_dicts(
@@ -220,6 +224,10 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("billing_settings_by_circuit", {}),
         ),
         billing_by_circuit=_dict_of_dicts(raw.get("billing_by_circuit", {})),
+        cost_settings_by_circuit=_dict_of_dicts(
+            raw.get("cost_settings_by_circuit", {}),
+        ),
+        cost_by_circuit=_dict_of_dicts(raw.get("cost_by_circuit", {})),
         demand_settings_by_circuit=_dict_of_dicts(
             raw.get("demand_settings_by_circuit", {}),
         ),
@@ -250,6 +258,8 @@ def prune_events(
         energy_usage_by_circuit=data.energy_usage_by_circuit,
         billing_settings_by_circuit=data.billing_settings_by_circuit,
         billing_by_circuit=data.billing_by_circuit,
+        cost_settings_by_circuit=data.cost_settings_by_circuit,
+        cost_by_circuit=data.cost_by_circuit,
         demand_settings_by_circuit=data.demand_settings_by_circuit,
         demand_by_circuit=data.demand_by_circuit,
         standby_settings_by_circuit=data.standby_settings_by_circuit,
