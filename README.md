@@ -168,6 +168,14 @@ optional demand limit in watts. When a limit is configured, the analyzer sends a
 possible issue notification only after repeated rolling-demand observations stay
 above that limit.
 
+The demand tracker also ranks the current rolling window against retained
+monthly peak-demand windows. This provides Emporia-style peak-demand awareness:
+the diagnostic rank/status entities show when a circuit is near the month's top
+three demand windows, and repeated near-peak observations can create a
+possible-issue notification with the current demand, monthly cutoff, rank, and
+window length. This is demand evidence, not a replacement for Home Assistant's
+Energy Dashboard energy graphs.
+
 ## Circuit Capacity Tracking
 
 For circuits with current sensors, the analyzer can compare measured amps with
@@ -314,6 +322,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_current_demand`
 - `sensor.<circuit>_peak_demand`
 - `sensor.<circuit>_demand_limit_usage`
+- `sensor.<circuit>_demand_peak_rank`
+- `sensor.<circuit>_demand_peak_status`
 - `sensor.<circuit>_demand_status`
 - `sensor.<circuit>_capacity_usage`
 - `sensor.<circuit>_capacity_status`

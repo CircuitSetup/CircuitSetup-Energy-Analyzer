@@ -46,7 +46,12 @@ from .cycles import (
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
 )
-from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
+from .demand import (
+    DemandLimitEvidence,
+    DemandPeakEvidence,
+    DemandSettings,
+    record_demand_sample,
+)
 from .energy_dashboard import (
     evaluate_energy_dashboard_readiness,
     readiness_payload,
@@ -223,6 +228,8 @@ class AnalyzerState:
     current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    demand_peak_rank_by_circuit: dict[str, int] = field(default_factory=dict)
+    demand_peak_status_by_circuit: dict[str, str] = field(default_factory=dict)
     demand_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -2736,6 +2743,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if result is None:
             return None
 
+        if result.monthly_peak_recorded:
+            self._mark_store_dirty()
         self.state.current_demand_w_by_circuit[config.circuit_id] = (
             result.current_demand_w
         )
@@ -2743,34 +2752,59 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.demand_limit_usage_by_circuit[config.circuit_id] = (
             result.demand_limit_usage
         )
+        self.state.demand_peak_rank_by_circuit[config.circuit_id] = (
+            result.monthly_peak_rank
+        )
+        self.state.demand_peak_status_by_circuit[config.circuit_id] = (
+            result.monthly_peak_status
+        )
         self.state.demand_evidence_by_circuit[config.circuit_id] = (
             _demand_evidence_payload(result)
         )
 
-        if result.limit_exceeded is None:
-            return None
-
-        self._mark_store_dirty()
-        evidence = result.limit_exceeded
-        policy = self._demand_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            evidence.current_demand_w / evidence.demand_limit_w
-            if evidence.demand_limit_w > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="demand_limit",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=evidence.current_demand_w,
-                baseline_value=evidence.demand_limit_w,
-                message=_demand_limit_message(config, evidence),
-                features=evidence.features,
+        if result.limit_exceeded is not None:
+            self._mark_store_dirty()
+            evidence = result.limit_exceeded
+            policy = self._demand_alert_policy_for_circuit(config.circuit_id)
+            score = (
+                evidence.current_demand_w / evidence.demand_limit_w
+                if evidence.demand_limit_w > 0.0
+                else 0.0
             )
-        )
+            return policy.observe(
+                Observation(
+                    circuit_id=config.circuit_id,
+                    feature="demand_limit",
+                    score=score,
+                    baseline_confidence=1.0,
+                    observed_at=now,
+                    observed_value=evidence.current_demand_w,
+                    baseline_value=evidence.demand_limit_w,
+                    message=_demand_limit_message(config, evidence),
+                    features=evidence.features,
+                )
+            )
+
+        if result.monthly_peak_warning is not None:
+            self._mark_store_dirty()
+            evidence = result.monthly_peak_warning
+            policy = self._demand_alert_policy_for_circuit(config.circuit_id)
+            score = max(1.0, evidence.monthly_peak_usage_percent / 100.0)
+            return policy.observe(
+                Observation(
+                    circuit_id=config.circuit_id,
+                    feature="demand_monthly_peak",
+                    score=score,
+                    baseline_confidence=1.0,
+                    observed_at=now,
+                    observed_value=evidence.current_demand_w,
+                    baseline_value=evidence.monthly_peak_cutoff_w,
+                    message=_demand_monthly_peak_message(config, evidence),
+                    features=evidence.features,
+                )
+            )
+
+        return None
 
     def _observe_capacity(
         self: Self,
@@ -3401,6 +3435,20 @@ def _demand_limit_message(
     )
 
 
+def _demand_monthly_peak_message(
+    config: CircuitConfig,
+    evidence: DemandPeakEvidence,
+) -> str:
+    return (
+        f"Possible issue: {config.name} demand averaged "
+        f"{_format_w(evidence.current_demand_w)} W over "
+        f"{evidence.window_minutes} minutes, near this month's top "
+        f"{evidence.peak_rank_count} demand windows. It is "
+        f"{_format_percent(evidence.monthly_peak_usage_percent)}% of the "
+        f"{_format_w(evidence.monthly_peak_cutoff_w)} W cutoff."
+    )
+
+
 def _demand_evidence_payload(result: Any) -> dict[str, Any]:
     return {
         "date": result.date,
@@ -3414,6 +3462,12 @@ def _demand_evidence_payload(result: Any) -> dict[str, Any]:
             if result.limit_exceeded is not None
             else ("tracking" if result.demand_limit_w is not None else "unconfigured")
         ),
+        "monthly_peak_rank": result.monthly_peak_rank,
+        "monthly_peak_status": result.monthly_peak_status,
+        "monthly_peak_cutoff_w": result.monthly_peak_cutoff_w,
+        "monthly_peak_usage_percent": result.monthly_peak_usage_percent,
+        "monthly_peak_rank_count": result.monthly_peak_rank_count,
+        "monthly_peak_warning_ratio": result.monthly_peak_warning_ratio,
     }
 
 

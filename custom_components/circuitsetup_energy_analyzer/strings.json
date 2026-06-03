@@ -128,6 +128,12 @@
       "demand_limit_usage": {
         "name": "Demand limit usage"
       },
+      "demand_peak_rank": {
+        "name": "Demand peak rank"
+      },
+      "demand_peak_status": {
+        "name": "Demand peak status"
+      },
       "demand_status": {
         "name": "Demand status"
       },

@@ -3222,6 +3222,113 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 15, tzinfo=UTC)
+    holder = {"time": now, "power": 3700.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.mains_power"
+            return SimpleNamespace(
+                state=str(holder["power"]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            demand_by_circuit={
+                "mains": {
+                    "samples": [],
+                    "daily_peaks": [],
+                    "monthly_peak_windows": [
+                        {
+                            "timestamp": "2026-06-01T18:15:00+00:00",
+                            "demand_w": 5000.0,
+                            "window_minutes": 15,
+                        },
+                        {
+                            "timestamp": "2026-06-02T17:30:00+00:00",
+                            "demand_w": 4500.0,
+                            "window_minutes": 15,
+                        },
+                        {
+                            "timestamp": "2026-06-03T07:45:00+00:00",
+                            "demand_w": 4000.0,
+                            "window_minutes": 15,
+                        },
+                    ],
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert coordinator.state.demand_peak_rank_by_circuit["mains"] == 4
+    assert (
+        coordinator.state.demand_peak_status_by_circuit["mains"]
+        == "near_monthly_peak"
+    )
+    assert coordinator.state.demand_evidence_by_circuit["mains"] == {
+        "date": "2026-06-03",
+        "current_demand_w": 3700.0,
+        "peak_demand_w": 3700.0,
+        "demand_window_minutes": 15,
+        "demand_limit_w": None,
+        "demand_limit_usage_percent": 0.0,
+        "status": "unconfigured",
+        "monthly_peak_rank": 4,
+        "monthly_peak_status": "near_monthly_peak",
+        "monthly_peak_cutoff_w": 4000.0,
+        "monthly_peak_usage_percent": 92.5,
+        "monthly_peak_rank_count": 3,
+        "monthly_peak_warning_ratio": 0.9,
+    }
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "demand_monthly_peak"
+    assert "Mains demand averaged 3700 W" in alert.message
+    assert "near this month's top 3 demand windows" in alert.message
+    assert alert.observed_value == 3700.0
+    assert alert.baseline_value == 4000.0
+    assert alert.features["monthly_peak_usage_percent"] == 92.5
+
+
+@pytest.mark.asyncio
 async def test_runtime_persists_demand_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

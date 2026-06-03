@@ -43,6 +43,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         daily_energy_usage_value,
         data_quality_checklist_value,
         demand_limit_usage_value,
+        demand_peak_rank_value,
+        demand_peak_status_value,
         demand_status_value,
         energy_dashboard_status_value,
         energy_goal_status_value,
@@ -160,8 +162,14 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         current_demand_w_by_circuit={"fridge": 2400.0},
         peak_demand_w_by_circuit={"fridge": 3200.0},
         demand_limit_usage_by_circuit={"fridge": 80.0},
+        demand_peak_rank_by_circuit={"fridge": 2},
+        demand_peak_status_by_circuit={"fridge": "monthly_peak"},
         demand_evidence_by_circuit={
-            "fridge": {"status": "tracking", "demand_limit_w": 4000.0}
+            "fridge": {
+                "status": "tracking",
+                "demand_limit_w": 4000.0,
+                "monthly_peak_status": "monthly_peak",
+            }
         },
         capacity_usage_by_circuit={"fridge": 85.0},
         capacity_status_by_circuit={"fridge": "over_limit"},
@@ -264,6 +272,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert current_demand_value(state, "fridge") == 2400.0
     assert peak_demand_value(state, "fridge") == 3200.0
     assert demand_limit_usage_value(state, "fridge") == 80.0
+    assert demand_peak_rank_value(state, "fridge") == 2
+    assert demand_peak_status_value(state, "fridge") == "monthly_peak"
     assert demand_status_value(state, "fridge") == "tracking"
     assert capacity_usage_value(state, "fridge") == 85.0
     assert capacity_status_value(state, "fridge") == "over_limit"
@@ -323,6 +333,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert current_demand_value(state, "unknown") == 0.0
     assert peak_demand_value(state, "unknown") == 0.0
     assert demand_limit_usage_value(state, "unknown") == 0.0
+    assert demand_peak_rank_value(state, "unknown") == 0
+    assert demand_peak_status_value(state, "unknown") == "unavailable"
     assert demand_status_value(state, "unknown") == "unconfigured"
     assert capacity_usage_value(state, "unknown") == 0.0
     assert capacity_status_value(state, "unknown") == "unconfigured"
@@ -615,6 +627,18 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["demand_peak_rank"],
+    ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["demand_peak_status"],
+    ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["demand_status"],
     ).extra_state_attributes == demand_evidence
     assert CircuitAnalyzerSensor(
@@ -811,6 +835,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Current Demand",
         "Kitchen Fridge Peak Demand",
         "Kitchen Fridge Demand Limit Usage",
+        "Kitchen Fridge Demand Peak Rank",
+        "Kitchen Fridge Demand Peak Status",
         "Kitchen Fridge Demand Status",
         "Kitchen Fridge Circuit Capacity Usage",
         "Kitchen Fridge Circuit Capacity Status",
@@ -868,6 +894,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_current_demand",
         "entry-1_fridge_peak_demand",
         "entry-1_fridge_demand_limit_usage",
+        "entry-1_fridge_demand_peak_rank",
+        "entry-1_fridge_demand_peak_status",
         "entry-1_fridge_demand_status",
         "entry-1_fridge_capacity_usage",
         "entry-1_fridge_capacity_status",

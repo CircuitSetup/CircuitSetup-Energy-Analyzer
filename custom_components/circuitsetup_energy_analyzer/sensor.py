@@ -316,6 +316,21 @@ def demand_limit_usage_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def demand_peak_rank_value(state: Any, circuit_id: str) -> int:
+    """Return the current rolling demand rank for this month's peak windows."""
+    return int(getattr(state, "demand_peak_rank_by_circuit", {}).get(circuit_id, 0))
+
+
+def demand_peak_status_value(state: Any, circuit_id: str) -> str:
+    """Return whether current demand is near this month's top windows."""
+    return str(
+        getattr(state, "demand_peak_status_by_circuit", {}).get(
+            circuit_id,
+            "unavailable",
+        )
+    )
+
+
 def demand_status_value(state: Any, circuit_id: str) -> str:
     """Return the rolling demand tracker status."""
     evidence = getattr(state, "demand_evidence_by_circuit", {}).get(circuit_id, {})
@@ -752,6 +767,19 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         value_fn=demand_limit_usage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="demand_peak_rank",
+        name_suffix="Demand Peak Rank",
+        value_fn=demand_peak_rank_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="demand_peak_status",
+        name_suffix="Demand Peak Status",
+        value_fn=demand_peak_status_value,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(

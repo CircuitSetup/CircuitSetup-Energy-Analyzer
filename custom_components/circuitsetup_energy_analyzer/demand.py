@@ -5,6 +5,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 DEFAULT_DEMAND_WINDOW_MINUTES = 15
+DEFAULT_PEAK_RANK_COUNT = 3
+DEFAULT_PEAK_WARNING_RATIO = 0.9
+MAX_MONTHLY_PEAK_WINDOWS_PER_MONTH = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +16,8 @@ class DemandSettings:
 
     window_minutes: int = DEFAULT_DEMAND_WINDOW_MINUTES
     demand_limit_w: float | None = None
+    peak_rank_count: int = DEFAULT_PEAK_RANK_COUNT
+    peak_warning_ratio: float = DEFAULT_PEAK_WARNING_RATIO
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,22 @@ class DemandLimitEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class DemandPeakEvidence:
+    """Evidence that rolling demand is near the month's highest windows."""
+
+    circuit_id: str
+    date: str
+    current_demand_w: float
+    monthly_peak_rank: int
+    monthly_peak_cutoff_w: float
+    monthly_peak_usage_percent: float
+    peak_rank_count: int
+    peak_warning_ratio: float
+    window_minutes: int
+    features: dict[str, float]
+
+
+@dataclass(frozen=True, slots=True)
 class DemandResult:
     """Latest rolling demand state for a circuit."""
 
@@ -41,6 +62,14 @@ class DemandResult:
     demand_limit_w: float | None = None
     demand_limit_usage: float = 0.0
     limit_exceeded: DemandLimitEvidence | None = None
+    monthly_peak_rank: int = 0
+    monthly_peak_status: str = "unavailable"
+    monthly_peak_cutoff_w: float = 0.0
+    monthly_peak_usage_percent: float = 0.0
+    monthly_peak_rank_count: int = DEFAULT_PEAK_RANK_COUNT
+    monthly_peak_warning_ratio: float = DEFAULT_PEAK_WARNING_RATIO
+    monthly_peak_warning: DemandPeakEvidence | None = None
+    monthly_peak_recorded: bool = False
 
 
 def record_demand_sample(
@@ -71,6 +100,16 @@ def record_demand_sample(
     current_demand = _time_weighted_average(samples, timestamp, window)
     daily_peaks = _coerce_daily_peaks(history.get("daily_peaks"))
     peak_demand = _record_daily_peak(daily_peaks, today, current_demand)
+    monthly_peak = _record_monthly_peak_window(
+        history,
+        circuit_id=circuit_id,
+        timestamp=timestamp,
+        current_demand_w=current_demand,
+        window_minutes=window_minutes,
+        peak_rank_count=settings.peak_rank_count,
+        peak_warning_ratio=settings.peak_warning_ratio,
+        retention_days=retention_days,
+    )
 
     history["samples"] = samples
     history["daily_peaks"] = _prune_daily_peaks(daily_peaks, timestamp, retention_days)
@@ -89,6 +128,14 @@ def record_demand_sample(
         window_minutes=window_minutes,
         demand_limit_w=limit_w,
         demand_limit_usage=limit_usage,
+        monthly_peak_rank=monthly_peak["rank"],
+        monthly_peak_status=monthly_peak["status"],
+        monthly_peak_cutoff_w=monthly_peak["cutoff_w"],
+        monthly_peak_usage_percent=monthly_peak["usage_percent"],
+        monthly_peak_rank_count=monthly_peak["rank_count"],
+        monthly_peak_warning_ratio=monthly_peak["warning_ratio"],
+        monthly_peak_warning=monthly_peak["warning"],
+        monthly_peak_recorded=monthly_peak["recorded"],
     )
     if limit_w is None or current_demand <= limit_w:
         return result
@@ -147,6 +194,132 @@ def _coerce_daily_peaks(raw_peaks: Any) -> list[dict[str, float | str]]:
             continue
         peaks.append({"date": date, "peak_demand_w": _round_w(max(peak, 0.0))})
     return sorted(peaks, key=lambda peak: str(peak["date"]))
+
+
+def _coerce_monthly_peak_windows(
+    raw_windows: Any,
+) -> list[dict[str, float | int | str]]:
+    windows: list[dict[str, float | int | str]] = []
+    if not isinstance(raw_windows, list):
+        return windows
+    for raw_window in raw_windows:
+        if not isinstance(raw_window, dict):
+            continue
+        timestamp = raw_window.get("timestamp")
+        demand_w = _float_or_none(raw_window.get("demand_w"))
+        window_minutes = int(_float_or_none(raw_window.get("window_minutes")) or 0)
+        if (
+            not isinstance(timestamp, str)
+            or demand_w is None
+            or window_minutes <= 0
+            or _datetime_or_none(timestamp) is None
+        ):
+            continue
+        windows.append(
+            {
+                "timestamp": timestamp,
+                "demand_w": _round_w(max(demand_w, 0.0)),
+                "window_minutes": window_minutes,
+            }
+        )
+    return sorted(
+        windows,
+        key=lambda window: (
+            _month_key(str(window["timestamp"])),
+            -float(window["demand_w"]),
+            str(window["timestamp"]),
+        ),
+    )
+
+
+def _record_monthly_peak_window(
+    history: dict[str, Any],
+    *,
+    circuit_id: str,
+    timestamp: datetime,
+    current_demand_w: float,
+    window_minutes: int,
+    peak_rank_count: int,
+    peak_warning_ratio: float,
+    retention_days: int,
+) -> dict[str, Any]:
+    rank_count = max(int(peak_rank_count), 1)
+    warning_ratio = min(max(float(peak_warning_ratio), 0.0), 1.0)
+    windows = _coerce_monthly_peak_windows(history.get("monthly_peak_windows"))
+    month = timestamp.strftime("%Y-%m")
+    monthly_before = [
+        window for window in windows if _month_key(str(window["timestamp"])) == month
+    ]
+    monthly_demands = sorted(
+        (float(window["demand_w"]) for window in monthly_before),
+        reverse=True,
+    )
+    cutoff_w = (
+        monthly_demands[rank_count - 1]
+        if len(monthly_demands) >= rank_count
+        else (monthly_demands[-1] if monthly_demands else current_demand_w)
+    )
+    rank = 1 + sum(1 for demand_w in monthly_demands if demand_w > current_demand_w)
+    usage_percent = (
+        round((current_demand_w / cutoff_w) * 100, 1) if cutoff_w > 0.0 else 0.0
+    )
+    has_monthly_baseline = len(monthly_demands) >= rank_count and cutoff_w > 0.0
+    status = "below_monthly_peak"
+    if rank <= rank_count:
+        status = "monthly_peak"
+    elif has_monthly_baseline and usage_percent >= round(warning_ratio * 100, 1):
+        status = "near_monthly_peak"
+
+    warning = None
+    if has_monthly_baseline and status in {"monthly_peak", "near_monthly_peak"}:
+        warning = DemandPeakEvidence(
+            circuit_id=circuit_id,
+            date=timestamp.date().isoformat(),
+            current_demand_w=current_demand_w,
+            monthly_peak_rank=rank,
+            monthly_peak_cutoff_w=cutoff_w,
+            monthly_peak_usage_percent=usage_percent,
+            peak_rank_count=rank_count,
+            peak_warning_ratio=warning_ratio,
+            window_minutes=window_minutes,
+            features={
+                "current_demand_w": current_demand_w,
+                "monthly_peak_rank": float(rank),
+                "monthly_peak_cutoff_w": cutoff_w,
+                "monthly_peak_usage_percent": usage_percent,
+                "peak_rank_count": float(rank_count),
+                "peak_warning_ratio": warning_ratio,
+                "demand_window_minutes": float(window_minutes),
+            },
+        )
+
+    before_windows = list(windows)
+    if current_demand_w > 0.0:
+        windows.append(
+            {
+                "timestamp": timestamp.isoformat(),
+                "demand_w": current_demand_w,
+                "window_minutes": window_minutes,
+            }
+        )
+    pruned_windows = _prune_monthly_peak_windows(
+        windows,
+        timestamp=timestamp,
+        retention_days=retention_days,
+    )
+    recorded = pruned_windows != before_windows
+    if recorded or "monthly_peak_windows" in history:
+        history["monthly_peak_windows"] = pruned_windows
+    return {
+        "rank": rank,
+        "status": status,
+        "cutoff_w": cutoff_w,
+        "usage_percent": usage_percent,
+        "rank_count": rank_count,
+        "warning_ratio": warning_ratio,
+        "warning": warning,
+        "recorded": recorded,
+    }
 
 
 def _prune_samples(
@@ -222,6 +395,50 @@ def _prune_daily_peaks(
         for peak in daily_peaks
         if isinstance(peak.get("date"), str) and str(peak["date"]) >= cutoff
     ]
+
+
+def _prune_monthly_peak_windows(
+    windows: list[dict[str, float | int | str]],
+    *,
+    timestamp: datetime,
+    retention_days: int,
+) -> list[dict[str, float | int | str]]:
+    cutoff = timestamp - timedelta(days=max(retention_days, 1))
+    retained = [
+        window
+        for window in windows
+        if (window_time := _datetime_or_none(window["timestamp"])) is not None
+        and window_time >= cutoff
+    ]
+    by_month: dict[str, list[dict[str, float | int | str]]] = {}
+    for window in retained:
+        by_month.setdefault(_month_key(str(window["timestamp"])), []).append(window)
+
+    top_windows: list[dict[str, float | int | str]] = []
+    for month in sorted(by_month):
+        month_windows = sorted(
+            by_month[month],
+            key=lambda window: (
+                -float(window["demand_w"]),
+                str(window["timestamp"]),
+            ),
+        )
+        top_windows.extend(month_windows[:MAX_MONTHLY_PEAK_WINDOWS_PER_MONTH])
+    return [
+        {
+            "timestamp": str(window["timestamp"]),
+            "demand_w": _round_w(float(window["demand_w"])),
+            "window_minutes": int(window["window_minutes"]),
+        }
+        for window in top_windows
+    ]
+
+
+def _month_key(timestamp: str) -> str:
+    parsed = _datetime_or_none(timestamp)
+    if parsed is None:
+        return ""
+    return parsed.strftime("%Y-%m")
 
 
 def _datetime_or_none(value: Any) -> datetime | None:
