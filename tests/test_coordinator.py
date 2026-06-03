@@ -1898,6 +1898,14 @@ async def test_export_diagnostics_includes_ux_state() -> None:
         "status": "over_goal",
         "daily_goal_kwh": 12.0,
     }
+    coordinator.state.run_cycle_count_by_circuit["fridge"] = 4
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["fridge"] = 3600.0
+    coordinator.state.run_cycle_duty_cycle_by_circuit["fridge"] = 12.5
+    coordinator.state.run_cycle_status_by_circuit["fridge"] = "idle"
+    coordinator.state.run_cycle_evidence_by_circuit["fridge"] = {
+        "status": "idle",
+        "start_count": 4,
+    }
 
     await coordinator.async_export_diagnostics("fridge")
 
@@ -1925,6 +1933,14 @@ async def test_export_diagnostics_includes_ux_state() -> None:
     assert coordinator.last_exported_diagnostics["energy_goal_evidence"] == {
         "status": "over_goal",
         "daily_goal_kwh": 12.0,
+    }
+    assert coordinator.last_exported_diagnostics["run_cycle_count"] == 4
+    assert coordinator.last_exported_diagnostics["run_cycle_runtime_seconds"] == 3600.0
+    assert coordinator.last_exported_diagnostics["run_cycle_duty_cycle_percent"] == 12.5
+    assert coordinator.last_exported_diagnostics["run_cycle_status"] == "idle"
+    assert coordinator.last_exported_diagnostics["run_cycle_evidence"] == {
+        "status": "idle",
+        "start_count": 4,
     }
 
 
@@ -2472,6 +2488,71 @@ async def test_runtime_reports_energy_dashboard_readiness() -> None:
             "Add the ready energy entity to Home Assistant's Energy Dashboard "
             "as an individual device."
         ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_reports_run_cycle_diagnostics_from_retained_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=0),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=20),
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+                CircuitEvent(
+                    timestamp=now.replace(hour=11, minute=30),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+            ]
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.run_cycle_count_by_circuit["fridge"] == 2
+    assert coordinator.state.run_cycle_runtime_seconds_by_circuit["fridge"] == 3000.0
+    assert coordinator.state.run_cycle_duty_cycle_by_circuit["fridge"] == 6.9
+    assert coordinator.state.run_cycle_status_by_circuit["fridge"] == "running"
+    assert coordinator.state.run_cycle_evidence_by_circuit["fridge"] == {
+        "date": "2026-06-03",
+        "status": "running",
+        "start_count": 2,
+        "completed_cycle_count": 1,
+        "runtime_seconds": 3000.0,
+        "average_cycle_seconds": 1200.0,
+        "active_cycle_seconds": 1800.0,
+        "duty_cycle_percent": 6.9,
+        "day_elapsed_seconds": 43200.0,
+        "first_start": "2026-06-03T01:00:00+00:00",
+        "last_start": "2026-06-03T11:30:00+00:00",
+        "last_stop": "2026-06-03T01:20:00+00:00",
+        "scope": "today",
+        "evidence_source": "retained_start_stop_events",
     }
 
 

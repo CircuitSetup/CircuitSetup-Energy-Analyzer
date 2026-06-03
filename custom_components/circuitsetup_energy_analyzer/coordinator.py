@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
 )
 from .cost import CostSettings, record_cost_sample
+from .cycles import cycle_summary_payload, summarize_circuit_cycles
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .energy_dashboard import (
     evaluate_energy_dashboard_readiness,
@@ -157,6 +158,15 @@ class AnalyzerState:
     energy_goal_usage_by_circuit: dict[str, float] = field(default_factory=dict)
     energy_goal_status_by_circuit: dict[str, str] = field(default_factory=dict)
     energy_goal_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    run_cycle_count_by_circuit: dict[str, int] = field(default_factory=dict)
+    run_cycle_runtime_seconds_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    run_cycle_duty_cycle_by_circuit: dict[str, float] = field(default_factory=dict)
+    run_cycle_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    run_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -822,6 +832,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 circuit_id,
                 {},
             ),
+            "run_cycle_count": self.state.run_cycle_count_by_circuit.get(
+                circuit_id,
+                0,
+            ),
+            "run_cycle_runtime_seconds": (
+                self.state.run_cycle_runtime_seconds_by_circuit.get(circuit_id, 0.0)
+            ),
+            "run_cycle_duty_cycle_percent": (
+                self.state.run_cycle_duty_cycle_by_circuit.get(circuit_id, 0.0)
+            ),
+            "run_cycle_status": self.state.run_cycle_status_by_circuit.get(
+                circuit_id,
+                "no_activity",
+            ),
+            "run_cycle_evidence": self.state.run_cycle_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
             "billing_cycle_usage_kwh": (
                 self.state.billing_cycle_usage_kwh_by_circuit.get(circuit_id, 0.0)
             ),
@@ -1058,6 +1086,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             suppression_reason=suppression_reason,
         )
         self.state.learning_progress_by_circuit[circuit_id] = progress
+        cycle_summary = summarize_circuit_cycles(
+            self.store_data.events,
+            circuit_id=circuit_id,
+            now=now,
+        )
+        self.state.run_cycle_count_by_circuit[circuit_id] = (
+            cycle_summary.start_count
+        )
+        self.state.run_cycle_runtime_seconds_by_circuit[circuit_id] = (
+            cycle_summary.runtime_seconds
+        )
+        self.state.run_cycle_duty_cycle_by_circuit[circuit_id] = (
+            cycle_summary.duty_cycle_percent
+        )
+        self.state.run_cycle_status_by_circuit[circuit_id] = cycle_summary.status
+        self.state.run_cycle_evidence_by_circuit[circuit_id] = cycle_summary_payload(
+            cycle_summary
+        )
 
         maintenance = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
         maintenance.setdefault("active", circuit_id in self.paused_circuits)

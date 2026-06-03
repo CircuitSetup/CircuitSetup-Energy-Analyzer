@@ -60,6 +60,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         power_quality_score_value,
         reactive_power_drift_value,
         readiness_value,
+        run_cycle_count_value,
+        run_cycle_duty_cycle_value,
+        run_cycle_runtime_value,
+        run_cycle_status_value,
         sensitivity_value,
         standby_status_value,
         standby_threshold_value,
@@ -130,6 +134,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         energy_goal_evidence_by_circuit={
             "fridge": {"status": "over_goal", "daily_goal_kwh": 12.0}
         },
+        run_cycle_count_by_circuit={"fridge": 4},
+        run_cycle_runtime_seconds_by_circuit={"fridge": 3600.0},
+        run_cycle_duty_cycle_by_circuit={"fridge": 12.5},
+        run_cycle_status_by_circuit={"fridge": "idle"},
+        run_cycle_evidence_by_circuit={"fridge": {"status": "idle"}},
         current_demand_w_by_circuit={"fridge": 2400.0},
         peak_demand_w_by_circuit={"fridge": 3200.0},
         demand_limit_usage_by_circuit={"fridge": 80.0},
@@ -195,6 +204,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert energy_usage_status_value(state, "fridge") == "over_threshold"
     assert energy_goal_usage_value(state, "fridge") == 110.0
     assert energy_goal_status_value(state, "fridge") == "over_goal"
+    assert run_cycle_count_value(state, "fridge") == 4
+    assert run_cycle_runtime_value(state, "fridge") == 3600.0
+    assert run_cycle_duty_cycle_value(state, "fridge") == 12.5
+    assert run_cycle_status_value(state, "fridge") == "idle"
     assert current_demand_value(state, "fridge") == 2400.0
     assert peak_demand_value(state, "fridge") == 3200.0
     assert demand_limit_usage_value(state, "fridge") == 80.0
@@ -237,6 +250,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert energy_usage_status_value(state, "unknown") == "learning"
     assert energy_goal_usage_value(state, "unknown") == 0.0
     assert energy_goal_status_value(state, "unknown") == "unconfigured"
+    assert run_cycle_count_value(state, "unknown") == 0
+    assert run_cycle_runtime_value(state, "unknown") == 0.0
+    assert run_cycle_duty_cycle_value(state, "unknown") == 0.0
+    assert run_cycle_status_value(state, "unknown") == "no_activity"
     assert current_demand_value(state, "unknown") == 0.0
     assert peak_demand_value(state, "unknown") == 0.0
     assert demand_limit_usage_value(state, "unknown") == 0.0
@@ -314,6 +331,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "daily_usage_kwh": 13.2,
         "daily_goal_kwh": 12.0,
     }
+    run_cycle_evidence = {
+        "status": "idle",
+        "start_count": 4,
+        "runtime_seconds": 3600.0,
+    }
     demand_evidence = {
         "status": "over_limit",
         "current_demand_w": 2400.0,
@@ -348,6 +370,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         sensitivity_by_circuit={"fridge": "quiet"},
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
         energy_goal_evidence_by_circuit={"fridge": energy_goal_evidence},
+        run_cycle_evidence_by_circuit={"fridge": run_cycle_evidence},
         demand_evidence_by_circuit={"fridge": demand_evidence},
         balance_evidence_by_circuit={"fridge": balance_evidence},
         billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
@@ -424,6 +447,30 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["energy_goal_status"],
     ).extra_state_attributes == energy_goal_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["run_cycle_count"],
+    ).extra_state_attributes == run_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["run_cycle_runtime"],
+    ).extra_state_attributes == run_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["run_cycle_duty_cycle"],
+    ).extra_state_attributes == run_cycle_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["run_cycle_status"],
+    ).extra_state_attributes == run_cycle_evidence
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -585,6 +632,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Energy Usage Status",
         "Kitchen Fridge Energy Goal Usage",
         "Kitchen Fridge Energy Goal Status",
+        "Kitchen Fridge Run Cycle Count",
+        "Kitchen Fridge Run Cycle Runtime",
+        "Kitchen Fridge Run Cycle Duty Cycle",
+        "Kitchen Fridge Run Cycle Status",
         "Kitchen Fridge Current Demand",
         "Kitchen Fridge Peak Demand",
         "Kitchen Fridge Demand Limit Usage",
@@ -628,6 +679,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_energy_usage_status",
         "entry-1_fridge_energy_goal_usage",
         "entry-1_fridge_energy_goal_status",
+        "entry-1_fridge_run_cycle_count",
+        "entry-1_fridge_run_cycle_runtime",
+        "entry-1_fridge_run_cycle_duty_cycle",
+        "entry-1_fridge_run_cycle_status",
         "entry-1_fridge_current_demand",
         "entry-1_fridge_peak_demand",
         "entry-1_fridge_demand_limit_usage",
@@ -658,7 +713,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
 @pytest.mark.asyncio
 async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        async_setup_entry,
+    )
 
     circuit = CircuitConfig(
         circuit_id="mains",
@@ -674,48 +732,8 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-        "mains",
-    ]
+        "mains"
+    ] * len(SENSOR_DESCRIPTIONS)
 
 
 @pytest.mark.asyncio

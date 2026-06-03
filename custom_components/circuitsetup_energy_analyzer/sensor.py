@@ -248,6 +248,38 @@ def energy_goal_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def run_cycle_count_value(state: Any, circuit_id: str) -> int:
+    """Return today's appliance start count from retained event evidence."""
+    return int(getattr(state, "run_cycle_count_by_circuit", {}).get(circuit_id, 0))
+
+
+def run_cycle_runtime_value(state: Any, circuit_id: str) -> float:
+    """Return today's appliance runtime in seconds."""
+    return float(
+        getattr(state, "run_cycle_runtime_seconds_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def run_cycle_duty_cycle_value(state: Any, circuit_id: str) -> float:
+    """Return today's appliance duty cycle as a percentage."""
+    return float(
+        getattr(state, "run_cycle_duty_cycle_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def run_cycle_status_value(state: Any, circuit_id: str) -> str:
+    """Return today's appliance run-cycle status."""
+    return str(
+        getattr(state, "run_cycle_status_by_circuit", {}).get(
+            circuit_id,
+            "no_activity",
+        )
+    )
+
+
 def current_demand_value(state: Any, circuit_id: str) -> float:
     """Return the current rolling demand average in watts."""
     return float(
@@ -566,6 +598,35 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Energy Goal Status",
         value_fn=energy_goal_status_value,
         attributes_fn=_mapping_attributes("energy_goal_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="run_cycle_count",
+        name_suffix="Run Cycle Count",
+        value_fn=run_cycle_count_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="run_cycle_runtime",
+        name_suffix="Run Cycle Runtime",
+        value_fn=run_cycle_runtime_value,
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="run_cycle_duty_cycle",
+        name_suffix="Run Cycle Duty Cycle",
+        value_fn=run_cycle_duty_cycle_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="run_cycle_status",
+        name_suffix="Run Cycle Status",
+        value_fn=run_cycle_status_value,
+        attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="current_demand",

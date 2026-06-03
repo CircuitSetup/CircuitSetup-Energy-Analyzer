@@ -80,6 +80,18 @@ optional `goal_alert_ratio`. By default, goal notices trigger at 100% of the
 daily goal after repeated observations. Setting the ratio below 1.0 can warn
 before the goal is reached, while setting the daily goal to 0 clears the goal.
 
+## Run Cycle Diagnostics
+
+For appliance-style circuits, the analyzer derives today's run-cycle count,
+runtime, duty cycle, and current run status from retained START/STOP event
+evidence. This is intended for appliance behavior diagnostics, such as whether
+a refrigerator, pump, or HVAC circuit is cycling more often or staying on longer
+than expected.
+
+These diagnostics do not replace Home Assistant's Energy Dashboard history,
+energy charts, tariffs, or cost views. They are event-derived activity evidence
+that can be reviewed alongside power-quality and data-quality diagnostics.
+
 ## Billing Cycle Forecasts
 
 The analyzer can also track circuit usage against a utility-style billing
@@ -189,6 +201,10 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_energy_usage_status`
 - `sensor.<circuit>_energy_goal_usage`
 - `sensor.<circuit>_energy_goal_status`
+- `sensor.<circuit>_run_cycle_count`
+- `sensor.<circuit>_run_cycle_runtime`
+- `sensor.<circuit>_run_cycle_duty_cycle`
+- `sensor.<circuit>_run_cycle_status`
 - `sensor.<circuit>_billing_cycle_usage`
 - `sensor.<circuit>_billing_cycle_forecast`
 - `sensor.<circuit>_billing_cycle_budget_usage`

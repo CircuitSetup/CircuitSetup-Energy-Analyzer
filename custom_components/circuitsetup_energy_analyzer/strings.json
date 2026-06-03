@@ -101,6 +101,18 @@
       "energy_goal_status": {
         "name": "Energy goal status"
       },
+      "run_cycle_count": {
+        "name": "Run cycle count"
+      },
+      "run_cycle_runtime": {
+        "name": "Run cycle runtime"
+      },
+      "run_cycle_duty_cycle": {
+        "name": "Run cycle duty cycle"
+      },
+      "run_cycle_status": {
+        "name": "Run cycle status"
+      },
       "current_demand": {
         "name": "Current demand"
       },
