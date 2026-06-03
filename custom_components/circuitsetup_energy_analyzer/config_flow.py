@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -46,6 +48,7 @@ except ModuleNotFoundError:
 try:
     from homeassistant import config_entries
     from homeassistant.core import callback
+    from homeassistant.helpers.selector import selector as ha_selector
 except ModuleNotFoundError:
 
     def callback(func: Any) -> Any:
@@ -88,6 +91,7 @@ except ModuleNotFoundError:
         ConfigFlowResult=dict[str, Any],
         OptionsFlow=_OptionsFlow,
     )
+    ha_selector = None
 
 from .const import (
     CONF_CIRCUITS,
@@ -112,6 +116,7 @@ ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 _VALID_CIRCUIT_MODES = {mode.value for mode in CircuitMode}
 _VALID_APPLIANCE_PROFILES = {profile.value for profile in ApplianceProfile}
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
+_SENSITIVITY_OPTIONS = ("standard", "high", "low")
 
 
 class SetupValidationError(ValueError):
@@ -207,6 +212,14 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
 def _validate_circuits(value: Any) -> list[Any]:
     if value is None:
         return []
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return []
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as err:
+            raise SetupValidationError("invalid_circuits") from err
     if not isinstance(value, list):
         raise SetupValidationError("invalid_circuits")
 
@@ -228,7 +241,12 @@ def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
-        return [value] if value else []
+        items: list[str] = []
+        for raw_item in re.split(r"[\n,]+", value):
+            item = raw_item.strip()
+            if item:
+                items.append(item)
+        return items
     if isinstance(value, Mapping) or not isinstance(value, (list, tuple, set)):
         raise SetupValidationError(invalid_error_key)
 
@@ -248,18 +266,56 @@ def _validate_retention_mode(user_input: Mapping[str, Any]) -> str:
     return retention_mode
 
 
+def _selector(config: dict[str, Any], fallback: Any) -> Any:
+    if ha_selector is None:
+        return fallback
+    return ha_selector(config)
+
+
+def _entity_list_selector() -> Any:
+    return _selector(
+        {
+            "entity": {
+                "multiple": True,
+                "filter": [{"domain": "sensor"}],
+            }
+        },
+        str,
+    )
+
+
+def _multiline_text_selector() -> Any:
+    return _selector({"text": {"multiline": True}}, str)
+
+
+def _select_selector(options: Iterable[str]) -> Any:
+    return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
+
+
+def _list_text_default(value: Any) -> str:
+    return "\n".join(
+        _strict_string_list(value, invalid_error_key="invalid_list_default")
+    )
+
+
 DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_SOURCE_ENTITIES): [str],
-        vol.Optional(CONF_CIRCUITS, default=[]): [dict],
+        vol.Required(CONF_SOURCE_ENTITIES): _entity_list_selector(),
+        vol.Optional(CONF_CIRCUITS, default=""): _multiline_text_selector(),
         vol.Optional(
             CONF_ENABLE_EXPERIMENTAL_NILM,
             default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
         ): bool,
-        vol.Optional(CONF_MAINS_SOURCE_ENTITIES, default=[]): [str],
-        vol.Optional(CONF_KNOWN_LOAD_CIRCUITS, default=[]): [str],
-        vol.Optional(CONF_SENSITIVITY, default=DEFAULT_SENSITIVITY): str,
-        vol.Optional(CONF_RETENTION_MODE, default=DEFAULT_RETENTION_MODE): str,
+        vol.Optional(CONF_MAINS_SOURCE_ENTITIES, default=[]): _entity_list_selector(),
+        vol.Optional(CONF_KNOWN_LOAD_CIRCUITS, default=""): _multiline_text_selector(),
+        vol.Optional(
+            CONF_SENSITIVITY,
+            default=DEFAULT_SENSITIVITY,
+        ): _select_selector(_SENSITIVITY_OPTIONS),
+        vol.Optional(
+            CONF_RETENTION_MODE,
+            default=DEFAULT_RETENTION_MODE,
+        ): _select_selector(sorted(_VALID_RETENTION_MODES)),
     }
 )
 
@@ -362,28 +418,30 @@ def _options_schema(config_entry: config_entries.ConfigEntry) -> Any:
                     CONF_MAINS_SOURCE_ENTITIES,
                     data.get(CONF_MAINS_SOURCE_ENTITIES, []),
                 ),
-            ): [str],
+            ): _entity_list_selector(),
             vol.Optional(
                 CONF_KNOWN_LOAD_CIRCUITS,
-                default=options.get(
-                    CONF_KNOWN_LOAD_CIRCUITS,
-                    data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                default=_list_text_default(
+                    options.get(
+                        CONF_KNOWN_LOAD_CIRCUITS,
+                        data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                    )
                 ),
-            ): [str],
+            ): _multiline_text_selector(),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=options.get(
                     CONF_SENSITIVITY,
                     data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
                 ),
-            ): str,
+            ): _select_selector(_SENSITIVITY_OPTIONS),
             vol.Optional(
                 CONF_RETENTION_MODE,
                 default=options.get(
                     CONF_RETENTION_MODE,
                     data.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE),
                 ),
-            ): str,
+            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
         }
     )
 

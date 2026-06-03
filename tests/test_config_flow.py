@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -113,6 +114,59 @@ def test_validate_setup_input_preserves_nilm_and_circuit_fields() -> None:
     assert validated[CONF_CIRCUITS] == payload[CONF_CIRCUITS]
 
 
+def test_validate_setup_input_parses_text_area_values() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_setup_input,
+    )
+
+    validated = validate_setup_input(
+        {
+            CONF_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.hvac_power",
+            CONF_MAINS_SOURCE_ENTITIES: "sensor.main_l1_power, sensor.main_l2_power",
+            CONF_KNOWN_LOAD_CIRCUITS: "fridge\nhvac",
+            CONF_CIRCUITS: json.dumps(
+                [
+                    {
+                        "circuit_id": "fridge",
+                        "name": "Fridge",
+                        "mode": "single_phase",
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert validated[CONF_SOURCE_ENTITIES] == [
+        "sensor.fridge_power",
+        "sensor.hvac_power",
+    ]
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+    assert validated[CONF_KNOWN_LOAD_CIRCUITS] == ["fridge", "hvac"]
+    assert validated[CONF_CIRCUITS] == [
+        {"circuit_id": "fridge", "name": "Fridge", "mode": "single_phase"}
+    ]
+
+
+def test_validate_setup_input_rejects_invalid_circuit_json() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        SetupValidationError,
+        validate_setup_input,
+    )
+
+    with pytest.raises(SetupValidationError) as error:
+        validate_setup_input(
+            {
+                CONF_SOURCE_ENTITIES: "sensor.fridge_power",
+                CONF_CIRCUITS: "{not json",
+            }
+        )
+
+    assert error.value.error_key == "invalid_circuits"
+
+
 def test_validate_setup_input_requires_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         SetupValidationError,
@@ -180,9 +234,7 @@ async def test_options_flow_rejects_bogus_retention_mode() -> None:
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
 
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
-        SimpleNamespace(data={}, options={})
-    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
     result = await flow.async_step_init({CONF_RETENTION_MODE: "forever"})
 
     assert result["type"] == "form"
@@ -197,9 +249,7 @@ async def test_options_flow_rejects_malformed_mains_source_entities() -> None:
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
 
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
-        SimpleNamespace(data={}, options={})
-    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
     result = await flow.async_step_init(
         {CONF_MAINS_SOURCE_ENTITIES: {"sensor.main_l1_power": True}}
     )
@@ -223,9 +273,7 @@ async def test_options_flow_preserves_valid_options() -> None:
         CONF_SENSITIVITY: "high",
         CONF_RETENTION_MODE: "diagnostic",
     }
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
-        SimpleNamespace(data={}, options={})
-    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
 
     result = await flow.async_step_init(user_input)
 
@@ -233,9 +281,29 @@ async def test_options_flow_preserves_valid_options() -> None:
     assert result["data"] == user_input
 
 
+def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
+    import voluptuous_serialize
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        DATA_SCHEMA,
+        _options_schema,
+    )
+
+    assert voluptuous_serialize.convert(DATA_SCHEMA)
+    assert voluptuous_serialize.convert(
+        _options_schema(SimpleNamespace(data={}, options={}))
+    )
+
+
 def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
+    manifest_path = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "circuitsetup_energy_analyzer"
+        / "manifest.json"
+    )
     strings_path = (
         Path(__file__).parents[1]
         / "custom_components"
@@ -244,6 +312,10 @@ def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
     )
 
     assert config_flow.CircuitSetupEnergyAnalyzerConfigFlow.VERSION == 1
+    assert (
+        json.loads(manifest_path.read_text(encoding="utf-8"))["integration_type"]
+        == "hub"
+    )
     assert json.loads(strings_path.read_text(encoding="utf-8"))["title"] == (
         "CircuitSetup Energy Analyzer"
     )
