@@ -2381,6 +2381,90 @@ async def test_runtime_persists_demand_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_calculates_mains_balance_from_monitored_circuits() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_power": "5000",
+                "sensor.hvac_power": "2400",
+                "sensor.fridge_power": "300",
+                "sensor.solar_power": "-1500",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.balance_power_w_by_circuit["mains"] == 2300.0
+    assert coordinator.state.monitored_power_w_by_circuit["mains"] == 2700.0
+    assert coordinator.state.monitored_coverage_percent_by_circuit["mains"] == 54.0
+    assert coordinator.state.balance_status_by_circuit["mains"] == "tracking"
+    assert coordinator.state.balance_evidence_by_circuit["mains"] == {
+        "mains_power_w": 5000.0,
+        "monitored_power_w": 2700.0,
+        "balance_power_w": 2300.0,
+        "monitored_coverage_percent": 54.0,
+        "monitored_circuit_count": 2.0,
+        "status": "tracking",
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

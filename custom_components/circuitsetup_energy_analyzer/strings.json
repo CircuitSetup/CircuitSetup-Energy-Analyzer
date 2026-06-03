@@ -103,6 +103,18 @@
       },
       "demand_status": {
         "name": "Demand status"
+      },
+      "balance_power": {
+        "name": "Balance power"
+      },
+      "monitored_power": {
+        "name": "Monitored power"
+      },
+      "monitored_coverage": {
+        "name": "Monitored coverage"
+      },
+      "balance_status": {
+        "name": "Balance status"
       }
     },
     "binary_sensor": {

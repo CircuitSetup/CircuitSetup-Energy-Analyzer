@@ -64,6 +64,18 @@ optional demand limit in watts. When a limit is configured, the analyzer sends a
 possible issue notification only after repeated rolling-demand observations stay
 above that limit.
 
+## Mains Balance
+
+For mains/NILM circuits, the analyzer calculates an Emporia-style Balance view:
+mains real power minus the sum of directly monitored load circuits. This helps
+show how much power is currently unmonitored or unexplained by the circuits you
+mapped. A positive balance often represents normal unmonitored lighting or plug
+loads. A strongly negative balance can point to CT direction, phase pairing,
+solar configuration, or multiplier problems.
+
+Generation circuits, such as solar inverter channels, are excluded from the
+monitored load sum so they do not look like household consumption.
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
@@ -97,5 +109,9 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_peak_demand`
 - `sensor.<circuit>_demand_limit_usage`
 - `sensor.<circuit>_demand_status`
+- `sensor.<circuit>_balance_power`
+- `sensor.<circuit>_monitored_power`
+- `sensor.<circuit>_monitored_coverage`
+- `sensor.<circuit>_balance_status`
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator, HVAC, and Mains NILM cards.

@@ -10,6 +10,7 @@ from typing import Any, Self
 from . import notifications, repairs
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
+from .balance import BalanceInput, calculate_balance
 from .baseline import build_baseline
 from .const import (
     CONF_CIRCUITS,
@@ -136,6 +137,15 @@ class AnalyzerState:
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    balance_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    monitored_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    monitored_coverage_percent_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    balance_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    balance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
 
@@ -319,6 +329,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
+        self._refresh_balance_state(samples)
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -1082,6 +1093,53 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.nilm_review_by_circuit[circuit_id] = [
             _nilm_review_payload(signature) for signature in signatures
         ]
+
+    def _refresh_balance_state(
+        self: Self,
+        samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
+    ) -> None:
+        mains_items = [
+            (config, sample)
+            for config, sample in samples
+            if config.mode is CircuitMode.MAINS_NILM
+            or config.appliance_profile is ApplianceProfile.MAINS_NILM
+        ]
+        if not mains_items:
+            return
+
+        monitored = [
+            BalanceInput(
+                circuit_id=config.circuit_id,
+                real_power_w=sample.real_power,
+                generation=config.power_flow is PowerFlowMode.GENERATION
+                or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER,
+            )
+            for config, sample in samples
+            if config not in {item[0] for item in mains_items}
+        ]
+        for config, sample in mains_items:
+            result = calculate_balance(
+                mains=BalanceInput(
+                    circuit_id=config.circuit_id,
+                    real_power_w=sample.real_power,
+                ),
+                monitored=monitored,
+            )
+            circuit_id = config.circuit_id
+            self.state.balance_power_w_by_circuit[circuit_id] = (
+                result.balance_power_w
+            )
+            self.state.monitored_power_w_by_circuit[circuit_id] = (
+                result.monitored_power_w
+            )
+            self.state.monitored_coverage_percent_by_circuit[circuit_id] = (
+                result.monitored_coverage_percent
+            )
+            self.state.balance_status_by_circuit[circuit_id] = result.status
+            self.state.balance_evidence_by_circuit[circuit_id] = {
+                **result.features,
+                "status": result.status,
+            }
 
     def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
         return normalize_sensitivity(

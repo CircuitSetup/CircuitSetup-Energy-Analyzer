@@ -248,6 +248,36 @@ def demand_status_value(state: Any, circuit_id: str) -> str:
     return "unconfigured"
 
 
+def balance_power_value(state: Any, circuit_id: str) -> float:
+    """Return unmonitored mains balance power in watts."""
+    return float(
+        getattr(state, "balance_power_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def monitored_power_value(state: Any, circuit_id: str) -> float:
+    """Return summed monitored circuit power for a mains balance."""
+    return float(
+        getattr(state, "monitored_power_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def monitored_coverage_value(state: Any, circuit_id: str) -> float:
+    """Return percent of mains power covered by monitored circuits."""
+    return float(
+        getattr(state, "monitored_coverage_percent_by_circuit", {}).get(
+            circuit_id,
+            0.0,
+        )
+    )
+
+
+def balance_status_value(state: Any, circuit_id: str) -> str:
+    """Return the mains balance tracker status."""
+    status = getattr(state, "balance_status_by_circuit", {}).get(circuit_id)
+    return str(status or "missing_mains")
+
+
 def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
@@ -422,6 +452,36 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Demand Status",
         value_fn=demand_status_value,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="balance_power",
+        name_suffix="Balance Power",
+        value_fn=balance_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="monitored_power",
+        name_suffix="Monitored Power",
+        value_fn=monitored_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="monitored_coverage",
+        name_suffix="Monitored Coverage",
+        value_fn=monitored_coverage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="balance_status",
+        name_suffix="Balance Status",
+        value_fn=balance_status_value,
+        attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
     ),
 )
 

@@ -68,6 +68,10 @@ sections:
           - entity: sensor.mains_anomaly_score
           - entity: sensor.mains_last_event
           - entity: sensor.mains_alert_evidence
+          - entity: sensor.mains_balance_power
+          - entity: sensor.mains_monitored_power
+          - entity: sensor.mains_monitored_coverage
+          - entity: sensor.mains_balance_status
   - type: grid
     title: Active evidence
     cards:
@@ -119,6 +123,13 @@ sections:
           - entity: sensor.hvac_peak_demand
           - entity: sensor.hvac_demand_limit_usage
           - entity: sensor.hvac_demand_status
+      - type: entities
+        title: Mains balance
+        entities:
+          - entity: sensor.mains_balance_power
+          - entity: sensor.mains_monitored_power
+          - entity: sensor.mains_monitored_coverage
+          - entity: sensor.mains_balance_status
   - type: grid
     title: Experimental NILM review
     cards:

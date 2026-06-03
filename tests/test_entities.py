@@ -25,6 +25,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         alert_evidence_value,
         anomaly_score_value,
         apparent_power_drift_value,
+        balance_power_value,
+        balance_status_value,
         current_demand_value,
         daily_energy_usage_value,
         data_quality_checklist_value,
@@ -35,6 +37,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         health_summary_value,
         last_event_value,
         learning_progress_value,
+        monitored_coverage_value,
+        monitored_power_value,
         nilm_signature_count_value,
         nilm_unmatched_load_percentage_value,
         peak_demand_value,
@@ -108,6 +112,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         demand_evidence_by_circuit={
             "fridge": {"status": "tracking", "demand_limit_w": 4000.0}
         },
+        balance_power_w_by_circuit={"fridge": 2300.0},
+        monitored_power_w_by_circuit={"fridge": 2700.0},
+        monitored_coverage_percent_by_circuit={"fridge": 54.0},
+        balance_status_by_circuit={"fridge": "tracking"},
+        balance_evidence_by_circuit={
+            "fridge": {"status": "tracking", "balance_power_w": 2300.0}
+        },
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
@@ -137,6 +148,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert peak_demand_value(state, "fridge") == 3200.0
     assert demand_limit_usage_value(state, "fridge") == 80.0
     assert demand_status_value(state, "fridge") == "tracking"
+    assert balance_power_value(state, "fridge") == 2300.0
+    assert monitored_power_value(state, "fridge") == 2700.0
+    assert monitored_coverage_value(state, "fridge") == 54.0
+    assert balance_status_value(state, "fridge") == "tracking"
 
     assert anomaly_score_value(state, "unknown") == 0.0
     assert last_event_value(state, "unknown") is None
@@ -160,6 +175,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert peak_demand_value(state, "unknown") == 0.0
     assert demand_limit_usage_value(state, "unknown") == 0.0
     assert demand_status_value(state, "unknown") == "unconfigured"
+    assert balance_power_value(state, "unknown") == 0.0
+    assert monitored_power_value(state, "unknown") == 0.0
+    assert monitored_coverage_value(state, "unknown") == 0.0
+    assert balance_status_value(state, "unknown") == "missing_mains"
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -213,6 +232,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "current_demand_w": 2400.0,
         "demand_limit_w": 2000.0,
     }
+    balance_evidence = {
+        "status": "tracking",
+        "balance_power_w": 2300.0,
+        "monitored_coverage_percent": 54.0,
+    }
     state = AnalyzerState(
         readiness_by_circuit={"fridge": readiness},
         learning_progress_by_circuit={"fridge": progress},
@@ -221,6 +245,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         sensitivity_by_circuit={"fridge": "quiet"},
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
         demand_evidence_by_circuit={"fridge": demand_evidence},
+        balance_evidence_by_circuit={"fridge": balance_evidence},
     )
     coordinator = SimpleNamespace(data=state)
     circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
@@ -298,6 +323,30 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["demand_status"],
     ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["balance_power"],
+    ).extra_state_attributes == balance_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["monitored_power"],
+    ).extra_state_attributes == balance_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["monitored_coverage"],
+    ).extra_state_attributes == balance_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["balance_status"],
+    ).extra_state_attributes == balance_evidence
 
 
 @pytest.mark.asyncio
@@ -340,6 +389,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Peak Demand",
         "Kitchen Fridge Demand Limit Usage",
         "Kitchen Fridge Demand Status",
+        "Kitchen Fridge Balance Power",
+        "Kitchen Fridge Monitored Power",
+        "Kitchen Fridge Monitored Coverage",
+        "Kitchen Fridge Balance Status",
     ]
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_fridge_anomaly_score",
@@ -364,6 +417,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_peak_demand",
         "entry-1_fridge_demand_limit_usage",
         "entry-1_fridge_demand_status",
+        "entry-1_fridge_balance_power",
+        "entry-1_fridge_monitored_power",
+        "entry-1_fridge_monitored_coverage",
+        "entry-1_fridge_balance_status",
     ]
     assert added_entities[0].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
@@ -390,6 +447,10 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
         "mains",
         "mains",
         "mains",
