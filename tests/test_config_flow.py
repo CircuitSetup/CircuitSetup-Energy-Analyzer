@@ -7,9 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
-    CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
-    CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
@@ -67,10 +65,19 @@ def test_format_mapping_suggestions_requires_manual_definition_when_empty() -> N
 
     text = format_mapping_suggestions([])
 
-    assert "manual definition" in text
+    assert "Continue with source sensors" in text
+    assert "manual definition" not in text
 
 
-def test_validate_setup_input_preserves_nilm_and_circuit_fields() -> None:
+def _schema_keys(schema) -> set[str]:
+    keys = set()
+    for marker in schema.schema:
+        key = getattr(marker, "schema", getattr(marker, "key", marker))
+        keys.add(key)
+    return keys
+
+
+def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
     )
@@ -79,28 +86,10 @@ def test_validate_setup_input_preserves_nilm_and_circuit_fields() -> None:
         CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.main_l1_power"],
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
         CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
-        CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
         CONF_SENSITIVITY: "high",
         CONF_RETENTION_MODE: "diagnostic",
-        CONF_CIRCUITS: [
-            {
-                "circuit_id": "fridge",
-                "name": "Fridge",
-                "mode": "mixed",
-                "appliance_profile": "mixed",
-                "source_entities": ["sensor.fridge_power"],
-            },
-            {
-                "id": "mains",
-                "name": "Mains NILM",
-                "mode": "mains_nilm",
-                "appliance_profile": "mains_nilm",
-                "source_entities": [
-                    "sensor.main_l1_power",
-                    "sensor.main_l2_power",
-                ],
-            },
-        ],
+        "circuits": [{"circuit_id": "fridge"}],
+        "known_load_circuits": ["fridge"],
     }
 
     validated = validate_setup_input(payload)
@@ -108,13 +97,13 @@ def test_validate_setup_input_preserves_nilm_and_circuit_fields() -> None:
     assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_SOURCE_ENTITIES]
     assert validated[CONF_ENABLE_EXPERIMENTAL_NILM] is True
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
-    assert validated[CONF_KNOWN_LOAD_CIRCUITS] == ["fridge"]
     assert validated[CONF_SENSITIVITY] == "high"
     assert validated[CONF_RETENTION_MODE] == "diagnostic"
-    assert validated[CONF_CIRCUITS] == payload[CONF_CIRCUITS]
+    assert "circuits" not in validated
+    assert "known_load_circuits" not in validated
 
 
-def test_validate_setup_input_parses_text_area_values() -> None:
+def test_validate_setup_input_parses_text_entity_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
     )
@@ -123,16 +112,6 @@ def test_validate_setup_input_parses_text_area_values() -> None:
         {
             CONF_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.hvac_power",
             CONF_MAINS_SOURCE_ENTITIES: "sensor.main_l1_power, sensor.main_l2_power",
-            CONF_KNOWN_LOAD_CIRCUITS: "fridge\nhvac",
-            CONF_CIRCUITS: json.dumps(
-                [
-                    {
-                        "circuit_id": "fridge",
-                        "name": "Fridge",
-                        "mode": "single_phase",
-                    }
-                ]
-            ),
         }
     )
 
@@ -144,27 +123,6 @@ def test_validate_setup_input_parses_text_area_values() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
-    assert validated[CONF_KNOWN_LOAD_CIRCUITS] == ["fridge", "hvac"]
-    assert validated[CONF_CIRCUITS] == [
-        {"circuit_id": "fridge", "name": "Fridge", "mode": "single_phase"}
-    ]
-
-
-def test_validate_setup_input_rejects_invalid_circuit_json() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        SetupValidationError,
-        validate_setup_input,
-    )
-
-    with pytest.raises(SetupValidationError) as error:
-        validate_setup_input(
-            {
-                CONF_SOURCE_ENTITIES: "sensor.fridge_power",
-                CONF_CIRCUITS: "{not json",
-            }
-        )
-
-    assert error.value.error_key == "invalid_circuits"
 
 
 def test_validate_setup_input_requires_source_entities() -> None:
@@ -174,26 +132,9 @@ def test_validate_setup_input_requires_source_entities() -> None:
     )
 
     with pytest.raises(SetupValidationError) as error:
-        validate_setup_input({CONF_SOURCE_ENTITIES: [], CONF_CIRCUITS: []})
+        validate_setup_input({CONF_SOURCE_ENTITIES: []})
 
     assert error.value.error_key == "no_source_entities"
-
-
-def test_validate_setup_input_rejects_non_mapping_circuit_items() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        SetupValidationError,
-        validate_setup_input,
-    )
-
-    with pytest.raises(SetupValidationError) as error:
-        validate_setup_input(
-            {
-                CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
-                CONF_CIRCUITS: ["not-a-dict"],
-            }
-        )
-
-    assert error.value.error_key == "invalid_circuits"
 
 
 def test_validate_setup_input_rejects_source_entity_mapping() -> None:
@@ -206,7 +147,6 @@ def test_validate_setup_input_rejects_source_entity_mapping() -> None:
         validate_setup_input(
             {
                 CONF_SOURCE_ENTITIES: {"sensor.fridge_power": True},
-                CONF_CIRCUITS: [],
             }
         )
 
@@ -220,7 +160,7 @@ async def test_fallback_user_flow_returns_no_source_entities_form_error() -> Non
     )
 
     flow = CircuitSetupEnergyAnalyzerConfigFlow()
-    result = await flow.async_step_user({CONF_SOURCE_ENTITIES: [], CONF_CIRCUITS: []})
+    result = await flow.async_step_user({CONF_SOURCE_ENTITIES: []})
 
     assert result["type"] == "form"
     assert result["errors"]["base"] == "no_source_entities"
@@ -269,7 +209,6 @@ async def test_options_flow_preserves_valid_options() -> None:
     user_input = {
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
         CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
-        CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
         CONF_SENSITIVITY: "high",
         CONF_RETENTION_MODE: "diagnostic",
     }
@@ -292,6 +231,49 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
     assert voluptuous_serialize.convert(DATA_SCHEMA)
     assert voluptuous_serialize.convert(
         _options_schema(SimpleNamespace(data={}, options={}))
+    )
+
+
+def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    selector_config = config_flow._energy_entity_selector_config()
+
+    assert selector_config == {
+        "entity": {
+            "multiple": True,
+            "filter": [
+                {
+                    "domain": "sensor",
+                    "device_class": sorted(
+                        {
+                            "apparent_power",
+                            "current",
+                            "energy",
+                            "frequency",
+                            "power",
+                            "power_factor",
+                            "reactive_energy",
+                            "reactive_power",
+                            "voltage",
+                        }
+                    ),
+                }
+            ],
+        }
+    }
+    assert config_flow._energy_entity_selector_config(
+        ["sensor.panel_power", "sensor.panel_voltage"]
+    ) == {
+        "entity": {
+            "multiple": True,
+            "include_entities": ["sensor.panel_power", "sensor.panel_voltage"],
+        }
+    }
+    assert "circuits" not in _schema_keys(config_flow.DATA_SCHEMA)
+    assert "known_load_circuits" not in _schema_keys(config_flow.DATA_SCHEMA)
+    assert "known_load_circuits" not in _schema_keys(
+        config_flow._options_schema(SimpleNamespace(data={}, options={}))
     )
 
 

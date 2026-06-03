@@ -173,5 +173,50 @@ def test_async_discover_sensors_filters_low_score_generic_sensors() -> None:
     assert sensors[0].integration_domain == "esphome"
 
 
+def test_async_discover_energy_sources_includes_generic_sensors() -> None:
+    import custom_components.circuitsetup_energy_analyzer.discovery as discovery
+
+    hass = FakeHass(
+        [
+            FakeState(
+                "sensor.random_power",
+                {
+                    "friendly_name": "Random Power",
+                    "device_class": "power",
+                    "unit_of_measurement": "W",
+                },
+            ),
+            FakeState(
+                "sensor.panel_reactive_power",
+                {
+                    "friendly_name": "Panel Reactive Power",
+                    "unit_of_measurement": "var",
+                },
+            ),
+            FakeState(
+                "sensor.living_room_temperature",
+                {
+                    "friendly_name": "Living Room Temperature",
+                    "device_class": "temperature",
+                    "unit_of_measurement": "degF",
+                },
+            ),
+        ]
+    )
+
+    entity_ids = asyncio.run(discovery.async_discover_energy_source_entities(hass))
+
+    assert entity_ids == [
+        "sensor.panel_reactive_power",
+        "sensor.random_power",
+    ]
+
+
 def test_async_discover_sensors_returns_empty_list_without_hass() -> None:
     assert asyncio.run(async_discover_sensors(None)) == []
+
+
+def test_async_discover_energy_sources_returns_empty_without_hass() -> None:
+    import custom_components.circuitsetup_energy_analyzer.discovery as discovery
+
+    assert asyncio.run(discovery.async_discover_energy_source_entities(None)) == []

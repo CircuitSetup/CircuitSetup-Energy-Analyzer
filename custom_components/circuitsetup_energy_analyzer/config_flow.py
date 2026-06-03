@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
@@ -94,9 +93,7 @@ except ModuleNotFoundError:
     ha_selector = None
 
 from .const import (
-    CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
-    CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
@@ -106,15 +103,17 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DOMAIN,
 )
-from .discovery import async_discover_sensors
+from .discovery import (
+    ENERGY_SOURCE_DEVICE_CLASSES,
+    async_discover_energy_source_entities,
+    async_discover_sensors,
+)
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
-from .models import ApplianceProfile, CircuitMode, RetentionMode
+from .models import RetentionMode
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
-_VALID_CIRCUIT_MODES = {mode.value for mode in CircuitMode}
-_VALID_APPLIANCE_PROFILES = {profile.value for profile in ApplianceProfile}
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
 
@@ -132,8 +131,8 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
     suggestion_list = list(suggestions)
     if not suggestion_list:
         return (
-            "No dual-phase mapping suggestions were found; manual definition is "
-            "needed for circuit channels."
+            "No dual-phase mapping suggestions were found yet. Continue with "
+            "source sensors; the analyzer can still learn from selected inputs."
         )
 
     lines = [
@@ -162,12 +161,10 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     if not source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
-    circuits = _validate_circuits(user_input.get(CONF_CIRCUITS, []))
     retention_mode = _validate_retention_mode(user_input)
 
     return {
         CONF_SOURCE_ENTITIES: source_entities,
-        CONF_CIRCUITS: circuits,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -177,10 +174,6 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
-        ),
-        CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
-            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, []),
-            invalid_error_key="invalid_known_load_circuits",
         ),
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: retention_mode,
@@ -200,41 +193,9 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
         ),
-        CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
-            user_input.get(CONF_KNOWN_LOAD_CIRCUITS, []),
-            invalid_error_key="invalid_known_load_circuits",
-        ),
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
-
-
-def _validate_circuits(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return []
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError as err:
-            raise SetupValidationError("invalid_circuits") from err
-    if not isinstance(value, list):
-        raise SetupValidationError("invalid_circuits")
-
-    circuits: list[Any] = []
-    for circuit in value:
-        if not isinstance(circuit, Mapping):
-            raise SetupValidationError("invalid_circuits")
-        mode = circuit.get("mode")
-        if mode is not None and str(mode) not in _VALID_CIRCUIT_MODES:
-            raise SetupValidationError("invalid_circuit_mode")
-        profile = circuit.get("appliance_profile")
-        if profile is not None and str(profile) not in _VALID_APPLIANCE_PROFILES:
-            raise SetupValidationError("invalid_appliance_profile")
-        circuits.append(circuit)
-    return circuits
 
 
 def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
@@ -272,52 +233,68 @@ def _selector(config: dict[str, Any], fallback: Any) -> Any:
     return ha_selector(config)
 
 
-def _entity_list_selector() -> Any:
-    return _selector(
-        {
+def _energy_entity_selector_config(
+    include_entities: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    entity_ids = list(dict.fromkeys(include_entities or ()))
+    if entity_ids:
+        return {
             "entity": {
                 "multiple": True,
-                "filter": [{"domain": "sensor"}],
+                "include_entities": entity_ids,
             }
-        },
-        str,
-    )
+        }
+
+    return {
+        "entity": {
+            "multiple": True,
+            "filter": [
+                {
+                    "domain": "sensor",
+                    "device_class": sorted(ENERGY_SOURCE_DEVICE_CLASSES),
+                }
+            ],
+        }
+    }
 
 
-def _multiline_text_selector() -> Any:
-    return _selector({"text": {"multiline": True}}, str)
+def _energy_entity_list_selector(
+    include_entities: Iterable[str] | None = None,
+) -> Any:
+    return _selector(_energy_entity_selector_config(include_entities), str)
 
 
 def _select_selector(options: Iterable[str]) -> Any:
     return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
 
 
-def _list_text_default(value: Any) -> str:
-    return "\n".join(
-        _strict_string_list(value, invalid_error_key="invalid_list_default")
+def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
+    return vol.Schema(
+        {
+            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(
+                source_entity_ids,
+            ),
+            vol.Optional(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+            ): bool,
+            vol.Optional(
+                CONF_MAINS_SOURCE_ENTITIES,
+                default=[],
+            ): _energy_entity_list_selector(source_entity_ids),
+            vol.Optional(
+                CONF_SENSITIVITY,
+                default=DEFAULT_SENSITIVITY,
+            ): _select_selector(_SENSITIVITY_OPTIONS),
+            vol.Optional(
+                CONF_RETENTION_MODE,
+                default=DEFAULT_RETENTION_MODE,
+            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
+        }
     )
 
 
-DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_SOURCE_ENTITIES): _entity_list_selector(),
-        vol.Optional(CONF_CIRCUITS, default=""): _multiline_text_selector(),
-        vol.Optional(
-            CONF_ENABLE_EXPERIMENTAL_NILM,
-            default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
-        ): bool,
-        vol.Optional(CONF_MAINS_SOURCE_ENTITIES, default=[]): _entity_list_selector(),
-        vol.Optional(CONF_KNOWN_LOAD_CIRCUITS, default=""): _multiline_text_selector(),
-        vol.Optional(
-            CONF_SENSITIVITY,
-            default=DEFAULT_SENSITIVITY,
-        ): _select_selector(_SENSITIVITY_OPTIONS),
-        vol.Optional(
-            CONF_RETENTION_MODE,
-            default=DEFAULT_RETENTION_MODE,
-        ): _select_selector(sorted(_VALID_RETENTION_MODES)),
-    }
-)
+DATA_SCHEMA = _setup_schema()
 
 
 class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -351,7 +328,11 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
 
         return self.async_show_form(
             step_id="user",
-            data_schema=DATA_SCHEMA,
+            data_schema=_setup_schema(
+                await _async_discover_energy_source_entities(
+                    getattr(self, "hass", None),
+                )
+            ),
             errors=errors,
             description_placeholders={
                 "mapping_suggestions": await _async_format_mapping_suggestions(
@@ -385,9 +366,12 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
         self,
         errors: dict[str, str] | None = None,
     ) -> config_entries.ConfigFlowResult:
+        source_entity_ids = await _async_discover_energy_source_entities(
+            getattr(self, "hass", None),
+        )
         return self.async_show_form(
             step_id="init",
-            data_schema=_options_schema(self._config_entry),
+            data_schema=_options_schema(self._config_entry, source_entity_ids),
             errors=errors or {},
             description_placeholders={
                 "mapping_suggestions": await _async_format_mapping_suggestions(
@@ -397,9 +381,23 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
         )
 
 
-def _options_schema(config_entry: config_entries.ConfigEntry) -> Any:
+def _options_schema(
+    config_entry: config_entries.ConfigEntry,
+    source_entity_ids: Iterable[str] | None = None,
+) -> Any:
     options = getattr(config_entry, "options", {}) or {}
     data = getattr(config_entry, "data", {}) or {}
+    mains_source_entities = options.get(
+        CONF_MAINS_SOURCE_ENTITIES,
+        data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+    )
+    selectable_source_entities = [
+        *list(source_entity_ids or ()),
+        *_strict_string_list(
+            mains_source_entities,
+            invalid_error_key="invalid_mains_source_entities",
+        ),
+    ]
     return vol.Schema(
         {
             vol.Optional(
@@ -414,20 +412,8 @@ def _options_schema(config_entry: config_entries.ConfigEntry) -> Any:
             ): bool,
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
-                default=options.get(
-                    CONF_MAINS_SOURCE_ENTITIES,
-                    data.get(CONF_MAINS_SOURCE_ENTITIES, []),
-                ),
-            ): _entity_list_selector(),
-            vol.Optional(
-                CONF_KNOWN_LOAD_CIRCUITS,
-                default=_list_text_default(
-                    options.get(
-                        CONF_KNOWN_LOAD_CIRCUITS,
-                        data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
-                    )
-                ),
-            ): _multiline_text_selector(),
+                default=mains_source_entities,
+            ): _energy_entity_list_selector(selectable_source_entities),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=options.get(
@@ -454,3 +440,12 @@ async def _async_format_mapping_suggestions(hass: Any) -> str:
     except Exception:
         discovered = []
     return format_mapping_suggestions(suggest_dual_phase_pairs(discovered))
+
+
+async def _async_discover_energy_source_entities(hass: Any) -> list[str]:
+    if hass is None:
+        return []
+    try:
+        return await async_discover_energy_source_entities(hass)
+    except Exception:
+        return []

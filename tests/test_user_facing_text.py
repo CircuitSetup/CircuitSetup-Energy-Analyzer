@@ -11,10 +11,8 @@ INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 
 EXPECTED_FLOW_LABELS = {
     "source_entities": "Source Entities",
-    "circuits": "Circuit Definitions",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
-    "known_load_circuits": "Known Load Circuits",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -22,7 +20,6 @@ EXPECTED_FLOW_LABELS = {
 EXPECTED_OPTIONS_LABELS = {
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
-    "known_load_circuits": "Known Load Circuits",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -52,6 +49,9 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 160 for description in descriptions.values())
+    assert "power, voltage, current" in descriptions["source_entities"].lower()
+    assert "power factor" in descriptions["source_entities"].lower()
+    assert "optional" in descriptions["mains_source_entities"].lower()
 
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
@@ -64,6 +64,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 160 for description in descriptions.values())
+    assert "optional" in descriptions["mains_source_entities"].lower()
 
 
 def test_service_fields_have_human_readable_names_and_descriptions() -> None:

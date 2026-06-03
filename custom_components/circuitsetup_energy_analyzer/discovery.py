@@ -6,13 +6,40 @@ from typing import Any
 
 from .models import SensorRole
 
-_DEVICE_CLASSES = {
-    "power",
-    "voltage",
+ENERGY_SOURCE_DEVICE_CLASSES = (
+    "apparent_power",
     "current",
     "energy",
-    "power_factor",
     "frequency",
+    "power",
+    "power_factor",
+    "reactive_energy",
+    "reactive_power",
+    "voltage",
+)
+_DEVICE_CLASSES = set(ENERGY_SOURCE_DEVICE_CLASSES)
+_ENERGY_SOURCE_UNITS = {
+    "a",
+    "hz",
+    "ka",
+    "kva",
+    "kvar",
+    "kvarh",
+    "kv",
+    "kw",
+    "kwh",
+    "ma",
+    "mva",
+    "mvar",
+    "mv",
+    "mw",
+    "mwh",
+    "v",
+    "va",
+    "var",
+    "varh",
+    "w",
+    "wh",
 }
 
 
@@ -74,8 +101,35 @@ def score_circuitsetup_candidate(sensor: DiscoveredSensor) -> int:
     return score
 
 
+def is_energy_source_sensor(sensor: DiscoveredSensor) -> bool:
+    """Return true when a sensor looks useful for energy analysis."""
+    if sensor.device_class in _DEVICE_CLASSES:
+        return True
+    if sensor.role is not None:
+        return True
+    unit = (sensor.unit or "").strip().lower()
+    return unit in _ENERGY_SOURCE_UNITS
+
+
 async def async_discover_sensors(hass: Any) -> list[DiscoveredSensor]:
     """Discover candidate sensor entities from HA registry and current states."""
+    return [
+        sensor
+        for sensor in _build_discovered_sensors(hass)
+        if score_circuitsetup_candidate(sensor) >= 3
+    ]
+
+
+async def async_discover_energy_source_entities(hass: Any) -> list[str]:
+    """Discover generic energy-like sensor entity IDs for setup selectors."""
+    return [
+        sensor.entity_id
+        for sensor in _build_discovered_sensors(hass)
+        if is_energy_source_sensor(sensor)
+    ]
+
+
+def _build_discovered_sensors(hass: Any) -> list[DiscoveredSensor]:
     if hass is None:
         return []
 
@@ -88,8 +142,7 @@ async def async_discover_sensors(hass: Any) -> list[DiscoveredSensor]:
         state = hass.states.get(entity_id) if getattr(hass, "states", None) else None
         entry = registry_entries.get(entity_id)
         sensor = _build_discovered_sensor(entity_id, state, entry)
-        if score_circuitsetup_candidate(sensor) >= 3:
-            sensors.append(sensor)
+        sensors.append(sensor)
 
     return sensors
 
