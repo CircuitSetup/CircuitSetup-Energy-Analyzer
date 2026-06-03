@@ -56,6 +56,8 @@ sections:
           - entity: sensor.refrigerator_run_cycle_duty_cycle
           - entity: sensor.refrigerator_run_cycle_status
           - entity: sensor.refrigerator_alert_evidence
+          - entity: sensor.refrigerator_recent_activity
+          - entity: sensor.refrigerator_recent_activity_count
       - type: entities
         title: HVAC
         entities:
@@ -66,6 +68,8 @@ sections:
           - entity: sensor.hvac_run_cycle_duty_cycle
           - entity: sensor.hvac_run_cycle_status
           - entity: sensor.hvac_alert_evidence
+          - entity: sensor.hvac_recent_activity
+          - entity: sensor.hvac_recent_activity_count
           - entity: sensor.hvac_current_demand
           - entity: sensor.hvac_peak_demand
           - entity: sensor.hvac_demand_limit_usage
@@ -82,6 +86,8 @@ sections:
           - entity: sensor.mains_anomaly_score
           - entity: sensor.mains_last_event
           - entity: sensor.mains_alert_evidence
+          - entity: sensor.mains_recent_activity
+          - entity: sensor.mains_recent_activity_count
           - entity: sensor.mains_balance_power
           - entity: sensor.mains_monitored_power
           - entity: sensor.mains_monitored_coverage
@@ -104,6 +110,15 @@ sections:
           - entity: sensor.refrigerator_alert_evidence
           - entity: sensor.hvac_alert_evidence
           - entity: sensor.mains_alert_evidence
+      - type: entities
+        title: Recent activity
+        entities:
+          - entity: sensor.refrigerator_recent_activity
+          - entity: sensor.refrigerator_recent_activity_count
+          - entity: sensor.hvac_recent_activity
+          - entity: sensor.hvac_recent_activity_count
+          - entity: sensor.mains_recent_activity
+          - entity: sensor.mains_recent_activity_count
   - type: grid
     title: Power-quality diagnostics
     cards:

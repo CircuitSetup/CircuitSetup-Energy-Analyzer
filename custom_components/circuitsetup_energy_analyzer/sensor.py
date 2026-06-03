@@ -147,6 +147,23 @@ def alert_evidence_value(state: Any, circuit_id: str) -> str:
     return ""
 
 
+def recent_activity_value(state: Any, circuit_id: str) -> str:
+    """Return the latest recent activity title for a circuit."""
+    return str(
+        getattr(state, "recent_activity_by_circuit", {}).get(
+            circuit_id,
+            "No recent activity",
+        )
+    )
+
+
+def recent_activity_count_value(state: Any, circuit_id: str) -> int:
+    """Return the number of retained activity items in the recent window."""
+    return int(
+        getattr(state, "recent_activity_count_by_circuit", {}).get(circuit_id, 0)
+    )
+
+
 def sensitivity_value(state: Any, circuit_id: str) -> str:
     """Return the active sensitivity preset for a circuit."""
     return str(
@@ -586,6 +603,19 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Alert Evidence",
         value_fn=alert_evidence_value,
         attributes_fn=_mapping_attributes("alert_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="recent_activity",
+        name_suffix="Recent Activity",
+        value_fn=recent_activity_value,
+        attributes_fn=_mapping_attributes("recent_activity_timeline_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="recent_activity_count",
+        name_suffix="Recent Activity Count",
+        value_fn=recent_activity_count_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("recent_activity_timeline_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="sensitivity",

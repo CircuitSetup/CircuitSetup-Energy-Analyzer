@@ -9,6 +9,10 @@ from typing import Any, Self
 
 from . import notifications, repairs
 from .activity_alerts import ActivityAlertSettings, evaluate_activity_alert
+from .activity_timeline import (
+    build_recent_activity_timeline,
+    timeline_payload,
+)
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .balance import BalanceInput, calculate_balance
@@ -171,6 +175,11 @@ class AnalyzerState:
         default_factory=dict
     )
     alert_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    recent_activity_by_circuit: dict[str, str] = field(default_factory=dict)
+    recent_activity_count_by_circuit: dict[str, int] = field(default_factory=dict)
+    recent_activity_timeline_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
@@ -1343,6 +1352,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id
         )
         self._refresh_alert_evidence_state(circuit_id)
+        self._refresh_recent_activity_state(circuit_id, now)
         self._refresh_nilm_state(circuit_id)
 
         status, summary = health_summary(
@@ -1386,6 +1396,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state.alert_evidence_by_circuit.pop(circuit_id, None)
             return
         self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(alert)
+
+    def _refresh_recent_activity_state(
+        self: Self,
+        circuit_id: str,
+        now: datetime,
+    ) -> None:
+        timeline = build_recent_activity_timeline(
+            circuit_id=circuit_id,
+            events=self.store_data.events,
+            alerts=self.store_data.alerts,
+            now=now,
+        )
+        self.state.recent_activity_by_circuit[circuit_id] = timeline.latest_title
+        self.state.recent_activity_count_by_circuit[circuit_id] = (
+            timeline.total_count
+        )
+        self.state.recent_activity_timeline_by_circuit[circuit_id] = (
+            timeline_payload(timeline)
+        )
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         alerts = list(self.state.active_alerts_by_circuit.get(circuit_id, []))

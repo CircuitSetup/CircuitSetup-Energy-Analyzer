@@ -74,6 +74,12 @@
       "alert_evidence": {
         "name": "Alert evidence"
       },
+      "recent_activity": {
+        "name": "Recent activity"
+      },
+      "recent_activity_count": {
+        "name": "Recent activity count"
+      },
       "sensitivity": {
         "name": "Sensitivity"
       },

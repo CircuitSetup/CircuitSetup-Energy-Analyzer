@@ -104,6 +104,19 @@ for appliance-style "left on too long" notices, such as a pump, oven, dryer, or
 refrigerator compressor run that exceeds a user-selected duration, and for
 "no activity for too long" notices when an expected cycling load has not run.
 
+## Recent Activity Timeline
+
+Each configured circuit exposes a compact recent-activity timeline from the
+integration's retained analyzer evidence. It merges START/STOP/steady-window
+events with retained possible-issue alert evidence from the last 24 hours,
+sorted newest first.
+
+Use the `recent_activity` diagnostic sensor for the latest activity title and
+the sensor attributes for the detailed timeline items. The `recent_activity_count`
+sensor shows how much activity was retained in the recent window. These entities
+are intended for quick operational review and dashboard cards, not as a
+replacement for Home Assistant recorder history or Energy Dashboard graphs.
+
 ## Billing Cycle Forecasts
 
 The analyzer can also track circuit usage against a utility-style billing
@@ -274,6 +287,8 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 
 - `sensor.<circuit>_anomaly_score`
 - `sensor.<circuit>_last_event`
+- `sensor.<circuit>_recent_activity`
+- `sensor.<circuit>_recent_activity_count`
 - `binary_sensor.<circuit>_learning`
 - `binary_sensor.<circuit>_data_quality_problem`
 - `sensor.<circuit>_energy_dashboard_status`

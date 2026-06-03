@@ -66,6 +66,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         power_quality_score_value,
         reactive_power_drift_value,
         readiness_value,
+        recent_activity_count_value,
+        recent_activity_value,
         run_cycle_count_value,
         run_cycle_duty_cycle_value,
         run_cycle_runtime_value,
@@ -131,6 +133,14 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
             "fridge": {"status": "ready", "ready_energy_entities": []}
         },
         alert_evidence_by_circuit={"fridge": {"feature": "reactive_power"}},
+        recent_activity_by_circuit={"fridge": "Possible issue: cycle duration"},
+        recent_activity_count_by_circuit={"fridge": 2},
+        recent_activity_timeline_by_circuit={
+            "fridge": {
+                "status": "activity",
+                "items": [{"title": "Possible issue: cycle duration"}],
+            }
+        },
         sensitivity_by_circuit={"fridge": "quiet"},
         daily_energy_usage_by_circuit={"fridge": 12.9},
         energy_usage_share_by_circuit={"fridge": 25.8},
@@ -239,6 +249,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert data_quality_checklist_value(state, "well_pump") == "problem"
     assert energy_dashboard_status_value(state, "fridge") == "ready"
     assert alert_evidence_value(state, "fridge") == "reactive_power"
+    assert recent_activity_value(state, "fridge") == "Possible issue: cycle duration"
+    assert recent_activity_count_value(state, "fridge") == 2
     assert sensitivity_value(state, "fridge") == "quiet"
     assert daily_energy_usage_value(state, "fridge") == 12.9
     assert energy_usage_share_value(state, "fridge") == 25.8
@@ -296,6 +308,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert data_quality_checklist_value(state, "unknown") == "problem"
     assert energy_dashboard_status_value(state, "unknown") == "needs_energy_source"
     assert alert_evidence_value(state, "unknown") == ""
+    assert recent_activity_value(state, "unknown") == "No recent activity"
+    assert recent_activity_count_value(state, "unknown") == 0
     assert sensitivity_value(state, "unknown") == "balanced"
     assert daily_energy_usage_value(state, "unknown") == 0.0
     assert energy_usage_share_value(state, "unknown") == 0.0
@@ -381,6 +395,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "ready_energy_entities": ["sensor.fridge_energy"],
     }
     evidence = {"feature": "reactive_power", "change_ratio": 0.42}
+    recent_activity = {
+        "status": "activity",
+        "total_count": 2,
+        "items": [{"title": "Possible issue: cycle duration"}],
+    }
     energy_evidence = {
         "status": "tracking",
         "daily_usage_kwh": 8.2,
@@ -449,6 +468,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         data_quality_checklist_by_circuit={"fridge": checklist},
         energy_dashboard_evidence_by_circuit={"fridge": energy_dashboard},
         alert_evidence_by_circuit={"fridge": evidence},
+        recent_activity_timeline_by_circuit={"fridge": recent_activity},
         sensitivity_by_circuit={"fridge": "quiet"},
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
         energy_goal_evidence_by_circuit={"fridge": energy_goal_evidence},
@@ -501,6 +521,18 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["alert_evidence"],
     ).extra_state_attributes == evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["recent_activity"],
+    ).extra_state_attributes == recent_activity
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["recent_activity_count"],
+    ).extra_state_attributes == recent_activity
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -757,6 +789,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Data Quality Checklist",
         "Kitchen Fridge Energy Dashboard Status",
         "Kitchen Fridge Alert Evidence",
+        "Kitchen Fridge Recent Activity",
+        "Kitchen Fridge Recent Activity Count",
         "Kitchen Fridge Sensitivity",
         "Kitchen Fridge Power Quality Score",
         "Kitchen Fridge Power Quality Evidence",
@@ -812,6 +846,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_data_quality_checklist",
         "entry-1_fridge_energy_dashboard_status",
         "entry-1_fridge_alert_evidence",
+        "entry-1_fridge_recent_activity",
+        "entry-1_fridge_recent_activity_count",
         "entry-1_fridge_sensitivity",
         "entry-1_fridge_power_quality_score",
         "entry-1_fridge_power_quality_evidence",

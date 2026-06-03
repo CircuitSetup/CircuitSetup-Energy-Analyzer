@@ -356,6 +356,100 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
 
 
 @pytest.mark.asyncio
+async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    event = CircuitEvent(
+        timestamp=now - timedelta(minutes=20),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        severity=Severity.INFO,
+    )
+    old_event = CircuitEvent(
+        timestamp=now - timedelta(days=3),
+        circuit_id="fridge",
+        event_type=EventType.STOP,
+        severity=Severity.INFO,
+    )
+    alert = AlertEvidence(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue: Fridge cycle duration changed.",
+        feature="cycle_duration",
+        observed_value=45.0,
+        baseline_value=30.0,
+        change_ratio=0.5,
+        repeated_count=3,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(events=[old_event, event], alerts=[alert]),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert (
+        coordinator.state.recent_activity_by_circuit["fridge"]
+        == "Possible issue: cycle duration"
+    )
+    assert coordinator.state.recent_activity_count_by_circuit["fridge"] == 2
+    assert coordinator.state.recent_activity_timeline_by_circuit["fridge"] == {
+        "status": "activity",
+        "window_hours": 24,
+        "total_count": 2,
+        "event_count": 1,
+        "alert_count": 1,
+        "latest_title": "Possible issue: cycle duration",
+        "latest_timestamp": alert.timestamp.isoformat(),
+        "items": [
+            {
+                "timestamp": alert.timestamp.isoformat(),
+                "kind": "alert",
+                "title": "Possible issue: cycle duration",
+                "detail": "Possible issue: Fridge cycle duration changed.",
+                "severity": "warning",
+                "feature": "cycle_duration",
+                "event_type": None,
+                "observed_value": 45.0,
+                "baseline_value": 30.0,
+                "change_ratio": 0.5,
+                "repeated_count": 3,
+            },
+            {
+                "timestamp": event.timestamp.isoformat(),
+                "kind": "event",
+                "title": "Start",
+                "detail": "Observed start event.",
+                "severity": "info",
+                "feature": None,
+                "event_type": "start",
+                "observed_value": None,
+                "baseline_value": None,
+                "change_ratio": None,
+                "repeated_count": None,
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
     monkeypatch,
 ) -> None:
