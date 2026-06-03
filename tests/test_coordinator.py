@@ -3862,8 +3862,16 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
     assert coordinator.state.utility_comparison_evidence_by_circuit["mains"] == {
         "status": "mismatch",
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "",
+        "utility_source_id": "sensor.opower_current_bill_usage",
+        "utility_source_type": "entity",
+        "utility_statistic_period": "day",
         "measured_energy_entities": ["sensor.panel_import_energy"],
         "comparison_source": "explicit_entities",
+        "measured_source_type": "entity_state",
+        "period_start": None,
+        "period_end": None,
+        "utility_data_lag_hours": None,
         "utility_kwh": 120.0,
         "measured_kwh": 135.0,
         "difference_kwh": 15.0,
@@ -3973,11 +3981,19 @@ async def test_runtime_sums_circuit_energy_when_measured_entities_omitted() -> N
     assert coordinator.state.utility_comparison_evidence_by_circuit["mains"] == {
         "status": "mismatch",
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "",
+        "utility_source_id": "sensor.opower_current_bill_usage",
+        "utility_source_type": "entity",
+        "utility_statistic_period": "day",
         "measured_energy_entities": [
             "sensor.fridge_energy",
             "sensor.hvac_energy",
         ],
         "comparison_source": "circuit_energy_sum",
+        "measured_source_type": "entity_state",
+        "period_start": None,
+        "period_end": None,
+        "utility_data_lag_hours": None,
         "utility_kwh": 50.0,
         "measured_kwh": 62.0,
         "difference_kwh": 12.0,
@@ -3985,6 +4001,383 @@ async def test_runtime_sums_circuit_energy_when_measured_entities_omitted() -> N
         "absolute_difference_percent": 24.0,
         "tolerance_percent": 10.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_compares_opower_statistics_with_measured_mains_statistics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    period_start = datetime(2026, 6, 2, 0, 0, tzinfo=UTC)
+    period_end = datetime(2026, 6, 3, 0, 0, tzinfo=UTC)
+    calls: list[dict[str, object]] = []
+
+    def timestamp_ms(value: datetime) -> int:
+        return int(value.timestamp() * 1000)
+
+    def fake_statistics_during_period(
+        hass: object,
+        start_time: datetime,
+        end_time: datetime | None,
+        statistic_ids: set[str],
+        period: str,
+        units: dict[str, str],
+        types: set[str],
+    ) -> dict[str, list[dict[str, float]]]:
+        del hass
+        calls.append(
+            {
+                "start_time": start_time,
+                "end_time": end_time,
+                "statistic_ids": statistic_ids,
+                "period": period,
+                "units": units,
+                "types": types,
+            }
+        )
+        if statistic_ids == {"opower:utility_elec_consumption"}:
+            return {
+                "opower:utility_elec_consumption": [
+                    {
+                        "start": timestamp_ms(
+                            datetime(2026, 6, 1, 0, 0, tzinfo=UTC),
+                        ),
+                        "end": timestamp_ms(period_start),
+                        "change": 29.0,
+                    },
+                    {
+                        "start": timestamp_ms(period_start),
+                        "end": timestamp_ms(period_end),
+                        "change": 30.0,
+                    },
+                ]
+            }
+        if statistic_ids == {"sensor.mains_import_energy"}:
+            assert start_time == period_start
+            assert end_time == period_end
+            return {
+                "sensor.mains_import_energy": [
+                    {
+                        "start": timestamp_ms(period_start),
+                        "end": timestamp_ms(period_end),
+                        "change": 36.0,
+                    }
+                ]
+            }
+        return {}
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        fake_statistics_during_period,
+        raising=False,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.mains_power"
+            return SimpleNamespace(
+                state="1000",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_statistic_id": "opower:utility_elec_consumption",
+                    "utility_source_type": "statistics",
+                    "measured_energy_entities": ["sensor.mains_import_energy"],
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert calls[0]["statistic_ids"] == {"opower:utility_elec_consumption"}
+    assert calls[0]["period"] == "day"
+    assert calls[1]["statistic_ids"] == {"sensor.mains_import_energy"}
+    assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
+        "mismatch"
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
+        == 6.0
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
+        == 20.0
+    )
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"] == {
+        "status": "mismatch",
+        "utility_energy_entity": "",
+        "utility_statistic_id": "opower:utility_elec_consumption",
+        "utility_source_id": "opower:utility_elec_consumption",
+        "utility_source_type": "statistics",
+        "utility_statistic_period": "day",
+        "measured_energy_entities": ["sensor.mains_import_energy"],
+        "comparison_source": "explicit_entities",
+        "measured_source_type": "statistics",
+        "period_start": "2026-06-02T00:00:00+00:00",
+        "period_end": "2026-06-03T00:00:00+00:00",
+        "utility_data_lag_hours": 48.0,
+        "utility_kwh": 30.0,
+        "measured_kwh": 36.0,
+        "difference_kwh": 6.0,
+        "difference_percent": 20.0,
+        "absolute_difference_percent": 20.0,
+        "tolerance_percent": 10.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_compares_opower_statistics_with_configured_circuit_sum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    period_start = datetime(2026, 6, 2, 0, 0, tzinfo=UTC)
+    period_end = datetime(2026, 6, 3, 0, 0, tzinfo=UTC)
+    measured_statistic_ids: list[set[str]] = []
+
+    def timestamp_ms(value: datetime) -> int:
+        return int(value.timestamp() * 1000)
+
+    def fake_statistics_during_period(
+        hass: object,
+        start_time: datetime,
+        end_time: datetime | None,
+        statistic_ids: set[str],
+        period: str,
+        units: dict[str, str],
+        types: set[str],
+    ) -> dict[str, list[dict[str, float]]]:
+        del hass, period, units, types
+        if statistic_ids == {"opower:utility_elec_consumption"}:
+            return {
+                "opower:utility_elec_consumption": [
+                    {
+                        "start": timestamp_ms(period_start),
+                        "end": timestamp_ms(period_end),
+                        "change": 50.0,
+                    }
+                ]
+            }
+        measured_statistic_ids.append(statistic_ids)
+        assert start_time == period_start
+        assert end_time == period_end
+        return {
+            "sensor.fridge_energy": [
+                {
+                    "start": timestamp_ms(period_start),
+                    "end": timestamp_ms(period_end),
+                    "change": 20.0,
+                }
+            ],
+            "sensor.hvac_energy": [
+                {
+                    "start": timestamp_ms(period_start),
+                    "end": timestamp_ms(period_end),
+                    "change": 32.0,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        fake_statistics_during_period,
+        raising=False,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_power": "1000",
+                "sensor.fridge_energy": "20",
+                "sensor.hvac_energy": "32",
+                "sensor.solar_energy": "100",
+            }
+            units = {
+                "sensor.mains_power": "W",
+                "sensor.fridge_energy": "kWh",
+                "sensor.hvac_energy": "kWh",
+                "sensor.solar_energy": "kWh",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_energy", "role": "energy"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_statistic_id": "opower:utility_elec_consumption",
+                    "utility_source_type": "statistics",
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert measured_statistic_ids == [{"sensor.fridge_energy", "sensor.hvac_energy"}]
+    assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
+        "tracking"
+    )
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+        "measured_energy_entities"
+    ] == ["sensor.fridge_energy", "sensor.hvac_energy"]
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+        "comparison_source"
+    ] == "circuit_energy_sum"
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+        "measured_source_type"
+    ] == "statistics"
+    assert (
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
+        == 2.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_handles_unavailable_recorder_statistics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+
+    def broken_statistics_during_period(*args, **kwargs):
+        raise RuntimeError("recorder is not available")
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        broken_statistics_during_period,
+        raising=False,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.mains_power"
+            return SimpleNamespace(
+                state="1000",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_statistic_id": "opower:utility_elec_consumption",
+                    "utility_source_type": "statistics",
+                    "measured_energy_entities": ["sensor.mains_import_energy"],
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
+        "missing_utility"
+    )
+    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+        "utility_source_type"
+    ] == "statistics"
 
 
 @pytest.mark.asyncio
@@ -4021,6 +4414,9 @@ async def test_runtime_persists_utility_comparison_settings() -> None:
     await coordinator.async_set_utility_comparison_settings(
         "mains",
         utility_energy_entity="sensor.opower_current_bill_usage",
+        utility_statistic_id="opower:utility_elec_consumption",
+        utility_source_type="auto",
+        utility_statistic_period="day",
         measured_energy_entities=["sensor.panel_import_energy"],
         tolerance_percent=8.5,
     )
@@ -4028,6 +4424,9 @@ async def test_runtime_persists_utility_comparison_settings() -> None:
     assert saved
     assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "opower:utility_elec_consumption",
+        "utility_source_type": "auto",
+        "utility_statistic_period": "day",
         "measured_energy_entities": ["sensor.panel_import_energy"],
         "tolerance_percent": 8.5,
     }

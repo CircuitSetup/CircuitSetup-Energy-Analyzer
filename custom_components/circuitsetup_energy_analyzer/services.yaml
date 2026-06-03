@@ -456,12 +456,41 @@ set_utility_comparison_settings:
         text:
     utility_energy_entity:
       name: Utility Energy Entity
-      description: Opower or utility kWh sensor representing the same period as measured data.
+      description: Utility kWh sensor representing the same period as measured data.
       required: false
       example: sensor.opower_current_bill_usage
       selector:
         entity:
           domain: sensor
+    utility_statistic_id:
+      name: Utility Statistic ID
+      description: Optional Opower or utility statistic ID from Developer Tools Statistics.
+      required: false
+      example: opower:utility_elec_consumption
+      selector:
+        text:
+    utility_source_type:
+      name: Utility Source Type
+      description: Choose entity for sensor state, statistics for Opower data, or auto.
+      required: false
+      example: auto
+      selector:
+        select:
+          options:
+            - auto
+            - entity
+            - statistics
+    utility_statistic_period:
+      name: Utility Statistic Period
+      description: Recorder statistic period to compare for Opower or utility statistics.
+      required: false
+      example: day
+      selector:
+        select:
+          options:
+            - hour
+            - day
+            - month
     measured_energy_entities:
       name: Measured Energy Entities
       description: Optional mains kWh sensors; leave empty to sum configured load circuit energy sensors.

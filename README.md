@@ -259,24 +259,33 @@ generation channels, battery export, or a solar/mains mapping problem.
 
 ## Utility And Opower Comparison
 
-For aggregate circuits, the analyzer can compare a utility-reported kWh sensor
-with a measured same-period kWh source. This is intended for sanity-check
-evidence, not normal energy history. Use Home Assistant's Energy Dashboard for
-standard long-term energy charts, tariffs, costs, and device energy rollups.
+For aggregate circuits, the analyzer can compare utility-reported kWh with a
+measured same-period kWh source. This is intended for sanity-check evidence,
+not normal energy history. Use Home Assistant's Energy Dashboard for standard
+long-term energy charts, tariffs, costs, and device energy rollups.
 
 Use the `set_utility_comparison_settings` service on a mains or aggregate
-circuit. Set `utility_energy_entity` to an Opower/current-bill/utility kWh
-sensor. If you also set `measured_energy_entities`, those mains kWh sensors are
-summed and compared with the utility value. If measured entities are left empty,
-the analyzer sums configured load-circuit energy sensors and excludes mains and
-generation circuits such as solar inverters.
+circuit. Set `utility_energy_entity` to a current-bill or utility kWh sensor,
+or set `utility_statistic_id` and `utility_source_type: statistics` to compare
+an Opower statistic from Developer Tools > Statistics. For Opower statistics,
+the default `utility_statistic_period` is `day`; use `month` if your utility
+only provides monthly data.
+
+If you also set `measured_energy_entities`, those mains kWh sensors are summed
+and compared with the utility value. When an Opower/statistics source is used,
+the measured sensors are read from recorder statistics over the same utility
+period. If measured entities are left empty, the analyzer sums configured
+load-circuit energy sensors and excludes mains and generation circuits such as
+solar inverters.
 
 The default tolerance is 10%. When the measured value repeatedly differs from
 the utility value by more than the configured tolerance, the analyzer sends a
 possible-issue notification with the utility kWh, measured kWh, difference,
 percent difference, source entities, and tolerance. Before acting on the alert,
-verify that the utility and measured sensors represent the same billing or
-current-bill period; utility integrations can update on a delay.
+verify that the utility and measured sensors represent the same period; utility
+integrations can update on a delay. The diagnostic evidence includes the utility
+source type, statistic ID when used, measured source type, comparison period,
+and utility data lag.
 
 ## Always On And Standby Tracking
 

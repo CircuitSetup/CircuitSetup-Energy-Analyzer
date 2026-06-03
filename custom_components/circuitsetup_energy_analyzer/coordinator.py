@@ -107,8 +107,11 @@ from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+    DEFAULT_UTILITY_STATISTIC_PERIOD,
     UtilityComparisonSettings,
     compare_utility_energy,
+    select_latest_statistics_energy,
+    select_statistics_energy_for_period,
 )
 from .ux import (
     alert_evidence_detail,
@@ -122,9 +125,13 @@ from .ux import (
 _LOGGER = logging.getLogger(__name__)
 
 try:
+    from homeassistant.components.recorder.statistics import (
+        statistics_during_period as _ha_statistics_during_period,
+    )
     from homeassistant.helpers.event import async_track_state_change_event
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 except ModuleNotFoundError:
+    _ha_statistics_during_period = None
     async_track_state_change_event = None
 
     class DataUpdateCoordinator:
@@ -552,7 +559,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._process_nilm_sample(config, sample, events)
         self._refresh_balance_state(samples)
         self._refresh_solar_flow_state(samples)
-        for utility_alert in self._observe_utility_comparisons(now):
+        for utility_alert in await self._observe_utility_comparisons(now):
             alerts.append(utility_alert)
             self.store_data.alerts.append(utility_alert)
             self._mark_store_dirty()
@@ -908,6 +915,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         utility_energy_entity: Any = None,
         measured_energy_entities: Any = None,
         tolerance_percent: Any = None,
+        utility_statistic_id: Any = None,
+        utility_source_type: Any = None,
+        utility_statistic_period: Any = None,
     ) -> None:
         """Persist utility-vs-measured kWh comparison settings."""
         current = self._utility_comparison_settings_for_circuit(circuit_id)
@@ -915,6 +925,21 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             current.utility_energy_entity
             if utility_energy_entity is None
             else str(utility_energy_entity).strip()
+        )
+        utility_statistic = (
+            current.utility_statistic_id
+            if utility_statistic_id is None
+            else str(utility_statistic_id).strip()
+        )
+        source_type = (
+            current.utility_source_type
+            if utility_source_type is None
+            else str(utility_source_type).strip()
+        )
+        statistic_period = (
+            current.utility_statistic_period
+            if utility_statistic_period is None
+            else str(utility_statistic_period).strip()
         )
         measured_entities = _entity_id_tuple_value(
             measured_energy_entities,
@@ -928,6 +953,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         }
         if utility_entity:
             settings["utility_energy_entity"] = utility_entity
+        if utility_statistic:
+            settings["utility_statistic_id"] = utility_statistic
+        if source_type:
+            settings["utility_source_type"] = source_type
+        if statistic_period:
+            settings["utility_statistic_period"] = statistic_period
         if measured_entities:
             settings["measured_energy_entities"] = list(measured_entities)
         self.store_data.utility_comparison_settings_by_circuit[circuit_id] = settings
@@ -1837,7 +1868,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 "status": result.status,
             }
 
-    def _observe_utility_comparisons(
+    async def _observe_utility_comparisons(
         self: Self,
         now: datetime,
     ) -> list[AlertEvidence]:
@@ -1846,34 +1877,87 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             config = self._config_for_circuit(circuit_id)
             if config is None:
                 continue
-            alert = self._observe_utility_comparison(config, now)
+            alert = await self._observe_utility_comparison(config, now)
             if alert is not None:
                 alerts.append(alert)
         return alerts
 
-    def _observe_utility_comparison(
+    async def _observe_utility_comparison(
         self: Self,
         config: CircuitConfig,
         now: datetime,
     ) -> AlertEvidence | None:
         settings = self._utility_comparison_settings_for_circuit(config.circuit_id)
-        utility_kwh = self._energy_kwh_for_entity(
-            settings.utility_energy_entity,
-            now,
+        utility_source_type = _utility_source_type_for_settings(settings)
+        utility_period_start: datetime | None = None
+        utility_period_end: datetime | None = None
+        utility_data_lag_hours: float | None = None
+        if utility_source_type == "statistics":
+            utility_reading = await self._statistics_kwh_for_id(
+                settings.utility_statistic_id,
+                now,
+                period=settings.utility_statistic_period,
+            )
+            utility_kwh = utility_reading.energy_kwh
+            utility_period_start = utility_reading.period_start
+            utility_period_end = utility_reading.period_end
+            utility_data_lag_hours = utility_reading.data_lag_hours
+        else:
+            utility_kwh = self._energy_kwh_for_entity(
+                settings.utility_energy_entity,
+                now,
+            )
+
+        utility_period_available = (
+            utility_period_start is not None and utility_period_end is not None
         )
         if settings.measured_energy_entities:
             comparison_source = "explicit_entities"
-            measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
-                settings.measured_energy_entities,
-                now,
-            )
+            if utility_source_type == "statistics" and not utility_period_available:
+                measured_kwh = None
+                measured_entity_ids = settings.measured_energy_entities
+                measured_source_type = "statistics"
+            elif utility_period_available:
+                measured_kwh, measured_entity_ids = (
+                    await self._statistics_kwh_sum_for_entities(
+                        settings.measured_energy_entities,
+                        now,
+                        period=settings.utility_statistic_period,
+                        start_time=utility_period_start,
+                        end_time=utility_period_end,
+                    )
+                )
+                measured_source_type = "statistics"
+            else:
+                measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
+                    settings.measured_energy_entities,
+                    now,
+                )
+                measured_source_type = "entity_state"
         else:
             comparison_source = "circuit_energy_sum"
             fallback_entities = self._load_energy_entity_ids_for_sum(config.circuit_id)
-            measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
-                fallback_entities,
-                now,
-            )
+            if utility_source_type == "statistics" and not utility_period_available:
+                measured_kwh = None
+                measured_entity_ids = fallback_entities
+                measured_source_type = "statistics"
+            elif utility_period_available:
+                measured_kwh, measured_entity_ids = (
+                    await self._statistics_kwh_sum_for_entities(
+                        fallback_entities,
+                        now,
+                        period=settings.utility_statistic_period,
+                        start_time=utility_period_start,
+                        end_time=utility_period_end,
+                    )
+                )
+                measured_source_type = "statistics"
+            else:
+                measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
+                    fallback_entities,
+                    now,
+                )
+                measured_source_type = "entity_state"
 
         result = compare_utility_energy(
             settings=settings,
@@ -1881,6 +1965,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             measured_kwh=measured_kwh,
             measured_entity_ids=measured_entity_ids,
             comparison_source=comparison_source,
+            utility_source_type=utility_source_type,
+            measured_source_type=measured_source_type,
+            period_start=_datetime_iso_or_none(utility_period_start),
+            period_end=_datetime_iso_or_none(utility_period_end),
+            utility_data_lag_hours=utility_data_lag_hours,
         )
         self._update_utility_comparison_state(config.circuit_id, result)
         if result.status != "mismatch":
@@ -1964,6 +2053,99 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         attributes = getattr(raw_state, "attributes", {}) or {}
         unit = attributes.get("unit_of_measurement")
         return _energy_value_kwh(value, unit)
+
+    async def _statistics_kwh_for_id(
+        self: Self,
+        statistic_id: str,
+        now: datetime,
+        *,
+        period: str,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> Any:
+        if not statistic_id:
+            return select_latest_statistics_energy("", {}, now)
+        statistics = await self._recorder_statistics_during_period(
+            statistic_ids={statistic_id},
+            start_time=start_time
+            or _statistics_lookback_start(now, _utility_statistic_period_value(period)),
+            end_time=end_time or now,
+            period=period,
+        )
+        return select_latest_statistics_energy(statistic_id, statistics, now)
+
+    async def _statistics_kwh_sum_for_entities(
+        self: Self,
+        entity_ids: Iterable[str],
+        now: datetime,
+        *,
+        period: str,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> tuple[float | None, tuple[str, ...]]:
+        ids = tuple(entity_id for entity_id in entity_ids if entity_id)
+        if not ids:
+            return None, ()
+        statistics = await self._recorder_statistics_during_period(
+            statistic_ids=set(ids),
+            start_time=start_time,
+            end_time=end_time,
+            period=period,
+        )
+        values: list[float] = []
+        valid_entity_ids: list[str] = []
+        for entity_id in ids:
+            reading = select_statistics_energy_for_period(
+                entity_id,
+                statistics,
+                now,
+                period_start=start_time,
+                period_end=end_time,
+            )
+            if reading.energy_kwh is None:
+                continue
+            values.append(reading.energy_kwh)
+            valid_entity_ids.append(entity_id)
+        if not values:
+            return None, ()
+        return round(sum(values), 3), tuple(valid_entity_ids)
+
+    async def _recorder_statistics_during_period(
+        self: Self,
+        *,
+        statistic_ids: set[str],
+        start_time: datetime,
+        end_time: datetime | None,
+        period: str,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if _ha_statistics_during_period is None or not statistic_ids:
+            return {}
+
+        normalized_period = _utility_statistic_period_value(period)
+
+        def _fetch() -> dict[str, list[dict[str, Any]]]:
+            return _ha_statistics_during_period(
+                self.hass,
+                start_time,
+                end_time,
+                statistic_ids,
+                normalized_period,
+                {"energy": "kWh"},
+                {"change", "sum", "state"},
+            )
+
+        add_executor_job = getattr(self.hass, "async_add_executor_job", None)
+        try:
+            if add_executor_job is None:
+                return _fetch()
+            return await add_executor_job(_fetch)
+        except Exception as err:  # noqa: BLE001 - recorder availability varies by setup.
+            _LOGGER.debug(
+                "Recorder statistics unavailable for %s: %s",
+                sorted(statistic_ids),
+                err,
+            )
+            return {}
 
     def _load_energy_entity_ids_for_sum(self: Self, circuit_id: str) -> tuple[str, ...]:
         entity_ids: list[str] = []
@@ -3259,6 +3441,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         return UtilityComparisonSettings(
             utility_energy_entity=str(overrides.get("utility_energy_entity") or ""),
+            utility_statistic_id=str(overrides.get("utility_statistic_id") or ""),
+            utility_source_type=str(overrides.get("utility_source_type") or "auto"),
+            utility_statistic_period=_utility_statistic_period_value(
+                overrides.get("utility_statistic_period")
+            ),
             measured_energy_entities=_entity_id_tuple_value(
                 overrides.get("measured_energy_entities"),
                 default=(),
@@ -3649,7 +3836,7 @@ def _utility_comparison_message(config: CircuitConfig, result: Any) -> str:
     return (
         f"Utility comparison mismatch: {config.name} measured "
         f"{_format_kwh(result.measured_kwh or 0.0)} kWh while "
-        f"{result.utility_energy_entity} reports "
+        f"{result.utility_source_id} reports "
         f"{_format_kwh(result.utility_kwh or 0.0)} kWh. Difference is "
         f"{_format_kwh(result.difference_kwh)} kWh "
         f"({_format_percent(result.absolute_difference_percent)}%), above the "
@@ -3663,8 +3850,16 @@ def _utility_comparison_evidence_payload(result: Any) -> dict[str, Any]:
     return {
         "status": result.status,
         "utility_energy_entity": result.utility_energy_entity,
+        "utility_statistic_id": result.utility_statistic_id,
+        "utility_source_id": result.utility_source_id,
+        "utility_source_type": result.utility_source_type,
+        "utility_statistic_period": result.utility_statistic_period,
         "measured_energy_entities": list(result.measured_entity_ids),
         "comparison_source": result.comparison_source,
+        "measured_source_type": result.measured_source_type,
+        "period_start": result.period_start,
+        "period_end": result.period_end,
+        "utility_data_lag_hours": result.utility_data_lag_hours,
         "utility_kwh": result.utility_kwh,
         "measured_kwh": result.measured_kwh,
         "difference_kwh": result.difference_kwh,
@@ -3688,6 +3883,38 @@ def _format_amps(value: float) -> str:
 
 def _format_w(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _datetime_iso_or_none(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _utility_source_type_for_settings(settings: UtilityComparisonSettings) -> str:
+    raw = str(settings.utility_source_type or "auto").strip().lower()
+    if raw == "statistic":
+        raw = "statistics"
+    if raw not in {"auto", "entity", "statistics"}:
+        raw = "auto"
+    if raw == "auto":
+        return "statistics" if settings.utility_statistic_id.strip() else "entity"
+    return raw
+
+
+def _utility_statistic_period_value(value: Any) -> str:
+    normalized = str(value or DEFAULT_UTILITY_STATISTIC_PERIOD).strip().lower()
+    if normalized not in {"hour", "day", "month"}:
+        return DEFAULT_UTILITY_STATISTIC_PERIOD
+    return normalized
+
+
+def _statistics_lookback_start(now: datetime, period: str) -> datetime:
+    if period == "hour":
+        return now - timedelta(days=7)
+    if period == "month":
+        return now - timedelta(days=400)
+    return now - timedelta(days=45)
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

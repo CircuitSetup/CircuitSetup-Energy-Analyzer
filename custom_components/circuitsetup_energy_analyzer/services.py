@@ -60,6 +60,9 @@ ATTR_WINDOW_HOURS = "window_hours"
 ATTR_STANDBY_THRESHOLD_W = "standby_threshold_w"
 ATTR_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 ATTR_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
+ATTR_UTILITY_STATISTIC_ID = "utility_statistic_id"
+ATTR_UTILITY_SOURCE_TYPE = "utility_source_type"
+ATTR_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
 ATTR_MEASURED_ENERGY_ENTITIES = "measured_energy_entities"
 ATTR_TOLERANCE_PERCENT = "tolerance_percent"
 ATTR_NOTE = "note"
@@ -148,6 +151,9 @@ UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(
         ATTR_UTILITY_ENERGY_ENTITY,
+        ATTR_UTILITY_STATISTIC_ID,
+        ATTR_UTILITY_SOURCE_TYPE,
+        ATTR_UTILITY_STATISTIC_PERIOD,
         ATTR_MEASURED_ENERGY_ENTITIES,
         ATTR_TOLERANCE_PERCENT,
     ),
@@ -392,6 +398,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 data.get(ATTR_UTILITY_ENERGY_ENTITY),
                 data.get(ATTR_MEASURED_ENERGY_ENTITIES),
                 data.get(ATTR_TOLERANCE_PERCENT),
+                data.get(ATTR_UTILITY_STATISTIC_ID),
+                data.get(ATTR_UTILITY_SOURCE_TYPE),
+                data.get(ATTR_UTILITY_STATISTIC_PERIOD),
             )
         elif service == SERVICE_START_MAINTENANCE:
             await _call_if_present(

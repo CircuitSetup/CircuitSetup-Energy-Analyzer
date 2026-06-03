@@ -196,12 +196,18 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         {
             "circuit_id": "mains",
             "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_statistic_id": "opower:utility_elec_consumption",
+            "utility_source_type": "auto",
+            "utility_statistic_period": "day",
             "measured_energy_entities": ["sensor.panel_import_energy"],
             "tolerance_percent": 8.5,
         }
     ) == {
         "circuit_id": "mains",
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "opower:utility_elec_consumption",
+        "utility_source_type": "auto",
+        "utility_statistic_period": "day",
         "measured_energy_entities": ["sensor.panel_import_energy"],
         "tolerance_percent": 8.5,
     }
@@ -443,6 +449,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             utility_energy_entity: object = None,
             measured_energy_entities: object = None,
             tolerance_percent: object = None,
+            utility_statistic_id: object = None,
+            utility_source_type: object = None,
+            utility_statistic_period: object = None,
         ) -> None:
             self.calls.append(
                 (
@@ -452,6 +461,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                         utility_energy_entity,
                         measured_energy_entities,
                         tolerance_percent,
+                        utility_statistic_id,
+                        utility_source_type,
+                        utility_statistic_period,
                     ),
                 )
             )
@@ -603,6 +615,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             data={
                 "circuit_id": "mains",
                 "utility_energy_entity": "sensor.opower_current_bill_usage",
+                "utility_statistic_id": "opower:utility_elec_consumption",
+                "utility_source_type": "auto",
+                "utility_statistic_period": "day",
                 "measured_energy_entities": ["sensor.panel_import_energy"],
                 "tolerance_percent": 8.5,
             }
@@ -663,6 +678,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 "sensor.opower_current_bill_usage",
                 ["sensor.panel_import_energy"],
                 8.5,
+                "opower:utility_elec_consumption",
+                "auto",
+                "day",
             ),
         ),
         ("async_export_history_csv", ("fridge",)),

@@ -1,7 +1,7 @@
 {
   "domain": "circuitsetup_energy_analyzer",
   "name": "CircuitSetup Energy Analyzer",
-  "after_dependencies": ["esphome", "sensor"],
+  "after_dependencies": ["esphome", "recorder", "sensor"],
   "codeowners": ["@CircuitSetup"],
   "config_flow": true,
   "documentation": "https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer",
