@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DOMAIN,
 )
+from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .events import CircuitEventDetector
 from .models import (
     AlertEvidence,
@@ -131,6 +132,12 @@ class AnalyzerState:
     energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    demand_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
 
 
 def process_events_into_state(
@@ -219,6 +226,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -301,6 +309,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(usage_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(usage_alert)
+
+            demand_alert = self._observe_demand(config, sample, now)
+            if demand_alert is not None:
+                alerts.append(demand_alert)
+                self.store_data.alerts.append(demand_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(demand_alert)
 
         for config, sample in samples:
             self._process_nilm_sample(config, sample, events)
@@ -420,6 +435,34 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
+    async def async_set_demand_settings(
+        self: Self,
+        circuit_id: str,
+        window_minutes: Any = None,
+        demand_limit_w: Any = None,
+    ) -> None:
+        """Persist rolling demand settings for one circuit."""
+        config = self._config_for_circuit(circuit_id)
+        current = self._demand_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "window_minutes": _positive_int_value(
+                window_minutes,
+                default=current.window_minutes,
+            ),
+        }
+        limit_w = _optional_positive_float_value(
+            demand_limit_w,
+            default=current.demand_limit_w,
+        )
+        if limit_w is not None:
+            settings["demand_limit_w"] = limit_w
+        self.store_data.demand_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
     async def async_start_maintenance(
         self: Self,
         circuit_id: str,
@@ -526,6 +569,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 0.0,
             ),
             "energy_usage_evidence": self.state.energy_usage_evidence_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+            "current_demand_w": self.state.current_demand_w_by_circuit.get(
+                circuit_id,
+                0.0,
+            ),
+            "peak_demand_w": self.state.peak_demand_w_by_circuit.get(circuit_id, 0.0),
+            "demand_limit_usage_percent": (
+                self.state.demand_limit_usage_by_circuit.get(circuit_id, 0.0)
+            ),
+            "demand_evidence": self.state.demand_evidence_by_circuit.get(
                 circuit_id,
                 {},
             ),
@@ -1065,6 +1120,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._usage_alert_policies[key] = policy
         return policy
 
+    def _demand_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._demand_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._demand_alert_policies[key] = policy
+        return policy
+
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
         alert = self._alert_for_id(alert_id)
         if alert is None:
@@ -1128,6 +1202,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if len(retained_events) != len(self.store_data.events):
             self.store_data.events = retained_events
         self._prune_energy_usage(now)
+        self._prune_demand(now)
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -1145,6 +1220,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for day in days
                 if isinstance(day, dict) and str(day.get("date", "")) >= cutoff
             ]
+
+    def _prune_demand(self: Self, now: datetime) -> None:
+        for circuit_id, history in self.store_data.demand_by_circuit.items():
+            retention_mode = self._retention_mode_for_circuit(circuit_id)
+            cutoff = (now.date() - RETENTION_WINDOWS[retention_mode]).isoformat()
+            daily_peaks = history.get("daily_peaks", [])
+            if isinstance(daily_peaks, list):
+                history["daily_peaks"] = [
+                    peak
+                    for peak in daily_peaks
+                    if isinstance(peak, dict)
+                    and str(peak.get("date", "")) >= cutoff
+                ]
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
@@ -1311,6 +1399,63 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+    def _observe_demand(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        power_w = _demand_power_w(sample)
+        settings = self._demand_settings_for_config(config, config.circuit_id)
+        result = record_demand_sample(
+            self.store_data.demand_by_circuit.setdefault(config.circuit_id, {}),
+            circuit_id=config.circuit_id,
+            timestamp=now,
+            real_power_w=power_w,
+            settings=settings,
+            retention_days=RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(config.circuit_id)
+            ].days,
+        )
+        if result is None:
+            return None
+
+        self.state.current_demand_w_by_circuit[config.circuit_id] = (
+            result.current_demand_w
+        )
+        self.state.peak_demand_w_by_circuit[config.circuit_id] = result.peak_demand_w
+        self.state.demand_limit_usage_by_circuit[config.circuit_id] = (
+            result.demand_limit_usage
+        )
+        self.state.demand_evidence_by_circuit[config.circuit_id] = (
+            _demand_evidence_payload(result)
+        )
+
+        if result.limit_exceeded is None:
+            return None
+
+        self._mark_store_dirty()
+        evidence = result.limit_exceeded
+        policy = self._demand_alert_policy_for_circuit(config.circuit_id)
+        score = (
+            evidence.current_demand_w / evidence.demand_limit_w
+            if evidence.demand_limit_w > 0.0
+            else 0.0
+        )
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature="demand_limit",
+                score=score,
+                baseline_confidence=1.0,
+                observed_at=now,
+                observed_value=evidence.current_demand_w,
+                baseline_value=evidence.demand_limit_w,
+                message=_demand_limit_message(config, evidence),
+                features=evidence.features,
+            )
+        )
+
     def _energy_usage_settings_for_config(
         self: Self,
         config: CircuitConfig | None,
@@ -1334,6 +1479,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             daily_spike_ratio=_positive_float_value(
                 overrides.get("daily_spike_ratio"),
                 default=default_spike_ratio,
+            ),
+        )
+
+    def _demand_settings_for_config(
+        self: Self,
+        config: CircuitConfig | None,
+        circuit_id: str,
+    ) -> DemandSettings:
+        overrides = self.store_data.demand_settings_by_circuit.get(circuit_id, {})
+        default_window_minutes = (
+            config.demand_window_minutes if config is not None else 15
+        )
+        default_limit_w = config.demand_limit_w if config is not None else None
+        return DemandSettings(
+            window_minutes=_positive_int_value(
+                overrides.get("window_minutes"),
+                default=default_window_minutes,
+            ),
+            demand_limit_w=_optional_positive_float_value(
+                overrides.get("demand_limit_w"),
+                default=default_limit_w,
             ),
         )
 
@@ -1482,8 +1648,40 @@ def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
     }
 
 
+def _demand_limit_message(
+    config: CircuitConfig,
+    evidence: DemandLimitEvidence,
+) -> str:
+    return (
+        f"Possible issue: {config.name} demand averaged "
+        f"{_format_w(evidence.current_demand_w)} W over "
+        f"{evidence.window_minutes} minutes, above the configured "
+        f"{_format_w(evidence.demand_limit_w)} W limit."
+    )
+
+
+def _demand_evidence_payload(result: Any) -> dict[str, Any]:
+    return {
+        "date": result.date,
+        "current_demand_w": result.current_demand_w,
+        "peak_demand_w": result.peak_demand_w,
+        "demand_window_minutes": result.window_minutes,
+        "demand_limit_w": result.demand_limit_w,
+        "demand_limit_usage_percent": result.demand_limit_usage,
+        "status": (
+            "over_limit"
+            if result.limit_exceeded is not None
+            else ("tracking" if result.demand_limit_w is not None else "unconfigured")
+        ),
+    }
+
+
 def _format_kwh(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _format_w(value: float) -> str:
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def _alert_feature(alert: AlertEvidence) -> str:
@@ -1537,6 +1735,18 @@ def _average_sample_values(
     if not values:
         return None
     return float(sum(values) / len(values))
+
+
+def _demand_power_w(sample: Any) -> float | None:
+    power = getattr(sample, "real_power", None)
+    if power is None:
+        return None
+    power_flow = getattr(sample, "power_flow", PowerFlowMode.LOAD)
+    if power_flow is PowerFlowMode.GENERATION:
+        return None
+    if power_flow is PowerFlowMode.MAINS_NET:
+        return max(float(power), 0.0)
+    return max(float(power), 0.0)
 
 
 def _power_flow_direction(
@@ -1735,6 +1945,17 @@ def _circuit_config_from_raw(
             "usage_spike_ratio",
             default=0.25,
         ),
+        demand_window_minutes=_positive_int_from_raw(
+            raw_circuit,
+            "demand_window_minutes",
+            "demand_window",
+            default=15,
+        ),
+        demand_limit_w=_optional_positive_float_from_raw(
+            raw_circuit,
+            "demand_limit_w",
+            "demand_limit",
+        ),
     )
 
 
@@ -1817,7 +2038,32 @@ def _positive_float_from_raw(
     return default
 
 
+def _optional_positive_float_from_raw(
+    raw: dict[str, Any],
+    *keys: str,
+) -> float | None:
+    for key in keys:
+        if key not in raw:
+            continue
+        value = _optional_positive_float_value(raw[key], default=None)
+        if value is not None:
+            return value
+    return None
+
+
 def _positive_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0.0 else default
+
+
+def _optional_positive_float_value(
+    value: Any,
+    *,
+    default: float | None,
+) -> float | None:
     try:
         parsed = float(value)
     except (TypeError, ValueError):

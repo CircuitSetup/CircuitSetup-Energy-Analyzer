@@ -49,6 +49,17 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     energy_usage_settings_by_circuit = {
         "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
     }
+    demand_settings_by_circuit = {
+        "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
+    }
+    demand_by_circuit = {
+        "hvac": {
+            "samples": [
+                {"timestamp": now.isoformat(), "real_power_w": 3200.0},
+            ],
+            "daily_peaks": [{"date": "2026-06-02", "peak_demand_w": 3200.0}],
+        }
+    }
     energy_usage_by_circuit = {
         "fridge": {
             "last_energy_kwh": 112.5,
@@ -66,6 +77,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         alert_feedback=alert_feedback,
         energy_usage_settings_by_circuit=energy_usage_settings_by_circuit,
         energy_usage_by_circuit=energy_usage_by_circuit,
+        demand_settings_by_circuit=demand_settings_by_circuit,
+        demand_by_circuit=demand_by_circuit,
     )
 
     pruned = prune_events(data, RetentionMode.LIGHTWEIGHT, now)
@@ -82,6 +95,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         is data.energy_usage_settings_by_circuit
     )
     assert pruned.energy_usage_by_circuit is data.energy_usage_by_circuit
+    assert pruned.demand_settings_by_circuit is data.demand_settings_by_circuit
+    assert pruned.demand_by_circuit is data.demand_by_circuit
     assert data.events == [old, recent]
 
 
@@ -185,6 +200,15 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         energy_usage_settings_by_circuit={
             "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
         },
+        demand_settings_by_circuit={
+            "hvac": {"window_minutes": 15, "demand_limit_w": 4500.0}
+        },
+        demand_by_circuit={
+            "hvac": {
+                "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
+                "daily_peaks": [{"date": "2026-06-02", "peak_demand_w": 3200.0}],
+            }
+        },
         nilm_signatures={
             "mains": [
                 {
@@ -213,6 +237,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "window_days": 14,
         "daily_spike_ratio": 0.2,
     }
+    assert restored.demand_settings_by_circuit["hvac"] == {
+        "window_minutes": 15,
+        "demand_limit_w": 4500.0,
+    }
+    assert restored.demand_by_circuit["hvac"]["daily_peaks"] == [
+        {"date": "2026-06-02", "peak_demand_w": 3200.0}
+    ]
     assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [
         {"date": "2026-06-02", "usage_kwh": 8.5}

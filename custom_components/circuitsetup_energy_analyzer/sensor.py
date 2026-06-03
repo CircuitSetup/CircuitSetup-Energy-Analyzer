@@ -13,7 +13,7 @@ from .entity import (
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
-    from homeassistant.const import PERCENTAGE, UnitOfEnergy
+    from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfPower
 except ModuleNotFoundError:
     PERCENTAGE = "%"
 
@@ -21,6 +21,11 @@ except ModuleNotFoundError:
         """Fallback energy unit constants."""
 
         KILO_WATT_HOUR = "kWh"
+
+    class UnitOfPower:
+        """Fallback power unit constants."""
+
+        WATT = "W"
 
     class SensorEntity:
         """Fallback sensor base for tests without Home Assistant."""
@@ -216,6 +221,33 @@ def energy_usage_status_value(state: Any, circuit_id: str) -> str:
     return "learning"
 
 
+def current_demand_value(state: Any, circuit_id: str) -> float:
+    """Return the current rolling demand average in watts."""
+    return float(
+        getattr(state, "current_demand_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def peak_demand_value(state: Any, circuit_id: str) -> float:
+    """Return the highest rolling demand observed today."""
+    return float(getattr(state, "peak_demand_w_by_circuit", {}).get(circuit_id, 0.0))
+
+
+def demand_limit_usage_value(state: Any, circuit_id: str) -> float:
+    """Return current demand as a percent of the configured demand limit."""
+    return float(
+        getattr(state, "demand_limit_usage_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def demand_status_value(state: Any, circuit_id: str) -> str:
+    """Return the rolling demand tracker status."""
+    evidence = getattr(state, "demand_evidence_by_circuit", {}).get(circuit_id, {})
+    if isinstance(evidence, Mapping):
+        return str(evidence.get("status") or "unconfigured")
+    return "unconfigured"
+
+
 def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
@@ -360,6 +392,36 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Energy Usage Status",
         value_fn=energy_usage_status_value,
         attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="current_demand",
+        name_suffix="Current Demand",
+        value_fn=current_demand_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="peak_demand",
+        name_suffix="Peak Demand",
+        value_fn=peak_demand_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="demand_limit_usage",
+        name_suffix="Demand Limit Usage",
+        value_fn=demand_limit_usage_value,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="demand_status",
+        name_suffix="Demand Status",
+        value_fn=demand_status_value,
+        attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
     ),
 )
 

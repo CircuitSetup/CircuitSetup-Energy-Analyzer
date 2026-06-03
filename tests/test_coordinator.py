@@ -2253,6 +2253,134 @@ async def test_runtime_persists_energy_usage_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 15, tzinfo=UTC)
+    holder = {"time": now, "power": 2600.0}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.ev_power"
+            return SimpleNamespace(
+                state=str(holder["power"]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ev",
+                    "name": "EV Charger",
+                    "mode": "single_phase",
+                    "appliance_profile": "ev_charger",
+                    "demand_limit_w": 2000.0,
+                    "sensors": [
+                        {"entity_id": "sensor.ev_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            demand_by_circuit={
+                "ev": {
+                    "samples": [
+                        {
+                            "timestamp": "2026-06-03T12:00:00+00:00",
+                            "real_power_w": 2200.0,
+                        },
+                        {
+                            "timestamp": "2026-06-03T12:05:00+00:00",
+                            "real_power_w": 2400.0,
+                        },
+                        {
+                            "timestamp": "2026-06-03T12:10:00+00:00",
+                            "real_power_w": 2600.0,
+                        },
+                    ],
+                    "daily_peaks": [],
+                }
+            }
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "demand_limit"
+    assert "EV Charger demand averaged 2516.7 W" in alert.message
+    assert "configured 2000 W limit" in alert.message
+    assert alert.observed_value == 2516.7
+    assert alert.baseline_value == 2000.0
+    assert coordinator.state.current_demand_w_by_circuit["ev"] == 2516.7
+    assert coordinator.state.peak_demand_w_by_circuit["ev"] == 2516.7
+    assert coordinator.state.demand_limit_usage_by_circuit["ev"] == 125.8
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_demand_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        store=FakeStore(),
+    )
+
+    await coordinator.async_set_demand_settings(
+        "hvac",
+        window_minutes=30,
+        demand_limit_w=4500.0,
+    )
+
+    assert saved
+    assert coordinator.store_data.demand_settings_by_circuit["hvac"] == {
+        "window_minutes": 30,
+        "demand_limit_w": 4500.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
     monkeypatch,
 ) -> None:

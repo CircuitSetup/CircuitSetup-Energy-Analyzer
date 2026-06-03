@@ -91,6 +91,18 @@
       },
       "energy_usage_status": {
         "name": "Energy usage status"
+      },
+      "current_demand": {
+        "name": "Current demand"
+      },
+      "peak_demand": {
+        "name": "Peak demand"
+      },
+      "demand_limit_usage": {
+        "name": "Demand limit usage"
+      },
+      "demand_status": {
+        "name": "Demand status"
       }
     },
     "binary_sensor": {

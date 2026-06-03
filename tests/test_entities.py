@@ -25,8 +25,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         alert_evidence_value,
         anomaly_score_value,
         apparent_power_drift_value,
+        current_demand_value,
         daily_energy_usage_value,
         data_quality_checklist_value,
+        demand_limit_usage_value,
+        demand_status_value,
         energy_usage_share_value,
         energy_usage_status_value,
         health_summary_value,
@@ -34,6 +37,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         learning_progress_value,
         nilm_signature_count_value,
         nilm_unmatched_load_percentage_value,
+        peak_demand_value,
         power_factor_drift_value,
         power_quality_evidence_value,
         power_quality_score_value,
@@ -98,6 +102,12 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         energy_usage_evidence_by_circuit={
             "fridge": {"status": "over_threshold", "threshold_kwh": 12.5}
         },
+        current_demand_w_by_circuit={"fridge": 2400.0},
+        peak_demand_w_by_circuit={"fridge": 3200.0},
+        demand_limit_usage_by_circuit={"fridge": 80.0},
+        demand_evidence_by_circuit={
+            "fridge": {"status": "tracking", "demand_limit_w": 4000.0}
+        },
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
@@ -123,6 +133,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert daily_energy_usage_value(state, "fridge") == 12.9
     assert energy_usage_share_value(state, "fridge") == 25.8
     assert energy_usage_status_value(state, "fridge") == "over_threshold"
+    assert current_demand_value(state, "fridge") == 2400.0
+    assert peak_demand_value(state, "fridge") == 3200.0
+    assert demand_limit_usage_value(state, "fridge") == 80.0
+    assert demand_status_value(state, "fridge") == "tracking"
 
     assert anomaly_score_value(state, "unknown") == 0.0
     assert last_event_value(state, "unknown") is None
@@ -142,6 +156,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert daily_energy_usage_value(state, "unknown") == 0.0
     assert energy_usage_share_value(state, "unknown") == 0.0
     assert energy_usage_status_value(state, "unknown") == "learning"
+    assert current_demand_value(state, "unknown") == 0.0
+    assert peak_demand_value(state, "unknown") == 0.0
+    assert demand_limit_usage_value(state, "unknown") == 0.0
+    assert demand_status_value(state, "unknown") == "unconfigured"
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -190,6 +208,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "daily_usage_kwh": 8.2,
         "baseline_total_kwh": 50.0,
     }
+    demand_evidence = {
+        "status": "over_limit",
+        "current_demand_w": 2400.0,
+        "demand_limit_w": 2000.0,
+    }
     state = AnalyzerState(
         readiness_by_circuit={"fridge": readiness},
         learning_progress_by_circuit={"fridge": progress},
@@ -197,6 +220,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         alert_evidence_by_circuit={"fridge": evidence},
         sensitivity_by_circuit={"fridge": "quiet"},
         energy_usage_evidence_by_circuit={"fridge": energy_evidence},
+        demand_evidence_by_circuit={"fridge": demand_evidence},
     )
     coordinator = SimpleNamespace(data=state)
     circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
@@ -250,6 +274,30 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["energy_usage_status"],
     ).extra_state_attributes == energy_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["current_demand"],
+    ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["peak_demand"],
+    ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["demand_limit_usage"],
+    ).extra_state_attributes == demand_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["demand_status"],
+    ).extra_state_attributes == demand_evidence
 
 
 @pytest.mark.asyncio
@@ -288,6 +336,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Daily Energy Usage",
         "Kitchen Fridge Energy Usage Share",
         "Kitchen Fridge Energy Usage Status",
+        "Kitchen Fridge Current Demand",
+        "Kitchen Fridge Peak Demand",
+        "Kitchen Fridge Demand Limit Usage",
+        "Kitchen Fridge Demand Status",
     ]
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_fridge_anomaly_score",
@@ -308,6 +360,10 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_daily_energy_usage",
         "entry-1_fridge_energy_usage_share",
         "entry-1_fridge_energy_usage_status",
+        "entry-1_fridge_current_demand",
+        "entry-1_fridge_peak_demand",
+        "entry-1_fridge_demand_limit_usage",
+        "entry-1_fridge_demand_status",
     ]
     assert added_entities[0].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
@@ -334,6 +390,10 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.circuit_id for entity in added_entities] == [
+        "mains",
+        "mains",
+        "mains",
+        "mains",
         "mains",
         "mains",
         "mains",

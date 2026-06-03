@@ -58,6 +58,10 @@ sections:
           - entity: sensor.hvac_anomaly_score
           - entity: sensor.hvac_last_event
           - entity: sensor.hvac_alert_evidence
+          - entity: sensor.hvac_current_demand
+          - entity: sensor.hvac_peak_demand
+          - entity: sensor.hvac_demand_limit_usage
+          - entity: sensor.hvac_demand_status
       - type: entities
         title: Mains
         entities:
@@ -99,6 +103,22 @@ sections:
           - entity: sensor.hvac_reactive_power_drift
           - entity: sensor.hvac_apparent_power_drift
           - entity: sensor.hvac_power_factor_drift
+  - type: grid
+    title: Energy usage and demand
+    cards:
+      - type: entities
+        title: Refrigerator energy usage
+        entities:
+          - entity: sensor.refrigerator_daily_energy_usage
+          - entity: sensor.refrigerator_energy_usage_share
+          - entity: sensor.refrigerator_energy_usage_status
+      - type: entities
+        title: HVAC demand
+        entities:
+          - entity: sensor.hvac_current_demand
+          - entity: sensor.hvac_peak_demand
+          - entity: sensor.hvac_demand_limit_usage
+          - entity: sensor.hvac_demand_status
   - type: grid
     title: Experimental NILM review
     cards:

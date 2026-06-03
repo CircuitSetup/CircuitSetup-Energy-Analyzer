@@ -150,6 +150,37 @@ set_energy_usage_settings:
           max: 1
           step: 0.01
           mode: box
+set_demand_settings:
+  name: Set demand settings
+  description: Set rolling demand tracking for one configured circuit.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured circuit identifier, such as fridge or mains.
+      required: true
+      example: hvac
+      selector:
+        text:
+    window_minutes:
+      name: Window Minutes
+      description: Rolling demand averaging window in minutes for the circuit.
+      required: false
+      example: 15
+      selector:
+        number:
+          min: 1
+          max: 120
+          mode: box
+    demand_limit_w:
+      name: Demand Limit W
+      description: Optional rolling demand limit in watts for notifications.
+      required: false
+      example: 4500
+      selector:
+        number:
+          min: 1
+          max: 100000
+          mode: box
 start_maintenance:
   name: Start maintenance
   description: Pause appliance alert notifications while a circuit is being serviced.

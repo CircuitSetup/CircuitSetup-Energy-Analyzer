@@ -52,6 +52,18 @@ total, the threshold, and the percentage of the learned window used today.
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
 
+## Peak Demand Tracking
+
+The analyzer also tracks rolling power demand for each circuit with real-power
+data. The default demand window is 15 minutes, matching a common utility and
+energy-monitoring view for peak demand. Diagnostic entities show current rolling
+demand and today's peak demand even when no alert limit is configured.
+
+Use the `set_demand_settings` service to set a per-circuit demand window and an
+optional demand limit in watts. When a limit is configured, the analyzer sends a
+possible issue notification only after repeated rolling-demand observations stay
+above that limit.
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
@@ -81,5 +93,9 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_daily_energy_usage`
 - `sensor.<circuit>_energy_usage_share`
 - `sensor.<circuit>_energy_usage_status`
+- `sensor.<circuit>_current_demand`
+- `sensor.<circuit>_peak_demand`
+- `sensor.<circuit>_demand_limit_usage`
+- `sensor.<circuit>_demand_status`
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator, HVAC, and Mains NILM cards.

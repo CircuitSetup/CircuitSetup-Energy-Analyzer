@@ -109,6 +109,8 @@ class CircuitConfig:
     power_flow: PowerFlowMode = PowerFlowMode.LOAD
     energy_usage_window_days: int = 7
     daily_energy_spike_ratio: float = 0.25
+    demand_window_minutes: int = 15
+    demand_limit_w: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
