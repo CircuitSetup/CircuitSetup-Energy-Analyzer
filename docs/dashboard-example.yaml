@@ -51,12 +51,20 @@ sections:
         entities:
           - entity: sensor.refrigerator_anomaly_score
           - entity: sensor.refrigerator_last_event
+          - entity: sensor.refrigerator_run_cycle_count
+          - entity: sensor.refrigerator_run_cycle_runtime
+          - entity: sensor.refrigerator_run_cycle_duty_cycle
+          - entity: sensor.refrigerator_run_cycle_status
           - entity: sensor.refrigerator_alert_evidence
       - type: entities
         title: HVAC
         entities:
           - entity: sensor.hvac_anomaly_score
           - entity: sensor.hvac_last_event
+          - entity: sensor.hvac_run_cycle_count
+          - entity: sensor.hvac_run_cycle_runtime
+          - entity: sensor.hvac_run_cycle_duty_cycle
+          - entity: sensor.hvac_run_cycle_status
           - entity: sensor.hvac_alert_evidence
           - entity: sensor.hvac_current_demand
           - entity: sensor.hvac_peak_demand

@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import datetime, time
+from dataclasses import dataclass, field
+from datetime import date, datetime, time
+from types import MappingProxyType
 from typing import Any
 
-from .models import CircuitEvent, EventType
+from .baseline import score_deviation
+from .models import (
+    ApplianceProfile,
+    BaselineStats,
+    CircuitConfig,
+    CircuitEvent,
+    CircuitMode,
+    EventType,
+)
+
+RUN_CYCLE_DURATION_FEATURE = "run_cycle_duration_s"
+RUN_CYCLE_DUTY_CYCLE_FEATURE = "run_cycle_daily_duty_cycle_percent"
+RUN_CYCLE_START_COUNT_FEATURE = "run_cycle_daily_start_count"
+MIN_CYCLE_BASELINE_CONFIDENCE = 0.6
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +39,22 @@ class CircuitCycleSummary:
     first_start: datetime | None = None
     last_start: datetime | None = None
     last_stop: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CycleAnomalyEvidence:
+    """Selected run-cycle behavior evidence for one circuit."""
+
+    feature: str
+    message: str
+    observed_value: float
+    baseline_value: float
+    score: float
+    baseline_confidence: float
+    features: dict[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
 
 
 def summarize_circuit_cycles(
@@ -124,6 +154,84 @@ def summarize_circuit_cycles(
     )
 
 
+def cycle_baseline_feature_values(
+    events: Iterable[CircuitEvent],
+    *,
+    circuit_id: str,
+    now: datetime,
+) -> dict[str, list[float]]:
+    """Return prior cycle-feature samples suitable for robust baselines."""
+    day_start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+    circuit_events = _circuit_cycle_events(events, circuit_id)
+    prior_dates = sorted(
+        {
+            event.timestamp.date()
+            for event in circuit_events
+            if event.timestamp.date() < now.date()
+        }
+    )
+    daily_summaries = [
+        summarize_circuit_cycles(
+            circuit_events,
+            circuit_id=circuit_id,
+            now=_end_of_day(day, now),
+        )
+        for day in prior_dates
+    ]
+    active_daily_summaries = [
+        summary
+        for summary in daily_summaries
+        if summary.start_count > 0 or summary.completed_cycle_count > 0
+    ]
+    return {
+        RUN_CYCLE_DURATION_FEATURE: _completed_cycle_durations(
+            circuit_events,
+            before=day_start,
+        ),
+        RUN_CYCLE_DUTY_CYCLE_FEATURE: [
+            summary.duty_cycle_percent for summary in active_daily_summaries
+        ],
+        RUN_CYCLE_START_COUNT_FEATURE: [
+            float(summary.start_count) for summary in active_daily_summaries
+        ],
+    }
+
+
+def select_cycle_anomaly_evidence(
+    config: CircuitConfig,
+    summary: CircuitCycleSummary,
+    baselines: dict[str, BaselineStats],
+    *,
+    min_score: float = 1.5,
+) -> CycleAnomalyEvidence | None:
+    """Select conservative appliance run-cycle anomaly evidence."""
+    if (
+        config.mode in {CircuitMode.MIXED, CircuitMode.MAINS_NILM}
+        or config.appliance_profile
+        in {
+            ApplianceProfile.MIXED,
+            ApplianceProfile.MAINS_NILM,
+            ApplianceProfile.SOLAR_INVERTER,
+        }
+    ):
+        return None
+
+    candidates = [
+        candidate
+        for candidate in (
+            _active_cycle_duration_evidence(config, summary, baselines),
+            _daily_duty_cycle_evidence(config, summary, baselines),
+            _daily_start_count_evidence(config, summary, baselines),
+        )
+        if candidate is not None
+        and candidate.score >= min_score
+        and candidate.baseline_confidence >= MIN_CYCLE_BASELINE_CONFIDENCE
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate.score)
+
+
 def cycle_summary_payload(summary: CircuitCycleSummary) -> dict[str, Any]:
     """Return JSON-safe diagnostic evidence for cycle summary sensors."""
     return {
@@ -146,6 +254,156 @@ def cycle_summary_payload(summary: CircuitCycleSummary) -> dict[str, Any]:
 
 def _isoformat_or_none(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _active_cycle_duration_evidence(
+    config: CircuitConfig,
+    summary: CircuitCycleSummary,
+    baselines: dict[str, BaselineStats],
+) -> CycleAnomalyEvidence | None:
+    baseline = baselines.get(RUN_CYCLE_DURATION_FEATURE)
+    observed = summary.active_cycle_seconds
+    if baseline is None or observed <= baseline.median or observed <= 0.0:
+        return None
+    score = score_deviation(observed, baseline)
+    return CycleAnomalyEvidence(
+        feature=RUN_CYCLE_DURATION_FEATURE,
+        message=(
+            f"Possible issue: {config.name} has been running for "
+            f"{_format_seconds(observed)}, above its learned "
+            f"{_format_seconds(baseline.median)} cycle-duration baseline. "
+            "Evidence is retained start/stop timing only, not a diagnosis."
+        ),
+        observed_value=observed,
+        baseline_value=baseline.median,
+        score=score,
+        baseline_confidence=baseline.confidence,
+        features={
+            "active_cycle_seconds": observed,
+            "baseline_cycle_seconds": baseline.median,
+            "baseline_p90_cycle_seconds": baseline.p90,
+            "baseline_sample_count": float(baseline.sample_count),
+            "baseline_confidence": baseline.confidence,
+            "score": score,
+        },
+    )
+
+
+def _daily_duty_cycle_evidence(
+    config: CircuitConfig,
+    summary: CircuitCycleSummary,
+    baselines: dict[str, BaselineStats],
+) -> CycleAnomalyEvidence | None:
+    baseline = baselines.get(RUN_CYCLE_DUTY_CYCLE_FEATURE)
+    observed = summary.duty_cycle_percent
+    if baseline is None or observed <= baseline.median or observed <= 0.0:
+        return None
+    score = score_deviation(observed, baseline)
+    return CycleAnomalyEvidence(
+        feature=RUN_CYCLE_DUTY_CYCLE_FEATURE,
+        message=(
+            f"Possible issue: {config.name} has run for {observed}% of today, "
+            f"above its learned {baseline.median}% daily duty-cycle baseline. "
+            "Evidence is retained start/stop timing only, not a diagnosis."
+        ),
+        observed_value=observed,
+        baseline_value=baseline.median,
+        score=score,
+        baseline_confidence=baseline.confidence,
+        features={
+            "duty_cycle_percent": observed,
+            "baseline_duty_cycle_percent": baseline.median,
+            "baseline_p90_duty_cycle_percent": baseline.p90,
+            "baseline_sample_count": float(baseline.sample_count),
+            "baseline_confidence": baseline.confidence,
+            "score": score,
+        },
+    )
+
+
+def _daily_start_count_evidence(
+    config: CircuitConfig,
+    summary: CircuitCycleSummary,
+    baselines: dict[str, BaselineStats],
+) -> CycleAnomalyEvidence | None:
+    baseline = baselines.get(RUN_CYCLE_START_COUNT_FEATURE)
+    observed = float(summary.start_count)
+    if baseline is None or observed <= baseline.median or observed <= 0.0:
+        return None
+    score = score_deviation(observed, baseline)
+    return CycleAnomalyEvidence(
+        feature=RUN_CYCLE_START_COUNT_FEATURE,
+        message=(
+            f"Possible issue: {config.name} has started {summary.start_count} "
+            f"times today, above its learned {baseline.median:g} starts-per-day "
+            "baseline. Evidence is retained start/stop timing only, not a "
+            "diagnosis."
+        ),
+        observed_value=observed,
+        baseline_value=baseline.median,
+        score=score,
+        baseline_confidence=baseline.confidence,
+        features={
+            "start_count": observed,
+            "baseline_start_count": baseline.median,
+            "baseline_p90_start_count": baseline.p90,
+            "baseline_sample_count": float(baseline.sample_count),
+            "baseline_confidence": baseline.confidence,
+            "score": score,
+        },
+    )
+
+
+def _completed_cycle_durations(
+    events: Iterable[CircuitEvent],
+    *,
+    before: datetime,
+) -> list[float]:
+    active_start: datetime | None = None
+    durations: list[float] = []
+    for event in sorted(events, key=lambda item: item.timestamp):
+        if event.timestamp >= before:
+            break
+        if event.event_type is EventType.START:
+            active_start = event.timestamp
+            continue
+        if event.event_type is not EventType.STOP or active_start is None:
+            continue
+        duration = max((event.timestamp - active_start).total_seconds(), 0.0)
+        if duration > 0.0:
+            durations.append(_round_seconds(duration))
+        active_start = None
+    return durations
+
+
+def _circuit_cycle_events(
+    events: Iterable[CircuitEvent],
+    circuit_id: str,
+) -> list[CircuitEvent]:
+    return sorted(
+        (
+            event
+            for event in events
+            if event.circuit_id == circuit_id
+            and event.event_type in {EventType.START, EventType.STOP}
+        ),
+        key=lambda event: event.timestamp,
+    )
+
+
+def _end_of_day(day: date, now: datetime) -> datetime:
+    return datetime.combine(day, time.max, tzinfo=now.tzinfo)
+
+
+def _format_seconds(value: float) -> str:
+    seconds = int(round(value))
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes = seconds / 60.0
+    if minutes < 60:
+        return f"{minutes:.1f}".rstrip("0").rstrip(".") + " min"
+    hours = minutes / 60.0
+    return f"{hours:.1f}".rstrip("0").rstrip(".") + " h"
 
 
 def _round_seconds(value: float) -> float:

@@ -92,6 +92,12 @@ These diagnostics do not replace Home Assistant's Energy Dashboard history,
 energy charts, tariffs, or cost views. They are event-derived activity evidence
 that can be reviewed alongside power-quality and data-quality diagnostics.
 
+After the circuit has enough learned cycle evidence, unusually long active
+runs, unusually high daily duty cycle, or unusually high starts-per-day can
+create possible-issue notifications. The alert evidence reports the observed
+timing, learned baseline, sample count, and confidence. It does not diagnose a
+specific failed part.
+
 ## Billing Cycle Forecasts
 
 The analyzer can also track circuit usage against a utility-style billing

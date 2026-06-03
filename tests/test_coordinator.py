@@ -2557,6 +2557,97 @@ async def test_runtime_reports_run_cycle_diagnostics_from_retained_events() -> N
 
 
 @pytest.mark.asyncio
+async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_power"
+            return SimpleNamespace(
+                state="0",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    events: list[CircuitEvent] = []
+    for day_offset in range(1, 21):
+        start = now - timedelta(days=day_offset, hours=2)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=start + timedelta(minutes=20),
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(minutes=45),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(events=events),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "run_cycle_duration_s"
+    assert alert.repeated_count == 3
+    assert "Kitchen Fridge has been running" in alert.message
+    assert alert.observed_value >= 2700.0
+    assert alert.baseline_value == 1200.0
+    assert alert.features["baseline_sample_count"] == 20.0
+    assert coordinator.store_data.baselines["fridge:run_cycle_duration_s"].median == (
+        1200.0
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

@@ -29,7 +29,13 @@ from .const import (
     DOMAIN,
 )
 from .cost import CostSettings, record_cost_sample
-from .cycles import cycle_summary_payload, summarize_circuit_cycles
+from .cycles import (
+    MIN_CYCLE_BASELINE_CONFIDENCE,
+    cycle_baseline_feature_values,
+    cycle_summary_payload,
+    select_cycle_anomaly_evidence,
+    summarize_circuit_cycles,
+)
 from .demand import DemandLimitEvidence, DemandSettings, record_demand_sample
 from .energy_dashboard import (
     evaluate_energy_dashboard_readiness,
@@ -45,6 +51,7 @@ from .goals import (
 from .models import (
     AlertEvidence,
     ApplianceProfile,
+    BaselineStats,
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
@@ -305,6 +312,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tuple[str, str],
             ConservativeAlertPolicy,
         ] = {}
+        self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
         self._active_repair_issues: set[tuple[str, str]] = set()
@@ -395,6 +403,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(goal_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(goal_alert)
+
+            cycle_alert = self._observe_run_cycle(config, now)
+            if cycle_alert is not None:
+                alerts.append(cycle_alert)
+                self.store_data.alerts.append(cycle_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(cycle_alert)
 
             billing_alert = self._observe_billing_cycle(config, sample, now)
             if billing_alert is not None:
@@ -1606,6 +1621,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._standby_alert_policies[key] = policy
         return policy
 
+    def _cycle_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._cycle_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=min_repeated * 1.5,
+                min_average_score=1.5,
+                min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
+            )
+            self._cycle_alert_policies[key] = policy
+        return policy
+
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
         alert = self._alert_for_id(alert_id)
         if alert is None:
@@ -1954,6 +1988,66 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _energy_goal_evidence_payload(result)
         )
         return result
+
+    def _observe_run_cycle(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        summary = summarize_circuit_cycles(
+            self.store_data.events,
+            circuit_id=config.circuit_id,
+            now=now,
+        )
+        baselines = self._cycle_baselines_for_config(config, now)
+        if not self._learning_mature(config, now):
+            return None
+
+        policy = self._cycle_alert_policy_for_circuit(config.circuit_id)
+        evidence = select_cycle_anomaly_evidence(
+            config,
+            summary,
+            baselines,
+            min_score=policy.min_average_score,
+        )
+        if evidence is None:
+            return None
+
+        return policy.observe(
+            Observation(
+                circuit_id=config.circuit_id,
+                feature=evidence.feature,
+                score=evidence.score,
+                baseline_confidence=evidence.baseline_confidence,
+                observed_at=now,
+                observed_value=evidence.observed_value,
+                baseline_value=evidence.baseline_value,
+                message=evidence.message,
+                features=evidence.features,
+            )
+        )
+
+    def _cycle_baselines_for_config(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> dict[str, BaselineStats]:
+        baselines: dict[str, BaselineStats] = {}
+        values_by_feature = cycle_baseline_feature_values(
+            self.store_data.events,
+            circuit_id=config.circuit_id,
+            now=now,
+        )
+        for feature, values in values_by_feature.items():
+            key = _baseline_key(config.circuit_id, feature)
+            baseline = self.store_data.baselines.get(key)
+            if baseline is None and len(values) >= 9:
+                baseline = build_baseline(feature, values)
+                self.store_data.baselines[key] = baseline
+                self._mark_store_dirty()
+            if baseline is not None:
+                baselines[feature] = baseline
+        return baselines
 
     def _observe_billing_cycle(
         self: Self,
