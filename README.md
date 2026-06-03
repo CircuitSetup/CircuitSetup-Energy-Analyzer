@@ -253,6 +253,14 @@ CircuitSetup setup and sign-convention evidence. Use Home Assistant's Energy
 Dashboard solar cards for normal historical solar, return-to-grid, and
 self-sufficiency views.
 
+The analyzer also exposes instantaneous solar surplus and load-shift
+opportunity diagnostics. By default, exported solar at or above 500 W is
+reported as `surplus_available`, and exported solar at or above 1500 W is
+reported as `high_surplus`. This is inspired by solar diverter and home energy
+management tools, but it is read-only: use ordinary Home Assistant automations
+if you want to turn on an EV charger, water heater, pool pump, or other
+flexible load.
+
 If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
@@ -370,6 +378,9 @@ The integration exposes standard Home Assistant diagnostic entities per configur
 - `sensor.<circuit>_solar_self_consumption`
 - `sensor.<circuit>_solar_powered`
 - `sensor.<circuit>_solar_flow_status`
+- `sensor.<circuit>_solar_surplus_power`
+- `sensor.<circuit>_solar_load_shift_power`
+- `sensor.<circuit>_solar_surplus_status`
 - `sensor.<circuit>_utility_comparison_difference`
 - `sensor.<circuit>_utility_comparison_status`
 - `sensor.<circuit>_always_on_power`

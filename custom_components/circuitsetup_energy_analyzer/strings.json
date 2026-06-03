@@ -188,6 +188,15 @@
       "solar_flow_status": {
         "name": "Solar flow status"
       },
+      "solar_surplus_power": {
+        "name": "Solar surplus power"
+      },
+      "solar_load_shift_power": {
+        "name": "Solar load shift power"
+      },
+      "solar_surplus_status": {
+        "name": "Solar surplus status"
+      },
       "utility_comparison_difference": {
         "name": "Utility comparison difference"
       },

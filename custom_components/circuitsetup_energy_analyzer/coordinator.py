@@ -275,7 +275,10 @@ class AnalyzerState:
         default_factory=dict
     )
     solar_powered_percent_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_surplus_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    solar_load_shift_w_by_circuit: dict[str, float] = field(default_factory=dict)
     solar_flow_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    solar_surplus_status_by_circuit: dict[str, str] = field(default_factory=dict)
     solar_flow_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -1862,10 +1865,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state.solar_powered_percent_by_circuit[circuit_id] = (
                 result.solar_powered_percent
             )
+            self.state.solar_surplus_w_by_circuit[circuit_id] = (
+                result.solar_surplus_w
+            )
+            self.state.solar_load_shift_w_by_circuit[circuit_id] = (
+                result.load_shift_available_w
+            )
             self.state.solar_flow_status_by_circuit[circuit_id] = result.status
+            self.state.solar_surplus_status_by_circuit[circuit_id] = (
+                result.solar_surplus_status
+            )
             self.state.solar_flow_evidence_by_circuit[circuit_id] = {
                 **result.features,
                 "status": result.status,
+                "solar_surplus_status": result.solar_surplus_status,
             }
 
     async def _observe_utility_comparisons(

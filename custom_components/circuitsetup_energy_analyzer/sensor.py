@@ -479,6 +479,30 @@ def solar_flow_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def solar_surplus_power_value(state: Any, circuit_id: str) -> float:
+    """Return instantaneous solar export available as surplus power."""
+    return float(
+        getattr(state, "solar_surplus_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_load_shift_power_value(state: Any, circuit_id: str) -> float:
+    """Return surplus power available after the load-shift threshold is met."""
+    return float(
+        getattr(state, "solar_load_shift_w_by_circuit", {}).get(circuit_id, 0.0)
+    )
+
+
+def solar_surplus_status_value(state: Any, circuit_id: str) -> str:
+    """Return the solar surplus/load-shift diagnostic status."""
+    return str(
+        getattr(state, "solar_surplus_status_by_circuit", {}).get(
+            circuit_id,
+            "missing_mains",
+        )
+    )
+
+
 def utility_comparison_difference_value(state: Any, circuit_id: str) -> float:
     """Return measured-vs-utility kWh difference as a percentage."""
     return float(
@@ -970,6 +994,28 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="solar_flow_status",
         name_suffix="Solar Flow Status",
         value_fn=solar_flow_status_value,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_surplus_power",
+        name_suffix="Solar Surplus Power",
+        value_fn=solar_surplus_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_load_shift_power",
+        name_suffix="Solar Load Shift Power",
+        value_fn=solar_load_shift_power_value,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="solar_surplus_status",
+        name_suffix="Solar Surplus Status",
+        value_fn=solar_surplus_status_value,
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(

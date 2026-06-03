@@ -3632,6 +3632,12 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
     assert coordinator.state.solar_self_consumption_percent_by_circuit["mains"] == 75.0
     assert coordinator.state.solar_powered_percent_by_circuit["mains"] == 100.0
     assert coordinator.state.solar_flow_status_by_circuit["mains"] == "exporting"
+    assert coordinator.state.solar_surplus_w_by_circuit["mains"] == 500.0
+    assert coordinator.state.solar_load_shift_w_by_circuit["mains"] == 500.0
+    assert (
+        coordinator.state.solar_surplus_status_by_circuit["mains"]
+        == "surplus_available"
+    )
     assert coordinator.state.solar_flow_evidence_by_circuit["mains"] == {
         "mains_net_power_w": -500.0,
         "solar_generation_w": 2000.0,
@@ -3641,8 +3647,13 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
         "solar_used_on_site_w": 1500.0,
         "self_consumption_percent": 75.0,
         "solar_powered_percent": 100.0,
+        "solar_surplus_w": 500.0,
+        "load_shift_available_w": 500.0,
+        "solar_surplus_threshold_w": 500.0,
+        "high_solar_surplus_threshold_w": 1500.0,
         "generation_circuit_count": 1.0,
         "status": "exporting",
+        "solar_surplus_status": "surplus_available",
     }
 
 
