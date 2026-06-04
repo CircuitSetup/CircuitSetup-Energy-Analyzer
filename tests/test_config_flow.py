@@ -671,6 +671,123 @@ async def test_options_assignment_step_starts_from_saved_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_review_selects_one_saved_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+        assignment_picker_options,
+    )
+
+    circuits = [
+        {
+            "circuit_id": "upstairs_hvac",
+            "name": "Upstairs HVAC",
+            "appliance_profile": "hvac",
+            "mode": "dual_phase",
+            "sensors": [
+                {"entity_id": "sensor.upstairs_hvac_l1_power", "role": "real_power"},
+                {"entity_id": "sensor.upstairs_hvac_l2_power", "role": "real_power"},
+            ],
+        },
+        {
+            "circuit_id": "downstairs_hvac",
+            "name": "Downstairs HVAC",
+            "appliance_profile": "hvac",
+            "mode": "dual_phase",
+            "sensors": [
+                {"entity_id": "sensor.downstairs_hvac_l1_power", "role": "real_power"},
+                {"entity_id": "sensor.downstairs_hvac_l2_power", "role": "real_power"},
+            ],
+        },
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.upstairs_hvac_l1_power",
+                "sensor.upstairs_hvac_l2_power",
+                "sensor.downstairs_hvac_l1_power",
+                "sensor.downstairs_hvac_l2_power",
+            ],
+            CONF_CIRCUITS: circuits,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert _schema_keys(result["data_schema"]) == {"selected_assignment"}
+    assert assignment_picker_options(circuits) == [
+        {
+            "value": "upstairs_hvac",
+            "label": "Upstairs HVAC - Dual Phase - 2 sensors",
+        },
+        {
+            "value": "downstairs_hvac",
+            "label": "Downstairs HVAC - Dual Phase - 2 sensors",
+        },
+    ]
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "downstairs_hvac"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == "Downstairs HVAC"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": [
+                "sensor.downstairs_hvac_l1_power",
+                "sensor.downstairs_hvac_l2_power",
+            ],
+            "circuit_name": "Downstairs Heat Pump",
+            "appliance_profile": "hvac",
+            "circuit_mode": "dual_phase",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [
+        circuits[0],
+        {
+            "circuit_id": "downstairs_hvac",
+            "name": "Downstairs Heat Pump",
+            "appliance_profile": "hvac",
+            "mode": "dual_phase",
+            "sensors": [
+                {
+                    "entity_id": "sensor.downstairs_hvac_l1_power",
+                    "role": "real_power",
+                    "leg": "a",
+                },
+                {
+                    "entity_id": "sensor.downstairs_hvac_l2_power",
+                    "role": "real_power",
+                    "leg": "b",
+                },
+            ],
+        },
+    ]
+
+
+def test_circuit_mode_options_use_human_labels() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        circuit_mode_options,
+    )
+
+    assert circuit_mode_options() == [
+        {"value": "single_phase", "label": "Single Phase"},
+        {"value": "dual_phase", "label": "Dual Phase"},
+        {"value": "mixed", "label": "Mixed"},
+        {"value": "mains_nilm", "label": "Mains NILM"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

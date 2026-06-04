@@ -18,8 +18,8 @@
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
-          "sensitivity": "Controls how readily possible issues are reported.",
-          "retention_mode": "Controls how much historical diagnostic data is retained."
+          "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
+          "retention_mode": "Controls how long diagnostic evidence and events are kept. Shorter retention uses less storage; Diagnostic keeps more evidence."
         }
       },
       "assign": {
@@ -37,7 +37,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."
+          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits."
         }
       }
     },
@@ -76,8 +76,18 @@
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
-          "sensitivity": "Controls how readily possible issues are reported.",
-          "retention_mode": "Controls how much historical diagnostic data is retained."
+          "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
+          "retention_mode": "Controls how long diagnostic evidence and events are kept. Shorter retention uses less storage; Diagnostic keeps more evidence."
+        }
+      },
+      "select_assignment": {
+        "title": "Select Assignment",
+        "description": "Choose one current appliance or circuit assignment to edit.",
+        "data": {
+          "selected_assignment": "Assignment"
+        },
+        "data_description": {
+          "selected_assignment": "Choose the existing appliance or circuit assignment to edit."
         }
       },
       "assign": {
@@ -95,7 +105,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."
+          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits."
         }
       }
     }

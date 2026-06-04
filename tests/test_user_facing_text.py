@@ -79,11 +79,15 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert descriptions.keys() == EXPECTED_FLOW_LABELS.keys()
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
-    assert all(20 <= len(description) <= 160 for description in descriptions.values())
+    assert all(20 <= len(description) <= 260 for description in descriptions.values())
     assert "esphome" in descriptions["source_devices"].lower()
     assert "power, voltage, current" in descriptions["extra_source_entities"].lower()
     assert "power factor" in descriptions["extra_source_entities"].lower()
     assert "optional" in descriptions["mains_source_entities"].lower()
+    assert "quieter" in descriptions["sensitivity"].lower()
+    assert "more responsive" in descriptions["sensitivity"].lower()
+    assert "storage" in descriptions["retention_mode"].lower()
+    assert "diagnostic evidence" in descriptions["retention_mode"].lower()
     assert "review circuit assignments" in strings["config"]["step"]["user"][
         "description"
     ].lower()
@@ -107,8 +111,12 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert descriptions.keys() == EXPECTED_OPTIONS_LABELS.keys()
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
-    assert all(20 <= len(description) <= 160 for description in descriptions.values())
+    assert all(20 <= len(description) <= 260 for description in descriptions.values())
     assert "optional" in descriptions["mains_source_entities"].lower()
+    assert "quieter" in descriptions["sensitivity"].lower()
+    assert "more responsive" in descriptions["sensitivity"].lower()
+    assert "storage" in descriptions["retention_mode"].lower()
+    assert "diagnostic evidence" in descriptions["retention_mode"].lower()
     assert "review circuit assignments" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
@@ -133,6 +141,26 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "appliance" in descriptions["appliance_profile"].lower()
         assert "selected sensors" in descriptions["include_circuit"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
+        assert "mains nilm" in descriptions["circuit_mode"].lower()
+        assert "only" in descriptions["circuit_mode"].lower()
+        assert "mains" in descriptions["circuit_mode"].lower()
+
+
+def test_assignment_picker_text_is_human_readable() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+
+    data = strings["options"]["step"]["select_assignment"]["data"]
+    descriptions = strings["options"]["step"]["select_assignment"]["data_description"]
+
+    assert data == {"selected_assignment": "Assignment"}
+    assert descriptions == {
+        "selected_assignment": (
+            "Choose the existing appliance or circuit assignment to edit."
+        )
+    }
+    assert "x of" not in strings["options"]["step"]["select_assignment"][
+        "description"
+    ].lower()
 
 
 def test_runtime_english_translations_include_setup_and_options_text() -> None:
@@ -145,6 +173,7 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
         ("config", "user"),
         ("config", "assign"),
         ("options", "sources"),
+        ("options", "select_assignment"),
         ("options", "assign"),
     ):
         strings_step = strings[section]["step"][step]

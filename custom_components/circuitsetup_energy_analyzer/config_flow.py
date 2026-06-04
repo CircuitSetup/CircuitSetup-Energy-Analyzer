@@ -140,6 +140,7 @@ _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_INCLUDED_SENSORS = "included_sensors"
+FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
@@ -171,6 +172,12 @@ _ASSIGNMENT_MODE_OPTIONS = {
     CircuitMode.DUAL_PHASE.value,
     CircuitMode.MIXED.value,
     CircuitMode.MAINS_NILM.value,
+}
+_CIRCUIT_MODE_LABELS = {
+    CircuitMode.SINGLE_PHASE.value: "Single Phase",
+    CircuitMode.DUAL_PHASE.value: "Dual Phase",
+    CircuitMode.MIXED.value: "Mixed",
+    CircuitMode.MAINS_NILM.value: "Mains NILM",
 }
 _DEMO_SOURCE_METRICS = (
     "energy",
@@ -400,8 +407,15 @@ def _assignment_text_selector() -> Any:
     return _selector({"text": {"multiline": True, "multiple": False}}, str)
 
 
-def _select_selector(options: Iterable[str]) -> Any:
-    return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
+def _select_selector(options: Iterable[Any]) -> Any:
+    option_list = list(options)
+    values = [
+        str(option.get("value"))
+        if isinstance(option, Mapping)
+        else str(option)
+        for option in option_list
+    ]
+    return _selector({"select": {"options": option_list}}, vol.In(tuple(values)))
 
 
 def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
@@ -483,9 +497,63 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
             vol.Required(
                 FIELD_CIRCUIT_MODE,
                 default=str(group.get("mode") or CircuitMode.MIXED),
-            ): _select_selector(sorted(_ASSIGNMENT_MODE_OPTIONS)),
+            ): _select_selector(circuit_mode_options()),
         }
     )
+
+
+def _assignment_picker_schema(groups: Iterable[Mapping[str, Any]]) -> Any:
+    options = assignment_picker_options(groups)
+    default = options[0]["value"] if options else ""
+    return vol.Schema(
+        {
+            vol.Required(
+                FIELD_SELECTED_ASSIGNMENT,
+                default=default,
+            ): _select_selector(options),
+        }
+    )
+
+
+def circuit_mode_options() -> list[dict[str, str]]:
+    return [
+        {"value": CircuitMode.SINGLE_PHASE.value, "label": "Single Phase"},
+        {"value": CircuitMode.DUAL_PHASE.value, "label": "Dual Phase"},
+        {"value": CircuitMode.MIXED.value, "label": "Mixed"},
+        {"value": CircuitMode.MAINS_NILM.value, "label": "Mains NILM"},
+    ]
+
+
+def assignment_picker_options(
+    groups_or_circuits: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    groups = [group for group in groups_or_circuits if isinstance(group, Mapping)]
+    name_counts: dict[str, int] = {}
+    for group in groups:
+        name = str(group.get("name") or _assignment_group_value(group))
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    options: list[dict[str, str]] = []
+    for group in groups:
+        value = _assignment_group_value(group)
+        if not value:
+            continue
+        name = str(group.get("name") or value)
+        label_name = f"{name} ({value})" if name_counts.get(name, 0) > 1 else name
+        mode = friendly_circuit_mode_label(str(group.get("mode") or ""))
+        sensor_count = _assignment_group_sensor_count(group)
+        sensor_label = "sensor" if sensor_count == 1 else "sensors"
+        options.append(
+            {
+                "value": value,
+                "label": f"{label_name} - {mode} - {sensor_count} {sensor_label}",
+            }
+        )
+    return options
+
+
+def friendly_circuit_mode_label(mode: str) -> str:
+    return _CIRCUIT_MODE_LABELS.get(mode, _friendly_name_from_id(mode))
 
 
 def assignment_groups_from_sources(
@@ -580,6 +648,22 @@ def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ..
     )
 
 
+def _assignment_group_value(group: Mapping[str, Any]) -> str:
+    return str(
+        group.get("circuit_id")
+        or group.get("group_id")
+        or group.get("id")
+        or ""
+    )
+
+
+def _assignment_group_sensor_count(group: Mapping[str, Any]) -> int:
+    sensor_entities = _sensor_entity_ids_from_circuit(group)
+    if sensor_entities:
+        return len(sensor_entities)
+    return len(tuple(group.get("entity_ids", ()) or ()))
+
+
 def _assignment_review_form(
     flow: Any,
     *,
@@ -623,6 +707,20 @@ def _assignment_review_form(
     )
 
 
+def _assignment_picker_form(
+    flow: Any,
+    *,
+    errors: dict[str, str] | None = None,
+) -> config_entries.ConfigFlowResult:
+    groups = list(getattr(flow, "_assignment_groups", []) or [])
+    return flow.async_show_form(
+        step_id="select_assignment",
+        data_schema=_assignment_picker_schema(groups),
+        errors=errors or {},
+        description_placeholders={"assignment_count": str(len(groups))},
+    )
+
+
 def _assignment_description_placeholders(
     group: Mapping[str, Any],
     *,
@@ -645,16 +743,28 @@ def _start_assignment_review(
     pending_config: Mapping[str, Any],
     *,
     existing_circuits: Iterable[Mapping[str, Any]] = (),
+    show_picker: bool = False,
+    update_existing: bool = False,
 ) -> config_entries.ConfigFlowResult:
+    existing_circuit_list = [
+        circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
+    ]
     groups = assignment_groups_from_sources(
         pending_config.get(CONF_SOURCE_ENTITIES, []),
         mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
-        existing_circuits=existing_circuits,
+        existing_circuits=existing_circuit_list,
     )
     flow._pending_config = dict(pending_config)
     flow._assignment_groups = groups
     flow._assignment_index = 0
     flow._reviewed_circuits = []
+    flow._assignment_update_existing = bool(update_existing)
+    flow._assignment_existing_circuits = existing_circuit_list
+    flow._assignment_selected_circuit_id = None
+    if update_existing and len(groups) == 1:
+        flow._assignment_selected_circuit_id = _assignment_group_value(groups[0])
+    if show_picker and len(groups) > 1:
+        return _assignment_picker_form(flow)
     return _assignment_review_form(flow)
 
 
@@ -679,6 +789,13 @@ def _handle_assignment_review_submission(
 
     if flow._assignment_index < len(groups):
         return _assignment_review_form(flow)
+    if bool(getattr(flow, "_assignment_update_existing", False)):
+        return _final_config_from_single_assignment_update(
+            getattr(flow, "_pending_config", {}) or {},
+            getattr(flow, "_assignment_existing_circuits", []) or [],
+            str(getattr(flow, "_assignment_selected_circuit_id", "") or ""),
+            reviewed_circuits,
+        )
     return _final_config_from_reviewed_circuits(
         getattr(flow, "_pending_config", {}) or {},
         reviewed_circuits,
@@ -793,6 +910,29 @@ def _final_config_from_reviewed_circuits(
         circuit_list
     )
     return final_config
+
+
+def _final_config_from_single_assignment_update(
+    pending_config: Mapping[str, Any],
+    existing_circuits: Iterable[Mapping[str, Any]],
+    selected_circuit_id: str,
+    reviewed_circuits: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    reviewed = [dict(circuit) for circuit in reviewed_circuits]
+    replacement = reviewed[0] if reviewed else None
+    final_circuits: list[dict[str, Any]] = []
+    replaced = False
+    for circuit in existing_circuits:
+        current_id = str(circuit.get("circuit_id") or circuit.get("id") or "")
+        if current_id == selected_circuit_id:
+            replaced = True
+            if replacement is not None:
+                final_circuits.append(replacement)
+            continue
+        final_circuits.append(dict(circuit))
+    if replacement is not None and not replaced:
+        final_circuits.append(replacement)
+    return _final_config_from_reviewed_circuits(pending_config, final_circuits)
 
 
 def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str:
@@ -1214,6 +1354,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 self,
                 pending_config,
                 existing_circuits=_options_existing_circuits(self._config_entry),
+                show_picker=True,
+                update_existing=True,
             )
 
         if user_input is not None:
@@ -1230,6 +1372,31 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             return self.async_create_entry(title="", data=final_config)
 
         return _assignment_review_form(self)
+
+    async def async_step_select_assignment(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Select one existing assignment to edit."""
+        groups = list(getattr(self, "_assignment_groups", []) or [])
+        if user_input is None:
+            if not groups:
+                return await self.async_step_assign()
+            return _assignment_picker_form(self)
+
+        selected = str(user_input.get(FIELD_SELECTED_ASSIGNMENT) or "")
+        for group in groups:
+            if _assignment_group_value(group) == selected:
+                self._assignment_groups = [group]
+                self._assignment_index = 0
+                self._reviewed_circuits = []
+                self._assignment_update_existing = True
+                self._assignment_selected_circuit_id = selected
+                return _assignment_review_form(self)
+        return _assignment_picker_form(
+            self,
+            errors={"base": ERROR_INVALID_CIRCUIT_ASSIGNMENTS},
+        )
 
     async def _async_show_options_form(
         self,
