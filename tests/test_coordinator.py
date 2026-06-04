@@ -3196,6 +3196,125 @@ async def test_runtime_notifies_power_quality_relationship_change_after_maturity
 
 
 @pytest.mark.asyncio
+async def test_runtime_detects_motor_power_quality_shift_from_watts_amps_pf_and_var(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 4, 12, 0, tzinfo=UTC)
+    holder = {"time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.pool_pump_energy": "348.7",
+                "sensor.pool_pump_power": "950",
+                "sensor.pool_pump_current": "8.5",
+                "sensor.pool_pump_var": "580",
+                "sensor.pool_pump_pf": "0.86",
+            }
+            units = {
+                "sensor.pool_pump_energy": "kWh",
+                "sensor.pool_pump_power": "W",
+                "sensor.pool_pump_current": "A",
+                "sensor.pool_pump_var": "var",
+                "sensor.pool_pump_pf": "",
+            }
+            return SimpleNamespace(
+                state=values[entity_id],
+                attributes={"unit_of_measurement": units[entity_id]},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "pool_pump",
+                    "name": "Pool Pump",
+                    "mode": "single_phase",
+                    "appliance_profile": "pool_pump",
+                    "sensors": [
+                        {"entity_id": "sensor.pool_pump_energy", "role": "energy"},
+                        {"entity_id": "sensor.pool_pump_power", "role": "real_power"},
+                        {"entity_id": "sensor.pool_pump_current", "role": "current"},
+                        {
+                            "entity_id": "sensor.pool_pump_var",
+                            "role": "reactive_power",
+                        },
+                        {"entity_id": "sensor.pool_pump_pf", "role": "power_factor"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=index + 1),
+                    circuit_id="pool_pump",
+                    event_type=EventType.START,
+                )
+                for index in range(20)
+            ],
+            baselines={
+                "pool_pump:real_power": BaselineStats(
+                    "real_power", 20, 940.0, 30.0, 890.0, 980.0, 1.0
+                ),
+                "pool_pump:reactive_power": BaselineStats(
+                    "reactive_power", 20, 220.0, 25.0, 180.0, 260.0, 1.0
+                ),
+                "pool_pump:power_factor": BaselineStats(
+                    "power_factor", 20, 0.97, 0.02, 0.94, 0.99, 1.0
+                ),
+                "pool_pump:reactive_to_real_ratio": BaselineStats(
+                    "reactive_to_real_ratio", 20, 0.23, 0.03, 0.18, 0.28, 1.0
+                ),
+                "pool_pump:power_factor_deficit": BaselineStats(
+                    "power_factor_deficit", 20, 0.03, 0.01, 0.01, 0.06, 1.0
+                ),
+            },
+        ),
+        now_fn=lambda: holder["time"],
+    )
+
+    for offset in range(3):
+        holder["time"] = now + timedelta(minutes=offset)
+        await coordinator.async_process_update()
+
+    assert notifications
+    alert = notifications[0]
+    assert alert.feature == "reactive_shift_under_stable_real_power"
+    assert "reactive power changed" in alert.message
+    assert alert.features["real_power"] < 1.0
+    assert alert.features["reactive_power"] > 1.5
+    assert alert.features["reactive_to_real_ratio"] > 1.5
+    assert alert.features["power_factor"] > 1.5
+    assert alert.features["power_factor_deficit"] > 1.5
+    assert coordinator.state.power_quality_score_by_circuit["pool_pump"] > 1.5
+    assert coordinator.state.power_quality_evidence_by_circuit["pool_pump"]
+    assert coordinator.state.reactive_power_drift_by_circuit["pool_pump"] > 1.0
+    assert coordinator.state.power_factor_drift_by_circuit["pool_pump"] > 0.1
+    assert coordinator.state.apparent_power_drift_by_circuit["pool_pump"] == 0.0
+    assert (
+        coordinator.state.metric_consistency_status_by_circuit["pool_pump"]
+        == "missing_metrics"
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
     monkeypatch,
 ) -> None:
