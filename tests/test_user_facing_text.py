@@ -111,6 +111,24 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
         assert translated_step["description"] == strings_step["description"]
 
 
+def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
+    None
+):
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    translations = json.loads(
+        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+    )
+
+    for payload in (strings, translations):
+        descriptions = (
+            payload["config"]["step"]["user"]["description"],
+            payload["options"]["step"]["init"]["description"],
+        )
+        for description in descriptions:
+            assert "{mapping_suggestions}" not in description
+            assert "dual-phase channel pairs" not in description.lower()
+
+
 def test_service_fields_have_human_readable_names_and_descriptions() -> None:
     services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
 

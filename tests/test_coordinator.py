@@ -1357,51 +1357,123 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         entry_data={
             CONF_SOURCE_ENTITIES: [
                 "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_energy",
-                "sensor.cs_energy_analyzer_demo_water_heater_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_l2_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_current",
+                "sensor.cs_energy_analyzer_demo_hvac_l2_current",
+                "sensor.cs_energy_analyzer_demo_water_heater_l1_energy",
+                "sensor.cs_energy_analyzer_demo_water_heater_l2_energy",
+                "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power",
+                "sensor.cs_energy_analyzer_demo_water_heater_l2_active_power",
+                "sensor.cs_energy_analyzer_demo_water_heater_l1_current",
+                "sensor.cs_energy_analyzer_demo_water_heater_l2_current",
                 "sensor.cs_energy_analyzer_demo_pool_pump_energy",
                 "sensor.cs_energy_analyzer_demo_basement_lights_energy",
+                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+                "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
             ],
             CONF_MAINS_SOURCE_ENTITIES: [
                 "sensor.cs_energy_analyzer_demo_mains_l1_energy",
                 "sensor.cs_energy_analyzer_demo_mains_l2_energy",
+                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+                "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
             ],
         },
     )
 
-    by_sensor = {
-        config.sensors[0].entity_id: config for config in coordinator.circuit_configs
-    }
+    by_circuit = {config.circuit_id: config for config in coordinator.circuit_configs}
 
-    assert set(by_sensor) == {
-        "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-        "sensor.cs_energy_analyzer_demo_hvac_energy",
-        "sensor.cs_energy_analyzer_demo_water_heater_energy",
-        "sensor.cs_energy_analyzer_demo_pool_pump_energy",
-        "sensor.cs_energy_analyzer_demo_basement_lights_energy",
+    assert set(by_circuit) == {
+        "cs_energy_analyzer_demo_refrigerator",
+        "cs_energy_analyzer_demo_hvac",
+        "cs_energy_analyzer_demo_water_heater",
+        "cs_energy_analyzer_demo_pool_pump",
+        "cs_energy_analyzer_demo_basement_lights",
     }
-    fridge = by_sensor["sensor.cs_energy_analyzer_demo_refrigerator_energy"]
+    fridge = by_circuit["cs_energy_analyzer_demo_refrigerator"]
     assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
     assert fridge.name == "Cs Energy Analyzer Demo Refrigerator"
     assert fridge.appliance_profile is ApplianceProfile.REFRIGERATOR
     assert fridge.mode is CircuitMode.SINGLE_PHASE
     assert fridge.sensors[0].role is SensorRole.ENERGY
+    assert any(
+        sensor.entity_id == "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
+        and sensor.role is SensorRole.VOLTAGE
+        for sensor in fridge.sensors
+    )
 
-    hvac = by_sensor["sensor.cs_energy_analyzer_demo_hvac_energy"]
+    hvac = by_circuit["cs_energy_analyzer_demo_hvac"]
     assert hvac.appliance_profile is ApplianceProfile.HVAC
     assert hvac.mode is CircuitMode.DUAL_PHASE
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in hvac.sensors
+    } >= {
+        (
+            "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            SensorRole.REAL_POWER,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+            SensorRole.REAL_POWER,
+            "b",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+            SensorRole.VOLTAGE,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+            SensorRole.VOLTAGE,
+            "b",
+        ),
+    }
+    assert not any(
+        sensor.entity_id == "sensor.cs_energy_analyzer_demo_hvac_voltage"
+        for sensor in hvac.sensors
+    )
 
-    water_heater = by_sensor[
-        "sensor.cs_energy_analyzer_demo_water_heater_energy"
-    ]
+    water_heater = by_circuit["cs_energy_analyzer_demo_water_heater"]
     assert water_heater.appliance_profile is ApplianceProfile.WATER_HEATER
     assert water_heater.mode is CircuitMode.DUAL_PHASE
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg)
+        for sensor in water_heater.sensors
+    } >= {
+        (
+            "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power",
+            SensorRole.REAL_POWER,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_water_heater_l2_active_power",
+            SensorRole.REAL_POWER,
+            "b",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+            SensorRole.VOLTAGE,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+            SensorRole.VOLTAGE,
+            "b",
+        ),
+    }
+    assert not any(
+        sensor.entity_id == "sensor.cs_energy_analyzer_demo_water_heater_voltage"
+        for sensor in water_heater.sensors
+    )
 
-    pool_pump = by_sensor["sensor.cs_energy_analyzer_demo_pool_pump_energy"]
+    pool_pump = by_circuit["cs_energy_analyzer_demo_pool_pump"]
     assert pool_pump.appliance_profile is ApplianceProfile.POOL_PUMP
     assert pool_pump.mode is CircuitMode.SINGLE_PHASE
 
-    lights = by_sensor["sensor.cs_energy_analyzer_demo_basement_lights_energy"]
+    lights = by_circuit["cs_energy_analyzer_demo_basement_lights"]
     assert lights.appliance_profile is ApplianceProfile.MIXED
     assert lights.mode is CircuitMode.MIXED
 

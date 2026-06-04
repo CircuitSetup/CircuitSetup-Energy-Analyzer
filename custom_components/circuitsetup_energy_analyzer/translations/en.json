@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Configure CircuitSetup Energy Analyzer",
-        "description": "Select energy source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.\n\n{mapping_suggestions}",
+        "description": "Select energy source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
         "data": {
           "source_entities": "Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
@@ -32,7 +32,7 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Tune source sensors, diagnostics, and experimental NILM settings.\n\n{mapping_suggestions}",
+        "description": "Tune source sensors, diagnostics, and experimental NILM settings.",
         "data": {
           "source_entities": "Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",

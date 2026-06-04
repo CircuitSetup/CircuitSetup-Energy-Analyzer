@@ -344,11 +344,6 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
                 )
             ),
             errors=errors,
-            description_placeholders={
-                "mapping_suggestions": await _async_format_mapping_suggestions(
-                    getattr(self, "hass", None)
-                )
-            },
         )
 
 
@@ -383,11 +378,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             step_id="init",
             data_schema=_options_schema(self._config_entry, source_entity_ids),
             errors=errors or {},
-            description_placeholders={
-                "mapping_suggestions": await _async_format_mapping_suggestions(
-                    getattr(self, "hass", None)
-                )
-            },
         )
 
 

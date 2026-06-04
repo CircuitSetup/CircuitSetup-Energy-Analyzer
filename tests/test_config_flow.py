@@ -243,6 +243,20 @@ async def test_options_flow_preserves_valid_options() -> None:
     assert result["data"] == user_input
 
 
+@pytest.mark.asyncio
+async def test_options_flow_does_not_emit_non_actionable_mapping_suggestions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
+
+    result = await flow.async_step_init()
+
+    assert result["type"] == "form"
+    assert result["description_placeholders"] == {}
+
+
 def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
     import voluptuous_serialize
 

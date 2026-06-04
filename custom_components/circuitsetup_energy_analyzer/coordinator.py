@@ -4644,6 +4644,7 @@ def _source_entity_configs_from_sources(
     mains_entities = set(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
+    shared_voltage_refs = _shared_voltage_refs(source_entities, mains_entities)
     existing_circuit_ids = {config.circuit_id for config in existing_configs}
     existing_source_entities = {
         sensor.entity_id
@@ -4668,13 +4669,18 @@ def _source_entity_configs_from_sources(
     configs: list[CircuitConfig] = []
     for circuit_id, sensors in sensors_by_circuit_id.items():
         appliance_profile, mode = _appliance_profile_mode_from_circuit_id(circuit_id)
+        sensors_with_voltage = _with_shared_voltage_context(
+            tuple(sensors),
+            mode,
+            shared_voltage_refs,
+        )
         configs.append(
             CircuitConfig(
                 circuit_id=circuit_id,
                 name=_friendly_name_from_circuit_id(circuit_id),
                 appliance_profile=appliance_profile,
                 mode=mode,
-                sensors=tuple(sensors),
+                sensors=sensors_with_voltage,
                 retention_mode=retention_mode,
             )
         )
@@ -5084,6 +5090,74 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
     return SensorRole.REAL_POWER
 
 
+def _shared_voltage_refs(
+    source_entities: Iterable[str],
+    mains_entities: set[str],
+) -> tuple[SensorRef, ...]:
+    refs: list[SensorRef] = []
+    seen_legs: set[str] = set()
+    for entity_id in dict.fromkeys([*source_entities, *mains_entities]):
+        if _sensor_role_from_entity_id(entity_id) is not SensorRole.VOLTAGE:
+            continue
+        if entity_id not in mains_entities and not _looks_like_mains_voltage(entity_id):
+            continue
+        leg = _entity_id_leg_hint(entity_id)
+        if leg is None or leg in seen_legs:
+            continue
+        refs.append(SensorRef(entity_id=entity_id, role=SensorRole.VOLTAGE, leg=leg))
+        seen_legs.add(leg)
+    return tuple(refs)
+
+
+def _looks_like_mains_voltage(entity_id: str) -> bool:
+    object_id = _entity_object_id(entity_id)
+    return any(token in f"_{object_id}_" for token in ("_mains_", "_main_"))
+
+
+def _with_shared_voltage_context(
+    sensors: tuple[SensorRef, ...],
+    mode: CircuitMode,
+    shared_voltage_refs: tuple[SensorRef, ...],
+) -> tuple[SensorRef, ...]:
+    if not shared_voltage_refs or any(
+        sensor.role is SensorRole.VOLTAGE for sensor in sensors
+    ):
+        return sensors
+    if mode is CircuitMode.DUAL_PHASE:
+        return _append_missing_voltage_legs(sensors, shared_voltage_refs, {"a", "b"})
+    if mode is CircuitMode.SINGLE_PHASE:
+        desired_leg = next(
+            (
+                leg
+                for sensor in sensors
+                if (leg := _normalized_leg(sensor.leg)) is not None
+            ),
+            "a",
+        )
+        return _append_missing_voltage_legs(sensors, shared_voltage_refs, {desired_leg})
+    return sensors
+
+
+def _append_missing_voltage_legs(
+    sensors: tuple[SensorRef, ...],
+    shared_voltage_refs: tuple[SensorRef, ...],
+    desired_legs: set[str],
+) -> tuple[SensorRef, ...]:
+    present_legs = {
+        leg
+        for sensor in sensors
+        if sensor.role is SensorRole.VOLTAGE
+        and (leg := _normalized_leg(sensor.leg)) is not None
+    }
+    additions = tuple(
+        ref
+        for ref in shared_voltage_refs
+        if (leg := _normalized_leg(ref.leg)) in desired_legs
+        and leg not in present_legs
+    )
+    return (*sensors, *additions)
+
+
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = _entity_object_id(entity_id)
     for suffix in (
@@ -5109,6 +5183,34 @@ def _source_circuit_id_from_entity_id(entity_id: str) -> str:
         "_va",
         "_pf",
         "_hz",
+    ):
+        if object_id.endswith(suffix):
+            return _strip_trailing_leg_token(object_id[: -len(suffix)])
+    return _strip_trailing_leg_token(object_id)
+
+
+def _strip_trailing_leg_token(object_id: str) -> str:
+    for suffix in (
+        "_leg_a",
+        "_leg_b",
+        "_line_a",
+        "_line_b",
+        "_phase_a",
+        "_phase_b",
+        "_leg_1",
+        "_leg_2",
+        "_line_1",
+        "_line_2",
+        "_phase_1",
+        "_phase_2",
+        "_leg1",
+        "_leg2",
+        "_line1",
+        "_line2",
+        "_phase1",
+        "_phase2",
+        "_l1",
+        "_l2",
     ):
         if object_id.endswith(suffix):
             return object_id[: -len(suffix)]

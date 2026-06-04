@@ -1260,8 +1260,14 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
                 SensorRole.REACTIVE_POWER,
             ),
             SensorRef(
-                "sensor.cs_energy_analyzer_demo_pool_pump_voltage",
+                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
                 SensorRole.VOLTAGE,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+                SensorRole.VOLTAGE,
+                leg="b",
             ),
         ),
     )
@@ -1282,14 +1288,16 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
         "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_current",
         "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_power_factor",
         "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_reactive_power",
-        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_voltage",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_mains_l1_voltage",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_mains_l2_voltage",
     }
     assert {entity.entity_id for entity in source_entities} == {
         "sensor.cs_energy_analyzer_demo_pool_pump_active_power",
         "sensor.cs_energy_analyzer_demo_pool_pump_current",
         "sensor.cs_energy_analyzer_demo_pool_pump_power_factor",
         "sensor.cs_energy_analyzer_demo_pool_pump_reactive_power",
-        "sensor.cs_energy_analyzer_demo_pool_pump_voltage",
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+        "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
     }
     by_entity_id = {
         f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
@@ -1310,10 +1318,15 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
         == 0.86
     )
     assert by_entity_id[
-        "sensor.cs_energy_analyzer_demo_pool_pump_voltage"
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
     ].icon == "mdi:sine-wave"
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"].native_value
+        == 119.6
+    )
+    assert "sensor.cs_energy_analyzer_demo_pool_pump_voltage" not in by_entity_id
     assert getattr(
-        by_entity_id["sensor.cs_energy_analyzer_demo_pool_pump_voltage"],
+        by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"],
         "device_info",
         None,
     ) is None
