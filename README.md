@@ -179,7 +179,7 @@ Energy Dashboard energy graphs.
 ## Circuit Capacity Tracking
 
 For circuits with current sensors, the analyzer can compare measured amps with
-a user-configured breaker or circuit rating. This is useful for EV chargers,
+a user-configured breaker or circuit rating. This is useful for car/EV chargers,
 HVAC, pool pumps, water heaters, ovens, workshops, and other loads where amps
 are easier to reason about than watts. If a current sensor is unavailable, the
 analyzer can estimate current from real power and voltage when both are present.
@@ -199,7 +199,7 @@ electrician for circuit sizing and safety decisions.
 
 For dual-phase circuits with leg A and leg B real-power sensors, the analyzer
 tracks how far apart the two legs are while the appliance is drawing meaningful
-power. This is useful for HVAC, water heaters, pool pumps, ovens, EV chargers,
+power. This is useful for HVAC, water heaters, pool pumps, ovens, car/EV chargers,
 and other 240 V loads where a large persistent difference can point to CT
 pairing/orientation mistakes, phase mapping problems, or a load behavior change.
 
@@ -258,10 +258,10 @@ opportunity diagnostics. By default, exported solar at or above 500 W is
 reported as `surplus_available`, and exported solar at or above 1500 W is
 reported as `high_surplus`. This is inspired by solar diverter and home energy
 management tools, but it is read-only: use ordinary Home Assistant automations
-if you want to turn on an EV charger, water heater, pool pump, or other
+if you want to turn on a car/EV charger, water heater, pool pump, or other
 flexible load.
 
-For configured EV charger, HVAC, pool pump, and water heater circuits, the
+For configured car/EV charger, HVAC, pool pump, and water heater circuits, the
 analyzer also estimates instantaneous net solar support for active flexible
 loads and whether idle flexible loads are surplus candidates. The evidence
 lists candidate circuits, active/idle/unavailable state, current power,

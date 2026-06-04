@@ -134,7 +134,7 @@ _DEMO_SOURCE_ENTITY_IDS = tuple(
     for metric in _DEMO_SOURCE_METRICS
 ) + tuple(
     f"sensor.cs_energy_analyzer_demo_{circuit}_{leg}_{metric}"
-    for circuit in ("hvac", "water_heater")
+    for circuit in ("hvac", "water_heater", "car_charger")
     for leg in ("l1", "l2")
     for metric in _DEMO_SOURCE_METRICS
 )

@@ -4744,7 +4744,7 @@ def _circuit_config_from_raw(
         return None
 
     try:
-        appliance_profile = ApplianceProfile(
+        appliance_profile = _appliance_profile_from_raw_value(
             raw_circuit.get("appliance_profile", ApplianceProfile.MIXED.value)
         )
         mode = CircuitMode(raw_circuit.get("mode", CircuitMode.MIXED.value))
@@ -4861,6 +4861,20 @@ def _circuit_config_from_raw(
             default=24,
         ),
     )
+
+
+def _appliance_profile_from_raw_value(value: Any) -> ApplianceProfile:
+    normalized = str(value or ApplianceProfile.MIXED.value).strip().lower()
+    if normalized in {
+        "car_charger",
+        "vehicle_charger",
+        "vehicle_charging",
+        "level2_charger",
+        "level_2_charger",
+        "wall_connector",
+    }:
+        return ApplianceProfile.EV_CHARGER
+    return ApplianceProfile(normalized)
 
 
 def _power_flow_mode_from_raw(
@@ -5272,7 +5286,19 @@ def _appliance_profile_mode_from_circuit_id(
             CircuitMode.SINGLE_PHASE,
         ),
         (
-            ("_ev_", "_evse_", "_charger_"),
+            (
+                "_ev_",
+                "_evse_",
+                "_charger_",
+                "_ev_charging_",
+                "_car_charger_",
+                "_car_charging_",
+                "_vehicle_charger_",
+                "_vehicle_charging_",
+                "_level2_charger_",
+                "_level_2_charger_",
+                "_wall_connector_",
+            ),
             ApplianceProfile.EV_CHARGER,
             CircuitMode.DUAL_PHASE,
         ),

@@ -1478,6 +1478,101 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     assert lights.mode is CircuitMode.MIXED
 
 
+def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+        SensorRole,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.garage_vehicle_charging_l1_active_power",
+                "sensor.garage_vehicle_charging_l2_active_power",
+                "sensor.garage_vehicle_charging_l1_current",
+                "sensor.garage_vehicle_charging_l2_current",
+                "sensor.garage_vehicle_charging_l1_power_factor",
+                "sensor.garage_vehicle_charging_l2_power_factor",
+                "sensor.panel_mains_l1_voltage",
+                "sensor.panel_mains_l2_voltage",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.panel_mains_l1_voltage",
+                "sensor.panel_mains_l2_voltage",
+            ],
+        },
+    )
+
+    config = coordinator.circuit_configs[0]
+
+    assert config.circuit_id == "garage_vehicle_charging"
+    assert config.name == "Garage Vehicle Charging"
+    assert config.appliance_profile is ApplianceProfile.EV_CHARGER
+    assert config.mode is CircuitMode.DUAL_PHASE
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in config.sensors
+    } >= {
+        (
+            "sensor.garage_vehicle_charging_l1_active_power",
+            SensorRole.REAL_POWER,
+            "a",
+        ),
+        (
+            "sensor.garage_vehicle_charging_l2_active_power",
+            SensorRole.REAL_POWER,
+            "b",
+        ),
+        ("sensor.panel_mains_l1_voltage", SensorRole.VOLTAGE, "a"),
+        ("sensor.panel_mains_l2_voltage", SensorRole.VOLTAGE, "b"),
+    }
+
+
+def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "garage_charger",
+                    "name": "Garage Car Charger",
+                    "mode": "dual_phase",
+                    "appliance_profile": "car_charger",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.garage_charger_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.garage_charger_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    config = coordinator.circuit_configs[0]
+
+    assert config.appliance_profile is ApplianceProfile.EV_CHARGER
+    assert config.mode is CircuitMode.DUAL_PHASE
+
+
 def test_runtime_infers_mains_source_entity_role_from_entity_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

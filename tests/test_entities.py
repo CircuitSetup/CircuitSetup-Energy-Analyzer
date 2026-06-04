@@ -1196,6 +1196,63 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_adds_car_charger_specific_diagnostics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="car_charger",
+        name="Car Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.car_charger_l1_power", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.car_charger_l2_power", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.car_charger_l1_current", SensorRole.CURRENT, leg="a"),
+            SensorRef("sensor.car_charger_l2_current", SensorRole.CURRENT, leg="b"),
+            SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE, leg="a"),
+            SensorRef("sensor.mains_l2_voltage", SensorRole.VOLTAGE, leg="b"),
+            SensorRef("sensor.car_charger_apparent", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.car_charger_pf", SensorRole.POWER_FACTOR),
+            SensorRef("sensor.car_charger_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={
+                "car_charger": {"breaker_amps": 40.0, "warning_ratio": 0.8}
+            },
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_car_charger_current_demand",
+        "entry-1_car_charger_demand_peak_status",
+        "entry-1_car_charger_capacity_usage",
+        "entry-1_car_charger_leg_imbalance",
+        "entry-1_car_charger_leg_imbalance_status",
+        "entry-1_car_charger_metric_consistency_score",
+        "entry-1_car_charger_metric_consistency_status",
+        "entry-1_car_charger_daily_energy_usage",
+        "entry-1_car_charger_power_factor_drift",
+    } <= unique_ids
+    assert not {
+        "entry-1_car_charger_run_cycle_count",
+        "entry-1_car_charger_run_cycle_status",
+        "entry-1_car_charger_standby_status",
+        "entry-1_car_charger_nilm_signature_count",
+        "entry-1_car_charger_balance_power",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
     None
 ):
@@ -1330,6 +1387,105 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
         "device_info",
         None,
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_car_charger",
+        name="Car Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power",
+                SensorRole.REAL_POWER,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power",
+                SensorRole.REAL_POWER,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l1_current",
+                SensorRole.CURRENT,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l2_current",
+                SensorRole.CURRENT,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l1_power_factor",
+                SensorRole.POWER_FACTOR,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_car_charger_l2_reactive_power",
+                SensorRole.REACTIVE_POWER,
+                leg="b",
+            ),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    source_entities = [
+        entity
+        for entity in added_entities
+        if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
+    ]
+    by_entity_id = {
+        f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
+    }
+
+    assert set(by_entity_id) == {
+        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power",
+        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power",
+        "sensor.cs_energy_analyzer_demo_car_charger_l1_current",
+        "sensor.cs_energy_analyzer_demo_car_charger_l2_current",
+        "sensor.cs_energy_analyzer_demo_car_charger_l1_power_factor",
+        "sensor.cs_energy_analyzer_demo_car_charger_l2_reactive_power",
+    }
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power"
+        ].native_value
+        == 3600.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power"
+        ].native_value
+        == 3580.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_car_charger_l1_current"
+        ].native_value
+        == 30.1
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_car_charger_l1_power_factor"
+        ].native_value
+        == 0.99
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_car_charger_l2_reactive_power"
+        ].native_value
+        == 320.0
+    )
+    assert "sensor.cs_energy_analyzer_demo_car_charger_voltage" not in by_entity_id
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,22 @@ def test_hvac_profile_supports_dual_phase_and_voltage_context() -> None:
     assert "leg_imbalance" in definition.features
 
 
+def test_ev_charger_profile_supports_car_charger_analysis_context() -> None:
+    definition = get_profile_definition(ApplianceProfile.EV_CHARGER)
+
+    assert definition.supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
+    assert SensorRole.REAL_POWER in definition.required_roles
+    assert SensorRole.CURRENT in definition.recommended_roles
+    assert SensorRole.VOLTAGE in definition.recommended_roles
+    assert SensorRole.ENERGY in definition.recommended_roles
+    assert "charge_session" in definition.features
+    assert "ramp_rate" in definition.features
+    assert "leg_imbalance" in definition.features
+
+
 def test_mains_nilm_profile_is_experimental_aggregate_mode() -> None:
     definition = get_profile_definition(ApplianceProfile.MAINS_NILM)
 
