@@ -1342,6 +1342,70 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
     assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
 
 
+def test_runtime_creates_mixed_energy_circuits_from_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        CircuitMode,
+        SensorRole,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_energy",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
+                "sensor.cs_energy_analyzer_demo_mains_l2_energy",
+            ],
+        },
+    )
+
+    by_sensor = {
+        config.sensors[0].entity_id: config for config in coordinator.circuit_configs
+    }
+
+    assert set(by_sensor) == {
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+        "sensor.cs_energy_analyzer_demo_hvac_energy",
+    }
+    fridge = by_sensor["sensor.cs_energy_analyzer_demo_refrigerator_energy"]
+    assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
+    assert fridge.name == "Cs Energy Analyzer Demo Refrigerator"
+    assert fridge.mode is CircuitMode.MIXED
+    assert fridge.sensors[0].role is SensorRole.ENERGY
+
+
+def test_runtime_infers_mains_source_entity_role_from_entity_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import SensorRole
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
+                "sensor.cs_energy_analyzer_demo_mains_l2_power",
+            ],
+        },
+    )
+
+    mains = coordinator.circuit_configs[0]
+
+    assert [sensor.role for sensor in mains.sensors] == [
+        SensorRole.ENERGY,
+        SensorRole.REAL_POWER,
+    ]
+
+
 def test_runtime_circuit_config_defaults_solar_inverter_to_generation() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

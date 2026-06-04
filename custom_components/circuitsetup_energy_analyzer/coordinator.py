@@ -34,6 +34,7 @@ from .const import (
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
+    CONF_SOURCE_ENTITIES,
     DEFAULT_RETENTION_MODE,
     DEFAULT_SENSITIVITY,
     DOMAIN,
@@ -4607,6 +4608,15 @@ def _circuit_configs_from_entry_data(
         if config is not None:
             configs.append(config)
 
+    configs.extend(
+        _source_entity_configs_from_sources(
+            entry_data,
+            options,
+            default_retention_mode,
+            configs,
+        )
+    )
+
     if (
         _experimental_nilm_enabled(entry_data, options)
         and not any(config.mode is CircuitMode.MAINS_NILM for config in configs)
@@ -4615,6 +4625,57 @@ def _circuit_configs_from_entry_data(
         if mains_config is not None:
             configs.append(mains_config)
     return tuple(configs)
+
+
+def _source_entity_configs_from_sources(
+    entry_data: dict[str, Any],
+    options: dict[str, Any] | None,
+    retention_mode: RetentionMode,
+    existing_configs: Iterable[CircuitConfig],
+) -> tuple[CircuitConfig, ...]:
+    source_entities = _string_list_from_sources(
+        entry_data,
+        options,
+        CONF_SOURCE_ENTITIES,
+    )
+    if not source_entities:
+        return ()
+
+    mains_entities = set(
+        _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
+    )
+    existing_circuit_ids = {config.circuit_id for config in existing_configs}
+    existing_source_entities = {
+        sensor.entity_id
+        for config in existing_configs
+        for sensor in config.sensors
+    }
+    sensors_by_circuit_id: dict[str, list[SensorRef]] = {}
+    for entity_id in source_entities:
+        if entity_id in mains_entities or entity_id in existing_source_entities:
+            continue
+        circuit_id = _source_circuit_id_from_entity_id(entity_id)
+        if not circuit_id or circuit_id in existing_circuit_ids:
+            continue
+        sensors_by_circuit_id.setdefault(circuit_id, []).append(
+            SensorRef(
+                entity_id=entity_id,
+                role=_sensor_role_from_entity_id(entity_id),
+                leg=_entity_id_leg_hint(entity_id),
+            )
+        )
+
+    return tuple(
+        CircuitConfig(
+            circuit_id=circuit_id,
+            name=_friendly_name_from_circuit_id(circuit_id),
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.MIXED,
+            sensors=tuple(sensors),
+            retention_mode=retention_mode,
+        )
+        for circuit_id, sensors in sensors_by_circuit_id.items()
+    )
 
 
 def _experimental_nilm_enabled(
@@ -4648,7 +4709,11 @@ def _mains_nilm_config_from_sources(
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=tuple(
-            SensorRef(entity_id=entity_id, role=SensorRole.REAL_POWER)
+            SensorRef(
+                entity_id=entity_id,
+                role=_sensor_role_from_entity_id(entity_id),
+                leg=_entity_id_leg_hint(entity_id),
+            )
             for entity_id in mains_entities
         ),
         retention_mode=_retention_mode_from_sources(entry_data, options),
@@ -4976,7 +5041,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, str):
         return SensorRef(
             entity_id=raw_sensor,
-            role=SensorRole.REAL_POWER,
+            role=_sensor_role_from_entity_id(raw_sensor),
             leg=_entity_id_leg_hint(raw_sensor),
         )
     if not isinstance(raw_sensor, dict):
@@ -4995,3 +5060,69 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         leg=raw_sensor.get("leg"),
         unit=raw_sensor.get("unit"),
     )
+
+
+def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
+    object_id = _entity_object_id(entity_id)
+    if _has_metric_suffix(object_id, ("power_factor", "pf")):
+        return SensorRole.POWER_FACTOR
+    if _has_metric_suffix(object_id, ("reactive_power", "reactive", "var")):
+        return SensorRole.REACTIVE_POWER
+    if _has_metric_suffix(object_id, ("apparent_power", "apparent", "va")):
+        return SensorRole.APPARENT_POWER
+    if _has_metric_suffix(object_id, ("frequency", "line_frequency", "hz")):
+        return SensorRole.FREQUENCY
+    if _has_metric_suffix(object_id, ("current", "amps", "amp", "a")):
+        return SensorRole.CURRENT
+    if _has_metric_suffix(object_id, ("voltage", "volts", "volt", "v")):
+        return SensorRole.VOLTAGE
+    if _has_metric_suffix(object_id, ("energy", "kwh", "wh", "mwh")):
+        return SensorRole.ENERGY
+    return SensorRole.REAL_POWER
+
+
+def _source_circuit_id_from_entity_id(entity_id: str) -> str:
+    object_id = _entity_object_id(entity_id)
+    for suffix in (
+        "_reactive_power",
+        "_apparent_power",
+        "_power_factor",
+        "_line_frequency",
+        "_real_power",
+        "_active_power",
+        "_frequency",
+        "_current",
+        "_voltage",
+        "_energy",
+        "_watts",
+        "_watt",
+        "_amps",
+        "_amp",
+        "_power",
+        "_kwh",
+        "_mwh",
+        "_wh",
+        "_var",
+        "_va",
+        "_pf",
+        "_hz",
+    ):
+        if object_id.endswith(suffix):
+            return object_id[: -len(suffix)]
+    return object_id
+
+
+def _entity_object_id(entity_id: str) -> str:
+    return str(entity_id).split(".")[-1].strip().lower()
+
+
+def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
+    normalized = object_id.strip().lower()
+    return any(
+        normalized == suffix or normalized.endswith(f"_{suffix}")
+        for suffix in metric_suffixes
+    )
+
+
+def _friendly_name_from_circuit_id(circuit_id: str) -> str:
+    return str(circuit_id).replace("_", " ").strip().title()
