@@ -96,6 +96,21 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "optional" in descriptions["mains_source_entities"].lower()
 
 
+def test_runtime_english_translations_include_setup_and_options_text() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    translations = json.loads(
+        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+    )
+
+    for section, step in (("config", "user"), ("options", "init")):
+        strings_step = strings[section]["step"][step]
+        translated_step = translations[section]["step"][step]
+        assert translated_step["data"] == strings_step["data"]
+        assert translated_step["data_description"] == strings_step["data_description"]
+        assert translated_step["title"] == strings_step["title"]
+        assert translated_step["description"] == strings_step["description"]
+
+
 def test_service_fields_have_human_readable_names_and_descriptions() -> None:
     services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
 

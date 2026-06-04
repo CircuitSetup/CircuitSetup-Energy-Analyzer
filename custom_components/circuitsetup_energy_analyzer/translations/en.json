@@ -1,0 +1,53 @@
+{
+  "title": "CircuitSetup Energy Analyzer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure CircuitSetup Energy Analyzer",
+        "description": "Select energy source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.\n\n{mapping_suggestions}",
+        "data": {
+          "source_entities": "Source Entities",
+          "enable_experimental_nilm": "Enable Experimental NILM",
+          "mains_source_entities": "Mains Source Entities",
+          "sensitivity": "Sensitivity",
+          "retention_mode": "Retention Mode"
+        },
+        "data_description": {
+          "source_entities": "Use sensor entities for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "sensitivity": "Controls how readily possible issues are reported.",
+          "retention_mode": "Controls how much historical diagnostic data is retained."
+        }
+      }
+    },
+    "error": {
+      "no_source_entities": "Select at least one source sensor.",
+      "invalid_source_entities": "Source sensor entity IDs must be text values.",
+      "invalid_retention_mode": "Select a supported retention mode.",
+      "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "CircuitSetup Energy Analyzer options",
+        "description": "Tune source sensors, diagnostics, and experimental NILM settings.\n\n{mapping_suggestions}",
+        "data": {
+          "source_entities": "Source Entities",
+          "enable_experimental_nilm": "Enable Experimental NILM",
+          "mains_source_entities": "Mains Source Entities",
+          "sensitivity": "Sensitivity",
+          "retention_mode": "Retention Mode"
+        },
+        "data_description": {
+          "source_entities": "Update the sensor entities used for power, current, energy, reactive power, apparent power, or power factor.",
+          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "sensitivity": "Controls how readily possible issues are reported.",
+          "retention_mode": "Controls how much historical diagnostic data is retained."
+        }
+      }
+    }
+  }
+}
