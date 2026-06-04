@@ -39,6 +39,30 @@
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
           "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits."
         }
+      },
+      "utility": {
+        "title": "Utility / Opower Comparison",
+        "description": "Optional: compare Utility or Opower energy data with mains measurement data or a selected sum of measured kWh sensors.",
+        "data": {
+          "enable_utility_comparison": "Enable Utility Comparison",
+          "circuit_id": "Circuit",
+          "utility_energy_entity": "Utility Energy Entity",
+          "utility_statistic_id": "Utility Statistic ID",
+          "utility_source_type": "Utility Source Type",
+          "utility_statistic_period": "Utility Statistic Period",
+          "measured_energy_entities": "Measured Energy Entities",
+          "tolerance_percent": "Tolerance Percent"
+        },
+        "data_description": {
+          "enable_utility_comparison": "Turn this on to create utility comparison sensors for the selected circuit.",
+          "circuit_id": "Choose the circuit to compare. Mains is usually the right choice for utility bill data.",
+          "utility_energy_entity": "Optional utility or Opower kWh entity to use when recorder statistics are not available.",
+          "utility_statistic_id": "Optional recorder statistic ID for Utility or Opower kWh data.",
+          "utility_source_type": "Choose Auto to prefer statistics when available and fall back to the selected entity.",
+          "utility_statistic_period": "Choose the recorder period to compare against measured kWh data.",
+          "measured_energy_entities": "Optional measured kWh entities to sum; leave blank to use the analyzer's circuit energy total.",
+          "tolerance_percent": "Alert when the measured and utility totals differ by more than this percent."
+        }
       }
     },
     "error": {
@@ -54,10 +78,13 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose whether to review circuit appliance assignments or edit the source sensors included in analysis.",
+        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, utility comparison, or advanced circuit settings.",
         "menu_options": {
           "assign": "Review Circuit Assignments",
-          "sources": "Edit Source Selection"
+          "sources": "Edit Source Selection",
+          "mains": "Edit Mains Sensors",
+          "utility": "Utility / Opower Comparison",
+          "advanced": "Advanced Circuit Settings"
         }
       },
       "sources": {
@@ -67,7 +94,6 @@
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
-          "mains_source_entities": "Mains Source Entities",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -75,9 +101,42 @@
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
-          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls how long diagnostic evidence and events are kept. Shorter retention uses less storage; Diagnostic keeps more evidence."
+        }
+      },
+      "mains": {
+        "title": "Edit Mains Sensors",
+        "description": "Select optional aggregate mains sensors used for Mains NILM and whole-home comparison features.",
+        "data": {
+          "mains_source_entities": "Mains Source Entities"
+        },
+        "data_description": {
+          "mains_source_entities": "Optional aggregate mains sensors for Mains NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names."
+        }
+      },
+      "utility": {
+        "title": "Utility / Opower Comparison",
+        "description": "Optional: compare Utility or Opower energy data with mains measurement data or a selected sum of measured kWh sensors.",
+        "data": {
+          "enable_utility_comparison": "Enable Utility Comparison",
+          "circuit_id": "Circuit",
+          "utility_energy_entity": "Utility Energy Entity",
+          "utility_statistic_id": "Utility Statistic ID",
+          "utility_source_type": "Utility Source Type",
+          "utility_statistic_period": "Utility Statistic Period",
+          "measured_energy_entities": "Measured Energy Entities",
+          "tolerance_percent": "Tolerance Percent"
+        },
+        "data_description": {
+          "enable_utility_comparison": "Turn this on to create utility comparison sensors for the selected circuit.",
+          "circuit_id": "Choose the circuit to compare. Mains is usually the right choice for utility bill data.",
+          "utility_energy_entity": "Optional utility or Opower kWh entity to use when recorder statistics are not available.",
+          "utility_statistic_id": "Optional recorder statistic ID for Utility or Opower kWh data.",
+          "utility_source_type": "Choose Auto to prefer statistics when available and fall back to the selected entity.",
+          "utility_statistic_period": "Choose the recorder period to compare against measured kWh data.",
+          "measured_energy_entities": "Optional measured kWh entities to sum; leave blank to use the analyzer's circuit energy total.",
+          "tolerance_percent": "Alert when the measured and utility totals differ by more than this percent."
         }
       },
       "select_assignment": {
@@ -88,6 +147,70 @@
         },
         "data_description": {
           "selected_assignment": "Choose the existing appliance or circuit assignment to edit."
+        }
+      },
+      "select_advanced_circuit": {
+        "title": "Select Circuit",
+        "description": "Choose the circuit whose advanced analyzer settings you want to edit.",
+        "data": {
+          "circuit_id": "Circuit"
+        },
+        "data_description": {
+          "circuit_id": "Choose the existing appliance or circuit to tune."
+        }
+      },
+      "advanced_settings": {
+        "title": "Advanced Circuit Settings",
+        "description": "Tune sensitivity, usage spike, goal, activity, billing, cost, demand, capacity, and standby settings for {circuit_name}.",
+        "data": {
+          "preset": "Sensitivity",
+          "window_days": "Energy Window Days",
+          "daily_spike_ratio": "Daily Spike Ratio",
+          "daily_goal_kwh": "Daily Goal kWh",
+          "goal_alert_ratio": "Goal Alert Ratio",
+          "max_active_minutes": "Max Active Minutes",
+          "max_idle_minutes": "Max Idle Minutes",
+          "cycle_start_day": "Cycle Start Day",
+          "budget_kwh": "Budget kWh",
+          "budget_alert_ratio": "Budget Alert Ratio",
+          "default_rate_per_kwh": "Default Rate Per kWh",
+          "tou_rate_per_kwh": "TOU Rate Per kWh",
+          "tou_start": "TOU Start",
+          "tou_end": "TOU End",
+          "tou_weekdays": "TOU Weekdays",
+          "tou_name": "TOU Name",
+          "window_minutes": "Demand Window Minutes",
+          "demand_limit_w": "Demand Limit W",
+          "breaker_amps": "Breaker Amps",
+          "warning_ratio": "Capacity Warning Ratio",
+          "window_hours": "Standby Window Hours",
+          "standby_threshold_w": "Standby Threshold W",
+          "always_on_alert_w": "Always On Alert W"
+        },
+        "data_description": {
+          "preset": "Controls alert sensitivity for this circuit only.",
+          "window_days": "Number of days used for daily kWh spike comparison.",
+          "daily_spike_ratio": "Fraction over the rolling window total that counts as a usage spike.",
+          "daily_goal_kwh": "Optional daily kWh goal for this circuit.",
+          "goal_alert_ratio": "Alert when daily usage reaches this fraction of the goal.",
+          "max_active_minutes": "Optional longest expected active period before an activity alert.",
+          "max_idle_minutes": "Optional longest expected idle period before an activity alert.",
+          "cycle_start_day": "Billing or cost cycle start day of the month.",
+          "budget_kwh": "Optional billing-cycle kWh budget for this circuit.",
+          "budget_alert_ratio": "Alert when projected cycle usage reaches this fraction of the budget.",
+          "default_rate_per_kwh": "Optional default utility rate for circuit cost tracking.",
+          "tou_rate_per_kwh": "Optional time-of-use rate for the configured peak window.",
+          "tou_start": "Optional peak-rate start time, such as 16:00.",
+          "tou_end": "Optional peak-rate end time, such as 21:00.",
+          "tou_weekdays": "Optional comma-separated weekdays for peak pricing, where Monday is 0.",
+          "tou_name": "Display name for the time-of-use rate window.",
+          "window_minutes": "Demand calculation window in minutes.",
+          "demand_limit_w": "Optional watt limit for demand alerts.",
+          "breaker_amps": "Optional breaker size in amps for capacity alerts.",
+          "warning_ratio": "Alert when estimated capacity reaches this fraction of breaker size.",
+          "window_hours": "Hours used to learn the low-power standby watermark.",
+          "standby_threshold_w": "Minimum watts considered standby or always-on usage.",
+          "always_on_alert_w": "Optional watts limit for always-on usage alerts."
         }
       },
       "assign": {

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_KNOWN_LOAD_CIRCUITS,
@@ -11,6 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
+    CONF_UTILITY_COMPARISON_SETTINGS,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -252,6 +254,124 @@ async def test_setup_entry_listens_to_synthetic_mains_source_entities() -> None:
 
     coordinator = hass.data[DOMAIN]["entry-1"]
     assert coordinator.source_entities == ("sensor.mains_l1_power",)
+
+
+def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                },
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                },
+            ],
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {
+                    "utility_energy_entity": "sensor.opower_current_bill_usage",
+                    "utility_statistic_id": "opower:utility_elec_consumption",
+                    "utility_source_type": "statistics",
+                    "utility_statistic_period": "day",
+                    "measured_energy_entities": ["sensor.panel_import_energy"],
+                    "tolerance_percent": 8.5,
+                },
+            },
+            CONF_ADVANCED_SETTINGS: {
+                "refrigerator": {
+                    "preset": "high",
+                    "window_days": 14,
+                    "daily_spike_ratio": 0.35,
+                    "daily_goal_kwh": 2.5,
+                    "goal_alert_ratio": 0.9,
+                    "max_active_minutes": 120,
+                    "max_idle_minutes": 480,
+                    "cycle_start_day": 15,
+                    "budget_kwh": 90.0,
+                    "budget_alert_ratio": 0.85,
+                    "default_rate_per_kwh": 0.18,
+                    "tou_rate_per_kwh": 0.42,
+                    "tou_start": "16:00",
+                    "tou_end": "21:00",
+                    "tou_weekdays": "0,1,2,3,4",
+                    "tou_name": "Peak",
+                    "window_minutes": 30,
+                    "demand_limit_w": 1200.0,
+                    "breaker_amps": 20.0,
+                    "warning_ratio": 0.8,
+                    "window_hours": 72,
+                    "standby_threshold_w": 6.0,
+                    "always_on_alert_w": 12.0,
+                },
+            },
+        },
+    )
+
+    assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "opower:utility_elec_consumption",
+        "utility_source_type": "statistics",
+        "utility_statistic_period": "day",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "tolerance_percent": 8.5,
+    }
+    assert coordinator.store_data.sensitivity_by_circuit["refrigerator"] == "sensitive"
+    assert coordinator.store_data.energy_usage_settings_by_circuit[
+        "refrigerator"
+    ] == {
+        "window_days": 14,
+        "daily_spike_ratio": 0.35,
+    }
+    assert coordinator.store_data.energy_goal_settings_by_circuit["refrigerator"] == {
+        "daily_goal_kwh": 2.5,
+        "goal_alert_ratio": 0.9,
+    }
+    assert coordinator.store_data.activity_alert_settings_by_circuit[
+        "refrigerator"
+    ] == {
+        "max_active_minutes": 120,
+        "max_idle_minutes": 480,
+    }
+    assert coordinator.store_data.billing_settings_by_circuit["refrigerator"] == {
+        "cycle_start_day": 15,
+        "budget_kwh": 90.0,
+        "budget_alert_ratio": 0.85,
+    }
+    assert coordinator.store_data.cost_settings_by_circuit["refrigerator"] == {
+        "cycle_start_day": 15,
+        "default_rate_per_kwh": 0.18,
+        "tou_rate_per_kwh": 0.42,
+        "tou_start": "16:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+    }
+    assert coordinator.store_data.demand_settings_by_circuit["refrigerator"] == {
+        "window_minutes": 30,
+        "demand_limit_w": 1200.0,
+    }
+    assert coordinator.store_data.capacity_settings_by_circuit["refrigerator"] == {
+        "breaker_amps": 20.0,
+        "warning_ratio": 0.8,
+    }
+    assert coordinator.store_data.standby_settings_by_circuit["refrigerator"] == {
+        "window_hours": 72,
+        "standby_threshold_w": 6.0,
+        "always_on_alert_w": 12.0,
+    }
 
 
 @pytest.mark.asyncio

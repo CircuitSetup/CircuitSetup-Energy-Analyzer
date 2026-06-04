@@ -4,6 +4,8 @@ from custom_components.circuitsetup_energy_analyzer.discovery import (
     DiscoveredSensor,
     async_discover_energy_source_entities_for_devices,
     async_discover_sensors,
+    async_discover_utility_energy_entities,
+    async_discover_utility_statistic_ids,
     infer_sensor_role,
     score_circuitsetup_candidate,
 )
@@ -35,6 +37,7 @@ class FakeStates:
 class FakeHass:
     def __init__(self, states: list[FakeState]) -> None:
         self.states = FakeStates(states)
+        self.recorder_statistic_ids: list[str] = []
 
 
 def test_infer_sensor_role_from_entity_id_and_friendly_name() -> None:
@@ -262,6 +265,68 @@ def test_async_discover_energy_sources_for_devices_expands_selected_meter() -> N
     assert entity_ids == [
         "sensor.panel_ct1_amps",
         "sensor.panel_ct1_watts",
+    ]
+
+
+def test_async_discover_utility_energy_entities_prefers_opower_and_billing_kwh() -> (
+    None
+):
+    hass = FakeHass(
+        [
+            FakeState(
+                "sensor.typical_monthly_electric_usage",
+                {
+                    "friendly_name": "ELEC Typical monthly electric usage",
+                    "device_class": "energy",
+                    "unit_of_measurement": "kWh",
+                },
+            ),
+            FakeState(
+                "sensor.opower_current_bill_usage",
+                {
+                    "friendly_name": "Opower current bill usage",
+                    "device_class": "energy",
+                    "unit_of_measurement": "kWh",
+                },
+            ),
+            FakeState(
+                "sensor.kitchen_lights_energy",
+                {
+                    "friendly_name": "Kitchen Lights Energy",
+                    "device_class": "energy",
+                    "unit_of_measurement": "kWh",
+                },
+            ),
+            FakeState(
+                "sensor.typical_monthly_electric_cost",
+                {
+                    "friendly_name": "Typical monthly electric cost",
+                    "device_class": "monetary",
+                    "unit_of_measurement": "USD",
+                },
+            ),
+        ]
+    )
+
+    assert asyncio.run(async_discover_utility_energy_entities(hass)) == [
+        "sensor.opower_current_bill_usage",
+        "sensor.typical_monthly_electric_usage",
+    ]
+
+
+def test_async_discover_utility_statistic_ids_filters_recorder_metadata() -> None:
+    hass = FakeHass([])
+    hass.recorder_statistic_ids = [
+        "sensor.kitchen_lights_energy",
+        "opower:utility_elec_consumption",
+        "utility:gas_consumption",
+        "sensor.typical_monthly_electric_usage",
+    ]
+
+    assert asyncio.run(async_discover_utility_statistic_ids(hass)) == [
+        "opower:utility_elec_consumption",
+        "sensor.typical_monthly_electric_usage",
+        "utility:gas_consumption",
     ]
 
 

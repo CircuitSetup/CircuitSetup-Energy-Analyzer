@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
@@ -28,6 +28,7 @@ from .capacity import (
     evaluate_circuit_capacity,
 )
 from .const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_KNOWN_LOAD_CIRCUITS,
@@ -35,6 +36,7 @@ from .const import (
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
+    CONF_UTILITY_COMPARISON_SETTINGS,
     DEFAULT_RETENTION_MODE,
     DEFAULT_SENSITIVITY,
     DOMAIN,
@@ -366,6 +368,32 @@ def _alert_anomaly_score(alert: AlertEvidence) -> float:
     return abs(alert.observed_value)
 
 
+def _merged_entry_settings_map(
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+    key: str,
+) -> dict[str, dict[str, Any]]:
+    settings: dict[str, dict[str, Any]] = {}
+    for source in (entry_data.get(key, {}), options.get(key, {})):
+        if not isinstance(source, Mapping):
+            continue
+        for circuit_id, value in source.items():
+            if isinstance(value, Mapping):
+                settings[str(circuit_id)] = dict(value)
+    return settings
+
+
+def _replace_if_present(
+    target: dict[str, dict[str, Any]],
+    circuit_id: str,
+    source: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> None:
+    values = {key: source[key] for key in keys if key in source}
+    if values:
+        target[circuit_id] = values
+
+
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     """Runtime coordinator for source sensor updates and analyzer state."""
 
@@ -408,6 +436,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.entry_data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
             )
         )
+        self._apply_config_entry_settings()
         self._detectors = {
             config.circuit_id: CircuitEventDetector()
             for config in self.circuit_configs
@@ -489,6 +518,101 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._unsub_state_change()
             self._unsub_state_change = None
         self.started = False
+
+    def _apply_config_entry_settings(self: Self) -> None:
+        """Apply setup/options settings to store-backed runtime setting maps."""
+        for circuit_id, settings in _merged_entry_settings_map(
+            self.entry_data,
+            self.options,
+            CONF_UTILITY_COMPARISON_SETTINGS,
+        ).items():
+            if settings:
+                self.store_data.utility_comparison_settings_by_circuit[circuit_id] = (
+                    settings
+                )
+            else:
+                self.store_data.utility_comparison_settings_by_circuit.pop(
+                    circuit_id,
+                    None,
+                )
+
+        for circuit_id, settings in _merged_entry_settings_map(
+            self.entry_data,
+            self.options,
+            CONF_ADVANCED_SETTINGS,
+        ).items():
+            self._apply_advanced_settings(circuit_id, settings)
+
+    def _apply_advanced_settings(
+        self: Self,
+        circuit_id: str,
+        settings: dict[str, Any],
+    ) -> None:
+        if not settings:
+            return
+
+        sensitivity = settings.get("preset")
+        if sensitivity:
+            self.store_data.sensitivity_by_circuit[circuit_id] = (
+                normalize_sensitivity(str(sensitivity))
+            )
+
+        _replace_if_present(
+            self.store_data.energy_usage_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("window_days", "daily_spike_ratio"),
+        )
+        _replace_if_present(
+            self.store_data.energy_goal_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("daily_goal_kwh", "goal_alert_ratio"),
+        )
+        _replace_if_present(
+            self.store_data.activity_alert_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("max_active_minutes", "max_idle_minutes"),
+        )
+        _replace_if_present(
+            self.store_data.billing_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("cycle_start_day", "budget_kwh", "budget_alert_ratio"),
+        )
+        _replace_if_present(
+            self.store_data.cost_settings_by_circuit,
+            circuit_id,
+            settings,
+            (
+                "cycle_start_day",
+                "default_rate_per_kwh",
+                "tou_rate_per_kwh",
+                "tou_start",
+                "tou_end",
+                "tou_weekdays",
+                "tou_name",
+            ),
+        )
+        _replace_if_present(
+            self.store_data.demand_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("window_minutes", "demand_limit_w"),
+        )
+        _replace_if_present(
+            self.store_data.capacity_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("breaker_amps", "warning_ratio"),
+        )
+        _replace_if_present(
+            self.store_data.standby_settings_by_circuit,
+            circuit_id,
+            settings,
+            ("window_hours", "standby_threshold_w", "always_on_alert_w"),
+        )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""

@@ -55,6 +55,13 @@ Recommended v1 appliance types include broad `hvac`, more specific
 `water_pump`, `pool_pump`, and `sump_pump` pump profiles. Existing
 `well_pump` input is accepted as a legacy alias for `water_pump`.
 
+## Alert Blueprint
+
+The repository includes a Home Assistant automation blueprint at
+`blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml`.
+Use it to create persistent notifications or custom follow-up actions when
+selected analyzer entities report possible issue states.
+
 ## Circuit Modes
 
 CircuitSetup Energy Analyzer supports four analysis modes:

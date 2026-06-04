@@ -108,6 +108,7 @@ except ModuleNotFoundError:
     ha_selector = None
 
 from .const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -117,6 +118,7 @@ from .const import (
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
+    CONF_UTILITY_COMPARISON_SETTINGS,
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
     DEFAULT_RETENTION_MODE,
     DEFAULT_SENSITIVITY,
@@ -127,10 +129,19 @@ from .discovery import (
     async_discover_energy_source_entities,
     async_discover_energy_source_entities_for_devices,
     async_discover_sensors,
+    async_discover_utility_energy_entities,
+    async_discover_utility_statistic_ids,
     infer_sensor_role,
 )
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
 from .models import ApplianceProfile, CircuitMode, RetentionMode, SensorRole
+from .utility_comparison import (
+    DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+    DEFAULT_UTILITY_SOURCE_TYPE,
+    DEFAULT_UTILITY_STATISTIC_PERIOD,
+    VALID_UTILITY_SOURCE_TYPES,
+    VALID_UTILITY_STATISTIC_PERIODS,
+)
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
@@ -144,6 +155,37 @@ FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
+FIELD_ENABLE_UTILITY_COMPARISON = "enable_utility_comparison"
+FIELD_CIRCUIT_ID = "circuit_id"
+FIELD_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
+FIELD_UTILITY_STATISTIC_ID = "utility_statistic_id"
+FIELD_UTILITY_SOURCE_TYPE = "utility_source_type"
+FIELD_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
+FIELD_MEASURED_ENERGY_ENTITIES = "measured_energy_entities"
+FIELD_TOLERANCE_PERCENT = "tolerance_percent"
+FIELD_PRESET = "preset"
+FIELD_WINDOW_DAYS = "window_days"
+FIELD_DAILY_SPIKE_RATIO = "daily_spike_ratio"
+FIELD_DAILY_GOAL_KWH = "daily_goal_kwh"
+FIELD_GOAL_ALERT_RATIO = "goal_alert_ratio"
+FIELD_MAX_ACTIVE_MINUTES = "max_active_minutes"
+FIELD_MAX_IDLE_MINUTES = "max_idle_minutes"
+FIELD_CYCLE_START_DAY = "cycle_start_day"
+FIELD_BUDGET_KWH = "budget_kwh"
+FIELD_BUDGET_ALERT_RATIO = "budget_alert_ratio"
+FIELD_DEFAULT_RATE_PER_KWH = "default_rate_per_kwh"
+FIELD_TOU_RATE_PER_KWH = "tou_rate_per_kwh"
+FIELD_TOU_START = "tou_start"
+FIELD_TOU_END = "tou_end"
+FIELD_TOU_WEEKDAYS = "tou_weekdays"
+FIELD_TOU_NAME = "tou_name"
+FIELD_WINDOW_MINUTES = "window_minutes"
+FIELD_DEMAND_LIMIT_W = "demand_limit_w"
+FIELD_BREAKER_AMPS = "breaker_amps"
+FIELD_WARNING_RATIO = "warning_ratio"
+FIELD_WINDOW_HOURS = "window_hours"
+FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
+FIELD_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
     ApplianceProfile.REFRIGERATOR.value,
@@ -173,6 +215,16 @@ _ASSIGNMENT_MODE_OPTIONS = {
     CircuitMode.MIXED.value,
     CircuitMode.MAINS_NILM.value,
 }
+_UTILITY_SOURCE_TYPE_OPTIONS = (
+    {"value": "auto", "label": "Auto"},
+    {"value": "entity", "label": "Entity"},
+    {"value": "statistics", "label": "Statistics"},
+)
+_UTILITY_STATISTIC_PERIOD_OPTIONS = (
+    {"value": "hour", "label": "Hour"},
+    {"value": "day", "label": "Day"},
+    {"value": "month", "label": "Month"},
+)
 _CIRCUIT_MODE_LABELS = {
     CircuitMode.SINGLE_PHASE.value: "Single Phase",
     CircuitMode.DUAL_PHASE.value: "Dual Phase",
@@ -378,10 +430,42 @@ def _energy_entity_selector_config(
     return config
 
 
+def _energy_kwh_entity_selector_config(
+    include_entities: Iterable[str] | None = None,
+    *,
+    multiple: bool = True,
+) -> dict[str, Any]:
+    entity_ids = list(dict.fromkeys(include_entities or ()))
+    config: dict[str, Any] = {
+        "entity": {
+            "multiple": multiple,
+            "filter": [{"domain": "sensor", "device_class": "energy"}],
+        }
+    }
+    if entity_ids:
+        config["entity"]["include_entities"] = entity_ids
+    return config
+
+
 def _energy_entity_list_selector(
     include_entities: Iterable[str] | None = None,
 ) -> Any:
     return _selector(_energy_entity_selector_config(include_entities), str)
+
+
+def _energy_kwh_entity_list_selector(
+    include_entities: Iterable[str] | None = None,
+) -> Any:
+    return _selector(_energy_kwh_entity_selector_config(include_entities), str)
+
+
+def _single_energy_kwh_entity_selector(
+    include_entities: Iterable[str] | None = None,
+) -> Any:
+    return _selector(
+        _energy_kwh_entity_selector_config(include_entities, multiple=False),
+        str,
+    )
 
 
 def _source_device_selector() -> Any:
@@ -429,6 +513,24 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
         },
         list,
     )
+
+
+def _number_selector(
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    step: float | str = "any",
+) -> Any:
+    config: dict[str, Any] = {"number": {"mode": "box", "step": step}}
+    if minimum is not None:
+        config["number"]["min"] = minimum
+    if maximum is not None:
+        config["number"]["max"] = maximum
+    return _selector(config, float)
+
+
+def _text_selector() -> Any:
+    return _selector({"text": {"multiple": False}}, str)
 
 
 def _selectable_source_entity_ids(
@@ -511,6 +613,249 @@ def _assignment_picker_schema(groups: Iterable[Mapping[str, Any]]) -> Any:
                 FIELD_SELECTED_ASSIGNMENT,
                 default=default,
             ): _select_selector(options),
+        }
+    )
+
+
+def _mains_schema(
+    config_entry: config_entries.ConfigEntry,
+    source_entity_ids: Iterable[str] | None = None,
+) -> Any:
+    mains_source_entities = _entry_value(
+        config_entry,
+        CONF_MAINS_SOURCE_ENTITIES,
+        [],
+    )
+    source_entities = _entry_value(config_entry, CONF_SOURCE_ENTITIES, [])
+    selectable_source_entities = [
+        *list(source_entity_ids or ()),
+        *_DEMO_SOURCE_ENTITY_IDS,
+        *_strict_string_list(
+            source_entities,
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        ),
+    ]
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_MAINS_SOURCE_ENTITIES,
+                default=mains_source_entities,
+            ): _energy_entity_list_selector(selectable_source_entities),
+        }
+    )
+
+
+def _utility_schema(
+    config: Mapping[str, Any],
+    *,
+    utility_energy_entities: Iterable[str] = (),
+    utility_statistic_ids: Iterable[str] = (),
+    measured_energy_entities: Iterable[str] = (),
+    current_settings: Mapping[str, Any] | None = None,
+) -> Any:
+    settings = dict(current_settings or {})
+    circuit_options = _circuit_options_from_config(config, include_mains=True)
+    default_circuit = _default_circuit_id(circuit_options)
+    selectable_utility_entities = list(
+        dict.fromkeys(
+            [
+                *utility_energy_entities,
+                settings.get(FIELD_UTILITY_ENERGY_ENTITY, ""),
+            ]
+        )
+    )
+    selectable_measured_entities = list(
+        dict.fromkeys(
+            [
+                *measured_energy_entities,
+                *_strict_string_list(
+                    config.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                    invalid_error_key="invalid_mains_source_entities",
+                ),
+                *settings.get(FIELD_MEASURED_ENERGY_ENTITIES, []),
+            ]
+        )
+    )
+    statistic_options = [
+        {"value": statistic_id, "label": statistic_id}
+        for statistic_id in dict.fromkeys(
+            [
+                *utility_statistic_ids,
+                settings.get(FIELD_UTILITY_STATISTIC_ID, ""),
+            ]
+        )
+        if statistic_id
+    ]
+    statistic_selector = (
+        _select_selector(statistic_options) if statistic_options else _text_selector()
+    )
+    return vol.Schema(
+        {
+            vol.Required(
+                FIELD_ENABLE_UTILITY_COMPARISON,
+                default=bool(settings),
+            ): bool,
+            vol.Required(
+                FIELD_CIRCUIT_ID,
+                default=str(settings.get(FIELD_CIRCUIT_ID) or default_circuit),
+            ): _select_selector(circuit_options),
+            vol.Optional(
+                FIELD_UTILITY_ENERGY_ENTITY,
+                default=str(
+                    settings.get(FIELD_UTILITY_ENERGY_ENTITY)
+                    or _first_or_empty(selectable_utility_entities)
+                ),
+            ): _single_energy_kwh_entity_selector(selectable_utility_entities),
+            vol.Optional(
+                FIELD_UTILITY_STATISTIC_ID,
+                default=str(
+                    settings.get(FIELD_UTILITY_STATISTIC_ID)
+                    or _first_or_empty(utility_statistic_ids)
+                ),
+            ): statistic_selector,
+            vol.Optional(
+                FIELD_UTILITY_SOURCE_TYPE,
+                default=str(
+                    settings.get(
+                        FIELD_UTILITY_SOURCE_TYPE,
+                        DEFAULT_UTILITY_SOURCE_TYPE,
+                    )
+                ),
+            ): _select_selector(_UTILITY_SOURCE_TYPE_OPTIONS),
+            vol.Optional(
+                FIELD_UTILITY_STATISTIC_PERIOD,
+                default=str(
+                    settings.get(
+                        FIELD_UTILITY_STATISTIC_PERIOD,
+                        DEFAULT_UTILITY_STATISTIC_PERIOD,
+                    )
+                ),
+            ): _select_selector(_UTILITY_STATISTIC_PERIOD_OPTIONS),
+            vol.Optional(
+                FIELD_MEASURED_ENERGY_ENTITIES,
+                default=list(settings.get(FIELD_MEASURED_ENERGY_ENTITIES, [])),
+            ): _energy_kwh_entity_list_selector(selectable_measured_entities),
+            vol.Optional(
+                FIELD_TOLERANCE_PERCENT,
+                default=float(
+                    settings.get(
+                        FIELD_TOLERANCE_PERCENT,
+                        DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, maximum=100.0, step=0.1),
+        }
+    )
+
+
+def _advanced_circuit_schema(config: Mapping[str, Any]) -> Any:
+    circuit_options = _circuit_options_from_config(config, include_mains=True)
+    return vol.Schema(
+        {
+            vol.Required(
+                FIELD_CIRCUIT_ID,
+                default=_default_circuit_id(circuit_options),
+            ): _select_selector(circuit_options),
+        }
+    )
+
+
+def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None) -> Any:
+    settings = dict(current_settings or {})
+    return vol.Schema(
+        {
+            vol.Optional(
+                FIELD_PRESET,
+                default=str(settings.get(FIELD_PRESET, DEFAULT_SENSITIVITY)),
+            ): _select_selector(_SENSITIVITY_OPTIONS),
+            vol.Optional(
+                FIELD_WINDOW_DAYS,
+                default=int(settings.get(FIELD_WINDOW_DAYS, 7)),
+            ): _number_selector(minimum=1, maximum=90, step=1),
+            vol.Optional(
+                FIELD_DAILY_SPIKE_RATIO,
+                default=float(settings.get(FIELD_DAILY_SPIKE_RATIO, 0.25)),
+            ): _number_selector(minimum=0.01, maximum=5.0, step=0.01),
+            vol.Optional(
+                FIELD_DAILY_GOAL_KWH,
+                default=settings.get(FIELD_DAILY_GOAL_KWH),
+            ): _number_selector(minimum=0.0, step=0.1),
+            vol.Optional(
+                FIELD_GOAL_ALERT_RATIO,
+                default=float(settings.get(FIELD_GOAL_ALERT_RATIO, 1.0)),
+            ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
+            vol.Optional(
+                FIELD_MAX_ACTIVE_MINUTES,
+                default=settings.get(FIELD_MAX_ACTIVE_MINUTES),
+            ): _number_selector(minimum=1, step=1),
+            vol.Optional(
+                FIELD_MAX_IDLE_MINUTES,
+                default=settings.get(FIELD_MAX_IDLE_MINUTES),
+            ): _number_selector(minimum=1, step=1),
+            vol.Optional(
+                FIELD_CYCLE_START_DAY,
+                default=int(settings.get(FIELD_CYCLE_START_DAY, 1)),
+            ): _number_selector(minimum=1, maximum=31, step=1),
+            vol.Optional(
+                FIELD_BUDGET_KWH,
+                default=settings.get(FIELD_BUDGET_KWH),
+            ): _number_selector(minimum=0.0, step=0.1),
+            vol.Optional(
+                FIELD_BUDGET_ALERT_RATIO,
+                default=float(settings.get(FIELD_BUDGET_ALERT_RATIO, 1.0)),
+            ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
+            vol.Optional(
+                FIELD_DEFAULT_RATE_PER_KWH,
+                default=settings.get(FIELD_DEFAULT_RATE_PER_KWH),
+            ): _number_selector(minimum=0.0, step="any"),
+            vol.Optional(
+                FIELD_TOU_RATE_PER_KWH,
+                default=settings.get(FIELD_TOU_RATE_PER_KWH),
+            ): _number_selector(minimum=0.0, step="any"),
+            vol.Optional(
+                FIELD_TOU_START,
+                default=str(settings.get(FIELD_TOU_START) or ""),
+            ): _text_selector(),
+            vol.Optional(
+                FIELD_TOU_END,
+                default=str(settings.get(FIELD_TOU_END) or ""),
+            ): _text_selector(),
+            vol.Optional(
+                FIELD_TOU_WEEKDAYS,
+                default=str(settings.get(FIELD_TOU_WEEKDAYS) or ""),
+            ): _text_selector(),
+            vol.Optional(
+                FIELD_TOU_NAME,
+                default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
+            ): _text_selector(),
+            vol.Optional(
+                FIELD_WINDOW_MINUTES,
+                default=int(settings.get(FIELD_WINDOW_MINUTES, 15)),
+            ): _number_selector(minimum=1, maximum=240, step=1),
+            vol.Optional(
+                FIELD_DEMAND_LIMIT_W,
+                default=settings.get(FIELD_DEMAND_LIMIT_W),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_BREAKER_AMPS,
+                default=settings.get(FIELD_BREAKER_AMPS),
+            ): _number_selector(minimum=0.0, step=0.1),
+            vol.Optional(
+                FIELD_WARNING_RATIO,
+                default=float(settings.get(FIELD_WARNING_RATIO, 0.8)),
+            ): _number_selector(minimum=0.0, maximum=1.0, step=0.01),
+            vol.Optional(
+                FIELD_WINDOW_HOURS,
+                default=int(settings.get(FIELD_WINDOW_HOURS, 48)),
+            ): _number_selector(minimum=1, maximum=720, step=1),
+            vol.Optional(
+                FIELD_STANDBY_THRESHOLD_W,
+                default=float(settings.get(FIELD_STANDBY_THRESHOLD_W, 8.0)),
+            ): _number_selector(minimum=0.0, step=0.1),
+            vol.Optional(
+                FIELD_ALWAYS_ON_ALERT_W,
+                default=settings.get(FIELD_ALWAYS_ON_ALERT_W),
+            ): _number_selector(minimum=0.0, step=0.1),
         }
     )
 
@@ -1289,9 +1634,61 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             if assignment_result.get("type") == "form":
                 return assignment_result
             final_config = assignment_result
-            return self.async_create_entry(title=TITLE, data=final_config)
+            self._pending_final_config = final_config
+            return await self.async_step_utility()
 
         return _assignment_review_form(self)
+
+    async def async_step_utility(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Optionally configure Utility / Opower comparison during setup."""
+        final_config = dict(
+            getattr(
+                self,
+                "_pending_final_config",
+                None,
+            )
+            or getattr(self, "_pending_config", None)
+            or {}
+        )
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                circuit_id, settings = _utility_settings_from_input(user_input)
+            except SetupValidationError as err:
+                errors["base"] = err.error_key
+            else:
+                if settings:
+                    final_config.setdefault(CONF_UTILITY_COMPARISON_SETTINGS, {})[
+                        circuit_id
+                    ] = settings
+                return self.async_create_entry(title=TITLE, data=final_config)
+
+        return self.async_show_form(
+            step_id="utility",
+            data_schema=_utility_schema(
+                final_config,
+                utility_energy_entities=(
+                    await _async_discover_utility_energy_entities(
+                        getattr(self, "hass", None)
+                    )
+                ),
+                utility_statistic_ids=(
+                    await _async_discover_utility_statistic_ids(
+                        getattr(self, "hass", None)
+                    )
+                ),
+                measured_energy_entities=(
+                    await _async_discover_energy_source_entities(
+                        getattr(self, "hass", None)
+                    )
+                ),
+            ),
+            errors=errors,
+        )
 
 
 class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
@@ -1300,6 +1697,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
         self._pending_config: dict[str, Any] | None = None
+        self._advanced_circuit_id: str | None = None
         self._assignment_groups: list[dict[str, Any]] = []
         self._assignment_index = 0
         self._reviewed_circuits: list[dict[str, Any]] = []
@@ -1312,7 +1710,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         if user_input is None:
             return self.async_show_menu(
                 step_id="init",
-                menu_options=["assign", "sources"],
+                menu_options=["assign", "sources", "mains", "utility", "advanced"],
             )
 
         return await self.async_step_sources(user_input)
@@ -1398,6 +1796,108 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             errors={"base": ERROR_INVALID_CIRCUIT_ASSIGNMENTS},
         )
 
+    async def async_step_mains(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit aggregate mains source sensors."""
+        if user_input is not None:
+            try:
+                mains_source_entities = _strict_string_list(
+                    user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                    invalid_error_key="invalid_mains_source_entities",
+                )
+            except SetupValidationError as err:
+                return await self._async_show_mains_form({"base": err.error_key})
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_MAINS_SOURCE_ENTITIES: mains_source_entities},
+                ),
+            )
+
+        return await self._async_show_mains_form()
+
+    async def async_step_utility(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit Utility / Opower comparison settings."""
+        if user_input is not None:
+            try:
+                circuit_id, settings = _utility_settings_from_input(user_input)
+            except SetupValidationError as err:
+                return await self._async_show_utility_form({"base": err.error_key})
+            settings_by_circuit = _settings_map_for_entry(
+                self._config_entry,
+                CONF_UTILITY_COMPARISON_SETTINGS,
+            )
+            settings_by_circuit[circuit_id] = settings
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_UTILITY_COMPARISON_SETTINGS: settings_by_circuit},
+                ),
+            )
+
+        return await self._async_show_utility_form()
+
+    async def async_step_advanced(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Choose a circuit for advanced settings."""
+        if user_input is not None:
+            return await self.async_step_select_advanced_circuit(user_input)
+
+        return self.async_show_form(
+            step_id="select_advanced_circuit",
+            data_schema=_advanced_circuit_schema(_entry_config(self._config_entry)),
+            errors={},
+        )
+
+    async def async_step_select_advanced_circuit(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Select a circuit before editing advanced circuit settings."""
+        if user_input is None:
+            return await self.async_step_advanced()
+
+        self._advanced_circuit_id = str(user_input.get(FIELD_CIRCUIT_ID) or "mains")
+        return await self.async_step_advanced_settings()
+
+    async def async_step_advanced_settings(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit advanced per-circuit settings exposed through services."""
+        circuit_id = self._advanced_circuit_id or "mains"
+        if user_input is not None:
+            try:
+                settings = _advanced_settings_from_input(user_input)
+            except SetupValidationError as err:
+                return await self._async_show_advanced_settings_form(
+                    circuit_id,
+                    {"base": err.error_key},
+                )
+            settings_by_circuit = _settings_map_for_entry(
+                self._config_entry,
+                CONF_ADVANCED_SETTINGS,
+            )
+            settings_by_circuit[circuit_id] = settings
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_ADVANCED_SETTINGS: settings_by_circuit},
+                ),
+            )
+
+        return await self._async_show_advanced_settings_form(circuit_id)
+
     async def _async_show_options_form(
         self,
         errors: dict[str, str] | None = None,
@@ -1409,6 +1909,76 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             step_id="sources",
             data_schema=_options_schema(self._config_entry, source_entity_ids),
             errors=errors or {},
+        )
+
+    async def _async_show_mains_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        source_entity_ids = await _async_discover_energy_source_entities(
+            getattr(self, "hass", None),
+        )
+        return self.async_show_form(
+            step_id="mains",
+            data_schema=_mains_schema(self._config_entry, source_entity_ids),
+            errors=errors or {},
+        )
+
+    async def _async_show_utility_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        config = _entry_config(self._config_entry)
+        settings_by_circuit = _settings_map_for_entry(
+            self._config_entry,
+            CONF_UTILITY_COMPARISON_SETTINGS,
+        )
+        default_circuit = _default_circuit_id(
+            _circuit_options_from_config(config, include_mains=True)
+        )
+        current_settings = dict(settings_by_circuit.get(default_circuit, {}))
+        current_settings.setdefault(FIELD_CIRCUIT_ID, default_circuit)
+        return self.async_show_form(
+            step_id="utility",
+            data_schema=_utility_schema(
+                config,
+                utility_energy_entities=(
+                    await _async_discover_utility_energy_entities(
+                        getattr(self, "hass", None)
+                    )
+                ),
+                utility_statistic_ids=(
+                    await _async_discover_utility_statistic_ids(
+                        getattr(self, "hass", None)
+                    )
+                ),
+                measured_energy_entities=(
+                    await _async_discover_energy_source_entities(
+                        getattr(self, "hass", None)
+                    )
+                ),
+                current_settings=current_settings,
+            ),
+            errors=errors or {},
+        )
+
+    async def _async_show_advanced_settings_form(
+        self,
+        circuit_id: str,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        settings = _settings_map_for_entry(self._config_entry, CONF_ADVANCED_SETTINGS)
+        return self.async_show_form(
+            step_id="advanced_settings",
+            data_schema=_advanced_settings_schema(settings.get(circuit_id, {})),
+            errors=errors or {},
+            description_placeholders={
+                "circuit_id": circuit_id,
+                "circuit_name": _circuit_label_from_config(
+                    _entry_config(self._config_entry),
+                    circuit_id,
+                ),
+            },
         )
 
 
@@ -1430,20 +2000,12 @@ def _options_schema(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
     )
-    mains_source_entities = options.get(
-        CONF_MAINS_SOURCE_ENTITIES,
-        data.get(CONF_MAINS_SOURCE_ENTITIES, []),
-    )
     selectable_source_entities = [
         *list(source_entity_ids or ()),
         *_DEMO_SOURCE_ENTITY_IDS,
         *_strict_string_list(
             source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-        ),
-        *_strict_string_list(
-            mains_source_entities,
-            invalid_error_key="invalid_mains_source_entities",
         ),
     ]
     return vol.Schema(
@@ -1465,10 +2027,6 @@ def _options_schema(
             vol.Optional(
                 CONF_EXTRA_SOURCE_ENTITIES,
                 default=extra_source_entities,
-            ): _energy_entity_list_selector(selectable_source_entities),
-            vol.Optional(
-                CONF_MAINS_SOURCE_ENTITIES,
-                default=mains_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
             vol.Optional(
                 CONF_SENSITIVITY,
@@ -1556,6 +2114,227 @@ def _options_existing_circuits(
     return options.get(CONF_CIRCUITS, data.get(CONF_CIRCUITS, []))
 
 
+def _entry_value(
+    config_entry: config_entries.ConfigEntry,
+    key: str,
+    default: Any,
+) -> Any:
+    options = getattr(config_entry, "options", {}) or {}
+    data = getattr(config_entry, "data", {}) or {}
+    return options.get(key, data.get(key, default))
+
+
+def _entry_config(config_entry: config_entries.ConfigEntry) -> dict[str, Any]:
+    data = getattr(config_entry, "data", {}) or {}
+    options = getattr(config_entry, "options", {}) or {}
+    return {**data, **options}
+
+
+def _options_with_updates(
+    config_entry: config_entries.ConfigEntry,
+    updates: Mapping[str, Any],
+) -> dict[str, Any]:
+    options = dict(getattr(config_entry, "options", {}) or {})
+    options.update(dict(updates))
+    return options
+
+
+def _settings_map_for_entry(
+    config_entry: config_entries.ConfigEntry,
+    key: str,
+) -> dict[str, dict[str, Any]]:
+    settings: dict[str, dict[str, Any]] = {}
+    data = getattr(config_entry, "data", {}) or {}
+    options = getattr(config_entry, "options", {}) or {}
+    for source in (data.get(key, {}), options.get(key, {})):
+        if not isinstance(source, Mapping):
+            continue
+        for circuit_id, value in source.items():
+            if isinstance(value, Mapping):
+                settings[str(circuit_id)] = dict(value)
+    return settings
+
+
+def _circuit_options_from_config(
+    config: Mapping[str, Any],
+    *,
+    include_mains: bool = False,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for circuit in config.get(CONF_CIRCUITS, []) or []:
+        if not isinstance(circuit, Mapping):
+            continue
+        circuit_id = str(circuit.get("circuit_id") or circuit.get("id") or "").strip()
+        if not circuit_id or circuit_id in seen:
+            continue
+        name = str(circuit.get("name") or circuit_id)
+        options.append({"value": circuit_id, "label": f"{name} ({circuit_id})"})
+        seen.add(circuit_id)
+    if include_mains and "mains" not in seen:
+        options.insert(0, {"value": "mains", "label": "Mains NILM (mains)"})
+    if not options:
+        options.append({"value": "mains", "label": "Mains NILM (mains)"})
+    return options
+
+
+def _default_circuit_id(options: Iterable[Mapping[str, str]]) -> str:
+    option_list = list(options)
+    for option in option_list:
+        if option.get("value") == "mains":
+            return "mains"
+    if option_list:
+        return str(option_list[0].get("value") or "mains")
+    return "mains"
+
+
+def _circuit_label_from_config(config: Mapping[str, Any], circuit_id: str) -> str:
+    for option in _circuit_options_from_config(config, include_mains=True):
+        if option.get("value") == circuit_id:
+            return str(option.get("label") or circuit_id)
+    return circuit_id
+
+
+def _first_or_empty(values: Iterable[Any]) -> str:
+    for value in values:
+        if value:
+            return str(value)
+    return ""
+
+
+def _utility_settings_from_input(
+    user_input: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    circuit_id = str(user_input.get(FIELD_CIRCUIT_ID) or "mains").strip() or "mains"
+    if not bool(user_input.get(FIELD_ENABLE_UTILITY_COMPARISON, False)):
+        return circuit_id, {}
+
+    source_type = str(
+        user_input.get(FIELD_UTILITY_SOURCE_TYPE, DEFAULT_UTILITY_SOURCE_TYPE)
+    ).strip().lower()
+    if source_type not in VALID_UTILITY_SOURCE_TYPES:
+        raise SetupValidationError("invalid_utility_source_type")
+
+    statistic_period = str(
+        user_input.get(
+            FIELD_UTILITY_STATISTIC_PERIOD,
+            DEFAULT_UTILITY_STATISTIC_PERIOD,
+        )
+    ).strip().lower()
+    if statistic_period not in VALID_UTILITY_STATISTIC_PERIODS:
+        raise SetupValidationError("invalid_utility_statistic_period")
+
+    settings: dict[str, Any] = {}
+    utility_energy_entity = str(
+        user_input.get(FIELD_UTILITY_ENERGY_ENTITY) or ""
+    ).strip()
+    utility_statistic_id = str(
+        user_input.get(FIELD_UTILITY_STATISTIC_ID) or ""
+    ).strip()
+    if utility_energy_entity:
+        settings[FIELD_UTILITY_ENERGY_ENTITY] = utility_energy_entity
+    if utility_statistic_id:
+        settings[FIELD_UTILITY_STATISTIC_ID] = utility_statistic_id
+    settings[FIELD_UTILITY_SOURCE_TYPE] = source_type
+    settings[FIELD_UTILITY_STATISTIC_PERIOD] = statistic_period
+    measured_entities = _strict_string_list(
+        user_input.get(FIELD_MEASURED_ENERGY_ENTITIES, []),
+        invalid_error_key="invalid_measured_energy_entities",
+    )
+    if measured_entities:
+        settings[FIELD_MEASURED_ENERGY_ENTITIES] = measured_entities
+    settings[FIELD_TOLERANCE_PERCENT] = _nonnegative_float_from_input(
+        user_input.get(FIELD_TOLERANCE_PERCENT),
+        default=DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+    )
+    return circuit_id, settings
+
+
+def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    settings: dict[str, Any] = {}
+    preset = str(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY).strip()
+    if preset not in _SENSITIVITY_OPTIONS:
+        raise SetupValidationError("invalid_sensitivity")
+    settings[FIELD_PRESET] = preset
+
+    _set_optional_int(settings, user_input, FIELD_WINDOW_DAYS)
+    _set_optional_float(settings, user_input, FIELD_DAILY_SPIKE_RATIO)
+    _set_optional_float(settings, user_input, FIELD_DAILY_GOAL_KWH)
+    _set_optional_float(settings, user_input, FIELD_GOAL_ALERT_RATIO)
+    _set_optional_int(settings, user_input, FIELD_MAX_ACTIVE_MINUTES)
+    _set_optional_int(settings, user_input, FIELD_MAX_IDLE_MINUTES)
+    _set_optional_int(settings, user_input, FIELD_CYCLE_START_DAY)
+    _set_optional_float(settings, user_input, FIELD_BUDGET_KWH)
+    _set_optional_float(settings, user_input, FIELD_BUDGET_ALERT_RATIO)
+    _set_optional_float(settings, user_input, FIELD_DEFAULT_RATE_PER_KWH)
+    _set_optional_float(settings, user_input, FIELD_TOU_RATE_PER_KWH)
+    _set_optional_string(settings, user_input, FIELD_TOU_START)
+    _set_optional_string(settings, user_input, FIELD_TOU_END)
+    _set_optional_string(settings, user_input, FIELD_TOU_WEEKDAYS)
+    _set_optional_string(settings, user_input, FIELD_TOU_NAME)
+    _set_optional_int(settings, user_input, FIELD_WINDOW_MINUTES)
+    _set_optional_float(settings, user_input, FIELD_DEMAND_LIMIT_W)
+    _set_optional_float(settings, user_input, FIELD_BREAKER_AMPS)
+    _set_optional_float(settings, user_input, FIELD_WARNING_RATIO)
+    _set_optional_int(settings, user_input, FIELD_WINDOW_HOURS)
+    _set_optional_float(settings, user_input, FIELD_STANDBY_THRESHOLD_W)
+    _set_optional_float(settings, user_input, FIELD_ALWAYS_ON_ALERT_W)
+    return settings
+
+
+def _set_optional_string(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+) -> None:
+    value = user_input.get(key)
+    if value is None:
+        return
+    text = str(value).strip()
+    if text:
+        settings[key] = text
+
+
+def _set_optional_int(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+) -> None:
+    value = user_input.get(key)
+    if value is None or value == "":
+        return
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise SetupValidationError("invalid_advanced_settings") from None
+    if parsed > 0:
+        settings[key] = parsed
+
+
+def _set_optional_float(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+) -> None:
+    value = user_input.get(key)
+    if value is None or value == "":
+        return
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise SetupValidationError("invalid_advanced_settings") from None
+    if parsed >= 0.0:
+        settings[key] = parsed
+
+
+def _nonnegative_float_from_input(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0.0 else default
+
+
 async def _async_format_mapping_suggestions(hass: Any) -> str:
     if hass is None:
         return format_mapping_suggestions([])
@@ -1624,5 +2403,23 @@ async def _async_discover_energy_source_entities_for_devices(
             hass,
             tuple(source_devices),
         )
+    except Exception:
+        return []
+
+
+async def _async_discover_utility_energy_entities(hass: Any) -> list[str]:
+    if hass is None:
+        return []
+    try:
+        return await async_discover_utility_energy_entities(hass)
+    except Exception:
+        return []
+
+
+async def _async_discover_utility_statistic_ids(hass: Any) -> list[str]:
+    if hass is None:
+        return []
+    try:
+        return await async_discover_utility_statistic_ids(hass)
     except Exception:
         return []

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -16,6 +17,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
+    CONF_UTILITY_COMPARISON_SETTINGS,
 )
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
 from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
@@ -230,7 +232,13 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
 
     assert result["type"] == "menu"
     assert result["step_id"] == "init"
-    assert result["menu_options"] == ["assign", "sources"]
+    assert result["menu_options"] == [
+        "assign",
+        "sources",
+        "mains",
+        "utility",
+        "advanced",
+    ]
     assert result["description_placeholders"] == {}
 
 
@@ -253,6 +261,201 @@ async def test_options_sources_step_shows_source_selection_form() -> None:
     assert result["step_id"] == "sources"
     assert CONF_SOURCE_DEVICES in _schema_keys(result["data_schema"])
     assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(result["data_schema"])
+
+
+@pytest.mark.asyncio
+async def test_options_mains_step_updates_mains_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.fridge_energy"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.old_mains_energy"],
+        },
+        options={},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_mains(
+        {CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"]}
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "",
+        "data": {
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_options_utility_step_saves_opower_comparison_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(
+            data={
+                CONF_CIRCUITS: [
+                    {
+                        "circuit_id": "mains",
+                        "name": "Mains NILM",
+                        "mode": "mains_nilm",
+                        "appliance_profile": "mains_nilm",
+                        "sensors": [],
+                    }
+                ],
+            },
+            options={},
+        )
+    )
+
+    result = await flow.async_step_utility(
+        {
+            "enable_utility_comparison": True,
+            "circuit_id": "mains",
+            "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_statistic_id": "opower:utility_elec_consumption",
+            "utility_source_type": "statistics",
+            "utility_statistic_period": "day",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 8.5,
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
+        "mains": {
+            "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_statistic_id": "opower:utility_elec_consumption",
+            "utility_source_type": "statistics",
+            "utility_statistic_period": "day",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 8.5,
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_options_utility_step_can_clear_existing_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(
+            data={CONF_UTILITY_COMPARISON_SETTINGS: {"mains": {}}},
+            options={
+                CONF_UTILITY_COMPARISON_SETTINGS: {
+                    "mains": {
+                        "utility_energy_entity": "sensor.old_utility_usage",
+                        "tolerance_percent": 10.0,
+                    }
+                }
+            },
+        )
+    )
+
+    result = await flow.async_step_utility(
+        {"enable_utility_comparison": False, "circuit_id": "mains"}
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {"mains": {}}
+
+
+@pytest.mark.asyncio
+async def test_options_advanced_step_saves_existing_setting_families() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Kitchen Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        options={},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_advanced()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_advanced_circuit"
+
+    result = await flow.async_step_select_advanced_circuit(
+        {"circuit_id": "refrigerator"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "advanced_settings"
+
+    result = await flow.async_step_advanced_settings(
+        {
+            "preset": "high",
+            "window_days": 14,
+            "daily_spike_ratio": 0.35,
+            "daily_goal_kwh": 2.5,
+            "goal_alert_ratio": 0.9,
+            "max_active_minutes": 120,
+            "max_idle_minutes": 480,
+            "cycle_start_day": 15,
+            "budget_kwh": 90.0,
+            "budget_alert_ratio": 0.85,
+            "default_rate_per_kwh": 0.18,
+            "tou_rate_per_kwh": 0.42,
+            "tou_start": "16:00",
+            "tou_end": "21:00",
+            "tou_weekdays": "0,1,2,3,4",
+            "tou_name": "Peak",
+            "window_minutes": 30,
+            "demand_limit_w": 1200.0,
+            "breaker_amps": 20.0,
+            "warning_ratio": 0.8,
+            "window_hours": 72,
+            "standby_threshold_w": 6.0,
+            "always_on_alert_w": 12.0,
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS]["refrigerator"] == {
+        "preset": "high",
+        "window_days": 14,
+        "daily_spike_ratio": 0.35,
+        "daily_goal_kwh": 2.5,
+        "goal_alert_ratio": 0.9,
+        "max_active_minutes": 120,
+        "max_idle_minutes": 480,
+        "cycle_start_day": 15,
+        "budget_kwh": 90.0,
+        "budget_alert_ratio": 0.85,
+        "default_rate_per_kwh": 0.18,
+        "tou_rate_per_kwh": 0.42,
+        "tou_start": "16:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+        "window_minutes": 30,
+        "demand_limit_w": 1200.0,
+        "breaker_amps": 20.0,
+        "warning_ratio": 0.8,
+        "window_hours": 72,
+        "standby_threshold_w": 6.0,
+        "always_on_alert_w": 12.0,
+    }
 
 
 @pytest.mark.asyncio
@@ -496,6 +699,11 @@ async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> 
         }
     )
 
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+
+    result = await flow.async_step_utility({"enable_utility_comparison": False})
+
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SOURCE_ENTITIES] == [
         "sensor.air_handler_active_power",
@@ -569,10 +777,71 @@ async def test_assignment_step_allows_manual_override_before_saving() -> None:
         }
     )
 
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+
+    result = await flow.async_step_utility({"enable_utility_comparison": False})
+
     assert result["type"] == "create_entry"
     assert result["data"]["circuits"][0]["name"] == "Garage HVAC System"
     assert result["data"]["circuits"][0]["appliance_profile"] == "hvac"
     assert result["data"]["circuits"][0]["mode"] == "dual_phase"
+
+
+@pytest.mark.asyncio
+async def test_setup_utility_step_saves_opower_comparison_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.panel_import_energy",
+                "sensor.refrigerator_energy",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_import_energy"],
+        }
+    )
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.refrigerator_energy"],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+            "circuit_mode": "single_phase",
+        }
+    )
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+
+    result = await flow.async_step_utility(
+        {
+            "enable_utility_comparison": True,
+            "circuit_id": "mains",
+            "utility_energy_entity": "sensor.typical_monthly_electric_usage",
+            "utility_source_type": "entity",
+            "utility_statistic_period": "day",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 12.0,
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
+        "mains": {
+            "utility_energy_entity": "sensor.typical_monthly_electric_usage",
+            "utility_source_type": "entity",
+            "utility_statistic_period": "day",
+            "measured_energy_entities": ["sensor.panel_import_energy"],
+            "tolerance_percent": 12.0,
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -889,6 +1158,11 @@ async def test_assignment_step_allows_sensor_level_inclusion() -> None:
             ],
         }
     )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+
+    result = await flow.async_step_utility({"enable_utility_comparison": False})
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SOURCE_ENTITIES] == [

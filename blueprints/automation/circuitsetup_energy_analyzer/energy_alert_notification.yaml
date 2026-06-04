@@ -1,0 +1,115 @@
+blueprint:
+  name: CircuitSetup Energy Analyzer Alerts
+  description: Create friendly notifications and optional follow-up actions when selected CircuitSetup Energy Analyzer alert entities report a possible issue.
+  domain: automation
+  input:
+    alert_entities:
+      name: Alert Entities
+      description: Select analyzer status or alert entities that should trigger this automation.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - integration: circuitsetup_energy_analyzer
+    alert_states:
+      name: Alert States
+      description: Choose the states that should be treated as actionable possible issue alerts.
+      default:
+        - warning
+        - mismatch
+        - projected_over_budget
+        - over_limit
+        - issue
+      selector:
+        select:
+          multiple: true
+          mode: dropdown
+          options:
+            - label: Warning
+              value: warning
+            - label: Mismatch
+              value: mismatch
+            - label: Projected Over Budget
+              value: projected_over_budget
+            - label: Over Limit
+              value: over_limit
+            - label: Issue
+              value: issue
+            - label: Maintenance
+              value: maintenance
+            - label: Stale
+              value: stale
+    for_duration:
+      name: Repeat Duration
+      description: Require the alert state to remain active for this long before notifying.
+      default:
+        minutes: 5
+      selector:
+        duration:
+    notification_title:
+      name: Notification Title
+      description: Title used for the persistent notification.
+      default: CircuitSetup Energy Analyzer possible issue
+      selector:
+        text:
+    persistent_notification:
+      name: Persistent Notification
+      description: Create a Home Assistant persistent notification with the observed evidence.
+      default: true
+      selector:
+        boolean:
+    alert_actions:
+      name: Follow-up Actions
+      description: Optional actions such as mobile notifications, lights, or scripts.
+      default: []
+      selector:
+        action:
+
+mode: queued
+max: 10
+
+trigger:
+  - platform: state
+    entity_id: !input alert_entities
+    for: !input for_duration
+
+variables:
+  alert_states: !input alert_states
+  create_persistent_notification: !input persistent_notification
+  notification_title: !input notification_title
+  alert_entity_id: "{{ trigger.entity_id }}"
+  alert_entity_name: "{{ trigger.to_state.name if trigger.to_state else trigger.entity_id }}"
+  alert_state: "{{ trigger.to_state.state if trigger.to_state else 'unknown' }}"
+  alert_evidence: >-
+    {% if trigger.to_state %}
+      {{ trigger.to_state.attributes.evidence
+         or trigger.to_state.attributes.message
+         or trigger.to_state.attributes.friendly_name
+         or trigger.to_state.state }}
+    {% else %}
+      Alert entity changed.
+    {% endif %}
+
+condition:
+  - condition: template
+    value_template: "{{ trigger.to_state is not none and alert_state in alert_states }}"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ create_persistent_notification }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "{{ notification_title }}"
+              message: >-
+                {{ alert_entity_name }} reports a possible issue.
+
+                State: {{ alert_state }}
+
+                Evidence: {{ alert_evidence }}
+
+                Entity: {{ alert_entity_id }}
+  - choose: []
+    default: !input alert_actions

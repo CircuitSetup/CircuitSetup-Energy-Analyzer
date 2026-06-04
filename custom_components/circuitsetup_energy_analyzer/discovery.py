@@ -41,6 +41,34 @@ _ENERGY_SOURCE_UNITS = {
     "w",
     "wh",
 }
+_UTILITY_TEXT_KEYWORDS = (
+    "opower",
+    "utility",
+    "electric usage",
+    "electric consumption",
+    "monthly electric",
+    "current bill",
+    "billing",
+    "bill usage",
+    "bill energy",
+    "elec",
+)
+_UTILITY_STATISTIC_KEYWORDS = (
+    "opower",
+    "utility",
+    "electric",
+    "elec",
+    "bill",
+)
+_NON_ENERGY_BILLING_KEYWORDS = (
+    "cost",
+    "price",
+    "rate",
+    "charge",
+    "currency",
+    "dollar",
+    "usd",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +172,32 @@ async def async_discover_energy_source_entities_for_devices(
     ]
 
 
+async def async_discover_utility_energy_entities(hass: Any) -> list[str]:
+    """Discover utility or Opower energy entities suitable for bill comparison."""
+    return [
+        sensor.entity_id
+        for sensor in sorted(
+            _build_discovered_sensors(hass),
+            key=lambda candidate: (
+                _utility_sensor_score(candidate),
+                candidate.entity_id,
+            ),
+            reverse=True,
+        )
+        if _utility_sensor_score(sensor) > 0
+    ]
+
+
+async def async_discover_utility_statistic_ids(hass: Any) -> list[str]:
+    """Discover utility or Opower recorder statistic IDs when metadata is available."""
+    statistic_ids = await _async_recorder_statistic_ids(hass)
+    return sorted(
+        statistic_id
+        for statistic_id in statistic_ids
+        if _looks_like_utility_statistic_id(statistic_id)
+    )
+
+
 def _build_discovered_sensors(hass: Any) -> list[DiscoveredSensor]:
     if hass is None:
         return []
@@ -160,6 +214,68 @@ def _build_discovered_sensors(hass: Any) -> list[DiscoveredSensor]:
         sensors.append(sensor)
 
     return sensors
+
+
+def _utility_sensor_score(sensor: DiscoveredSensor) -> int:
+    if not _is_energy_quantity_sensor(sensor):
+        return 0
+    text = _normalize_text(sensor.entity_id, sensor.name)
+    if any(keyword in text for keyword in _NON_ENERGY_BILLING_KEYWORDS):
+        return 0
+
+    score = sum(1 for keyword in _UTILITY_TEXT_KEYWORDS if keyword in text)
+    if "opower" in text:
+        score += 4
+    if "utility" in text:
+        score += 3
+    if "bill" in text or "billing" in text:
+        score += 2
+    return score
+
+
+def _is_energy_quantity_sensor(sensor: DiscoveredSensor) -> bool:
+    unit = (sensor.unit or "").strip().lower()
+    return (
+        sensor.role is SensorRole.ENERGY
+        or sensor.device_class == "energy"
+        or unit in {"wh", "kwh", "mwh"}
+    )
+
+
+async def _async_recorder_statistic_ids(hass: Any) -> list[str]:
+    if hass is None:
+        return []
+
+    fake_statistic_ids = getattr(hass, "recorder_statistic_ids", None)
+    if fake_statistic_ids is not None:
+        return [str(statistic_id) for statistic_id in fake_statistic_ids]
+
+    try:
+        from homeassistant.components.recorder.statistics import (
+            async_list_statistic_ids,
+        )
+    except (ImportError, ModuleNotFoundError):
+        return []
+
+    try:
+        statistics = await async_list_statistic_ids(hass)
+    except Exception:
+        return []
+
+    statistic_ids: list[str] = []
+    for statistic in statistics or []:
+        if isinstance(statistic, str):
+            statistic_ids.append(statistic)
+        elif isinstance(statistic, dict) and statistic.get("statistic_id"):
+            statistic_ids.append(str(statistic["statistic_id"]))
+    return statistic_ids
+
+
+def _looks_like_utility_statistic_id(statistic_id: str) -> bool:
+    text = statistic_id.lower()
+    return any(keyword in text for keyword in _UTILITY_STATISTIC_KEYWORDS) and not any(
+        keyword in text for keyword in _NON_ENERGY_BILLING_KEYWORDS
+    )
 
 
 def _normalize_text(entity_id: str, friendly_name: str | None) -> str:

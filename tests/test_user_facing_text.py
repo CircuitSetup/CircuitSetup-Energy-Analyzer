@@ -23,9 +23,53 @@ EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
-    "mains_source_entities": "Mains Source Entities",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
+}
+
+EXPECTED_MAINS_LABELS = {
+    "mains_source_entities": "Mains Source Entities",
+}
+
+EXPECTED_UTILITY_LABELS = {
+    "enable_utility_comparison": "Enable Utility Comparison",
+    "circuit_id": "Circuit",
+    "utility_energy_entity": "Utility Energy Entity",
+    "utility_statistic_id": "Utility Statistic ID",
+    "utility_source_type": "Utility Source Type",
+    "utility_statistic_period": "Utility Statistic Period",
+    "measured_energy_entities": "Measured Energy Entities",
+    "tolerance_percent": "Tolerance Percent",
+}
+
+EXPECTED_ADVANCED_CIRCUIT_LABELS = {
+    "circuit_id": "Circuit",
+}
+
+EXPECTED_ADVANCED_SETTINGS_LABELS = {
+    "preset": "Sensitivity",
+    "window_days": "Energy Window Days",
+    "daily_spike_ratio": "Daily Spike Ratio",
+    "daily_goal_kwh": "Daily Goal kWh",
+    "goal_alert_ratio": "Goal Alert Ratio",
+    "max_active_minutes": "Max Active Minutes",
+    "max_idle_minutes": "Max Idle Minutes",
+    "cycle_start_day": "Cycle Start Day",
+    "budget_kwh": "Budget kWh",
+    "budget_alert_ratio": "Budget Alert Ratio",
+    "default_rate_per_kwh": "Default Rate Per kWh",
+    "tou_rate_per_kwh": "TOU Rate Per kWh",
+    "tou_start": "TOU Start",
+    "tou_end": "TOU End",
+    "tou_weekdays": "TOU Weekdays",
+    "tou_name": "TOU Name",
+    "window_minutes": "Demand Window Minutes",
+    "demand_limit_w": "Demand Limit W",
+    "breaker_amps": "Breaker Amps",
+    "warning_ratio": "Capacity Warning Ratio",
+    "window_hours": "Standby Window Hours",
+    "standby_threshold_w": "Standby Threshold W",
+    "always_on_alert_w": "Always On Alert W",
 }
 
 EXPECTED_SERVICE_FIELD_NAMES = {
@@ -103,6 +147,9 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert init_step["menu_options"] == {
         "assign": "Review Circuit Assignments",
         "sources": "Edit Source Selection",
+        "mains": "Edit Mains Sensors",
+        "utility": "Utility / Opower Comparison",
+        "advanced": "Advanced Circuit Settings",
     }
     assert all("_" not in label for label in init_step["menu_options"].values())
     assert "choose" in init_step["description"].lower()
@@ -113,7 +160,6 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 260 for description in descriptions.values())
-    assert "optional" in descriptions["mains_source_entities"].lower()
     assert "quieter" in descriptions["sensitivity"].lower()
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
@@ -121,6 +167,51 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "review circuit assignments" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
+
+
+def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+
+    for section in ("config", "options"):
+        utility_data = strings[section]["step"]["utility"]["data"]
+        utility_descriptions = strings[section]["step"]["utility"][
+            "data_description"
+        ]
+        assert utility_data == EXPECTED_UTILITY_LABELS
+        assert utility_descriptions.keys() == EXPECTED_UTILITY_LABELS.keys()
+        assert all("_" not in label for label in utility_data.values())
+        assert all(
+            description.endswith(".") for description in utility_descriptions.values()
+        )
+        assert "opower" in strings[section]["step"]["utility"]["description"].lower()
+        assert "optional" in strings[section]["step"]["utility"]["description"].lower()
+        assert "sum" in utility_descriptions["measured_energy_entities"].lower()
+
+    mains_data = strings["options"]["step"]["mains"]["data"]
+    mains_descriptions = strings["options"]["step"]["mains"]["data_description"]
+    assert mains_data == EXPECTED_MAINS_LABELS
+    assert mains_descriptions.keys() == EXPECTED_MAINS_LABELS.keys()
+    assert "optional" in mains_descriptions["mains_source_entities"].lower()
+    assert "mains nilm" in mains_descriptions["mains_source_entities"].lower()
+
+
+def test_advanced_settings_labels_are_human_readable_and_described() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    picker_step = strings["options"]["step"]["select_advanced_circuit"]
+    settings_step = strings["options"]["step"]["advanced_settings"]
+
+    assert picker_step["data"] == EXPECTED_ADVANCED_CIRCUIT_LABELS
+    assert picker_step["data_description"].keys() == (
+        EXPECTED_ADVANCED_CIRCUIT_LABELS.keys()
+    )
+    assert settings_step["data"] == EXPECTED_ADVANCED_SETTINGS_LABELS
+    assert settings_step["data_description"].keys() == (
+        EXPECTED_ADVANCED_SETTINGS_LABELS.keys()
+    )
+    assert all("_" not in label for label in settings_step["data"].values())
+    assert "service" not in settings_step["description"].lower()
+    assert "billing" in settings_step["description"].lower()
+    assert "standby" in settings_step["description"].lower()
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
@@ -172,9 +263,14 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
 
     for section, step in (
         ("config", "user"),
+        ("config", "utility"),
         ("config", "assign"),
         ("options", "sources"),
+        ("options", "mains"),
+        ("options", "utility"),
         ("options", "select_assignment"),
+        ("options", "select_advanced_circuit"),
+        ("options", "advanced_settings"),
         ("options", "assign"),
     ):
         strings_step = strings[section]["step"][step]
@@ -202,8 +298,11 @@ def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions
     for payload in (strings, translations):
         descriptions = (
             payload["config"]["step"]["user"]["description"],
+            payload["config"]["step"]["utility"]["description"],
             payload["options"]["step"]["init"]["description"],
             payload["options"]["step"]["sources"]["description"],
+            payload["options"]["step"]["mains"]["description"],
+            payload["options"]["step"]["utility"]["description"],
         )
         for description in descriptions:
             assert "{mapping_suggestions}" not in description
@@ -266,6 +365,26 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_health_summary" in dashboard_text
     assert "sensor.mains_nilm_nilm_discovered_signatures" in dashboard_text
     assert "binary_sensor.mains_nilm_maintenance" in dashboard_text
+
+
+def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
+    blueprint_path = (
+        ROOT
+        / "blueprints"
+        / "automation"
+        / "circuitsetup_energy_analyzer"
+        / "energy_alert_notification.yaml"
+    )
+    blueprint_text = blueprint_path.read_text(encoding="utf-8")
+
+    assert "CircuitSetup Energy Analyzer Alerts" in blueprint_text
+    assert "persistent_notification.create" in blueprint_text
+    assert "selector:" in blueprint_text
+    assert "entity:" in blueprint_text
+    assert "action:" in blueprint_text
+    assert "possible issue" in blueprint_text.lower()
+    assert "alert_entities:" in blueprint_text
+    assert "alert_actions:" in blueprint_text
 
 
 def _dashboard_cards(node: object) -> list[dict[str, object]]:
