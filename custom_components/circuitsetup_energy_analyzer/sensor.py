@@ -1783,8 +1783,9 @@ class DemoSourceSensor(SensorEntity):
         role = _coerce_sensor_role(sensor.role)
         metadata = _DEMO_SOURCE_ROLE_METADATA.get(role, {})
 
+        self.entity_id = sensor.entity_id
         self._attr_name = _title_from_object_id(object_id)
-        self._attr_unique_id = f"{entry_id}_demo_source_{object_id}"
+        self._attr_unique_id = f"{entry_id}_demo_source_exact_{object_id}"
         self._attr_suggested_object_id = object_id
         self._attr_native_value = _demo_source_value(circuit_id, role)
         self._attr_device_class = metadata.get("device_class")

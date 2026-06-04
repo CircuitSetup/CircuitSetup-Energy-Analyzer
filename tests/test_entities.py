@@ -1278,11 +1278,18 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
         if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
     ]
     assert {entity.unique_id for entity in source_entities} == {
-        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_active_power",
-        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_current",
-        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_power_factor",
-        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_reactive_power",
-        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_voltage",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_active_power",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_current",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_power_factor",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_reactive_power",
+        "entry-1_demo_source_exact_cs_energy_analyzer_demo_pool_pump_voltage",
+    }
+    assert {entity.entity_id for entity in source_entities} == {
+        "sensor.cs_energy_analyzer_demo_pool_pump_active_power",
+        "sensor.cs_energy_analyzer_demo_pool_pump_current",
+        "sensor.cs_energy_analyzer_demo_pool_pump_power_factor",
+        "sensor.cs_energy_analyzer_demo_pool_pump_reactive_power",
+        "sensor.cs_energy_analyzer_demo_pool_pump_voltage",
     }
     by_entity_id = {
         f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
