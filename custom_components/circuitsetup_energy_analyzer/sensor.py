@@ -1834,15 +1834,6 @@ class DemoSourceSensor(SensorEntity):
         """Return the demo source icon."""
         return self._attr_icon
 
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Group demo source sensors under a single demo source device."""
-        return {
-            "identifiers": {(DOMAIN, f"{self._entry_id}_demo_sources")},
-            "name": "CircuitSetup Energy Analyzer Demo Sources",
-            "manufacturer": "CircuitSetup",
-        }
-
 
 def _demo_source_entities_for_circuits(
     entry_id: str,

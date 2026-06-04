@@ -1312,6 +1312,11 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
     assert by_entity_id[
         "sensor.cs_energy_analyzer_demo_pool_pump_voltage"
     ].icon == "mdi:sine-wave"
+    assert getattr(
+        by_entity_id["sensor.cs_energy_analyzer_demo_pool_pump_voltage"],
+        "device_info",
+        None,
+    ) is None
 
 
 @pytest.mark.asyncio
