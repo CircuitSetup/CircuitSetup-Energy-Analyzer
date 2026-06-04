@@ -7,10 +7,13 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_CIRCUIT_ASSIGNMENTS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_EXTRA_SOURCE_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
+    CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
 )
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
@@ -83,7 +86,8 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
     )
 
     payload = {
-        CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.main_l1_power"],
+        CONF_SOURCE_DEVICES: ["meter-device"],
+        CONF_EXTRA_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.main_l1_power"],
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
         CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
         CONF_SENSITIVITY: "high",
@@ -94,7 +98,9 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
 
     validated = validate_setup_input(payload)
 
-    assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_SOURCE_ENTITIES]
+    assert validated[CONF_SOURCE_DEVICES] == payload[CONF_SOURCE_DEVICES]
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == payload[CONF_EXTRA_SOURCE_ENTITIES]
+    assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_EXTRA_SOURCE_ENTITIES]
     assert validated[CONF_ENABLE_EXPERIMENTAL_NILM] is True
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
     assert validated[CONF_SENSITIVITY] == "high"
@@ -110,11 +116,13 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
 
     validated = validate_setup_input(
         {
-            CONF_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.hvac_power",
+            CONF_SOURCE_DEVICES: "meter-1, meter-2",
+            CONF_EXTRA_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.hvac_power",
             CONF_MAINS_SOURCE_ENTITIES: "sensor.main_l1_power, sensor.main_l2_power",
         }
     )
 
+    assert validated[CONF_SOURCE_DEVICES] == ["meter-1", "meter-2"]
     assert validated[CONF_SOURCE_ENTITIES] == [
         "sensor.fridge_power",
         "sensor.hvac_power",
@@ -132,11 +140,15 @@ def test_validate_options_input_parses_source_entity_values() -> None:
 
     validated = validate_options_input(
         {
-            CONF_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.fridge_current",
+            CONF_EXTRA_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.fridge_current",
             CONF_MAINS_SOURCE_ENTITIES: "sensor.main_l1_power, sensor.main_l2_power",
         }
     )
 
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.fridge_power",
+        "sensor.fridge_current",
+    ]
     assert validated[CONF_SOURCE_ENTITIES] == [
         "sensor.fridge_power",
         "sensor.fridge_current",
@@ -154,7 +166,7 @@ def test_validate_setup_input_requires_source_entities() -> None:
     )
 
     with pytest.raises(SetupValidationError) as error:
-        validate_setup_input({CONF_SOURCE_ENTITIES: []})
+        validate_setup_input({CONF_SOURCE_DEVICES: [], CONF_EXTRA_SOURCE_ENTITIES: []})
 
     assert error.value.error_key == "no_source_entities"
 
@@ -168,7 +180,7 @@ def test_validate_setup_input_rejects_source_entity_mapping() -> None:
     with pytest.raises(SetupValidationError) as error:
         validate_setup_input(
             {
-                CONF_SOURCE_ENTITIES: {"sensor.fridge_power": True},
+                CONF_EXTRA_SOURCE_ENTITIES: {"sensor.fridge_power": True},
             }
         )
 
@@ -182,7 +194,9 @@ async def test_fallback_user_flow_returns_no_source_entities_form_error() -> Non
     )
 
     flow = CircuitSetupEnergyAnalyzerConfigFlow()
-    result = await flow.async_step_user({CONF_SOURCE_ENTITIES: []})
+    result = await flow.async_step_user(
+        {CONF_SOURCE_DEVICES: [], CONF_EXTRA_SOURCE_ENTITIES: []}
+    )
 
     assert result["type"] == "form"
     assert result["errors"]["base"] == "no_source_entities"
@@ -229,7 +243,8 @@ async def test_options_flow_preserves_valid_options() -> None:
     )
 
     user_input = {
-        CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.fridge_current"],
+        CONF_SOURCE_DEVICES: ["meter-device"],
+        CONF_EXTRA_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.fridge_current"],
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
         CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
         CONF_SENSITIVITY: "high",
@@ -239,8 +254,201 @@ async def test_options_flow_preserves_valid_options() -> None:
 
     result = await flow.async_step_init(user_input)
 
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert CONF_CIRCUIT_ASSIGNMENTS in _schema_keys(result["data_schema"])
+
+
+@pytest.mark.asyncio
+async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.garage_vehicle_charging_l1_active_power",
+                "sensor.garage_vehicle_charging_l2_active_power",
+                "sensor.garage_vehicle_charging_l1_current",
+                "sensor.garage_vehicle_charging_l2_current",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_l1_voltage"],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assignment_default = next(
+        marker.default()
+        for marker in result["data_schema"].schema
+        if getattr(marker, "schema", getattr(marker, "key", marker))
+        == CONF_CIRCUIT_ASSIGNMENTS
+    )
+    assert (
+        "Garage Vehicle Charging | ev_charger | dual_phase | "
+        "sensor.garage_vehicle_charging_l1_active_power, "
+        "sensor.garage_vehicle_charging_l2_active_power, "
+        "sensor.garage_vehicle_charging_l1_current, "
+        "sensor.garage_vehicle_charging_l2_current"
+    ) in assignment_default
+
+
+def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        build_config_from_assignment_input,
+    )
+
+    pending = {
+        CONF_SOURCE_ENTITIES: [
+            "sensor.hvac_l1_power",
+            "sensor.hvac_l2_power",
+            "sensor.hvac_l1_current",
+            "sensor.hvac_l2_current",
+            "sensor.basement_lights_power",
+        ],
+        CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power"],
+        CONF_SOURCE_DEVICES: ["meter-device"],
+        CONF_EXTRA_SOURCE_ENTITIES: [],
+        CONF_ENABLE_EXPERIMENTAL_NILM: True,
+        CONF_SENSITIVITY: "standard",
+        CONF_RETENTION_MODE: "standard",
+    }
+
+    config = build_config_from_assignment_input(
+        pending,
+        {
+            CONF_CIRCUIT_ASSIGNMENTS: "\n".join(
+                [
+                    (
+                        "A/C Compressor | hvac_compressor | dual_phase | "
+                        "sensor.hvac_l1_power, sensor.hvac_l2_power, "
+                        "sensor.hvac_l1_current, sensor.hvac_l2_current"
+                    ),
+                    "Basement Lights | exclude | mixed | sensor.basement_lights_power",
+                ]
+            )
+        },
+    )
+
+    assert config[CONF_SOURCE_DEVICES] == ["meter-device"]
+    assert config[CONF_SOURCE_ENTITIES] == [
+        "sensor.hvac_l1_power",
+        "sensor.hvac_l2_power",
+        "sensor.hvac_l1_current",
+        "sensor.hvac_l2_current",
+    ]
+    assert config["circuits"] == [
+        {
+            "circuit_id": "a_c_compressor",
+            "name": "A/C Compressor",
+            "appliance_profile": "hvac_compressor",
+            "mode": "dual_phase",
+            "sensors": [
+                {
+                    "entity_id": "sensor.hvac_l1_power",
+                    "role": "real_power",
+                    "leg": "a",
+                },
+                {
+                    "entity_id": "sensor.hvac_l2_power",
+                    "role": "real_power",
+                    "leg": "b",
+                },
+                {
+                    "entity_id": "sensor.hvac_l1_current",
+                    "role": "current",
+                    "leg": "a",
+                },
+                {
+                    "entity_id": "sensor.hvac_l2_current",
+                    "role": "current",
+                    "leg": "b",
+                },
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.air_handler_active_power",
+                "sensor.air_handler_current",
+                "sensor.sump_pump_active_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            CONF_CIRCUIT_ASSIGNMENTS: "\n".join(
+                [
+                    (
+                        "Air Handler | hvac_blower | single_phase | "
+                        "sensor.air_handler_active_power, sensor.air_handler_current"
+                    ),
+                    (
+                        "Sump Pump | sump_pump | single_phase | "
+                        "sensor.sump_pump_active_power"
+                    ),
+                ]
+            )
+        }
+    )
+
     assert result["type"] == "create_entry"
-    assert result["data"] == user_input
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.air_handler_active_power",
+        "sensor.air_handler_current",
+        "sensor.sump_pump_active_power",
+    ]
+    assert result["data"]["circuits"] == [
+        {
+            "circuit_id": "air_handler",
+            "name": "Air Handler",
+            "appliance_profile": "hvac_blower",
+            "mode": "single_phase",
+            "sensors": [
+                {
+                    "entity_id": "sensor.air_handler_active_power",
+                    "role": "real_power",
+                    "leg": None,
+                },
+                {
+                    "entity_id": "sensor.air_handler_current",
+                    "role": "current",
+                    "leg": None,
+                },
+            ],
+        },
+        {
+            "circuit_id": "sump_pump",
+            "name": "Sump Pump",
+            "appliance_profile": "sump_pump",
+            "mode": "single_phase",
+            "sensors": [
+                {
+                    "entity_id": "sensor.sump_pump_active_power",
+                    "role": "real_power",
+                    "leg": None,
+                }
+            ],
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -325,8 +533,38 @@ def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None
             "include_entities": ["sensor.panel_power", "sensor.panel_voltage"],
         }
     }
+    assert config_flow._source_device_selector_config() == {
+        "device": {
+            "multiple": True,
+            "filter": [{"integration": "esphome"}],
+            "entity": [
+                {
+                    "domain": "sensor",
+                    "device_class": sorted(
+                        {
+                            "apparent_power",
+                            "current",
+                            "energy",
+                            "frequency",
+                            "power",
+                            "power_factor",
+                            "reactive_energy",
+                            "reactive_power",
+                            "voltage",
+                        }
+                    ),
+                }
+            ],
+        }
+    }
     assert "circuits" not in _schema_keys(config_flow.DATA_SCHEMA)
-    assert CONF_SOURCE_ENTITIES in _schema_keys(
+    assert CONF_SOURCE_DEVICES in _schema_keys(config_flow.DATA_SCHEMA)
+    assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(config_flow.DATA_SCHEMA)
+    assert CONF_SOURCE_ENTITIES not in _schema_keys(config_flow.DATA_SCHEMA)
+    assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(
+        config_flow._options_schema(SimpleNamespace(data={}, options={}))
+    )
+    assert CONF_SOURCE_ENTITIES not in _schema_keys(
         config_flow._options_schema(SimpleNamespace(data={}, options={}))
     )
     assert "known_load_circuits" not in _schema_keys(config_flow.DATA_SCHEMA)

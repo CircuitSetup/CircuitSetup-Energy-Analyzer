@@ -4,26 +4,40 @@
     "step": {
       "user": {
         "title": "Configure CircuitSetup Energy Analyzer",
-        "description": "Select energy source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+        "description": "Select source meter devices or extra source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
         "data": {
-          "source_entities": "Source Entities",
+          "source_devices": "Source Meter Devices",
+          "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
-          "source_entities": "Use sensor entities for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+          "source_devices": "Select ESPHome meter devices to auto-add their energy-like sensors for appliance assignment.",
+          "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how readily possible issues are reported.",
           "retention_mode": "Controls how much historical diagnostic data is retained."
         }
+      },
+      "assign": {
+        "title": "Assign Circuit Appliances",
+        "description": "Review generated circuit groups and choose the appliance type and circuit mode before saving.",
+        "data": {
+          "circuit_assignments": "Circuit Assignments"
+        },
+        "data_description": {
+          "circuit_assignments": "Review one line per circuit: name, appliance type, mode, and sensor entities separated by vertical bars."
+        }
       }
     },
     "error": {
       "no_source_entities": "Select at least one source sensor.",
+      "invalid_source_devices": "Source meter devices must be text values.",
       "invalid_source_entities": "Source sensor entity IDs must be text values.",
+      "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values."
     }
@@ -32,20 +46,32 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Tune source sensors, diagnostics, and experimental NILM settings.",
+        "description": "Tune source meter devices, extra source sensors, diagnostics, and experimental NILM settings.",
         "data": {
-          "source_entities": "Source Entities",
+          "source_devices": "Source Meter Devices",
+          "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
-          "source_entities": "Update the sensor entities used for power, current, energy, reactive power, apparent power, or power factor.",
+          "source_devices": "Select ESPHome meter devices to auto-add their energy-like sensors for appliance assignment.",
+          "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how readily possible issues are reported.",
           "retention_mode": "Controls how much historical diagnostic data is retained."
+        }
+      },
+      "assign": {
+        "title": "Assign Circuit Appliances",
+        "description": "Review generated circuit groups and choose the appliance type and circuit mode before saving.",
+        "data": {
+          "circuit_assignments": "Circuit Assignments"
+        },
+        "data_description": {
+          "circuit_assignments": "Review one line per circuit: name, appliance type, mode, and sensor entities separated by vertical bars."
         }
       }
     }

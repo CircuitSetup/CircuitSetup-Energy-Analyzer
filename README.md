@@ -32,12 +32,34 @@ To install with HACS:
 4. Restart Home Assistant.
 5. Add the integration from Settings > Devices & services.
 
+## Setup Flow
+
+The setup and options screens are designed to avoid hand-written JSON:
+
+- Source Meter Devices: choose ESPHome meter devices, such as a CircuitSetup
+  ATM90E32 meter. The integration expands the selected devices into matching
+  power, current, voltage, energy, frequency, reactive power, apparent power,
+  and power-factor sensors.
+- Extra Source Entities: add individual sensors that are not attached to a
+  selected meter device or that you want to include manually.
+- Mains Source Entities: optional whole-panel or aggregate sensors for
+  experimental mains NILM and balance views. Use L1/L2 or leg A/B naming when
+  split-phase mains context is available.
+- Circuit Assignments: review the generated circuit groups, then set the
+  appliance type and circuit mode. Use `exclude` for plugs, lights, or other
+  groups that should not receive appliance-specific analysis.
+
+Recommended v1 appliance types include broad `hvac`, more specific
+`hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus
+`water_pump`, `pool_pump`, and `sump_pump` pump profiles. Existing
+`well_pump` input is accepted as a legacy alias for `water_pump`.
+
 ## Circuit Modes
 
 CircuitSetup Energy Analyzer supports four analysis modes:
 
 - Single-phase circuits monitor one CT/channel mapped to one primary appliance, such as a refrigerator, freezer, pump, or other 120 V load.
-- Dual-phase circuits combine two CT/channels into one appliance model for 240 V loads. The analyzer keeps leg-level context so it can surface suspicious imbalance or phase-pairing problems without treating each leg as an unrelated appliance.
+- Dual-phase circuits combine two CT/channels into one appliance model for 240 V loads, such as an HVAC compressor, electric heat, water heater, oven, dryer, pool pump, or car/EV charger. The analyzer keeps leg-level context so it can surface suspicious imbalance or phase-pairing problems without treating each leg as an unrelated appliance.
 - Mixed circuits are useful when one branch circuit feeds multiple small loads. The integration reports data quality, large changes, and recurring evidence conservatively instead of pretending the circuit is a clean appliance signature.
 - Mains NILM circuits are whole-home aggregate inputs. Experimental NILM can look for recurring aggregate signatures after known directly monitored circuits are masked out.
 

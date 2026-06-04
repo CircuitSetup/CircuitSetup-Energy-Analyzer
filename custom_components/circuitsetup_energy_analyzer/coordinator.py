@@ -131,6 +131,7 @@ FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
     {
         ApplianceProfile.EV_CHARGER,
         ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
         ApplianceProfile.POOL_PUMP,
         ApplianceProfile.WATER_HEATER,
     }
@@ -4602,8 +4603,14 @@ def _circuit_configs_from_entry_data(
     options: dict[str, Any] | None = None,
 ) -> tuple[CircuitConfig, ...]:
     configs: list[CircuitConfig] = []
+    options = options or {}
     default_retention_mode = _retention_mode_from_sources(entry_data, options)
-    for raw_circuit in entry_data.get(CONF_CIRCUITS, []):
+    raw_circuits = (
+        options[CONF_CIRCUITS]
+        if CONF_CIRCUITS in options
+        else entry_data.get(CONF_CIRCUITS, [])
+    )
+    for raw_circuit in raw_circuits:
         config = _circuit_config_from_raw(raw_circuit, default_retention_mode)
         if config is not None:
             configs.append(config)
@@ -4865,15 +4872,31 @@ def _circuit_config_from_raw(
 
 def _appliance_profile_from_raw_value(value: Any) -> ApplianceProfile:
     normalized = str(value or ApplianceProfile.MIXED.value).strip().lower()
-    if normalized in {
-        "car_charger",
-        "vehicle_charger",
-        "vehicle_charging",
-        "level2_charger",
-        "level_2_charger",
-        "wall_connector",
-    }:
-        return ApplianceProfile.EV_CHARGER
+    aliases = {
+        "hvac_system": ApplianceProfile.HVAC.value,
+        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "blower": ApplianceProfile.HVAC_BLOWER.value,
+        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
+        "well_pump": ApplianceProfile.WATER_PUMP.value,
+        "booster_pump": ApplianceProfile.WATER_PUMP.value,
+        "car_charger": ApplianceProfile.EV_CHARGER.value,
+        "vehicle_charger": ApplianceProfile.EV_CHARGER.value,
+        "vehicle_charging": ApplianceProfile.EV_CHARGER.value,
+        "level2_charger": ApplianceProfile.EV_CHARGER.value,
+        "level_2_charger": ApplianceProfile.EV_CHARGER.value,
+        "wall_connector": ApplianceProfile.EV_CHARGER.value,
+    }
+    normalized = aliases.get(normalized, normalized)
     return ApplianceProfile(normalized)
 
 
@@ -5259,7 +5282,29 @@ def _appliance_profile_mode_from_circuit_id(
         ),
         (("_freezer_",), ApplianceProfile.FREEZER, CircuitMode.SINGLE_PHASE),
         (
-            ("_hvac_", "_heat_pump_", "_air_conditioner_", "_ac_"),
+            (
+                "_ac_compressor_",
+                "_a_c_compressor_",
+                "_compressor_",
+                "_heat_pump_",
+                "_air_conditioner_",
+                "_ac_",
+            ),
+            ApplianceProfile.HVAC_COMPRESSOR,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (
+            ("_air_handler_", "_hvac_air_handler_", "_blower_"),
+            ApplianceProfile.HVAC_BLOWER,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_aux_heat_", "_electric_heat_", "_electric_aux_heat_", "_heat_strip_"),
+            ApplianceProfile.ELECTRIC_HEAT,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (
+            ("_hvac_",),
             ApplianceProfile.HVAC,
             CircuitMode.DUAL_PHASE,
         ),
@@ -5276,8 +5321,14 @@ def _appliance_profile_mode_from_circuit_id(
             CircuitMode.SINGLE_PHASE,
         ),
         (
-            ("_well_pump_", "_wellpump_"),
-            ApplianceProfile.WELL_PUMP,
+            (
+                "_well_pump_",
+                "_wellpump_",
+                "_water_pump_",
+                "_waterpump_",
+                "_booster_pump_",
+            ),
+            ApplianceProfile.WATER_PUMP,
             CircuitMode.SINGLE_PHASE,
         ),
         (

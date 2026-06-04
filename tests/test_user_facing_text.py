@@ -10,7 +10,8 @@ INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 
 
 EXPECTED_FLOW_LABELS = {
-    "source_entities": "Source Entities",
+    "source_devices": "Source Meter Devices",
+    "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "sensitivity": "Sensitivity",
@@ -18,7 +19,8 @@ EXPECTED_FLOW_LABELS = {
 }
 
 EXPECTED_OPTIONS_LABELS = {
-    "source_entities": "Source Entities",
+    "source_devices": "Source Meter Devices",
+    "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "sensitivity": "Sensitivity",
@@ -78,8 +80,9 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 160 for description in descriptions.values())
-    assert "power, voltage, current" in descriptions["source_entities"].lower()
-    assert "power factor" in descriptions["source_entities"].lower()
+    assert "esphome" in descriptions["source_devices"].lower()
+    assert "power, voltage, current" in descriptions["extra_source_entities"].lower()
+    assert "power factor" in descriptions["extra_source_entities"].lower()
     assert "optional" in descriptions["mains_source_entities"].lower()
 
 
@@ -96,13 +99,31 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "optional" in descriptions["mains_source_entities"].lower()
 
 
+def test_assignment_flow_labels_are_human_readable_and_described() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+
+    for section in ("config", "options"):
+        data = strings[section]["step"]["assign"]["data"]
+        descriptions = strings[section]["step"]["assign"]["data_description"]
+        assert data == {"circuit_assignments": "Circuit Assignments"}
+        assert descriptions.keys() == data.keys()
+        assert all("_" not in label for label in data.values())
+        assert all(description.endswith(".") for description in descriptions.values())
+        assert "appliance type" in descriptions["circuit_assignments"].lower()
+
+
 def test_runtime_english_translations_include_setup_and_options_text() -> None:
     strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
     translations = json.loads(
         (INTEGRATION_DIR / "translations" / "en.json").read_text()
     )
 
-    for section, step in (("config", "user"), ("options", "init")):
+    for section, step in (
+        ("config", "user"),
+        ("config", "assign"),
+        ("options", "init"),
+        ("options", "assign"),
+    ):
         strings_step = strings[section]["step"][step]
         translated_step = translations[section]["step"][step]
         assert translated_step["data"] == strings_step["data"]

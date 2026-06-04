@@ -94,10 +94,14 @@ except ModuleNotFoundError:
     ha_selector = None
 
 from .const import (
+    CONF_CIRCUIT_ASSIGNMENTS,
+    CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_EXTRA_SOURCE_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
+    CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
     DEFAULT_RETENTION_MODE,
@@ -107,16 +111,45 @@ from .const import (
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
     async_discover_energy_source_entities,
+    async_discover_energy_source_entities_for_devices,
     async_discover_sensors,
+    infer_sensor_role,
 )
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
-from .models import RetentionMode
+from .models import ApplianceProfile, CircuitMode, RetentionMode, SensorRole
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
+ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
+_ASSIGNMENT_PROFILE_OPTIONS = (
+    "exclude",
+    ApplianceProfile.REFRIGERATOR.value,
+    ApplianceProfile.FREEZER.value,
+    ApplianceProfile.HVAC.value,
+    ApplianceProfile.HVAC_COMPRESSOR.value,
+    ApplianceProfile.HVAC_BLOWER.value,
+    ApplianceProfile.ELECTRIC_HEAT.value,
+    ApplianceProfile.WATER_HEATER.value,
+    ApplianceProfile.OVEN.value,
+    ApplianceProfile.DRYER.value,
+    ApplianceProfile.POOL_PUMP.value,
+    ApplianceProfile.WATER_PUMP.value,
+    ApplianceProfile.SUMP_PUMP.value,
+    ApplianceProfile.EV_CHARGER.value,
+    ApplianceProfile.SOLAR_INVERTER.value,
+    ApplianceProfile.MOTOR_LOAD.value,
+    ApplianceProfile.RESISTIVE_LOAD.value,
+    ApplianceProfile.MIXED.value,
+)
+_ASSIGNMENT_MODE_OPTIONS = {
+    CircuitMode.SINGLE_PHASE.value,
+    CircuitMode.DUAL_PHASE.value,
+    CircuitMode.MIXED.value,
+    CircuitMode.MAINS_NILM.value,
+}
 _DEMO_SOURCE_METRICS = (
     "energy",
     "active_power",
@@ -181,9 +214,20 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
 
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize setup data without requiring Home Assistant."""
-    source_entities = _strict_string_list(
-        user_input.get(CONF_SOURCE_ENTITIES),
+    source_devices = _strict_string_list(
+        user_input.get(CONF_SOURCE_DEVICES, []),
+        invalid_error_key="invalid_source_devices",
+    )
+    extra_source_entities = _strict_string_list(
+        user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    legacy_source_entities = _strict_string_list(
+        user_input.get(CONF_SOURCE_ENTITIES, []),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    source_entities = list(
+        dict.fromkeys([*extra_source_entities, *legacy_source_entities])
     )
     if not source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
@@ -191,6 +235,8 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     retention_mode = _validate_retention_mode(user_input)
 
     return {
+        CONF_SOURCE_DEVICES: source_devices,
+        CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
         CONF_SOURCE_ENTITIES: source_entities,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
@@ -209,7 +255,17 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize options flow data without requiring Home Assistant."""
+    source_devices = _strict_string_list(
+        user_input.get(CONF_SOURCE_DEVICES, []),
+        invalid_error_key="invalid_source_devices",
+    )
+    extra_source_entities = _strict_string_list(
+        user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
     validated = {
+        CONF_SOURCE_DEVICES: source_devices,
+        CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -223,14 +279,17 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
+    merged_source_entities = list(extra_source_entities)
     if CONF_SOURCE_ENTITIES in user_input:
         source_entities = _strict_string_list(
             user_input.get(CONF_SOURCE_ENTITIES),
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
-        if not source_entities:
-            raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
-        validated[CONF_SOURCE_ENTITIES] = source_entities
+        merged_source_entities.extend(source_entities)
+    merged_source_entities = list(dict.fromkeys(merged_source_entities))
+    if not merged_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    validated[CONF_SOURCE_ENTITIES] = merged_source_entities
     return validated
 
 
@@ -296,6 +355,29 @@ def _energy_entity_list_selector(
     return _selector(_energy_entity_selector_config(include_entities), str)
 
 
+def _source_device_selector() -> Any:
+    return _selector(_source_device_selector_config(), str)
+
+
+def _source_device_selector_config() -> dict[str, Any]:
+    return {
+        "device": {
+            "multiple": True,
+            "filter": [{"integration": "esphome"}],
+            "entity": [
+                {
+                    "domain": "sensor",
+                    "device_class": sorted(ENERGY_SOURCE_DEVICE_CLASSES),
+                }
+            ],
+        }
+    }
+
+
+def _assignment_text_selector() -> Any:
+    return _selector({"text": {"multiline": True, "multiple": False}}, str)
+
+
 def _select_selector(options: Iterable[str]) -> Any:
     return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
 
@@ -311,7 +393,11 @@ def _selectable_source_entity_ids(
 def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
     return vol.Schema(
         {
-            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(
+            vol.Optional(CONF_SOURCE_DEVICES, default=[]): _source_device_selector(),
+            vol.Optional(
+                CONF_EXTRA_SOURCE_ENTITIES,
+                default=[],
+            ): _energy_entity_list_selector(
                 _selectable_source_entity_ids(source_entity_ids)
             ),
             vol.Optional(
@@ -339,11 +425,293 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
 DATA_SCHEMA = _setup_schema()
 
 
+def _assignment_schema(default_assignment_text: str) -> Any:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_CIRCUIT_ASSIGNMENTS,
+                default=default_assignment_text,
+            ): _assignment_text_selector(),
+        }
+    )
+
+
+def default_assignment_text(source_entities: Iterable[str]) -> str:
+    """Build editable non-JSON circuit assignment lines from source entities."""
+    groups: dict[str, list[str]] = {}
+    for entity_id in source_entities:
+        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
+        groups.setdefault(circuit_id, []).append(entity_id)
+
+    lines = [
+        "# Format: Circuit name | appliance_type | mode | entity_id, entity_id",
+        "# Use appliance_type 'exclude' to leave a detected group out.",
+    ]
+    for circuit_id, entity_ids in groups.items():
+        profile, mode = _suggest_assignment_profile_mode(circuit_id, entity_ids)
+        lines.append(
+            " | ".join(
+                (
+                    _friendly_name_from_id(circuit_id),
+                    profile,
+                    mode,
+                    ", ".join(entity_ids),
+                )
+            )
+        )
+    return "\n".join(lines)
+
+
+def build_config_from_assignment_input(
+    pending_config: Mapping[str, Any],
+    assignment_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build final config/options data from source selection and assignment text."""
+    circuits, assigned_source_entities = _circuits_from_assignment_text(
+        str(assignment_input.get(CONF_CIRCUIT_ASSIGNMENTS, ""))
+    )
+    if not assigned_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+
+    final_config = dict(pending_config)
+    final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
+    final_config[CONF_CIRCUITS] = circuits
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = str(
+        assignment_input.get(CONF_CIRCUIT_ASSIGNMENTS, "")
+    )
+    return final_config
+
+
+def _circuits_from_assignment_text(
+    assignment_text: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    circuits: list[dict[str, Any]] = []
+    assigned_source_entities: list[str] = []
+    for raw_line in assignment_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) != 4 or not parts[0] or not parts[1] or not parts[3]:
+            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+        name, raw_profile, raw_mode, raw_entities = parts
+        profile = _normalize_assignment_profile(raw_profile)
+        mode = _normalize_assignment_mode(raw_mode)
+        entity_ids = _strict_string_list(
+            raw_entities,
+            invalid_error_key=ERROR_INVALID_CIRCUIT_ASSIGNMENTS,
+        )
+        if profile == "exclude":
+            continue
+        if profile not in _ASSIGNMENT_PROFILE_OPTIONS:
+            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+        sensors = [
+            {
+                "entity_id": entity_id,
+                "role": _assignment_sensor_role(entity_id).value,
+                "leg": _assignment_leg_hint(entity_id),
+            }
+            for entity_id in entity_ids
+        ]
+        circuits.append(
+            {
+                "circuit_id": _slugify(name),
+                "name": name,
+                "appliance_profile": profile,
+                "mode": mode,
+                "sensors": sensors,
+            }
+        )
+        assigned_source_entities.extend(entity_ids)
+    return circuits, list(dict.fromkeys(assigned_source_entities))
+
+
+def _normalize_assignment_profile(raw_profile: str) -> str:
+    normalized = _slugify(raw_profile)
+    aliases = {
+        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "blower": ApplianceProfile.HVAC_BLOWER.value,
+        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
+        "well_pump": ApplianceProfile.WATER_PUMP.value,
+        "booster_pump": ApplianceProfile.WATER_PUMP.value,
+        "car_charger": ApplianceProfile.EV_CHARGER.value,
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _normalize_assignment_mode(raw_mode: str) -> str:
+    normalized = _slugify(raw_mode)
+    aliases = {
+        "single": CircuitMode.SINGLE_PHASE.value,
+        "single_phase": CircuitMode.SINGLE_PHASE.value,
+        "dual": CircuitMode.DUAL_PHASE.value,
+        "dual_phase": CircuitMode.DUAL_PHASE.value,
+        "split_phase": CircuitMode.DUAL_PHASE.value,
+        "mixed": CircuitMode.MIXED.value,
+        "mains": CircuitMode.MAINS_NILM.value,
+        "mains_nilm": CircuitMode.MAINS_NILM.value,
+    }
+    mode = aliases.get(normalized, normalized)
+    if mode not in _ASSIGNMENT_MODE_OPTIONS:
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+    return mode
+
+
+def _assignment_sensor_role(entity_id: str) -> SensorRole:
+    role = infer_sensor_role(entity_id, entity_id)
+    return role if role is not None else SensorRole.REAL_POWER
+
+
+def _assignment_leg_hint(entity_id: str) -> str | None:
+    object_id = str(entity_id).split(".")[-1].lower()
+    if re.search(r"(?:^|_)(?:l1|leg_a|line_a|phase_a|ct1)(?:_|$)", object_id):
+        return "a"
+    if re.search(r"(?:^|_)(?:l2|leg_b|line_b|phase_b|ct2)(?:_|$)", object_id):
+        return "b"
+    return None
+
+
+def _assignment_circuit_id_from_entity_id(entity_id: str) -> str:
+    object_id = str(entity_id).split(".")[-1].strip().lower()
+    for suffix in (
+        "_reactive_power",
+        "_apparent_power",
+        "_power_factor",
+        "_line_frequency",
+        "_real_power",
+        "_active_power",
+        "_frequency",
+        "_current",
+        "_voltage",
+        "_energy",
+        "_watts",
+        "_watt",
+        "_amps",
+        "_amp",
+        "_power",
+        "_kwh",
+        "_mwh",
+        "_wh",
+        "_var",
+        "_va",
+        "_pf",
+        "_hz",
+    ):
+        if object_id.endswith(suffix):
+            object_id = object_id[: -len(suffix)]
+            break
+    for suffix in (
+        "_leg_a",
+        "_leg_b",
+        "_line_a",
+        "_line_b",
+        "_phase_a",
+        "_phase_b",
+        "_leg_1",
+        "_leg_2",
+        "_line_1",
+        "_line_2",
+        "_phase_1",
+        "_phase_2",
+        "_l1",
+        "_l2",
+    ):
+        if object_id.endswith(suffix):
+            return object_id[: -len(suffix)]
+    return object_id
+
+
+def _suggest_assignment_profile_mode(
+    circuit_id: str,
+    entity_ids: Iterable[str],
+) -> tuple[str, str]:
+    text = f"_{circuit_id}_{' '.join(entity_ids)}_".lower()
+    is_dual = any(
+        _assignment_leg_hint(entity_id) in {"a", "b"} for entity_id in entity_ids
+    ) and any(_assignment_leg_hint(entity_id) == "b" for entity_id in entity_ids)
+    if any(token in text for token in ("_air_handler_", "_blower_")):
+        return ApplianceProfile.HVAC_BLOWER.value, CircuitMode.SINGLE_PHASE.value
+    if any(
+        token in text for token in ("_aux_heat_", "_electric_heat_", "_heat_strip_")
+    ):
+        return ApplianceProfile.ELECTRIC_HEAT.value, CircuitMode.DUAL_PHASE.value
+    if any(
+        token in text
+        for token in ("_compressor_", "_heat_pump_", "_air_conditioner_", "_ac_")
+    ):
+        return ApplianceProfile.HVAC_COMPRESSOR.value, CircuitMode.DUAL_PHASE.value
+    if "_hvac_" in text:
+        return ApplianceProfile.HVAC.value, (
+            CircuitMode.DUAL_PHASE.value if is_dual else CircuitMode.SINGLE_PHASE.value
+        )
+    if "_water_pump_" in text or "_well_pump_" in text or "_booster_pump_" in text:
+        return ApplianceProfile.WATER_PUMP.value, CircuitMode.SINGLE_PHASE.value
+    if "_sump_pump_" in text:
+        return ApplianceProfile.SUMP_PUMP.value, CircuitMode.SINGLE_PHASE.value
+    if "_pool_pump_" in text:
+        return ApplianceProfile.POOL_PUMP.value, CircuitMode.SINGLE_PHASE.value
+    for token, profile, mode in (
+        (
+            "_fridge_",
+            ApplianceProfile.REFRIGERATOR.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        (
+            "_refrigerator_",
+            ApplianceProfile.REFRIGERATOR.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        ("_freezer_", ApplianceProfile.FREEZER.value, CircuitMode.SINGLE_PHASE.value),
+        (
+            "_water_heater_",
+            ApplianceProfile.WATER_HEATER.value,
+            CircuitMode.DUAL_PHASE.value,
+        ),
+        ("_oven_", ApplianceProfile.OVEN.value, CircuitMode.DUAL_PHASE.value),
+        ("_dryer_", ApplianceProfile.DRYER.value, CircuitMode.DUAL_PHASE.value),
+        (
+            "_solar_",
+            ApplianceProfile.SOLAR_INVERTER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        (
+            "_inverter_",
+            ApplianceProfile.SOLAR_INVERTER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        ("_charger_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
+        ("_charging_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
+        ("_vehicle_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
+        ("_evse_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
+    ):
+        if token in text:
+            return profile, mode
+    return ApplianceProfile.MIXED.value, CircuitMode.MIXED.value
+
+
+def _friendly_name_from_id(value: str) -> str:
+    return value.replace("_", " ").strip().title()
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug or "circuit"
+
+
 class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for CircuitSetup Energy Analyzer."""
 
     VERSION = 1
     MINOR_VERSION = 1
+    _pending_config: dict[str, Any] | None = None
 
     @staticmethod
     @callback
@@ -362,11 +730,23 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
 
         if user_input is not None:
             try:
-                validated = validate_setup_input(user_input)
+                validated = validate_setup_input(
+                    await _async_source_selection_with_device_entities(
+                        getattr(self, "hass", None),
+                        user_input,
+                    )
+                )
             except SetupValidationError as err:
                 errors["base"] = err.error_key
             else:
-                return self.async_create_entry(title=TITLE, data=validated)
+                self._pending_config = validated
+                return self.async_show_form(
+                    step_id="assign",
+                    data_schema=_assignment_schema(
+                        default_assignment_text(validated[CONF_SOURCE_ENTITIES])
+                    ),
+                    errors={},
+                )
 
         return self.async_show_form(
             step_id="user",
@@ -378,12 +758,45 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             errors=errors,
         )
 
+    async def async_step_assign(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Confirm or edit circuit assignments."""
+        pending_config = self._pending_config or {}
+        if user_input is not None:
+            try:
+                final_config = build_config_from_assignment_input(
+                    pending_config,
+                    user_input,
+                )
+            except SetupValidationError as err:
+                return self.async_show_form(
+                    step_id="assign",
+                    data_schema=_assignment_schema(
+                        default_assignment_text(
+                            pending_config.get(CONF_SOURCE_ENTITIES, [])
+                        )
+                    ),
+                    errors={"base": err.error_key},
+                )
+            return self.async_create_entry(title=TITLE, data=final_config)
+
+        return self.async_show_form(
+            step_id="assign",
+            data_schema=_assignment_schema(
+                default_assignment_text(pending_config.get(CONF_SOURCE_ENTITIES, []))
+            ),
+            errors={},
+        )
+
 
 class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     """Options flow for CircuitSetup Energy Analyzer."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
+        self._pending_config: dict[str, Any] | None = None
 
     async def async_step_init(
         self,
@@ -392,12 +805,59 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         """Manage integration options."""
         if user_input is not None:
             try:
-                validated = validate_options_input(user_input)
+                validated = validate_options_input(
+                    await _async_source_selection_with_device_entities(
+                        getattr(self, "hass", None),
+                        user_input,
+                    )
+                )
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            return self.async_create_entry(title="", data=validated)
+            self._pending_config = validated
+            return self.async_show_form(
+                step_id="assign",
+                data_schema=_assignment_schema(
+                    str(
+                        (getattr(self._config_entry, "options", {}) or {}).get(
+                            CONF_CIRCUIT_ASSIGNMENTS,
+                            default_assignment_text(validated[CONF_SOURCE_ENTITIES]),
+                        )
+                    )
+                ),
+                errors={},
+            )
 
         return await self._async_show_options_form()
+
+    async def async_step_assign(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Confirm or edit circuit assignments in options."""
+        pending_config = self._pending_config or {}
+        if user_input is not None:
+            try:
+                final_config = build_config_from_assignment_input(
+                    pending_config,
+                    user_input,
+                )
+            except SetupValidationError as err:
+                return self.async_show_form(
+                    step_id="assign",
+                    data_schema=_assignment_schema(
+                        str(user_input.get(CONF_CIRCUIT_ASSIGNMENTS, ""))
+                    ),
+                    errors={"base": err.error_key},
+                )
+            return self.async_create_entry(title="", data=final_config)
+
+        return self.async_show_form(
+            step_id="assign",
+            data_schema=_assignment_schema(
+                default_assignment_text(pending_config.get(CONF_SOURCE_ENTITIES, []))
+            ),
+            errors={},
+        )
 
     async def _async_show_options_form(
         self,
@@ -422,6 +882,14 @@ def _options_schema(
     source_entities = options.get(
         CONF_SOURCE_ENTITIES,
         data.get(CONF_SOURCE_ENTITIES, []),
+    )
+    source_devices = options.get(
+        CONF_SOURCE_DEVICES,
+        data.get(CONF_SOURCE_DEVICES, []),
+    )
+    extra_source_entities = options.get(
+        CONF_EXTRA_SOURCE_ENTITIES,
+        data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
     )
     mains_source_entities = options.get(
         CONF_MAINS_SOURCE_ENTITIES,
@@ -452,8 +920,12 @@ def _options_schema(
                 ),
             ): bool,
             vol.Optional(
-                CONF_SOURCE_ENTITIES,
-                default=source_entities,
+                CONF_SOURCE_DEVICES,
+                default=source_devices,
+            ): _source_device_selector(),
+            vol.Optional(
+                CONF_EXTRA_SOURCE_ENTITIES,
+                default=extra_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
@@ -487,10 +959,63 @@ async def _async_format_mapping_suggestions(hass: Any) -> str:
     return format_mapping_suggestions(suggest_dual_phase_pairs(discovered))
 
 
+async def _async_source_selection_with_device_entities(
+    hass: Any,
+    user_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return source selection with selected devices expanded to source entities."""
+    source_devices = _strict_string_list(
+        user_input.get(CONF_SOURCE_DEVICES, []),
+        invalid_error_key="invalid_source_devices",
+    )
+    extra_source_entities = _strict_string_list(
+        user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    legacy_source_entities = _strict_string_list(
+        user_input.get(CONF_SOURCE_ENTITIES, []),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    device_source_entities = await _async_discover_energy_source_entities_for_devices(
+        hass,
+        source_devices,
+    )
+    merged = list(
+        dict.fromkeys(
+            [
+                *device_source_entities,
+                *extra_source_entities,
+                *legacy_source_entities,
+            ]
+        )
+    )
+    return {
+        **dict(user_input),
+        CONF_SOURCE_DEVICES: source_devices,
+        CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
+        CONF_SOURCE_ENTITIES: merged,
+    }
+
+
 async def _async_discover_energy_source_entities(hass: Any) -> list[str]:
     if hass is None:
         return []
     try:
         return await async_discover_energy_source_entities(hass)
+    except Exception:
+        return []
+
+
+async def _async_discover_energy_source_entities_for_devices(
+    hass: Any,
+    source_devices: Iterable[str],
+) -> list[str]:
+    if hass is None:
+        return []
+    try:
+        return await async_discover_energy_source_entities_for_devices(
+            hass,
+            tuple(source_devices),
+        )
     except Exception:
         return []

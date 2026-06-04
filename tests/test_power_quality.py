@@ -478,6 +478,64 @@ def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
     assert "resistive" in evidence.message
 
 
+def test_select_evidence_treats_electric_heat_as_resistive_load() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=9500.0,
+                reactive_power=1400.0,
+                apparent_power=9602.0,
+                power_factor=0.92,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 9500.0, 120.0),
+            "reactive_power": baseline("reactive_power", 30.0, 8.0),
+            "power_factor": baseline("power_factor", 0.99, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.003, 0.002),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.01, 0.005),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.ELECTRIC_HEAT, CircuitMode.DUAL_PHASE),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature == "resistive_load_became_reactive"
+
+
+def test_select_evidence_treats_hvac_compressor_as_motor_load() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=3200.0,
+                reactive_power=1100.0,
+                apparent_power=3384.0,
+                power_factor=0.88,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 2600.0, 90.0),
+            "reactive_power": baseline("reactive_power", 520.0, 40.0),
+            "apparent_power": baseline("apparent_power", 3223.0, 50.0),
+            "power_factor": baseline("power_factor", 0.96, 0.01),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.16, 0.02),
+            "apparent_to_real_ratio": baseline("apparent_to_real_ratio", 1.01, 0.01),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.04, 0.01),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.HVAC_COMPRESSOR, CircuitMode.SINGLE_PHASE),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature == "motor_relationship_changed"
+
+
 def test_select_evidence_ignores_raw_var_when_real_power_changed() -> None:
     scores = score_power_quality_features(
         extract_power_quality_features(

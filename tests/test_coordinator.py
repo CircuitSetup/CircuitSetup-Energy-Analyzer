@@ -1532,6 +1532,47 @@ def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> N
     }
 
 
+def test_runtime_infers_recommended_v1_appliance_taxonomy_from_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.garage_ac_compressor_l1_active_power",
+                "sensor.garage_ac_compressor_l2_active_power",
+                "sensor.air_handler_active_power",
+                "sensor.air_handler_current",
+                "sensor.aux_heat_l1_active_power",
+                "sensor.aux_heat_l2_active_power",
+                "sensor.well_pump_active_power",
+                "sensor.pool_pump_active_power",
+                "sensor.sump_pump_active_power",
+            ],
+        },
+    )
+
+    by_circuit = {config.circuit_id: config for config in coordinator.circuit_configs}
+
+    assert by_circuit["garage_ac_compressor"].appliance_profile is (
+        ApplianceProfile.HVAC_COMPRESSOR
+    )
+    assert by_circuit["garage_ac_compressor"].mode is CircuitMode.DUAL_PHASE
+    assert by_circuit["air_handler"].appliance_profile is ApplianceProfile.HVAC_BLOWER
+    assert by_circuit["air_handler"].mode is CircuitMode.SINGLE_PHASE
+    assert by_circuit["aux_heat"].appliance_profile is ApplianceProfile.ELECTRIC_HEAT
+    assert by_circuit["aux_heat"].mode is CircuitMode.DUAL_PHASE
+    assert by_circuit["well_pump"].appliance_profile is ApplianceProfile.WATER_PUMP
+    assert by_circuit["pool_pump"].appliance_profile is ApplianceProfile.POOL_PUMP
+    assert by_circuit["sump_pump"].appliance_profile is ApplianceProfile.SUMP_PUMP
+
+
 def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -1571,6 +1612,69 @@ def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None
 
     assert config.appliance_profile is ApplianceProfile.EV_CHARGER
     assert config.mode is CircuitMode.DUAL_PHASE
+
+
+def test_runtime_uses_circuits_saved_from_options_flow_assignments() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+        SensorRole,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "old_mixed",
+                    "name": "Old Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.old_mixed_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+        options={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "air_handler",
+                    "name": "Air Handler",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac_blower",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.air_handler_active_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.air_handler_current",
+                            "role": "current",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert len(coordinator.circuit_configs) == 1
+    config = coordinator.circuit_configs[0]
+    assert config.circuit_id == "air_handler"
+    assert config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+    assert config.mode is CircuitMode.SINGLE_PHASE
+    assert {
+        (sensor.entity_id, sensor.role) for sensor in config.sensors
+    } == {
+        ("sensor.air_handler_active_power", SensorRole.REAL_POWER),
+        ("sensor.air_handler_current", SensorRole.CURRENT),
+    }
 
 
 def test_runtime_infers_mains_source_entity_role_from_entity_id() -> None:

@@ -85,6 +85,31 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         }),
         minimum_cycles=12,
     ),
+    ApplianceProfile.HVAC_COMPRESSOR: ProfileDefinition(
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=_POWER_CONTEXT | frozenset({SensorRole.CURRENT}),
+        features=_MOTOR_FEATURES
+        | frozenset({"compressor_start", "leg_imbalance", "short_cycle"}),
+        minimum_cycles=12,
+    ),
+    ApplianceProfile.HVAC_BLOWER: ProfileDefinition(
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=_BASIC_POWER_ROLES,
+        recommended_roles=_POWER_CONTEXT,
+        features=_MOTOR_FEATURES | frozenset({"fan_only", "airflow_load_hint"}),
+        minimum_cycles=12,
+    ),
+    ApplianceProfile.ELECTRIC_HEAT: ProfileDefinition(
+        appliance_profile=ApplianceProfile.ELECTRIC_HEAT,
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({SensorRole.VOLTAGE, SensorRole.ENERGY}),
+        features=_RESISTIVE_FEATURES | frozenset({"aux_heat_stage"}),
+        minimum_cycles=8,
+    ),
     ApplianceProfile.WATER_HEATER: ProfileDefinition(
         appliance_profile=ApplianceProfile.WATER_HEATER,
         supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
@@ -119,6 +144,14 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
         features=_MOTOR_FEATURES | frozenset({"schedule_adherence"}),
+        minimum_cycles=12,
+    ),
+    ApplianceProfile.WATER_PUMP: ProfileDefinition(
+        appliance_profile=ApplianceProfile.WATER_PUMP,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=_BASIC_POWER_ROLES,
+        recommended_roles=_POWER_CONTEXT,
+        features=_MOTOR_FEATURES | frozenset({"pressure_cycle_hint"}),
         minimum_cycles=12,
     ),
     ApplianceProfile.WELL_PUMP: ProfileDefinition(

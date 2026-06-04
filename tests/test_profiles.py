@@ -49,6 +49,33 @@ def test_hvac_profile_supports_dual_phase_and_voltage_context() -> None:
     assert "leg_imbalance" in definition.features
 
 
+def test_recommended_v1_appliance_profiles_have_distinct_analysis_contexts() -> None:
+    compressor = get_profile_definition(ApplianceProfile.HVAC_COMPRESSOR)
+    blower = get_profile_definition(ApplianceProfile.HVAC_BLOWER)
+    electric_heat = get_profile_definition(ApplianceProfile.ELECTRIC_HEAT)
+    water_pump = get_profile_definition(ApplianceProfile.WATER_PUMP)
+    pool_pump = get_profile_definition(ApplianceProfile.POOL_PUMP)
+    sump_pump = get_profile_definition(ApplianceProfile.SUMP_PUMP)
+
+    assert CircuitMode.DUAL_PHASE in compressor.supported_modes
+    assert "compressor_start" in compressor.features
+    assert "short_cycle" in compressor.features
+    assert SensorRole.POWER_FACTOR in compressor.recommended_roles
+
+    assert blower.supported_modes == {CircuitMode.SINGLE_PHASE}
+    assert "fan_only" in blower.features
+    assert SensorRole.REACTIVE_POWER in blower.recommended_roles
+
+    assert CircuitMode.DUAL_PHASE in electric_heat.supported_modes
+    assert "aux_heat_stage" in electric_heat.features
+    assert "large_persistent_change" in electric_heat.features
+
+    assert water_pump.appliance_profile is ApplianceProfile.WATER_PUMP
+    assert "pressure_cycle_hint" in water_pump.features
+    assert "schedule_adherence" in pool_pump.features
+    assert "storm_frequency_hint" in sump_pump.features
+
+
 def test_ev_charger_profile_supports_car_charger_analysis_context() -> None:
     definition = get_profile_definition(ApplianceProfile.EV_CHARGER)
 

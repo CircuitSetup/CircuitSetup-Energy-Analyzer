@@ -2,6 +2,7 @@ import asyncio
 
 from custom_components.circuitsetup_energy_analyzer.discovery import (
     DiscoveredSensor,
+    async_discover_energy_source_entities_for_devices,
     async_discover_sensors,
     infer_sensor_role,
     score_circuitsetup_candidate,
@@ -209,6 +210,58 @@ def test_async_discover_energy_sources_includes_generic_sensors() -> None:
     assert entity_ids == [
         "sensor.panel_reactive_power",
         "sensor.random_power",
+    ]
+
+
+def test_async_discover_energy_sources_for_devices_expands_selected_meter() -> None:
+    hass = FakeHass(
+        [
+            FakeState(
+                "sensor.panel_ct1_watts",
+                {
+                    "friendly_name": "Panel CT1 Watts",
+                    "device_class": "power",
+                    "device_id": "meter-device",
+                    "unit_of_measurement": "W",
+                },
+            ),
+            FakeState(
+                "sensor.panel_ct1_amps",
+                {
+                    "friendly_name": "Panel CT1 Amps",
+                    "device_class": "current",
+                    "device_id": "meter-device",
+                    "unit_of_measurement": "A",
+                },
+            ),
+            FakeState(
+                "sensor.panel_temperature",
+                {
+                    "friendly_name": "Panel Temperature",
+                    "device_class": "temperature",
+                    "device_id": "meter-device",
+                    "unit_of_measurement": "degF",
+                },
+            ),
+            FakeState(
+                "sensor.other_power",
+                {
+                    "friendly_name": "Other Power",
+                    "device_class": "power",
+                    "device_id": "other-device",
+                    "unit_of_measurement": "W",
+                },
+            ),
+        ]
+    )
+
+    entity_ids = asyncio.run(
+        async_discover_energy_source_entities_for_devices(hass, ["meter-device"])
+    )
+
+    assert entity_ids == [
+        "sensor.panel_ct1_amps",
+        "sensor.panel_ct1_watts",
     ]
 
 

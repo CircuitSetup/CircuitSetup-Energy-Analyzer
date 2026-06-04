@@ -1380,10 +1380,14 @@ _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.REFRIGERATOR,
     ApplianceProfile.FREEZER,
     ApplianceProfile.HVAC,
+    ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.HVAC_BLOWER,
+    ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
     ApplianceProfile.DRYER,
     ApplianceProfile.POOL_PUMP,
+    ApplianceProfile.WATER_PUMP,
     ApplianceProfile.WELL_PUMP,
     ApplianceProfile.SUMP_PUMP,
     ApplianceProfile.MOTOR_LOAD,
@@ -1391,10 +1395,13 @@ _CYCLIC_APPLIANCE_PROFILES = {
 }
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
+    ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
     ApplianceProfile.DRYER,
     ApplianceProfile.POOL_PUMP,
+    ApplianceProfile.WATER_PUMP,
     ApplianceProfile.WELL_PUMP,
     ApplianceProfile.SUMP_PUMP,
     ApplianceProfile.EV_CHARGER,
@@ -1696,10 +1703,40 @@ def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
         if isinstance(circuit, Mapping)
         else getattr(circuit, "appliance_profile", None)
     )
+    raw_profile = _appliance_profile_alias(str(raw_profile or ""))
     try:
         return ApplianceProfile(raw_profile)
     except (TypeError, ValueError):
         return None
+
+
+def _appliance_profile_alias(raw_profile: str) -> str:
+    normalized = raw_profile.strip().lower()
+    aliases = {
+        "hvac_system": ApplianceProfile.HVAC.value,
+        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "blower": ApplianceProfile.HVAC_BLOWER.value,
+        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
+        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
+        "well_pump": ApplianceProfile.WATER_PUMP.value,
+        "booster_pump": ApplianceProfile.WATER_PUMP.value,
+        "car_charger": ApplianceProfile.EV_CHARGER.value,
+        "vehicle_charger": ApplianceProfile.EV_CHARGER.value,
+        "vehicle_charging": ApplianceProfile.EV_CHARGER.value,
+        "level2_charger": ApplianceProfile.EV_CHARGER.value,
+        "level_2_charger": ApplianceProfile.EV_CHARGER.value,
+        "wall_connector": ApplianceProfile.EV_CHARGER.value,
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _circuit_mode(circuit: Any) -> CircuitMode | None:

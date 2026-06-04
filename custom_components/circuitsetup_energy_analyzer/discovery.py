@@ -129,6 +129,21 @@ async def async_discover_energy_source_entities(hass: Any) -> list[str]:
     ]
 
 
+async def async_discover_energy_source_entities_for_devices(
+    hass: Any,
+    device_ids: list[str] | tuple[str, ...] | set[str],
+) -> list[str]:
+    """Discover energy-like source entities that belong to selected devices."""
+    selected_device_ids = {str(device_id) for device_id in device_ids if device_id}
+    if not selected_device_ids:
+        return []
+    return [
+        sensor.entity_id
+        for sensor in _build_discovered_sensors(hass)
+        if sensor.device_id in selected_device_ids and is_energy_source_sensor(sensor)
+    ]
+
+
 def _build_discovered_sensors(hass: Any) -> list[DiscoveredSensor]:
     if hass is None:
         return []
@@ -201,7 +216,7 @@ def _build_discovered_sensor(
         entity_id=entity_id,
         name=name,
         role=infer_sensor_role(entity_id, name),
-        device_id=getattr(entry, "device_id", None),
+        device_id=getattr(entry, "device_id", None) or attributes.get("device_id"),
         unit=attributes.get("unit_of_measurement"),
         device_class=device_class,
         integration_domain=(
