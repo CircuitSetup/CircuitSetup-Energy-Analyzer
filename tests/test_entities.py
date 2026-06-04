@@ -1232,6 +1232,82 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_pool_pump",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_pool_pump_active_power",
+                SensorRole.REAL_POWER,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_pool_pump_current",
+                SensorRole.CURRENT,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_pool_pump_power_factor",
+                SensorRole.POWER_FACTOR,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_pool_pump_reactive_power",
+                SensorRole.REACTIVE_POWER,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_pool_pump_voltage",
+                SensorRole.VOLTAGE,
+            ),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    source_entities = [
+        entity
+        for entity in added_entities
+        if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
+    ]
+    assert {entity.unique_id for entity in source_entities} == {
+        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_active_power",
+        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_current",
+        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_power_factor",
+        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_reactive_power",
+        "entry-1_demo_source_cs_energy_analyzer_demo_pool_pump_voltage",
+    }
+    by_entity_id = {
+        f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
+    }
+    assert by_entity_id[
+        "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
+    ].device_class == "power"
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
+        ].native_unit_of_measurement
+        == "W"
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_pool_pump_power_factor"
+        ].native_value
+        == 0.86
+    )
+    assert by_entity_id[
+        "sensor.cs_energy_analyzer_demo_pool_pump_voltage"
+    ].icon == "mdi:sine-wave"
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 

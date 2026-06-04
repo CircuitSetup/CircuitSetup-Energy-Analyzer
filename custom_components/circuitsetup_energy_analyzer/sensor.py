@@ -12,7 +12,7 @@ from .entity import (
     circuits_for_entities,
     prune_stale_entity_registry_entries,
 )
-from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRole
+from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -1409,6 +1409,119 @@ _POWER_QUALITY_ROLES = {
     SensorRole.CURRENT,
     SensorRole.VOLTAGE,
 }
+_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
+_DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
+    "mains_l1": {
+        SensorRole.ENERGY: 742.1,
+        SensorRole.REAL_POWER: 1850.0,
+        SensorRole.CURRENT: 15.4,
+        SensorRole.POWER_FACTOR: 0.96,
+        SensorRole.REACTIVE_POWER: 520.0,
+        SensorRole.APPARENT_POWER: 1927.0,
+        SensorRole.VOLTAGE: 119.6,
+        SensorRole.FREQUENCY: 60.0,
+    },
+    "mains_l2": {
+        SensorRole.ENERGY: 731.4,
+        SensorRole.REAL_POWER: 1680.0,
+        SensorRole.CURRENT: 14.1,
+        SensorRole.POWER_FACTOR: 0.95,
+        SensorRole.REACTIVE_POWER: 470.0,
+        SensorRole.APPARENT_POWER: 1768.0,
+        SensorRole.VOLTAGE: 120.3,
+        SensorRole.FREQUENCY: 60.0,
+    },
+    "refrigerator": {
+        SensorRole.ENERGY: 38.4,
+        SensorRole.REAL_POWER: 165.0,
+        SensorRole.CURRENT: 1.8,
+        SensorRole.POWER_FACTOR: 0.76,
+        SensorRole.REACTIVE_POWER: 140.0,
+        SensorRole.APPARENT_POWER: 217.0,
+        SensorRole.VOLTAGE: 120.0,
+        SensorRole.FREQUENCY: 60.0,
+    },
+    "hvac": {
+        SensorRole.ENERGY: 214.8,
+        SensorRole.REAL_POWER: 3750.0,
+        SensorRole.CURRENT: 17.2,
+        SensorRole.POWER_FACTOR: 0.91,
+        SensorRole.REACTIVE_POWER: 1710.0,
+        SensorRole.APPARENT_POWER: 4121.0,
+        SensorRole.VOLTAGE: 240.0,
+        SensorRole.FREQUENCY: 60.0,
+    },
+    "water_heater": {
+        SensorRole.ENERGY: 126.7,
+        SensorRole.REAL_POWER: 4100.0,
+        SensorRole.CURRENT: 18.5,
+        SensorRole.POWER_FACTOR: 0.99,
+        SensorRole.REACTIVE_POWER: 230.0,
+        SensorRole.APPARENT_POWER: 4141.0,
+        SensorRole.VOLTAGE: 240.0,
+        SensorRole.FREQUENCY: 60.0,
+    },
+    "pool_pump": {
+        SensorRole.ENERGY: 52.4,
+        SensorRole.REAL_POWER: 950.0,
+        SensorRole.CURRENT: 10.1,
+        SensorRole.POWER_FACTOR: 0.86,
+        SensorRole.REACTIVE_POWER: 580.0,
+        SensorRole.APPARENT_POWER: 1105.0,
+        SensorRole.VOLTAGE: 109.5,
+        SensorRole.FREQUENCY: 60.0,
+    },
+}
+_DEMO_SOURCE_ROLE_METADATA: dict[SensorRole, dict[str, str]] = {
+    SensorRole.ENERGY: {
+        "device_class": "energy",
+        "state_class": "total_increasing",
+        "unit": "kWh",
+        "icon": "mdi:counter",
+    },
+    SensorRole.REAL_POWER: {
+        "device_class": "power",
+        "state_class": "measurement",
+        "unit": "W",
+        "icon": "mdi:flash",
+    },
+    SensorRole.CURRENT: {
+        "device_class": "current",
+        "state_class": "measurement",
+        "unit": "A",
+        "icon": "mdi:current-ac",
+    },
+    SensorRole.POWER_FACTOR: {
+        "device_class": "power_factor",
+        "state_class": "measurement",
+        "unit": "",
+        "icon": "mdi:cosine-wave",
+    },
+    SensorRole.REACTIVE_POWER: {
+        "device_class": "reactive_power",
+        "state_class": "measurement",
+        "unit": "var",
+        "icon": "mdi:flash-triangle-outline",
+    },
+    SensorRole.APPARENT_POWER: {
+        "device_class": "apparent_power",
+        "state_class": "measurement",
+        "unit": "VA",
+        "icon": "mdi:flash-outline",
+    },
+    SensorRole.VOLTAGE: {
+        "device_class": "voltage",
+        "state_class": "measurement",
+        "unit": "V",
+        "icon": "mdi:sine-wave",
+    },
+    SensorRole.FREQUENCY: {
+        "device_class": "frequency",
+        "state_class": "measurement",
+        "unit": "Hz",
+        "icon": "mdi:sine-wave",
+    },
+}
 
 
 def sensor_description_applies(
@@ -1659,11 +1772,167 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         return attributes_fn(self.coordinator_state, self.circuit_id)
 
 
+class DemoSourceSensor(SensorEntity):
+    """Synthetic source sensor used by the installed demo dashboard."""
+
+    _attr_has_entity_name = False
+
+    def __init__(self, *, entry_id: str, sensor: SensorRef) -> None:
+        object_id = sensor.entity_id.removeprefix("sensor.")
+        circuit_id = _demo_circuit_id_from_entity_id(sensor.entity_id)
+        role = _coerce_sensor_role(sensor.role)
+        metadata = _DEMO_SOURCE_ROLE_METADATA.get(role, {})
+
+        self._attr_name = _title_from_object_id(object_id)
+        self._attr_unique_id = f"{entry_id}_demo_source_{object_id}"
+        self._attr_suggested_object_id = object_id
+        self._attr_native_value = _demo_source_value(circuit_id, role)
+        self._attr_device_class = metadata.get("device_class")
+        self._attr_native_unit_of_measurement = metadata.get("unit") or None
+        self._attr_state_class = metadata.get("state_class")
+        self._attr_icon = metadata.get("icon")
+        self._entry_id = entry_id
+
+    @property
+    def unique_id(self) -> str:
+        """Unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Suggested Home Assistant object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def name(self) -> str:
+        """Entity display name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the demo measurement value."""
+        return self._attr_native_value
+
+    @property
+    def device_class(self) -> str | None:
+        """Return the measurement device class."""
+        return self._attr_device_class
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the measurement unit."""
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def state_class(self) -> str | None:
+        """Return the recorder state class."""
+        return self._attr_state_class
+
+    @property
+    def icon(self) -> str | None:
+        """Return the demo source icon."""
+        return self._attr_icon
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group demo source sensors under a single demo source device."""
+        return {
+            "identifiers": {(DOMAIN, f"{self._entry_id}_demo_sources")},
+            "name": "CircuitSetup Energy Analyzer Demo Sources",
+            "manufacturer": "CircuitSetup",
+        }
+
+
+def _demo_source_entities_for_circuits(
+    entry_id: str,
+    circuits: tuple[Any, ...],
+) -> list[DemoSourceSensor]:
+    entities: list[DemoSourceSensor] = []
+    seen: set[str] = set()
+    for circuit in circuits:
+        sensors = (
+            circuit.get("sensors", ())
+            if isinstance(circuit, Mapping)
+            else getattr(circuit, "sensors", ())
+        )
+        for sensor in sensors or ():
+            sensor_ref = _sensor_ref_or_none(sensor)
+            if sensor_ref is None:
+                continue
+            if sensor_ref.entity_id in seen:
+                continue
+            if not _is_demo_source_entity_id(sensor_ref.entity_id):
+                continue
+            entities.append(DemoSourceSensor(entry_id=entry_id, sensor=sensor_ref))
+            seen.add(sensor_ref.entity_id)
+    return entities
+
+
+def _sensor_ref_or_none(sensor: Any) -> SensorRef | None:
+    if isinstance(sensor, SensorRef):
+        return sensor
+    if isinstance(sensor, Mapping):
+        entity_id = sensor.get("entity_id")
+        role = sensor.get("role")
+        leg = sensor.get("leg")
+        unit = sensor.get("unit")
+    else:
+        entity_id = getattr(sensor, "entity_id", None)
+        role = getattr(sensor, "role", None)
+        leg = getattr(sensor, "leg", None)
+        unit = getattr(sensor, "unit", None)
+    if not isinstance(entity_id, str) or not entity_id:
+        return None
+    try:
+        sensor_role = SensorRole(role)
+    except (TypeError, ValueError):
+        return None
+    return SensorRef(entity_id, sensor_role, leg=leg, unit=unit)
+
+
+def _is_demo_source_entity_id(entity_id: str) -> bool:
+    return entity_id.startswith(_DEMO_SOURCE_ENTITY_PREFIX)
+
+
+def _coerce_sensor_role(role: Any) -> SensorRole:
+    return role if isinstance(role, SensorRole) else SensorRole(role)
+
+
+def _demo_circuit_id_from_entity_id(entity_id: str) -> str:
+    object_id = entity_id.removeprefix("sensor.cs_energy_analyzer_demo_")
+    suffixes = (
+        "_reactive_power",
+        "_apparent_power",
+        "_power_factor",
+        "_active_power",
+        "_frequency",
+        "_voltage",
+        "_current",
+        "_energy",
+    )
+    for suffix in suffixes:
+        if object_id.endswith(suffix):
+            return object_id[: -len(suffix)]
+    return object_id
+
+
+def _demo_source_value(circuit_id: str, role: SensorRole) -> float | None:
+    circuit_values = _DEMO_SOURCE_VALUES.get(circuit_id, {})
+    if role in circuit_values:
+        return circuit_values[role]
+    return _DEMO_SOURCE_VALUES.get("pool_pump", {}).get(role)
+
+
+def _title_from_object_id(object_id: str) -> str:
+    text = object_id.removeprefix("cs_energy_analyzer_demo_")
+    return text.replace("_", " ").title()
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up diagnostic sensor entities for configured circuits."""
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
-    entities: list[CircuitAnalyzerSensor] = []
+    entities: list[SensorEntity] = []
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
@@ -1680,6 +1949,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in descriptions
         )
 
+    entities.extend(
+        _demo_source_entities_for_circuits(
+            entry_id,
+            circuits_for_entities(entry, coordinator),
+        )
+    )
     prune_stale_entity_registry_entries(
         hass,
         entry_id=entry_id,
