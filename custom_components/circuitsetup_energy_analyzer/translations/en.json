@@ -6,7 +6,7 @@
         "title": "Configure CircuitSetup Energy Analyzer",
         "description": "Select source meter devices or extra source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
         "data": {
-          "source_devices": "Source Meter Devices",
+          "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
@@ -14,7 +14,7 @@
           "retention_mode": "Retention Mode"
         },
         "data_description": {
-          "source_devices": "Select ESPHome meter devices to auto-add their energy-like sensors for appliance assignment.",
+          "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
@@ -24,12 +24,18 @@
       },
       "assign": {
         "title": "Assign Circuit Appliances",
-        "description": "Review generated circuit groups and choose the appliance type and circuit mode before saving.",
+        "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
         "data": {
-          "circuit_assignments": "Circuit Assignments"
+          "include_circuit": "Include Circuit",
+          "circuit_name": "Circuit Name",
+          "appliance_profile": "Appliance Type",
+          "circuit_mode": "Circuit Mode"
         },
         "data_description": {
-          "circuit_assignments": "Review one line per circuit: name, appliance type, mode, and sensor entities separated by vertical bars."
+          "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "circuit_name": "Edit the display name used for this analyzed circuit.",
+          "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+          "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."
         }
       }
     },
@@ -48,7 +54,7 @@
         "title": "CircuitSetup Energy Analyzer options",
         "description": "Tune source meter devices, extra source sensors, diagnostics, and experimental NILM settings.",
         "data": {
-          "source_devices": "Source Meter Devices",
+          "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
@@ -56,7 +62,7 @@
           "retention_mode": "Retention Mode"
         },
         "data_description": {
-          "source_devices": "Select ESPHome meter devices to auto-add their energy-like sensors for appliance assignment.",
+          "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
@@ -66,12 +72,18 @@
       },
       "assign": {
         "title": "Assign Circuit Appliances",
-        "description": "Review generated circuit groups and choose the appliance type and circuit mode before saving.",
+        "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
         "data": {
-          "circuit_assignments": "Circuit Assignments"
+          "include_circuit": "Include Circuit",
+          "circuit_name": "Circuit Name",
+          "appliance_profile": "Appliance Type",
+          "circuit_mode": "Circuit Mode"
         },
         "data_description": {
-          "circuit_assignments": "Review one line per circuit: name, appliance type, mode, and sensor entities separated by vertical bars."
+          "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "circuit_name": "Edit the display name used for this analyzed circuit.",
+          "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+          "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."
         }
       }
     }

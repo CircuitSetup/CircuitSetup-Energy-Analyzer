@@ -10,7 +10,7 @@ INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 
 
 EXPECTED_FLOW_LABELS = {
-    "source_devices": "Source Meter Devices",
+    "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
@@ -19,7 +19,7 @@ EXPECTED_FLOW_LABELS = {
 }
 
 EXPECTED_OPTIONS_LABELS = {
-    "source_devices": "Source Meter Devices",
+    "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
@@ -105,11 +105,17 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
     for section in ("config", "options"):
         data = strings[section]["step"]["assign"]["data"]
         descriptions = strings[section]["step"]["assign"]["data_description"]
-        assert data == {"circuit_assignments": "Circuit Assignments"}
+        assert data == {
+            "include_circuit": "Include Circuit",
+            "circuit_name": "Circuit Name",
+            "appliance_profile": "Appliance Type",
+            "circuit_mode": "Circuit Mode",
+        }
         assert descriptions.keys() == data.keys()
         assert all("_" not in label for label in data.values())
         assert all(description.endswith(".") for description in descriptions.values())
-        assert "appliance type" in descriptions["circuit_assignments"].lower()
+        assert "appliance" in descriptions["appliance_profile"].lower()
+        assert "selected sensors" in descriptions["include_circuit"].lower()
 
 
 def test_runtime_english_translations_include_setup_and_options_text() -> None:

@@ -36,7 +36,7 @@ To install with HACS:
 
 The setup and options screens are designed to avoid hand-written JSON:
 
-- Source Meter Devices: choose ESPHome meter devices, such as a CircuitSetup
+- Source Devices: choose ESPHome meter devices, such as a CircuitSetup
   ATM90E32 meter. The integration expands the selected devices into matching
   power, current, voltage, energy, frequency, reactive power, apparent power,
   and power-factor sensors.
@@ -45,9 +45,10 @@ The setup and options screens are designed to avoid hand-written JSON:
 - Mains Source Entities: optional whole-panel or aggregate sensors for
   experimental mains NILM and balance views. Use L1/L2 or leg A/B naming when
   split-phase mains context is available.
-- Circuit Assignments: review the generated circuit groups, then set the
-  appliance type and circuit mode. Use `exclude` for plugs, lights, or other
-  groups that should not receive appliance-specific analysis.
+- Circuit Assignments: review one detected circuit group at a time, see the
+  selected sensors, then confirm or change the appliance type and circuit mode.
+  Turn off Include Circuit for plugs, lights, or other groups that should not
+  receive appliance-specific analysis.
 
 Recommended v1 appliance types include broad `hvac`, more specific
 `hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus

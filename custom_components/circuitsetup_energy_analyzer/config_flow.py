@@ -124,6 +124,10 @@ ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
+FIELD_INCLUDE_CIRCUIT = "include_circuit"
+FIELD_CIRCUIT_NAME = "circuit_name"
+FIELD_APPLIANCE_PROFILE = "appliance_profile"
+FIELD_CIRCUIT_MODE = "circuit_mode"
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
     ApplianceProfile.REFRIGERATOR.value,
@@ -143,6 +147,9 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.MOTOR_LOAD.value,
     ApplianceProfile.RESISTIVE_LOAD.value,
     ApplianceProfile.MIXED.value,
+)
+_GUIDED_ASSIGNMENT_PROFILE_OPTIONS = tuple(
+    option for option in _ASSIGNMENT_PROFILE_OPTIONS if option != "exclude"
 )
 _ASSIGNMENT_MODE_OPTIONS = {
     CircuitMode.SINGLE_PHASE.value,
@@ -425,15 +432,298 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
 DATA_SCHEMA = _setup_schema()
 
 
-def _assignment_schema(default_assignment_text: str) -> Any:
+def _assignment_schema(group: Mapping[str, Any]) -> Any:
     return vol.Schema(
         {
             vol.Required(
-                CONF_CIRCUIT_ASSIGNMENTS,
-                default=default_assignment_text,
-            ): _assignment_text_selector(),
+                FIELD_INCLUDE_CIRCUIT,
+                default=True,
+            ): bool,
+            vol.Required(
+                FIELD_CIRCUIT_NAME,
+                default=str(group.get("name") or ""),
+            ): str,
+            vol.Required(
+                FIELD_APPLIANCE_PROFILE,
+                default=str(group.get("appliance_profile") or ApplianceProfile.MIXED),
+            ): _select_selector(_GUIDED_ASSIGNMENT_PROFILE_OPTIONS),
+            vol.Required(
+                FIELD_CIRCUIT_MODE,
+                default=str(group.get("mode") or CircuitMode.MIXED),
+            ): _select_selector(sorted(_ASSIGNMENT_MODE_OPTIONS)),
         }
     )
+
+
+def assignment_groups_from_sources(
+    source_entities: Iterable[str],
+    *,
+    mains_source_entities: Iterable[str] = (),
+    existing_circuits: Iterable[Mapping[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    """Build guided assignment groups with automatic or saved classification."""
+    source_entity_list = list(dict.fromkeys(source_entities))
+    mains_entities = set(mains_source_entities)
+    non_mains_entities = [
+        entity_id for entity_id in source_entity_list if entity_id not in mains_entities
+    ]
+    grouped_entities = non_mains_entities or source_entity_list
+    existing_circuit_list = [
+        circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
+    ]
+
+    groups: dict[str, list[str]] = {}
+    for entity_id in grouped_entities:
+        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
+        groups.setdefault(circuit_id, []).append(entity_id)
+
+    assignment_groups: list[dict[str, Any]] = []
+    for circuit_id, entity_ids in groups.items():
+        profile, mode = _suggest_assignment_profile_mode(circuit_id, entity_ids)
+        group = {
+            "group_id": circuit_id,
+            "entity_ids": tuple(entity_ids),
+            "name": _friendly_name_from_id(circuit_id),
+            "appliance_profile": profile,
+            "mode": mode,
+        }
+        saved_circuit = _saved_circuit_for_group(group, existing_circuit_list)
+        if saved_circuit is not None:
+            group.update(
+                {
+                    "name": str(saved_circuit.get("name") or group["name"]),
+                    "appliance_profile": _normalize_assignment_profile(
+                        str(
+                            saved_circuit.get(
+                                "appliance_profile",
+                                group["appliance_profile"],
+                            )
+                        )
+                    ),
+                    "mode": _normalize_assignment_mode(
+                        str(saved_circuit.get("mode", group["mode"]))
+                    ),
+                }
+            )
+        assignment_groups.append(group)
+    return assignment_groups
+
+
+def _saved_circuit_for_group(
+    group: Mapping[str, Any],
+    existing_circuits: Iterable[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    group_entities = set(group.get("entity_ids", ()))
+    group_id = str(group.get("group_id") or "")
+    for circuit in existing_circuits:
+        sensor_entities = {
+            str(sensor.get("entity_id"))
+            for sensor in circuit.get("sensors", ())
+            if isinstance(sensor, Mapping) and sensor.get("entity_id")
+        }
+        if group_entities and group_entities <= sensor_entities:
+            return circuit
+        if str(circuit.get("circuit_id") or circuit.get("id") or "") == group_id:
+            return circuit
+    return None
+
+
+def _assignment_review_form(
+    flow: Any,
+    *,
+    errors: dict[str, str] | None = None,
+) -> config_entries.ConfigFlowResult:
+    groups = list(getattr(flow, "_assignment_groups", []) or [])
+    index = int(getattr(flow, "_assignment_index", 0) or 0)
+    if not groups or index >= len(groups):
+        return flow.async_show_form(
+            step_id="assign",
+            data_schema=_assignment_schema(
+                {
+                    "name": "Circuit",
+                    "appliance_profile": ApplianceProfile.MIXED.value,
+                    "mode": CircuitMode.MIXED.value,
+                    "entity_ids": (),
+                }
+            ),
+            errors=errors or {"base": ERROR_NO_SOURCE_ENTITIES},
+            description_placeholders=_assignment_description_placeholders(
+                {
+                    "name": "Circuit",
+                    "appliance_profile": ApplianceProfile.MIXED.value,
+                    "mode": CircuitMode.MIXED.value,
+                    "entity_ids": (),
+                },
+                index=0,
+                total=0,
+            ),
+        )
+    group = groups[index]
+    return flow.async_show_form(
+        step_id="assign",
+        data_schema=_assignment_schema(group),
+        errors=errors or {},
+        description_placeholders=_assignment_description_placeholders(
+            group,
+            index=index,
+            total=len(groups),
+        ),
+    )
+
+
+def _assignment_description_placeholders(
+    group: Mapping[str, Any],
+    *,
+    index: int,
+    total: int,
+) -> dict[str, str]:
+    return {
+        "assignment_progress": f"{index + 1} of {total}" if total else "0 of 0",
+        "circuit_name": str(group.get("name") or ""),
+        "appliance_profile": str(group.get("appliance_profile") or ""),
+        "circuit_mode": str(group.get("mode") or ""),
+        "current_sensors": "\n".join(
+            str(entity_id) for entity_id in group.get("entity_ids", ())
+        ),
+    }
+
+
+def _start_assignment_review(
+    flow: Any,
+    pending_config: Mapping[str, Any],
+    *,
+    existing_circuits: Iterable[Mapping[str, Any]] = (),
+) -> config_entries.ConfigFlowResult:
+    groups = assignment_groups_from_sources(
+        pending_config.get(CONF_SOURCE_ENTITIES, []),
+        mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
+        existing_circuits=existing_circuits,
+    )
+    flow._pending_config = dict(pending_config)
+    flow._assignment_groups = groups
+    flow._assignment_index = 0
+    flow._reviewed_circuits = []
+    return _assignment_review_form(flow)
+
+
+def _handle_assignment_review_submission(
+    flow: Any,
+    user_input: Mapping[str, Any],
+) -> config_entries.ConfigFlowResult | dict[str, Any]:
+    groups = list(getattr(flow, "_assignment_groups", []) or [])
+    index = int(getattr(flow, "_assignment_index", 0) or 0)
+    if not groups or index >= len(groups):
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+
+    reviewed_circuits = list(getattr(flow, "_reviewed_circuits", []) or [])
+    try:
+        circuit = _circuit_from_assignment_group(groups[index], user_input)
+    except SetupValidationError:
+        raise
+    if circuit is not None:
+        reviewed_circuits.append(circuit)
+    flow._reviewed_circuits = reviewed_circuits
+    flow._assignment_index = index + 1
+
+    if flow._assignment_index < len(groups):
+        return _assignment_review_form(flow)
+    return _final_config_from_reviewed_circuits(
+        getattr(flow, "_pending_config", {}) or {},
+        reviewed_circuits,
+    )
+
+
+def _circuit_from_assignment_group(
+    group: Mapping[str, Any],
+    user_input: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if not bool(user_input.get(FIELD_INCLUDE_CIRCUIT, True)):
+        return None
+
+    name = str(user_input.get(FIELD_CIRCUIT_NAME) or group.get("name") or "").strip()
+    if not name:
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+    profile = _normalize_assignment_profile(
+        str(
+            user_input.get(FIELD_APPLIANCE_PROFILE)
+            or group.get("appliance_profile")
+            or ApplianceProfile.MIXED.value
+        )
+    )
+    mode = _normalize_assignment_mode(
+        str(
+            user_input.get(FIELD_CIRCUIT_MODE)
+            or group.get("mode")
+            or CircuitMode.MIXED.value
+        )
+    )
+    if profile not in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS:
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+
+    entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
+    sensors = [
+        {
+            "entity_id": entity_id,
+            "role": _assignment_sensor_role(entity_id).value,
+            "leg": _assignment_leg_hint(entity_id),
+        }
+        for entity_id in entity_ids
+    ]
+    return {
+        "circuit_id": _slugify(name),
+        "name": name,
+        "appliance_profile": profile,
+        "mode": mode,
+        "sensors": sensors,
+    }
+
+
+def _final_config_from_reviewed_circuits(
+    pending_config: Mapping[str, Any],
+    circuits: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    circuit_list = [dict(circuit) for circuit in circuits]
+    assigned_source_entities = list(
+        dict.fromkeys(
+            str(sensor.get("entity_id"))
+            for circuit in circuit_list
+            for sensor in circuit.get("sensors", ())
+            if isinstance(sensor, Mapping) and sensor.get("entity_id")
+        )
+    )
+    if not assigned_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+
+    final_config = dict(pending_config)
+    final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
+    final_config[CONF_CIRCUITS] = circuit_list
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
+        circuit_list
+    )
+    return final_config
+
+
+def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str:
+    lines = [
+        "# Format: Circuit name | appliance_type | mode | entity_id, entity_id",
+        "# Generated from guided circuit assignment review.",
+    ]
+    for circuit in circuits:
+        lines.append(
+            " | ".join(
+                (
+                    str(circuit.get("name") or circuit.get("circuit_id") or "Circuit"),
+                    str(circuit.get("appliance_profile") or ApplianceProfile.MIXED),
+                    str(circuit.get("mode") or CircuitMode.MIXED),
+                    ", ".join(
+                        str(sensor.get("entity_id"))
+                        for sensor in circuit.get("sensors", ())
+                        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+                    ),
+                )
+            )
+        )
+    return "\n".join(lines)
 
 
 def default_assignment_text(source_entities: Iterable[str]) -> str:
@@ -739,14 +1029,7 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             except SetupValidationError as err:
                 errors["base"] = err.error_key
             else:
-                self._pending_config = validated
-                return self.async_show_form(
-                    step_id="assign",
-                    data_schema=_assignment_schema(
-                        default_assignment_text(validated[CONF_SOURCE_ENTITIES])
-                    ),
-                    errors={},
-                )
+                return _start_assignment_review(self, validated)
 
         return self.async_show_form(
             step_id="user",
@@ -763,32 +1046,20 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Confirm or edit circuit assignments."""
-        pending_config = self._pending_config or {}
         if user_input is not None:
             try:
-                final_config = build_config_from_assignment_input(
-                    pending_config,
+                assignment_result = _handle_assignment_review_submission(
+                    self,
                     user_input,
                 )
             except SetupValidationError as err:
-                return self.async_show_form(
-                    step_id="assign",
-                    data_schema=_assignment_schema(
-                        default_assignment_text(
-                            pending_config.get(CONF_SOURCE_ENTITIES, [])
-                        )
-                    ),
-                    errors={"base": err.error_key},
-                )
+                return _assignment_review_form(self, errors={"base": err.error_key})
+            if assignment_result.get("type") == "form":
+                return assignment_result
+            final_config = assignment_result
             return self.async_create_entry(title=TITLE, data=final_config)
 
-        return self.async_show_form(
-            step_id="assign",
-            data_schema=_assignment_schema(
-                default_assignment_text(pending_config.get(CONF_SOURCE_ENTITIES, []))
-            ),
-            errors={},
-        )
+        return _assignment_review_form(self)
 
 
 class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
@@ -797,6 +1068,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
         self._pending_config: dict[str, Any] | None = None
+        self._assignment_groups: list[dict[str, Any]] = []
+        self._assignment_index = 0
+        self._reviewed_circuits: list[dict[str, Any]] = []
 
     async def async_step_init(
         self,
@@ -813,18 +1087,15 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 )
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            self._pending_config = validated
-            return self.async_show_form(
-                step_id="assign",
-                data_schema=_assignment_schema(
-                    str(
-                        (getattr(self._config_entry, "options", {}) or {}).get(
-                            CONF_CIRCUIT_ASSIGNMENTS,
-                            default_assignment_text(validated[CONF_SOURCE_ENTITIES]),
-                        )
-                    )
+            options = getattr(self._config_entry, "options", {}) or {}
+            data = getattr(self._config_entry, "data", {}) or {}
+            return _start_assignment_review(
+                self,
+                validated,
+                existing_circuits=options.get(
+                    CONF_CIRCUITS,
+                    data.get(CONF_CIRCUITS, []),
                 ),
-                errors={},
             )
 
         return await self._async_show_options_form()
@@ -834,30 +1105,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Confirm or edit circuit assignments in options."""
-        pending_config = self._pending_config or {}
         if user_input is not None:
             try:
-                final_config = build_config_from_assignment_input(
-                    pending_config,
+                assignment_result = _handle_assignment_review_submission(
+                    self,
                     user_input,
                 )
             except SetupValidationError as err:
-                return self.async_show_form(
-                    step_id="assign",
-                    data_schema=_assignment_schema(
-                        str(user_input.get(CONF_CIRCUIT_ASSIGNMENTS, ""))
-                    ),
-                    errors={"base": err.error_key},
-                )
+                return _assignment_review_form(self, errors={"base": err.error_key})
+            if assignment_result.get("type") == "form":
+                return assignment_result
+            final_config = assignment_result
             return self.async_create_entry(title="", data=final_config)
 
-        return self.async_show_form(
-            step_id="assign",
-            data_schema=_assignment_schema(
-                default_assignment_text(pending_config.get(CONF_SOURCE_ENTITIES, []))
-            ),
-            errors={},
-        )
+        return _assignment_review_form(self)
 
     async def _async_show_options_form(
         self,
