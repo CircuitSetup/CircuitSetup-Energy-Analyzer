@@ -32,14 +32,16 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Tune diagnostics and experimental NILM settings.\n\n{mapping_suggestions}",
+        "description": "Tune source sensors, diagnostics, and experimental NILM settings.\n\n{mapping_suggestions}",
         "data": {
+          "source_entities": "Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
+          "source_entities": "Update the sensor entities used for power, current, energy, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how readily possible issues are reported.",

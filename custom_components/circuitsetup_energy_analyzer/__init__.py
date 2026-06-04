@@ -69,7 +69,14 @@ def _source_entities_for_entry(
     entry: CircuitSetupEnergyAnalyzerConfigEntry,
     coordinator: EnergyAnalyzerCoordinator,
 ) -> tuple[str, ...]:
-    entity_ids = list(getattr(entry, "data", {}).get(CONF_SOURCE_ENTITIES, []))
+    entry_data = getattr(entry, "data", {}) or {}
+    entry_options = getattr(entry, "options", {}) or {}
+    entity_ids = list(
+        entry_options.get(
+            CONF_SOURCE_ENTITIES,
+            entry_data.get(CONF_SOURCE_ENTITIES, []),
+        )
+    )
     for config in getattr(coordinator, "circuit_configs", ()):
         for sensor in getattr(config, "sensors", ()):
             entity_ids.append(sensor.entity_id)

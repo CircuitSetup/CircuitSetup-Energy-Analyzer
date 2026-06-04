@@ -125,6 +125,28 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
     ]
 
 
+def test_validate_options_input_parses_source_entity_values() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+    )
+
+    validated = validate_options_input(
+        {
+            CONF_SOURCE_ENTITIES: "sensor.fridge_power\nsensor.fridge_current",
+            CONF_MAINS_SOURCE_ENTITIES: "sensor.main_l1_power, sensor.main_l2_power",
+        }
+    )
+
+    assert validated[CONF_SOURCE_ENTITIES] == [
+        "sensor.fridge_power",
+        "sensor.fridge_current",
+    ]
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+
+
 def test_validate_setup_input_requires_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         SetupValidationError,
@@ -207,6 +229,7 @@ async def test_options_flow_preserves_valid_options() -> None:
     )
 
     user_input = {
+        CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.fridge_current"],
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
         CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power", "sensor.main_l2_power"],
         CONF_SENSITIVITY: "high",
@@ -289,10 +312,27 @@ def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None
         }
     }
     assert "circuits" not in _schema_keys(config_flow.DATA_SCHEMA)
+    assert CONF_SOURCE_ENTITIES in _schema_keys(
+        config_flow._options_schema(SimpleNamespace(data={}, options={}))
+    )
     assert "known_load_circuits" not in _schema_keys(config_flow.DATA_SCHEMA)
     assert "known_load_circuits" not in _schema_keys(
         config_flow._options_schema(SimpleNamespace(data={}, options={}))
     )
+
+
+def test_options_source_entities_override_setup_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        data={CONF_SOURCE_ENTITIES: ["sensor.setup_energy"]},
+        options={CONF_SOURCE_ENTITIES: ["sensor.option_power"]},
+    )
+    coordinator = SimpleNamespace(circuit_configs=())
+
+    assert _source_entities_for_entry(entry, coordinator) == ("sensor.option_power",)
 
 
 def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:

@@ -361,7 +361,7 @@ set_cost_settings:
         number:
           min: 0.0001
           max: 1000
-          step: 0.0001
+          step: any
           mode: box
     tou_rate_per_kwh:
       name: TOU Rate Per kWh
@@ -372,7 +372,7 @@ set_cost_settings:
         number:
           min: 0.0001
           max: 1000
-          step: 0.0001
+          step: any
           mode: box
     tou_start:
       name: TOU Start

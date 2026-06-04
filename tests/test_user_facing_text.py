@@ -18,6 +18,7 @@ EXPECTED_FLOW_LABELS = {
 }
 
 EXPECTED_OPTIONS_LABELS = {
+    "source_entities": "Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "sensitivity": "Sensitivity",
@@ -104,6 +105,14 @@ def test_service_fields_have_human_readable_names_and_descriptions() -> None:
             assert "_" not in field["name"]
             assert field["description"].endswith(".")
             assert 20 <= len(field["description"]) <= 160
+
+
+def test_cost_rate_selectors_allow_any_decimal_precision() -> None:
+    services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
+    fields = services["set_cost_settings"]["fields"]
+
+    assert fields["default_rate_per_kwh"]["selector"]["number"]["step"] == "any"
+    assert fields["tou_rate_per_kwh"]["selector"]["number"]["step"] == "any"
 
 
 def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None:

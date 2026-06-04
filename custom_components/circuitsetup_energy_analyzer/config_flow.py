@@ -89,6 +89,7 @@ except ModuleNotFoundError:
         ConfigFlow=_ConfigFlow,
         ConfigFlowResult=dict[str, Any],
         OptionsFlow=_OptionsFlow,
+        OptionsFlowWithReload=_OptionsFlow,
     )
     ha_selector = None
 
@@ -116,6 +117,11 @@ ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
+_OPTIONS_FLOW_BASE = getattr(
+    config_entries,
+    "OptionsFlowWithReload",
+    config_entries.OptionsFlow,
+)
 
 
 class SetupValidationError(ValueError):
@@ -182,7 +188,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize options flow data without requiring Home Assistant."""
-    return {
+    validated = {
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -196,6 +202,15 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
+    if CONF_SOURCE_ENTITIES in user_input:
+        source_entities = _strict_string_list(
+            user_input.get(CONF_SOURCE_ENTITIES),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+        if not source_entities:
+            raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+        validated[CONF_SOURCE_ENTITIES] = source_entities
+    return validated
 
 
 def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
@@ -337,7 +352,7 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
         )
 
 
-class CircuitSetupEnergyAnalyzerOptionsFlow(config_entries.OptionsFlow):
+class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     """Options flow for CircuitSetup Energy Analyzer."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
@@ -382,12 +397,20 @@ def _options_schema(
 ) -> Any:
     options = getattr(config_entry, "options", {}) or {}
     data = getattr(config_entry, "data", {}) or {}
+    source_entities = options.get(
+        CONF_SOURCE_ENTITIES,
+        data.get(CONF_SOURCE_ENTITIES, []),
+    )
     mains_source_entities = options.get(
         CONF_MAINS_SOURCE_ENTITIES,
         data.get(CONF_MAINS_SOURCE_ENTITIES, []),
     )
     selectable_source_entities = [
         *list(source_entity_ids or ()),
+        *_strict_string_list(
+            source_entities,
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        ),
         *_strict_string_list(
             mains_source_entities,
             invalid_error_key="invalid_mains_source_entities",
@@ -405,6 +428,10 @@ def _options_schema(
                     ),
                 ),
             ): bool,
+            vol.Optional(
+                CONF_SOURCE_ENTITIES,
+                default=source_entities,
+            ): _energy_entity_list_selector(selectable_source_entities),
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
                 default=mains_source_entities,
