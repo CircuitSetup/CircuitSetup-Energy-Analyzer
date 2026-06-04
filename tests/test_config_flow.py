@@ -335,6 +335,27 @@ def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None
     )
 
 
+def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _energy_entity_selector_config,
+        _selectable_source_entity_ids,
+    )
+
+    include_entities = _energy_entity_selector_config(
+        _selectable_source_entity_ids(None)
+    )["entity"]["include_entities"]
+
+    assert "sensor.cs_energy_analyzer_demo_hvac_l1_active_power" in include_entities
+    assert "sensor.cs_energy_analyzer_demo_hvac_l2_active_power" in include_entities
+    assert (
+        "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power"
+        in include_entities
+    )
+    assert "sensor.cs_energy_analyzer_demo_hvac_voltage" not in include_entities
+    assert "sensor.cs_energy_analyzer_demo_mains_l1_voltage" in include_entities
+    assert "sensor.cs_energy_analyzer_demo_mains_l2_voltage" in include_entities
+
+
 def test_options_source_entities_override_setup_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         _source_entities_for_entry,

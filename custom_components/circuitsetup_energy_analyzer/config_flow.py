@@ -117,6 +117,27 @@ ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
+_DEMO_SOURCE_METRICS = (
+    "energy",
+    "active_power",
+    "current",
+    "power_factor",
+    "reactive_power",
+)
+_DEMO_SOURCE_ENTITY_IDS = tuple(
+    f"sensor.cs_energy_analyzer_demo_{leg}_{metric}"
+    for leg in ("mains_l1", "mains_l2")
+    for metric in (*_DEMO_SOURCE_METRICS, "voltage")
+) + tuple(
+    f"sensor.cs_energy_analyzer_demo_{circuit}_{metric}"
+    for circuit in ("refrigerator", "pool_pump")
+    for metric in _DEMO_SOURCE_METRICS
+) + tuple(
+    f"sensor.cs_energy_analyzer_demo_{circuit}_{leg}_{metric}"
+    for circuit in ("hvac", "water_heater")
+    for leg in ("l1", "l2")
+    for metric in _DEMO_SOURCE_METRICS
+)
 _OPTIONS_FLOW_BASE = getattr(
     config_entries,
     "OptionsFlowWithReload",
@@ -279,11 +300,20 @@ def _select_selector(options: Iterable[str]) -> Any:
     return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
 
 
+def _selectable_source_entity_ids(
+    source_entity_ids: Iterable[str] | None,
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys([*list(source_entity_ids or ()), *_DEMO_SOURCE_ENTITY_IDS])
+    )
+
+
 def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
-    del source_entity_ids
     return vol.Schema(
         {
-            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(),
+            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(
+                _selectable_source_entity_ids(source_entity_ids)
+            ),
             vol.Optional(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
                 default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
@@ -291,7 +321,9 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
                 default=[],
-            ): _energy_entity_list_selector(),
+            ): _energy_entity_list_selector(
+                _selectable_source_entity_ids(source_entity_ids)
+            ),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,
@@ -397,6 +429,7 @@ def _options_schema(
     )
     selectable_source_entities = [
         *list(source_entity_ids or ()),
+        *_DEMO_SOURCE_ENTITY_IDS,
         *_strict_string_list(
             source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
