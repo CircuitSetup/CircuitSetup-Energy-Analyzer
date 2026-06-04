@@ -81,6 +81,20 @@ except ModuleNotFoundError:
                 "description_placeholders": description_placeholders or {},
             }
 
+        def async_show_menu(
+            self,
+            *,
+            step_id: str,
+            menu_options: list[str],
+            description_placeholders: dict[str, str] | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "type": "menu",
+                "step_id": step_id,
+                "menu_options": menu_options,
+                "description_placeholders": description_placeholders or {},
+            }
+
     class _OptionsFlow(_ConfigFlow):
         pass
 
@@ -1077,6 +1091,19 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
+        if user_input is None:
+            return self.async_show_menu(
+                step_id="init",
+                menu_options=["assign", "sources"],
+            )
+
+        return await self.async_step_sources(user_input)
+
+    async def async_step_sources(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit source devices and source sensors before reviewing assignments."""
         if user_input is not None:
             try:
                 validated = validate_options_input(
@@ -1087,15 +1114,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 )
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            options = getattr(self._config_entry, "options", {}) or {}
-            data = getattr(self._config_entry, "data", {}) or {}
             return _start_assignment_review(
                 self,
                 validated,
-                existing_circuits=options.get(
-                    CONF_CIRCUITS,
-                    data.get(CONF_CIRCUITS, []),
-                ),
+                existing_circuits=_options_existing_circuits(self._config_entry),
             )
 
         return await self._async_show_options_form()
@@ -1105,6 +1127,17 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Confirm or edit circuit assignments in options."""
+        if user_input is None and not self._assignment_groups:
+            try:
+                pending_config = _options_source_payload(self._config_entry)
+            except SetupValidationError as err:
+                return await self._async_show_options_form({"base": err.error_key})
+            return _start_assignment_review(
+                self,
+                pending_config,
+                existing_circuits=_options_existing_circuits(self._config_entry),
+            )
+
         if user_input is not None:
             try:
                 assignment_result = _handle_assignment_review_submission(
@@ -1208,6 +1241,74 @@ def _options_schema(
             ): _select_selector(sorted(_VALID_RETENTION_MODES)),
         }
     )
+
+
+def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[str, Any]:
+    options = getattr(config_entry, "options", {}) or {}
+    data = getattr(config_entry, "data", {}) or {}
+    source_entities = _strict_string_list(
+        options.get(CONF_SOURCE_ENTITIES, data.get(CONF_SOURCE_ENTITIES, [])),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    extra_source_entities = _strict_string_list(
+        options.get(
+            CONF_EXTRA_SOURCE_ENTITIES,
+            data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
+        ),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    )
+    merged_source_entities = list(
+        dict.fromkeys([*extra_source_entities, *source_entities])
+    )
+    if not merged_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+
+    return {
+        CONF_SOURCE_DEVICES: _strict_string_list(
+            options.get(CONF_SOURCE_DEVICES, data.get(CONF_SOURCE_DEVICES, [])),
+            invalid_error_key="invalid_source_devices",
+        ),
+        CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
+        CONF_SOURCE_ENTITIES: merged_source_entities,
+        CONF_ENABLE_EXPERIMENTAL_NILM: bool(
+            options.get(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                data.get(
+                    CONF_ENABLE_EXPERIMENTAL_NILM,
+                    DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+                ),
+            )
+        ),
+        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
+            options.get(
+                CONF_MAINS_SOURCE_ENTITIES,
+                data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_mains_source_entities",
+        ),
+        CONF_SENSITIVITY: str(
+            options.get(
+                CONF_SENSITIVITY,
+                data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+            )
+        ),
+        CONF_RETENTION_MODE: _validate_retention_mode(
+            {
+                CONF_RETENTION_MODE: options.get(
+                    CONF_RETENTION_MODE,
+                    data.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE),
+                )
+            }
+        ),
+    }
+
+
+def _options_existing_circuits(
+    config_entry: config_entries.ConfigEntry,
+) -> Iterable[Mapping[str, Any]]:
+    options = getattr(config_entry, "options", {}) or {}
+    data = getattr(config_entry, "data", {}) or {}
+    return options.get(CONF_CIRCUITS, data.get(CONF_CIRCUITS, []))
 
 
 async def _async_format_mapping_suggestions(hass: Any) -> str:

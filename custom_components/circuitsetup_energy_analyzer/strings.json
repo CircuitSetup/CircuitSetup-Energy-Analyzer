@@ -52,7 +52,15 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Step 1: tune source devices, extra source sensors, diagnostics, and NILM. Submit opens review circuit assignments before settings are saved.",
+        "description": "Choose whether to review circuit appliance assignments or edit the source sensors included in analysis.",
+        "menu_options": {
+          "assign": "Review Circuit Assignments",
+          "sources": "Edit Source Selection"
+        }
+      },
+      "sources": {
+        "title": "Edit Source Selection",
+        "description": "Tune source devices, extra source sensors, diagnostics, and NILM. Submit opens review circuit assignments before settings are saved.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",

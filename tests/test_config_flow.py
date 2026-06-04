@@ -8,6 +8,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUIT_ASSIGNMENTS,
+    CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
@@ -213,6 +214,27 @@ async def test_fallback_user_flow_returns_no_source_entities_form_error() -> Non
 
 
 @pytest.mark.asyncio
+async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(
+            data={},
+            options={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
+        )
+    )
+
+    result = await flow.async_step_init()
+
+    assert result["type"] == "menu"
+    assert result["step_id"] == "init"
+    assert result["menu_options"] == ["assign", "sources"]
+    assert result["description_placeholders"] == {}
+
+
+@pytest.mark.asyncio
 async def test_options_flow_rejects_bogus_retention_mode() -> None:
     from types import SimpleNamespace
 
@@ -221,7 +243,7 @@ async def test_options_flow_rejects_bogus_retention_mode() -> None:
     )
 
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
-    result = await flow.async_step_init({CONF_RETENTION_MODE: "forever"})
+    result = await flow.async_step_sources({CONF_RETENTION_MODE: "forever"})
 
     assert result["type"] == "form"
     assert result["errors"]["base"] == "invalid_retention_mode"
@@ -236,7 +258,7 @@ async def test_options_flow_rejects_malformed_mains_source_entities() -> None:
     )
 
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
-    result = await flow.async_step_init(
+    result = await flow.async_step_sources(
         {CONF_MAINS_SOURCE_ENTITIES: {"sensor.main_l1_power": True}}
     )
 
@@ -262,7 +284,7 @@ async def test_options_flow_preserves_valid_options() -> None:
     }
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(SimpleNamespace(data={}, options={}))
 
-    result = await flow.async_step_init(user_input)
+    result = await flow.async_step_sources(user_input)
 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
@@ -565,7 +587,7 @@ async def test_options_assignment_step_prefills_saved_classification() -> None:
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
 
-    result = await flow.async_step_init(
+    result = await flow.async_step_sources(
         {
             CONF_EXTRA_SOURCE_ENTITIES: [
                 "sensor.air_handler_active_power",
@@ -573,6 +595,50 @@ async def test_options_assignment_step_prefills_saved_classification() -> None:
             ],
         }
     )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == "HVAC Blower"
+    assert _schema_default(result["data_schema"], "appliance_profile") == "hvac_blower"
+    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_step_starts_from_saved_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.air_handler_active_power",
+                "sensor.air_handler_current",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac_blower",
+                    "name": "HVAC Blower",
+                    "appliance_profile": "hvac_blower",
+                    "mode": "single_phase",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.air_handler_active_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.air_handler_current",
+                            "role": "current",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
@@ -591,7 +657,7 @@ async def test_options_flow_does_not_emit_non_actionable_mapping_suggestions() -
 
     result = await flow.async_step_init()
 
-    assert result["type"] == "form"
+    assert result["type"] == "menu"
     assert result["description_placeholders"] == {}
 
 

@@ -91,16 +91,25 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
     strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
-    data = strings["options"]["step"]["init"]["data"]
-    descriptions = strings["options"]["step"]["init"]["data_description"]
+    init_step = strings["options"]["step"]["init"]
+    data = strings["options"]["step"]["sources"]["data"]
+    descriptions = strings["options"]["step"]["sources"]["data_description"]
 
+    assert init_step["menu_options"] == {
+        "assign": "Review Circuit Assignments",
+        "sources": "Edit Source Selection",
+    }
+    assert all("_" not in label for label in init_step["menu_options"].values())
+    assert "choose" in init_step["description"].lower()
+    assert "source_devices" not in init_step
+    assert "extra_source_entities" not in init_step
     assert data == EXPECTED_OPTIONS_LABELS
     assert descriptions.keys() == EXPECTED_OPTIONS_LABELS.keys()
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 160 for description in descriptions.values())
     assert "optional" in descriptions["mains_source_entities"].lower()
-    assert "review circuit assignments" in strings["options"]["step"]["init"][
+    assert "review circuit assignments" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
 
@@ -133,7 +142,7 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
     for section, step in (
         ("config", "user"),
         ("config", "assign"),
-        ("options", "init"),
+        ("options", "sources"),
         ("options", "assign"),
     ):
         strings_step = strings[section]["step"][step]
@@ -142,6 +151,12 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
         assert translated_step["data_description"] == strings_step["data_description"]
         assert translated_step["title"] == strings_step["title"]
         assert translated_step["description"] == strings_step["description"]
+
+    strings_init = strings["options"]["step"]["init"]
+    translated_init = translations["options"]["step"]["init"]
+    assert translated_init["title"] == strings_init["title"]
+    assert translated_init["description"] == strings_init["description"]
+    assert translated_init["menu_options"] == strings_init["menu_options"]
 
 
 def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
@@ -156,6 +171,7 @@ def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions
         descriptions = (
             payload["config"]["step"]["user"]["description"],
             payload["options"]["step"]["init"]["description"],
+            payload["options"]["step"]["sources"]["description"],
         )
         for description in descriptions:
             assert "{mapping_suggestions}" not in description
