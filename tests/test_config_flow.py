@@ -94,6 +94,14 @@ def _schema_default(schema, field_name: str):
     raise AssertionError(f"{field_name} missing from schema")
 
 
+def _schema_validator(schema, field_name: str):
+    for marker, validator in schema.schema.items():
+        key = getattr(marker, "schema", getattr(marker, "key", marker))
+        if key == field_name:
+            return validator
+    raise AssertionError(f"{field_name} missing from schema")
+
+
 def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
@@ -1417,6 +1425,65 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
     assert voluptuous_serialize.convert(
         _options_schema(SimpleNamespace(data={}, options={}))
     )
+
+
+def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    setup_schema = config_flow._setup_schema()
+    assignment_schema = config_flow._assignment_schema(
+        {
+            "entity_ids": ("sensor.fridge_active_power",),
+            "appliance_profile": "refrigerator",
+            "mode": "single_phase",
+        }
+    )
+    advanced_schema = config_flow._advanced_settings_schema({})
+
+    assert _schema_validator(setup_schema, CONF_SENSITIVITY) == {
+        "select": {
+            "options": [
+                {"value": "standard", "label": "Standard"},
+                {"value": "high", "label": "High"},
+                {"value": "low", "label": "Low"},
+            ]
+        }
+    }
+    retention_options = [
+        {"value": "standard", "label": "Standard"},
+        {"value": "lightweight", "label": "Lightweight"},
+        {"value": "diagnostic", "label": "Diagnostic"},
+    ]
+    assert _schema_validator(setup_schema, CONF_RETENTION_MODE) == {
+        "select": {"options": retention_options}
+    }
+    assert _schema_validator(
+        assignment_schema,
+        "circuit_retention_mode",
+    ) == {"select": {"options": retention_options}}
+    assert _schema_validator(advanced_schema, "preset") == {
+        "select": {
+            "options": [
+                {"value": "standard", "label": "Standard"},
+                {"value": "high", "label": "High"},
+                {"value": "low", "label": "Low"},
+            ]
+        }
+    }
+
+    appliance_options = _schema_validator(
+        assignment_schema,
+        "appliance_profile",
+    )["select"]["options"]
+    assert {"value": "hvac", "label": "HVAC"} in appliance_options
+    assert {"value": "hvac_compressor", "label": "HVAC Compressor"} in (
+        appliance_options
+    )
+    assert {"value": "hvac_blower", "label": "HVAC Blower"} in appliance_options
+    assert {"value": "ev_charger", "label": "EV Charger"} in appliance_options
+    assert all("_" not in option["label"] for option in appliance_options)
 
 
 def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None:

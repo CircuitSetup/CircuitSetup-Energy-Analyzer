@@ -156,6 +156,11 @@ ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
+_SENSITIVITY_LABELS = {
+    "standard": "Standard",
+    "high": "High",
+    "low": "Low",
+}
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_INCLUDED_SENSORS = "included_sensors"
 FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
@@ -220,11 +225,29 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
 _GUIDED_ASSIGNMENT_PROFILE_OPTIONS = tuple(
     option for option in _ASSIGNMENT_PROFILE_OPTIONS if option != "exclude"
 )
+_APPLIANCE_PROFILE_LABELS = {
+    "exclude": "Exclude",
+    ApplianceProfile.HVAC.value: "HVAC",
+    ApplianceProfile.HVAC_COMPRESSOR.value: "HVAC Compressor",
+    ApplianceProfile.HVAC_BLOWER.value: "HVAC Blower",
+    ApplianceProfile.EV_CHARGER.value: "EV Charger",
+    ApplianceProfile.MAINS_NILM.value: "Mains NILM",
+}
 _ASSIGNMENT_MODE_OPTIONS = {
     CircuitMode.SINGLE_PHASE.value,
     CircuitMode.DUAL_PHASE.value,
     CircuitMode.MIXED.value,
     CircuitMode.MAINS_NILM.value,
+}
+_RETENTION_MODE_OPTIONS = (
+    RetentionMode.STANDARD.value,
+    RetentionMode.LIGHTWEIGHT.value,
+    RetentionMode.DIAGNOSTIC.value,
+)
+_RETENTION_MODE_LABELS = {
+    RetentionMode.STANDARD.value: "Standard",
+    RetentionMode.LIGHTWEIGHT.value: "Lightweight",
+    RetentionMode.DIAGNOSTIC.value: "Diagnostic",
 }
 _UTILITY_SOURCE_TYPE_OPTIONS = (
     {"value": "auto", "label": "Auto"},
@@ -544,6 +567,33 @@ def _text_selector() -> Any:
     return _selector({"text": {"multiple": False}}, str)
 
 
+def sensitivity_options() -> list[dict[str, str]]:
+    return [
+        {"value": value, "label": _SENSITIVITY_LABELS[value]}
+        for value in _SENSITIVITY_OPTIONS
+    ]
+
+
+def retention_mode_options() -> list[dict[str, str]]:
+    return [
+        {"value": value, "label": _RETENTION_MODE_LABELS[value]}
+        for value in _RETENTION_MODE_OPTIONS
+    ]
+
+
+def appliance_profile_options() -> list[dict[str, str]]:
+    return [
+        {
+            "value": value,
+            "label": _APPLIANCE_PROFILE_LABELS.get(
+                value,
+                _friendly_name_from_id(value),
+            ),
+        }
+        for value in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS
+    ]
+
+
 def _selectable_source_entity_ids(
     source_entity_ids: Iterable[str] | None,
 ) -> tuple[str, ...]:
@@ -575,11 +625,11 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,
-            ): _select_selector(_SENSITIVITY_OPTIONS),
+            ): _select_selector(sensitivity_options()),
             vol.Optional(
                 CONF_RETENTION_MODE,
                 default=DEFAULT_RETENTION_MODE,
-            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
+            ): _select_selector(retention_mode_options()),
         }
     )
 
@@ -606,7 +656,7 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
             vol.Required(
                 FIELD_APPLIANCE_PROFILE,
                 default=str(group.get("appliance_profile") or ApplianceProfile.MIXED),
-            ): _select_selector(_GUIDED_ASSIGNMENT_PROFILE_OPTIONS),
+            ): _select_selector(appliance_profile_options()),
             vol.Required(
                 FIELD_CIRCUIT_MODE,
                 default=str(group.get("mode") or CircuitMode.MIXED),
@@ -620,7 +670,7 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=str(
                     group.get("retention_mode") or DEFAULT_RETENTION_MODE
                 ),
-            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
+            ): _select_selector(retention_mode_options()),
         }
     )
 
@@ -802,7 +852,7 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             vol.Optional(
                 FIELD_PRESET,
                 default=str(settings.get(FIELD_PRESET, DEFAULT_SENSITIVITY)),
-            ): _select_selector(_SENSITIVITY_OPTIONS),
+            ): _select_selector(sensitivity_options()),
             vol.Optional(
                 FIELD_WINDOW_DAYS,
                 default=int(settings.get(FIELD_WINDOW_DAYS, 7)),
@@ -2259,14 +2309,14 @@ def _options_schema(
                     CONF_SENSITIVITY,
                     data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
                 ),
-            ): _select_selector(_SENSITIVITY_OPTIONS),
+            ): _select_selector(sensitivity_options()),
             vol.Optional(
                 CONF_RETENTION_MODE,
                 default=options.get(
                     CONF_RETENTION_MODE,
                     data.get(CONF_RETENTION_MODE, DEFAULT_RETENTION_MODE),
                 ),
-            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
+            ): _select_selector(retention_mode_options()),
         }
     )
 
