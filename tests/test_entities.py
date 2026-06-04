@@ -61,6 +61,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         monitored_coverage_value,
         monitored_power_value,
         nilm_signature_count_value,
+        nilm_topology_status_value,
         nilm_unmatched_load_percentage_value,
         peak_demand_value,
         power_factor_drift_value,
@@ -113,6 +114,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         power_factor_drift_by_circuit={"fridge": 0.07},
         nilm_signature_count_by_circuit={"fridge": 3},
         nilm_unmatched_load_percentage_by_circuit={"fridge": 17.5},
+        nilm_topology_status_by_circuit={"fridge": "topology_mismatch"},
+        nilm_topology_evidence_by_circuit={
+            "fridge": {
+                "status": "topology_mismatch",
+                "observed_split_phase_type": "balanced_240v",
+            }
+        },
         health_status_by_circuit={"fridge": "possible_issue"},
         health_summary_by_circuit={"fridge": "Possible issue"},
         readiness_by_circuit={
@@ -285,6 +293,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert power_factor_drift_value(state, "fridge") == 0.07
     assert nilm_signature_count_value(state, "fridge") == 3
     assert nilm_unmatched_load_percentage_value(state, "fridge") == 17.5
+    assert nilm_topology_status_value(state, "fridge") == "topology_mismatch"
     assert health_summary_value(state, "fridge") == "Possible issue"
     assert readiness_value(state, "fridge") == "possible_issue"
     assert learning_progress_value(state, "fridge") == 62.5
@@ -361,6 +370,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert power_factor_drift_value(state, "unknown") == 0.0
     assert nilm_signature_count_value(state, "unknown") == 0
     assert nilm_unmatched_load_percentage_value(state, "unknown") == 0.0
+    assert nilm_topology_status_value(state, "unknown") == "no_match"
     assert health_summary_value(state, "unknown") == "Ready"
     assert readiness_value(state, "unknown") == "ready"
     assert learning_progress_value(state, "unknown") == 0.0
@@ -535,6 +545,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "utility_kwh": 120.0,
         "measured_kwh": 135.0,
     }
+    nilm_topology_evidence = {
+        "status": "topology_mismatch",
+        "observed_split_phase_type": "balanced_240v",
+        "configured_mode": "single_phase",
+    }
     billing_cycle_evidence = {
         "status": "projected_over_budget",
         "cycle_usage_kwh": 100.0,
@@ -574,6 +589,9 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         },
         utility_comparison_evidence_by_circuit={
             "fridge": utility_comparison_evidence
+        },
+        nilm_topology_evidence_by_circuit={
+            "fridge": nilm_topology_evidence
         },
         billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
         cost_evidence_by_circuit={"fridge": cost_evidence},
@@ -875,6 +893,12 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
+        description=descriptions["nilm_topology_status"],
+    ).extra_state_attributes == nilm_topology_evidence
+    assert CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
         description=descriptions["billing_cycle_usage"],
     ).extra_state_attributes == billing_cycle_evidence
     assert CircuitAnalyzerSensor(
@@ -981,6 +1005,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Kitchen Fridge Power Factor Drift",
         "Kitchen Fridge NILM Discovered Signatures",
         "Kitchen Fridge NILM Unmatched Load Percentage",
+        "Kitchen Fridge NILM Topology Status",
         "Kitchen Fridge Daily Energy Usage",
         "Kitchen Fridge Energy Usage Share",
         "Kitchen Fridge Energy Usage Status",
@@ -1053,6 +1078,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_power_factor_drift",
         "entry-1_fridge_nilm_signature_count",
         "entry-1_fridge_nilm_unmatched_load_percentage",
+        "entry-1_fridge_nilm_topology_status",
         "entry-1_fridge_daily_energy_usage",
         "entry-1_fridge_energy_usage_share",
         "entry-1_fridge_energy_usage_status",

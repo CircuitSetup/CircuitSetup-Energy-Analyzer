@@ -15,7 +15,7 @@
         "data_description": {
           "source_entities": "Use sensor entities for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
-          "mains_source_entities": "Optional aggregate mains sensors for NILM, such as total power, voltage, current, energy, or power factor.",
+          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how readily possible issues are reported.",
           "retention_mode": "Controls how much historical diagnostic data is retained."
         }
@@ -41,7 +41,7 @@
         },
         "data_description": {
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
-          "mains_source_entities": "Optional aggregate mains sensors for NILM, such as total power, voltage, current, energy, or power factor.",
+          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how readily possible issues are reported.",
           "retention_mode": "Controls how much historical diagnostic data is retained."
         }
@@ -91,6 +91,9 @@
       },
       "nilm_unmatched_load_percentage": {
         "name": "NILM unmatched load percentage"
+      },
+      "nilm_topology_status": {
+        "name": "NILM topology status"
       },
       "daily_energy_usage": {
         "name": "Daily energy usage"

@@ -49,6 +49,7 @@ def test_event_detector_emits_start_and_stop() -> None:
 
     assert [event.event_type for event in events] == [EventType.START, EventType.STOP]
     assert events[0].features["startup_power_w"] == 210.0
+    assert events[1].features["stop_power_w"] == 185.0
     assert events[1].features["run_duration_s"] == 120.0
 
 

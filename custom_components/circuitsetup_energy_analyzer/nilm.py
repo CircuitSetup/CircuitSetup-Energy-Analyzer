@@ -32,6 +32,7 @@ class KnownLoadMatch:
     edge: NilmEdge
     known_circuit_id: str
     confidence: float
+    known_power_w: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +154,7 @@ def mask_known_loads(
                 (
                     edge_index,
                     event_index,
-                    KnownLoadMatch(edge, event.circuit_id, confidence),
+                    KnownLoadMatch(edge, event.circuit_id, confidence, known_watts),
                     time_distance.total_seconds(),
                 )
             )

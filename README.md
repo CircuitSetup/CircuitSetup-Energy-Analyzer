@@ -331,6 +331,14 @@ dominant leg, leg balance ratio, and split-phase type such as `single_leg_a`,
 review clues for mapping, CT orientation, or unknown-load investigation rather
 than appliance diagnoses.
 
+When a mains NILM edge matches a configured circuit start/stop event, the
+analyzer also records topology consistency evidence on that known circuit. A
+single-phase circuit is expected to match one leg, while a dual-phase circuit is
+expected to look like a balanced 240 V transition. Repeated conflicts create a
+possible-issue alert with the observed mains topology, leg deltas, match
+confidence, and configured circuit mode so the user can check mapping,
+overlapping loads, or CT orientation.
+
 ## Alert Philosophy
 
 The analyzer is evidence-first. It learns for at least 7 days or enough profile-specific cycles before sending appliance-behavior alerts. Alerts require repeated evidence and are phrased as a possible issue or behavior change, not a diagnosis.

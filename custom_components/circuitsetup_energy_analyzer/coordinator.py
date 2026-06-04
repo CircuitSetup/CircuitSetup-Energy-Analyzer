@@ -82,6 +82,7 @@ from .models import (
     SensorRole,
 )
 from .nilm import (
+    KnownLoadMatch,
     NilmEdge,
     NilmEdgeDetector,
     classify_signature,
@@ -133,6 +134,7 @@ FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
         ApplianceProfile.WATER_HEATER,
     }
 )
+MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE = 0.5
 
 try:
     from homeassistant.components.recorder.statistics import (
@@ -182,6 +184,10 @@ class AnalyzerState:
     power_factor_drift_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_signature_count_by_circuit: dict[str, int] = field(default_factory=dict)
     nilm_unmatched_load_percentage_by_circuit: dict[str, float] = field(
+        default_factory=dict
+    )
+    nilm_topology_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    nilm_topology_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     health_status_by_circuit: dict[str, str] = field(default_factory=dict)
@@ -429,6 +435,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tuple[str, str],
             ConservativeAlertPolicy,
         ] = {}
+        self._nilm_topology_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._activity_alert_policies: dict[
             tuple[str, str],
@@ -579,7 +589,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(standby_alert)
 
         for config, sample in samples:
-            self._process_nilm_sample(config, sample, events)
+            for nilm_alert in self._process_nilm_sample(config, sample, events):
+                alerts.append(nilm_alert)
+                self.store_data.alerts.append(nilm_alert)
+                self._mark_store_dirty()
+                await self._notify_alert(nilm_alert)
         self._refresh_balance_state(samples)
         self._refresh_solar_flow_state(samples)
         for utility_alert in await self._observe_utility_comparisons(now):
@@ -614,6 +628,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
         self._clear_power_quality_state(circuit_id)
+        self._clear_nilm_topology_state(circuit_id)
         now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
@@ -1676,9 +1691,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         sample: NormalizedCircuitSample,
         events: Iterable[CircuitEvent],
-    ) -> None:
+    ) -> list[AlertEvidence]:
+        alerts: list[AlertEvidence] = []
         if not self._nilm_enabled(config):
-            return
+            return alerts
 
         min_delta_w = _nilm_min_delta_w(
             self._sensitivity_for_circuit(config.circuit_id)
@@ -1692,6 +1708,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if edges:
             known_events = self._known_load_events(config.circuit_id, events)
             mask = mask_known_loads(edges, known_events)
+            for match in mask.matched_edges:
+                alert = self._observe_nilm_known_load_topology(config, match)
+                if alert is not None:
+                    alerts.append(alert)
             self._nilm_total_events_by_circuit[config.circuit_id] += len(edges)
             self._nilm_unmatched_edges[config.circuit_id].extend(mask.unmatched_edges)
 
@@ -1704,6 +1724,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
 
         self._refresh_nilm_state(config.circuit_id)
+        return alerts
 
     def _known_load_events(
         self: Self,
@@ -1719,6 +1740,57 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ):
                 continue
             yield event
+
+    def _observe_nilm_known_load_topology(
+        self: Self,
+        mains_config: CircuitConfig,
+        match: KnownLoadMatch,
+    ) -> AlertEvidence | None:
+        known_config = self._config_for_circuit(match.known_circuit_id)
+        if known_config is None:
+            return None
+
+        evidence = _nilm_topology_evidence_payload(
+            mains_config=mains_config,
+            known_config=known_config,
+            match=match,
+        )
+        if not evidence:
+            return None
+
+        circuit_id = known_config.circuit_id
+        if match.confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
+            evidence["status"] = "low_confidence_match"
+            evidence["minimum_match_confidence"] = (
+                MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+            )
+        status = str(evidence["status"])
+        self.state.nilm_topology_status_by_circuit[circuit_id] = status
+        self.state.nilm_topology_evidence_by_circuit[circuit_id] = evidence
+        if status != "topology_mismatch":
+            return None
+
+        policy = self._nilm_topology_alert_policy_for_circuit(circuit_id)
+        return policy.observe(
+            Observation(
+                circuit_id=circuit_id,
+                feature="nilm_topology_mismatch",
+                score=1.0,
+                baseline_confidence=1.0,
+                observed_at=match.edge.timestamp,
+                observed_value=1.0,
+                baseline_value=0.0,
+                message=_nilm_topology_mismatch_message(known_config, evidence),
+                features={
+                    "match_confidence": float(evidence["match_confidence"]),
+                    "matched_delta_w": float(evidence["matched_delta_w"]),
+                    "known_event_power_w": float(evidence["known_event_power_w"]),
+                    "observed_leg_balance_ratio": float(
+                        evidence.get("observed_leg_balance_ratio") or 0.0
+                    ),
+                },
+            )
+        )
 
     def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
         enabled = bool(
@@ -2459,6 +2531,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._utility_comparison_alert_policies[key] = policy
+        return policy
+
+    def _nilm_topology_alert_policy_for_circuit(
+        self: Self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        sensitivity = self._sensitivity_for_circuit(circuit_id)
+        policy_name = alert_policy_name_for_sensitivity(sensitivity)
+        key = (circuit_id, policy_name)
+        policy = self._nilm_topology_alert_policies.get(key)
+        if policy is None:
+            min_repeated = 4 if policy_name == "low" else 3
+            policy = ConservativeAlertPolicy(
+                min_repeated=min_repeated,
+                min_total_score=float(min_repeated),
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            )
+            self._nilm_topology_alert_policies[key] = policy
         return policy
 
     def _cycle_alert_policy_for_circuit(
@@ -3568,6 +3659,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.apparent_power_drift_by_circuit.pop(circuit_id, None)
         self.state.power_factor_drift_by_circuit.pop(circuit_id, None)
 
+    def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
+        self.state.nilm_topology_status_by_circuit.pop(circuit_id, None)
+        self.state.nilm_topology_evidence_by_circuit.pop(circuit_id, None)
+        for key in list(self._nilm_topology_alert_policies):
+            if key[0] == circuit_id:
+                self._nilm_topology_alert_policies.pop(key, None)
+
     def _clear_standby_state(self: Self, circuit_id: str) -> None:
         self.state.always_on_power_w_by_circuit.pop(circuit_id, None)
         self.state.standby_threshold_w_by_circuit.pop(circuit_id, None)
@@ -4048,6 +4146,70 @@ def _nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _nilm_topology_evidence_payload(
+    *,
+    mains_config: CircuitConfig,
+    known_config: CircuitConfig,
+    match: KnownLoadMatch,
+) -> dict[str, Any]:
+    expected_types = _expected_nilm_split_phase_types(known_config)
+    observed_type = str(match.edge.split_phase_type or "unknown")
+    if not expected_types:
+        status = "not_evaluated"
+    elif observed_type in {"unknown", "missing_leg_data"}:
+        status = "unknown_topology"
+    elif observed_type in expected_types:
+        status = "consistent"
+    else:
+        status = "topology_mismatch"
+
+    return {
+        "status": status,
+        "matched_mains_circuit_id": mains_config.circuit_id,
+        "event_type": "start" if match.edge.direction == "on" else "stop",
+        "configured_mode": known_config.mode.value,
+        "expected_split_phase_types": list(expected_types),
+        "observed_split_phase_type": observed_type,
+        "observed_dominant_leg": match.edge.dominant_leg,
+        "observed_leg_a_delta_w": _round_optional_number(match.edge.leg_a_delta_w),
+        "observed_leg_b_delta_w": _round_optional_number(match.edge.leg_b_delta_w),
+        "observed_leg_balance_ratio": _round_optional_number(
+            match.edge.leg_balance_ratio
+        ),
+        "matched_delta_w": _round_number(match.edge.delta_w),
+        "known_event_power_w": _round_number(match.known_power_w),
+        "match_confidence": _round_number(match.confidence),
+    }
+
+
+def _expected_nilm_split_phase_types(config: CircuitConfig) -> tuple[str, ...]:
+    if config.mode is CircuitMode.SINGLE_PHASE:
+        return ("single_leg_a", "single_leg_b")
+    if config.mode is CircuitMode.DUAL_PHASE:
+        return ("balanced_240v",)
+    return ()
+
+
+def _nilm_topology_mismatch_message(
+    config: CircuitConfig,
+    evidence: dict[str, Any],
+) -> str:
+    observed_type = evidence.get("observed_split_phase_type", "unknown")
+    expected = ", ".join(evidence.get("expected_split_phase_types") or [])
+    return (
+        f"Possible issue: {config.name} is configured as "
+        f"{_circuit_mode_phrase(config.mode)}, but mains NILM repeatedly matched "
+        f"it as {observed_type}. Expected {expected or 'no topology check'} from "
+        "the configured circuit mode. Verify circuit mapping, CT orientation, "
+        "and whether another appliance changed at the same time before treating "
+        "this as an appliance problem."
+    )
+
+
+def _circuit_mode_phrase(mode: CircuitMode) -> str:
+    return str(mode.value).replace("_", " ")
+
+
 def _nilm_signature_metadata_compatible(
     signature: Any,
     current: dict[str, Any],
@@ -4097,6 +4259,20 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _round_number(value: Any) -> float:
+    parsed = _float_or_none(value)
+    if parsed is None:
+        return 0.0
+    return round(parsed, 3)
+
+
+def _round_optional_number(value: Any) -> float | None:
+    parsed = _float_or_none(value)
+    if parsed is None:
+        return None
+    return round(parsed, 3)
 
 
 def _parallel_leg_samples(

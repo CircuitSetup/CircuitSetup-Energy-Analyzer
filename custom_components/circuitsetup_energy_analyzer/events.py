@@ -19,6 +19,7 @@ class CircuitEventDetector:
         self._voltage_sag_ratio = voltage_sag_ratio
         self._is_on = False
         self._run_started_at: datetime | None = None
+        self._last_on_power_w: float | None = None
         self._nominal_voltage: float | None = None
         self._sag_emitted_for_run = False
 
@@ -30,6 +31,7 @@ class CircuitEventDetector:
             if watts is not None and watts >= self._on_threshold_w:
                 self._is_on = True
                 self._run_started_at = sample.timestamp
+                self._last_on_power_w = float(watts)
                 self._sag_emitted_for_run = False
                 events.append(
                     CircuitEvent(
@@ -42,7 +44,11 @@ class CircuitEventDetector:
             elif sample.voltage is not None:
                 self._nominal_voltage = sample.voltage
         elif watts is not None and watts <= self._off_threshold_w:
-            features: dict[str, float] = {}
+            features = _power_features(
+                sample,
+                "stop_power_w",
+                self._last_on_power_w or watts,
+            )
             if self._run_started_at is not None:
                 features["run_duration_s"] = (
                     sample.timestamp - self._run_started_at
@@ -58,9 +64,13 @@ class CircuitEventDetector:
             )
             self._is_on = False
             self._run_started_at = None
+            self._last_on_power_w = None
             self._sag_emitted_for_run = False
             if sample.voltage is not None:
                 self._nominal_voltage = sample.voltage
+
+        if self._is_on and watts is not None:
+            self._last_on_power_w = float(watts)
 
         if self._is_on and not self._sag_emitted_for_run:
             sag_event = self._detect_voltage_sag(sample)

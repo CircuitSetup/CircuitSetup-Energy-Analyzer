@@ -223,6 +223,16 @@ def nilm_unmatched_load_percentage_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def nilm_topology_status_value(state: Any, circuit_id: str) -> str:
+    """Return whether mains NILM topology matches the configured circuit mode."""
+    return str(
+        getattr(state, "nilm_topology_status_by_circuit", {}).get(
+            circuit_id,
+            "no_match",
+        )
+    )
+
+
 def daily_energy_usage_value(state: Any, circuit_id: str) -> float:
     """Return today's cumulative usage derived from the circuit energy sensor."""
     return float(
@@ -792,6 +802,12 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         value_fn=nilm_unmatched_load_percentage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="nilm_topology_status",
+        name_suffix="NILM Topology Status",
+        value_fn=nilm_topology_status_value,
+        attributes_fn=_mapping_attributes("nilm_topology_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
