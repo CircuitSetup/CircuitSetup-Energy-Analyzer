@@ -24,6 +24,8 @@ recommended handoff action.
 
 This repository is structured for HACS as a custom integration. The integration files live under `custom_components/circuitsetup_energy_analyzer`.
 
+![CircuitSetup Energy Analyzer integration overview](docs/images/readme/integration-overview.png)
+
 To install with HACS:
 
 1. Open HACS.
@@ -35,6 +37,8 @@ To install with HACS:
 ## Setup Flow
 
 The setup and options screens are designed to avoid hand-written JSON:
+
+![CircuitSetup Energy Analyzer options menu](docs/images/readme/options-menu.png)
 
 - Source Devices: choose ESPHome meter devices, such as a CircuitSetup
   ATM90E32 meter. The integration expands the selected devices into matching
@@ -50,10 +54,23 @@ The setup and options screens are designed to avoid hand-written JSON:
   Turn off Include Circuit for plugs, lights, or other groups that should not
   receive appliance-specific analysis.
 
+![Circuit assignment editor](docs/images/readme/assignment-editor.png)
+
 Recommended v1 appliance types include broad `hvac`, more specific
 `hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus
 `water_pump`, `pool_pump`, and `sump_pump` pump profiles. Existing
 `well_pump` input is accepted as a legacy alias for `water_pump`.
+
+Mains sensors are optional, but they are required for the whole-home balance,
+Mains NILM, solar-flow, and utility comparison features.
+
+![Mains sensor selection](docs/images/readme/mains-sensors.png)
+
+Advanced settings expose per-circuit tuning for sensitivity, usage spike
+thresholds, daily goals, billing/cost settings, demand and capacity settings,
+and standby/always-on behavior.
+
+![Advanced circuit settings](docs/images/readme/advanced-settings.png)
 
 ## Alert Blueprint
 
@@ -310,6 +327,8 @@ measured same-period kWh source. This is intended for sanity-check evidence,
 not normal energy history. Use Home Assistant's Energy Dashboard for standard
 long-term energy charts, tariffs, costs, and device energy rollups.
 
+![Utility and Opower comparison options](docs/images/readme/utility-comparison.png)
+
 Use the `set_utility_comparison_settings` service on a mains or aggregate
 circuit. Set `utility_energy_entity` to a current-bill or utility kWh sensor,
 or set `utility_statistic_id` and `utility_source_type: statistics` to compare
@@ -387,70 +406,162 @@ Persistent notifications are reserved for important evidence about appliance beh
 
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
 
-## Standard Entities
+## Sensor Reference
 
-The integration exposes standard Home Assistant diagnostic entities per configured circuit:
+The integration exposes standard Home Assistant diagnostic entities per
+configured circuit. In the entity IDs below, `<circuit>` is the configured
+circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
 
-- `sensor.<circuit>_anomaly_score`
-- `sensor.<circuit>_last_event`
-- `sensor.<circuit>_recent_activity`
-- `sensor.<circuit>_recent_activity_count`
-- `binary_sensor.<circuit>_learning`
-- `binary_sensor.<circuit>_data_quality_problem`
-- `sensor.<circuit>_energy_dashboard_status`
-- `sensor.<circuit>_nilm_discovered_signatures`
-- `sensor.<circuit>_nilm_unmatched_load_percentage`
-- `sensor.<circuit>_daily_energy_usage`
-- `sensor.<circuit>_energy_usage_share`
-- `sensor.<circuit>_energy_usage_status`
-- `sensor.<circuit>_energy_goal_usage`
-- `sensor.<circuit>_energy_goal_status`
-- `sensor.<circuit>_run_cycle_count`
-- `sensor.<circuit>_run_cycle_runtime`
-- `sensor.<circuit>_run_cycle_duty_cycle`
-- `sensor.<circuit>_run_cycle_status`
-- `sensor.<circuit>_billing_cycle_usage`
-- `sensor.<circuit>_billing_cycle_forecast`
-- `sensor.<circuit>_billing_cycle_budget_usage`
-- `sensor.<circuit>_billing_cycle_status`
-- `sensor.<circuit>_cost_current_rate`
-- `sensor.<circuit>_cost_cycle`
-- `sensor.<circuit>_cost_cycle_forecast`
-- `sensor.<circuit>_cost_status`
-- `sensor.<circuit>_current_demand`
-- `sensor.<circuit>_peak_demand`
-- `sensor.<circuit>_demand_limit_usage`
-- `sensor.<circuit>_demand_peak_rank`
-- `sensor.<circuit>_demand_peak_status`
-- `sensor.<circuit>_demand_status`
-- `sensor.<circuit>_capacity_usage`
-- `sensor.<circuit>_capacity_status`
-- `sensor.<circuit>_leg_imbalance`
-- `sensor.<circuit>_leg_imbalance_status`
-- `sensor.<circuit>_metric_consistency_score`
-- `sensor.<circuit>_metric_consistency_status`
-- `sensor.<circuit>_balance_power`
-- `sensor.<circuit>_monitored_power`
-- `sensor.<circuit>_monitored_coverage`
-- `sensor.<circuit>_balance_status`
-- `sensor.<circuit>_solar_generation_power`
-- `sensor.<circuit>_solar_site_consumption_power`
-- `sensor.<circuit>_solar_grid_import_power`
-- `sensor.<circuit>_solar_grid_export_power`
-- `sensor.<circuit>_solar_self_consumption`
-- `sensor.<circuit>_solar_powered`
-- `sensor.<circuit>_solar_flow_status`
-- `sensor.<circuit>_solar_surplus_power`
-- `sensor.<circuit>_solar_load_shift_power`
-- `sensor.<circuit>_solar_flexible_load_power`
-- `sensor.<circuit>_solar_flexible_load_coverage`
-- `sensor.<circuit>_solar_load_shift_status`
-- `sensor.<circuit>_solar_surplus_status`
-- `sensor.<circuit>_utility_comparison_difference`
-- `sensor.<circuit>_utility_comparison_status`
-- `sensor.<circuit>_always_on_power`
-- `sensor.<circuit>_standby_threshold`
-- `sensor.<circuit>_standby_status`
-- `sensor.<circuit>_always_on_limit_usage`
+The installed demo dashboard shows how these entities can be arranged without
+recreating Home Assistant's Energy Dashboard.
 
-See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator, HVAC, and Mains NILM cards.
+![Energy Analyzer demo dashboard](docs/images/readme/demo-dashboard.png)
+
+### Source Measurement Inputs
+
+These are the ESPHome/CircuitSetup sensors selected during setup. They may come
+from a CircuitSetup ATM90E32 meter, manually selected entities, or the included
+demo sensors. The analyzer does not require every source role for every
+appliance, but each additional role improves the evidence it can produce.
+
+For single-phase appliances, use one set of source entities for the circuit.
+For dual-phase appliances, use L1/L2 or leg A/B source entities where possible.
+For mains, use aggregate L1/L2 sources. For solar inverters, set the circuit
+Power Flow to Generation / Solar Export.
+
+- Energy (`sensor.<appliance>_energy`) - Cumulative kWh used to derive daily usage, billing-cycle usage, goals, utility comparison, and Energy Dashboard readiness. Possible outputs: increasing `kWh` totals.
+- Active Power (`sensor.<appliance>_active_power` or `sensor.<appliance>_watts`) - Real power in watts used for appliance state, demand, cycles, NILM, balance, solar flow, and negative-power checks. Possible outputs: positive load watts, negative export watts, or near-zero idle watts.
+- Current (`sensor.<appliance>_current`) - Amps used for capacity checks, dual-phase evidence, and power metric consistency. Possible outputs: `A` readings, usually always positive even when real power is signed.
+- Voltage (`sensor.mains_l1_voltage`, `sensor.mains_l2_voltage`) - Line voltage used for metric consistency and current estimation. For split-phase systems, mains L1/L2 voltage can apply to all appliances instead of per-appliance voltage sensors. Possible outputs: `V` readings.
+- Frequency (`sensor.<source>_frequency`) - Line frequency context from the meter. Possible outputs: `Hz` readings, usually near 60 Hz in North America.
+- Power Factor (`sensor.<appliance>_power_factor`) - Ratio between real and apparent power, used for motor/load change evidence and metric consistency. Possible outputs: `0.0` to `1.0`, sometimes signed by source integrations.
+- Reactive Power (`sensor.<appliance>_reactive_power`) - VAR evidence used for motor, compressor, pump, and power-quality drift detection. Possible outputs: `var` values that can rise when inductive behavior changes.
+- Apparent Power (`sensor.<appliance>_apparent_power`) - VA used with watts and power factor to validate power metric relationships. Possible outputs: `VA` values, typically greater than or equal to real-power magnitude.
+
+### Core Health, Learning, And Evidence
+
+These sensors are created for every configured circuit, including refrigerators,
+freezers, HVAC, water heaters, ovens, dryers, pumps, EV chargers, mixed
+circuits, mains, and solar-related circuits.
+
+- Anomaly Score (`sensor.<circuit>_anomaly_score`) - Numeric summary of current anomaly evidence for the circuit. Possible outputs: `0.0` when quiet, higher numbers as repeated evidence accumulates.
+- Last Event (`sensor.<circuit>_last_event`) - Latest retained event type. Possible outputs include `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, or `unknown`.
+- Health Summary (`sensor.<circuit>_health_summary`) - Dashboard-friendly circuit state. Possible outputs include `Learning`, `Ready`, `Needs data`, `Paused`, `Possible issue`, `Mixed observation`, or `NILM review`.
+- Readiness (`sensor.<circuit>_readiness`) - Machine-readable health/readiness state with readiness attributes. Possible outputs include `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, or `nilm_review`.
+- Learning Progress (`sensor.<circuit>_learning_progress`) - Percentage of learned baseline evidence. Possible outputs: `0` to `100%`, with attributes showing learned and pending feature samples.
+- Data Quality Checklist (`sensor.<circuit>_data_quality_checklist`) - Input quality summary for the circuit. Possible outputs: `ok` or `problem`, with attributes for missing sensors, stale data, and invalid numeric states.
+- Energy Dashboard Status (`sensor.<circuit>_energy_dashboard_status`) - Whether configured energy/power sources have metadata usable by Home Assistant's Energy Dashboard. Possible outputs include `ready`, `needs_energy_source`, or metadata issue states.
+- Alert Evidence (`sensor.<circuit>_alert_evidence`) - Feature name behind the latest active alert evidence. Possible outputs: feature strings such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`, or blank when no alert is active.
+- Recent Activity (`sensor.<circuit>_recent_activity`) - Latest human-readable activity item from retained analyzer evidence. Possible outputs: `No recent activity`, `start`, `stop`, or a possible-issue summary.
+- Recent Activity Count (`sensor.<circuit>_recent_activity_count`) - Count of retained activity items in the recent activity window. Possible outputs: integer counts.
+- Sensitivity (`sensor.<circuit>_sensitivity`) - Active alert sensitivity preset for the circuit. Possible outputs include `standard`, `high`, `low`, or the stored preset name.
+
+### Appliance Behavior And Power Quality
+
+These sensors are most useful for dedicated appliance circuits: refrigerator,
+freezer, HVAC compressor, HVAC blower, electric heat, water heater, oven, dryer,
+pool pump, water pump, sump pump, motor loads, resistive loads, and similar
+single-load circuits. Mixed circuits may expose fewer appliance-specific
+signals.
+
+- Power Quality Score (`sensor.<circuit>_power_quality_score`) - Numeric score for observed power-quality relationship changes. Possible outputs: `0.0` when quiet, higher values when voltage/current/PF/VAR/VA relationships drift.
+- Power Quality Evidence (`sensor.<circuit>_power_quality_evidence`) - Text evidence for the latest power-quality relationship observation. Possible outputs: blank text, baseline/learning text, or possible-issue evidence.
+- Reactive Power Drift (`sensor.<circuit>_reactive_power_drift`) - Ratio-style drift in VAR behavior compared with baseline. Possible outputs: `0.0` or positive drift values.
+- Apparent Power Drift (`sensor.<circuit>_apparent_power_drift`) - Ratio-style drift in VA behavior compared with baseline. Possible outputs: `0.0` or positive drift values.
+- Power Factor Drift (`sensor.<circuit>_power_factor_drift`) - Ratio-style drift in power factor compared with baseline. Possible outputs: `0.0` or positive drift values.
+- Run Cycle Count (`sensor.<circuit>_run_cycle_count`) - Today's retained start count for cyclic appliances. Possible outputs: integer cycle counts.
+- Run Cycle Runtime (`sensor.<circuit>_run_cycle_runtime`) - Today's total active runtime from retained START/STOP evidence. Possible outputs: seconds.
+- Run Cycle Duty Cycle (`sensor.<circuit>_run_cycle_duty_cycle`) - Percent of today spent active. Possible outputs: `0` to `100%`.
+- Run Cycle Status (`sensor.<circuit>_run_cycle_status`) - Current cycle state. Possible outputs include `running`, `idle`, or `no_activity`.
+- Metric Consistency Score (`sensor.<circuit>_metric_consistency_score`) - Largest W/VA/PF consistency mismatch. Possible outputs: percentage mismatch.
+- Metric Consistency Status (`sensor.<circuit>_metric_consistency_status`) - Relationship status between real power, apparent power, voltage, current, and power factor. Possible outputs include `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, or `metric_mismatch`.
+
+### Energy Usage, Goals, Billing, And Cost
+
+These sensors require cumulative energy inputs. They are useful for appliances
+where usage over a day or billing cycle matters, such as refrigerators, HVAC,
+water heaters, pool pumps, EV chargers, ovens, dryers, and other large loads.
+Use Home Assistant's Energy Dashboard for normal energy history; these entities
+exist for analyzer evidence and alerts.
+
+- Daily Energy Usage (`sensor.<circuit>_daily_energy_usage`) - kWh derived from today's positive energy delta. Possible outputs: `kWh`.
+- Energy Usage Share (`sensor.<circuit>_energy_usage_share`) - Today's usage as a percent of the learned rolling energy window. Possible outputs: percentage values.
+- Energy Usage Status (`sensor.<circuit>_energy_usage_status`) - Daily spike tracker state. Possible outputs include `learning`, `tracking`, or `over_threshold`.
+- Energy Goal Usage (`sensor.<circuit>_energy_goal_usage`) - Today's usage as a percent of the configured daily goal. Possible outputs: percentage values when a goal is configured.
+- Energy Goal Status (`sensor.<circuit>_energy_goal_status`) - Daily goal tracker state. Possible outputs include `unconfigured`, `tracking`, `near_goal`, or `over_goal`.
+- Billing Cycle Usage (`sensor.<circuit>_billing_cycle_usage`) - Current billing-cycle usage for the circuit. Possible outputs: `kWh`.
+- Billing Cycle Forecast (`sensor.<circuit>_billing_cycle_forecast`) - Projected end-of-cycle usage based on current pace. Possible outputs: `kWh`.
+- Billing Cycle Budget Usage (`sensor.<circuit>_billing_cycle_budget_usage`) - Current or projected budget usage percentage. Possible outputs: percentage values.
+- Billing Cycle Status (`sensor.<circuit>_billing_cycle_status`) - Billing-cycle budget state. Possible outputs include `no_budget`, `tracking`, `over_budget`, or `projected_over_budget`.
+- Cost Current Rate (`sensor.<circuit>_cost_current_rate`) - Active cost rate for the circuit. Possible outputs: decimal currency-per-kWh values.
+- Cost Cycle (`sensor.<circuit>_cost_cycle`) - Current cycle cost estimate. Possible outputs: numeric cost estimates.
+- Cost Cycle Forecast (`sensor.<circuit>_cost_cycle_forecast`) - Projected end-of-cycle cost estimate. Possible outputs: numeric cost estimates.
+- Cost Status (`sensor.<circuit>_cost_status`) - Cost tracker state. Possible outputs include `unconfigured`, `tracking`, or `tou_peak`.
+
+### High-Power, Dual-Phase, And Capacity Loads
+
+These sensors are aimed at HVAC compressors, electric heat, water heaters,
+ovens, dryers, pool pumps, water pumps, sump pumps, EV chargers, mains feeds,
+and other high-power circuits. Capacity sensors require either current sensors
+or real power plus voltage, and a configured breaker/capacity setting.
+
+- Current Demand (`sensor.<circuit>_current_demand`) - Current rolling average demand. Possible outputs: watts.
+- Peak Demand (`sensor.<circuit>_peak_demand`) - Highest rolling demand observed today. Possible outputs: watts.
+- Demand Limit Usage (`sensor.<circuit>_demand_limit_usage`) - Current demand as a percent of configured demand limit. Possible outputs: percentage values.
+- Demand Peak Rank (`sensor.<circuit>_demand_peak_rank`) - Rank of the current rolling demand among retained monthly peak windows. Possible outputs: `0` when unavailable or integer ranks such as `1`, `2`, or `3`.
+- Demand Peak Status (`sensor.<circuit>_demand_peak_status`) - Whether current demand is notable for the month. Possible outputs include `unavailable`, `below_monthly_peak`, `near_monthly_peak`, or `monthly_peak`.
+- Demand Status (`sensor.<circuit>_demand_status`) - Demand tracker state. Possible outputs include `unconfigured`, `tracking`, or over-limit evidence states.
+- Circuit Capacity Usage (`sensor.<circuit>_capacity_usage`) - Current amps as a percent of configured circuit capacity. Possible outputs: percentage values.
+- Circuit Capacity Status (`sensor.<circuit>_capacity_status`) - Capacity tracker state. Possible outputs include `unconfigured`, `missing_current`, `tracking`, or `over_limit`.
+- Leg Imbalance (`sensor.<circuit>_leg_imbalance`) - Difference between dual-phase legs while load is meaningful. Possible outputs: percentage imbalance.
+- Leg Imbalance Status (`sensor.<circuit>_leg_imbalance_status`) - Split-phase balance state. Possible outputs include `not_dual_phase`, `missing_leg_power`, `idle`, `tracking`, or `imbalanced`.
+
+### Mains NILM, Balance, Solar, And Utility Comparison
+
+These sensors apply mainly to whole-home mains circuits, Mains NILM circuits,
+and homes with solar inverter or generation circuits.
+
+- NILM Discovered Signatures (`sensor.<circuit>_nilm_discovered_signatures`) - Count of recurring aggregate NILM signatures. Possible outputs: integer counts.
+- NILM Unmatched Load Percentage (`sensor.<circuit>_nilm_unmatched_load_percentage`) - Percent of aggregate load not matched to known monitored circuits. Possible outputs: `0` to `100%` or higher during inconsistent mapping.
+- NILM Topology Status (`sensor.<circuit>_nilm_topology_status`) - Mains topology evidence for known-load matches. Possible outputs include `no_match`, `topology_match`, `topology_mismatch`, or `leg_mismatch`.
+- Balance Power (`sensor.<circuit>_balance_power`) - Mains real power minus summed monitored load power. Possible outputs: watts; positive is unmonitored load, strongly negative can suggest mapping/sign issues.
+- Monitored Power (`sensor.<circuit>_monitored_power`) - Sum of directly monitored non-generation load circuits. Possible outputs: watts.
+- Monitored Coverage (`sensor.<circuit>_monitored_coverage`) - Percent of mains power covered by monitored circuits. Possible outputs: percentage values.
+- Balance Status (`sensor.<circuit>_balance_status`) - Mains balance state. Possible outputs include `missing_mains`, `tracking`, or `negative_balance`.
+- Solar Generation Power (`sensor.<circuit>_solar_generation_power`) - Instantaneous solar generation. Possible outputs: watts.
+- Solar Site Consumption Power (`sensor.<circuit>_solar_site_consumption_power`) - Estimated site consumption from solar generation plus signed grid power. Possible outputs: watts.
+- Solar Grid Import Power (`sensor.<circuit>_solar_grid_import_power`) - Current grid import. Possible outputs: watts.
+- Solar Grid Export Power (`sensor.<circuit>_solar_grid_export_power`) - Current grid export. Possible outputs: watts.
+- Solar Self Consumption (`sensor.<circuit>_solar_self_consumption`) - Percent of generated solar consumed on site. Possible outputs: percentage values.
+- Solar Powered (`sensor.<circuit>_solar_powered`) - Percent of current site load powered by solar. Possible outputs: percentage values.
+- Solar Flow Status (`sensor.<circuit>_solar_flow_status`) - Instantaneous solar-flow state. Possible outputs include `missing_mains`, `missing_generation`, `no_generation`, `importing`, `exporting`, `self_powered`, or `inconsistent_export`.
+- Solar Surplus Power (`sensor.<circuit>_solar_surplus_power`) - Exported solar available as surplus. Possible outputs: watts.
+- Solar Load Shift Power (`sensor.<circuit>_solar_load_shift_power`) - Surplus power above the configured load-shift threshold. Possible outputs: watts.
+- Solar Flexible Load Power (`sensor.<circuit>_solar_flexible_load_power`) - Current power used by configured flexible loads such as EV chargers, water heaters, HVAC, or pool pumps. Possible outputs: watts.
+- Solar Flexible Load Coverage (`sensor.<circuit>_solar_flexible_load_coverage`) - Percent of active flexible-load power estimated to be solar-covered. Possible outputs: percentage values.
+- Solar Load Shift Status (`sensor.<circuit>_solar_load_shift_status`) - Flexible-load solar support state. Possible outputs include `not_applicable`, `waiting_for_surplus`, `surplus_candidate`, `active_solar_supported`, or `active_grid_supported`.
+- Solar Surplus Status (`sensor.<circuit>_solar_surplus_status`) - Solar surplus state. Possible outputs include `missing_mains`, `missing_generation`, `no_generation`, `no_surplus`, `surplus_available`, `high_surplus`, or `inconsistent_export`.
+- Utility Comparison Difference (`sensor.<circuit>_utility_comparison_difference`) - Difference between measured and utility/Opower kWh. Possible outputs: percentage difference.
+- Utility Comparison Status (`sensor.<circuit>_utility_comparison_status`) - Utility comparison state. Possible outputs include `unconfigured`, `missing_utility`, `missing_measured`, `tracking`, or `mismatch`.
+
+### Standby And Always-On Loads
+
+These sensors apply to non-mains load circuits with real-power data. They are
+especially useful for refrigerators, freezers, pumps, HVAC blower circuits,
+motor loads, and any appliance with known standby behavior.
+
+- Always On Power (`sensor.<circuit>_always_on_power`) - Lowest retained power level in the standby window. Possible outputs: watts.
+- Standby Threshold (`sensor.<circuit>_standby_threshold`) - Configured watts threshold separating off/standby/on behavior. Possible outputs: watts.
+- Standby Status (`sensor.<circuit>_standby_status`) - Current standby state. Possible outputs include `learning`, `off`, `standby`, or `on`.
+- Always On Limit Usage (`sensor.<circuit>_always_on_limit_usage`) - Always-on estimate as a percent of configured limit. Possible outputs: percentage values.
+
+### Binary Diagnostic Sensors
+
+These binary sensors are created for every configured circuit.
+
+- Learning (`binary_sensor.<circuit>_learning`) - On while the circuit is still learning baseline evidence. Possible outputs: `on` or `off`.
+- Data Quality Problem (`binary_sensor.<circuit>_data_quality_problem`) - On when the circuit has a current data-quality issue. Possible outputs: `on` or `off`.
+- Maintenance (`binary_sensor.<circuit>_maintenance`) - On when the circuit is marked as in maintenance. Possible outputs: `on` or `off`.
+
+See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator,
+HVAC, Mains NILM, and utility comparison cards.
