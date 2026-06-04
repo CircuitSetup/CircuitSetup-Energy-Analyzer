@@ -7,6 +7,7 @@ from typing import Any
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
+    EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
 )
@@ -45,6 +46,17 @@ class DiagnosticBinarySensorDescription:
     key: str
     name_suffix: str
     value_fn: Callable[[Any, str], bool]
+    device_class: str | None = None
+    entity_category: Any | None = EntityCategory.DIAGNOSTIC
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
+    entity_picture: str | None = None
+    force_update: bool = False
+    has_entity_name: bool = False
+    icon: str | None = None
+    name: str | None = None
+    translation_key: str | None = None
+    translation_placeholders: dict[str, str] | None = None
 
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (

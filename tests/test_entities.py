@@ -459,6 +459,64 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert is_maintenance_active(state, "unknown") is False
 
 
+def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    required_attrs = {
+        "device_class",
+        "entity_category",
+        "entity_registry_enabled_default",
+        "entity_registry_visible_default",
+        "entity_picture",
+        "force_update",
+        "has_entity_name",
+        "icon",
+        "name",
+        "native_unit_of_measurement",
+        "state_class",
+        "suggested_display_precision",
+        "suggested_unit_of_measurement",
+        "translation_key",
+        "translation_placeholders",
+    }
+
+    for description in SENSOR_DESCRIPTIONS:
+        missing_attrs = sorted(
+            attr for attr in required_attrs if not hasattr(description, attr)
+        )
+        assert missing_attrs == []
+        assert description.entity_registry_enabled_default is True
+
+
+def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+    )
+
+    required_attrs = {
+        "device_class",
+        "entity_category",
+        "entity_registry_enabled_default",
+        "entity_registry_visible_default",
+        "entity_picture",
+        "force_update",
+        "has_entity_name",
+        "icon",
+        "name",
+        "translation_key",
+        "translation_placeholders",
+    }
+
+    for description in BINARY_SENSOR_DESCRIPTIONS:
+        missing_attrs = sorted(
+            attr for attr in required_attrs if not hasattr(description, attr)
+        )
+        assert missing_attrs == []
+        assert description.entity_registry_enabled_default is True
+
+
 def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,

@@ -7,6 +7,7 @@ from typing import Any
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
+    EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
 )
@@ -688,8 +689,21 @@ class DiagnosticSensorDescription:
     key: str
     name_suffix: str
     value_fn: Callable[[Any, str], Any]
+    device_class: str | None = None
+    entity_category: Any | None = EntityCategory.DIAGNOSTIC
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
+    entity_picture: str | None = None
+    force_update: bool = False
+    has_entity_name: bool = False
+    icon: str | None = None
+    name: str | None = None
     native_unit_of_measurement: str | None = None
     state_class: str | None = None
+    suggested_display_precision: int | None = None
+    suggested_unit_of_measurement: str | None = None
+    translation_key: str | None = None
+    translation_placeholders: Mapping[str, str] | None = None
     attributes_fn: Callable[[Any, str], dict[str, Any] | None] | None = None
 
 
