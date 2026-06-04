@@ -10,6 +10,7 @@ from .entity import (
     EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
+    prune_stale_entity_registry_entries,
 )
 
 try:
@@ -130,4 +131,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in BINARY_SENSOR_DESCRIPTIONS
         )
 
+    prune_stale_entity_registry_entries(
+        hass,
+        entry_id=entry_id,
+        entity_domain="binary_sensor",
+        desired_unique_ids={entity.unique_id for entity in entities},
+    )
     async_add_entities(entities)

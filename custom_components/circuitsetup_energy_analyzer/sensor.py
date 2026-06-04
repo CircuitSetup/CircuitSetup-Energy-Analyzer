@@ -10,7 +10,9 @@ from .entity import (
     EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
+    prune_stale_entity_registry_entries,
 )
+from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRole
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -1208,6 +1210,318 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
 )
 
 
+_CORE_SENSOR_KEYS = {
+    "anomaly_score",
+    "last_event",
+    "health_summary",
+    "readiness",
+    "learning_progress",
+    "data_quality_checklist",
+    "energy_dashboard_status",
+    "alert_evidence",
+    "recent_activity",
+    "recent_activity_count",
+    "sensitivity",
+}
+_ENERGY_USAGE_SENSOR_KEYS = {
+    "daily_energy_usage",
+    "energy_usage_share",
+    "energy_usage_status",
+}
+_ENERGY_GOAL_SENSOR_KEYS = {"energy_goal_usage", "energy_goal_status"}
+_POWER_QUALITY_SENSOR_KEYS = {"power_quality_score", "power_quality_evidence"}
+_RUN_CYCLE_SENSOR_KEYS = {
+    "run_cycle_count",
+    "run_cycle_runtime",
+    "run_cycle_duty_cycle",
+    "run_cycle_status",
+}
+_DEMAND_SENSOR_KEYS = {
+    "current_demand",
+    "peak_demand",
+    "demand_limit_usage",
+    "demand_peak_rank",
+    "demand_peak_status",
+    "demand_status",
+}
+_CAPACITY_SENSOR_KEYS = {"capacity_usage", "capacity_status"}
+_SPLIT_PHASE_SENSOR_KEYS = {
+    "leg_imbalance",
+    "leg_imbalance_status",
+    "metric_consistency_score",
+    "metric_consistency_status",
+}
+_MAINS_NILM_SENSOR_KEYS = {
+    "nilm_signature_count",
+    "nilm_unmatched_load_percentage",
+    "nilm_topology_status",
+}
+_BALANCE_SENSOR_KEYS = {
+    "balance_power",
+    "monitored_power",
+    "monitored_coverage",
+    "balance_status",
+}
+_SOLAR_FLOW_SENSOR_KEYS = {
+    "solar_generation_power",
+    "solar_site_consumption_power",
+    "solar_grid_import_power",
+    "solar_grid_export_power",
+    "solar_self_consumption",
+    "solar_powered",
+    "solar_flow_status",
+    "solar_surplus_power",
+    "solar_load_shift_power",
+    "solar_flexible_load_power",
+    "solar_flexible_load_coverage",
+    "solar_load_shift_status",
+    "solar_surplus_status",
+}
+_UTILITY_COMPARISON_SENSOR_KEYS = {
+    "utility_comparison_difference",
+    "utility_comparison_status",
+}
+_BILLING_SENSOR_KEYS = {
+    "billing_cycle_usage",
+    "billing_cycle_forecast",
+    "billing_cycle_budget_usage",
+    "billing_cycle_status",
+}
+_COST_SENSOR_KEYS = {
+    "cost_current_rate",
+    "cost_cycle",
+    "cost_cycle_forecast",
+    "cost_status",
+}
+_STANDBY_SENSOR_KEYS = {
+    "always_on_power",
+    "standby_threshold",
+    "standby_status",
+    "always_on_limit_usage",
+}
+_CYCLIC_APPLIANCE_PROFILES = {
+    ApplianceProfile.REFRIGERATOR,
+    ApplianceProfile.FREEZER,
+    ApplianceProfile.HVAC,
+    ApplianceProfile.WATER_HEATER,
+    ApplianceProfile.OVEN,
+    ApplianceProfile.DRYER,
+    ApplianceProfile.POOL_PUMP,
+    ApplianceProfile.WELL_PUMP,
+    ApplianceProfile.SUMP_PUMP,
+    ApplianceProfile.MOTOR_LOAD,
+    ApplianceProfile.RESISTIVE_LOAD,
+}
+_HIGH_POWER_PROFILES = {
+    ApplianceProfile.HVAC,
+    ApplianceProfile.WATER_HEATER,
+    ApplianceProfile.OVEN,
+    ApplianceProfile.DRYER,
+    ApplianceProfile.POOL_PUMP,
+    ApplianceProfile.WELL_PUMP,
+    ApplianceProfile.SUMP_PUMP,
+    ApplianceProfile.EV_CHARGER,
+    ApplianceProfile.SOLAR_INVERTER,
+    ApplianceProfile.MAINS_NILM,
+}
+_POWER_QUALITY_ROLES = {
+    SensorRole.REAL_POWER,
+    SensorRole.REACTIVE_POWER,
+    SensorRole.APPARENT_POWER,
+    SensorRole.POWER_FACTOR,
+    SensorRole.CURRENT,
+    SensorRole.VOLTAGE,
+}
+
+
+def sensor_description_applies(
+    description: DiagnosticSensorDescription,
+    circuit: Any,
+    coordinator: Any,
+) -> bool:
+    """Return whether a diagnostic sensor is useful for this circuit."""
+    key = description.key
+    if key in _CORE_SENSOR_KEYS:
+        return True
+
+    roles = _sensor_roles(circuit)
+    profile = _appliance_profile(circuit)
+    mode = _circuit_mode(circuit)
+    is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
+    has_real_power = SensorRole.REAL_POWER in roles
+    has_energy = SensorRole.ENERGY in roles
+    has_current = SensorRole.CURRENT in roles
+    has_voltage = SensorRole.VOLTAGE in roles
+
+    if key in _ENERGY_USAGE_SENSOR_KEYS:
+        return has_energy
+    if key in _ENERGY_GOAL_SENSOR_KEYS:
+        return has_energy and (
+            _configured_positive(circuit, "daily_energy_goal_kwh")
+            or _stored_settings(coordinator, "energy_goal_settings_by_circuit", circuit)
+        )
+    if key in _POWER_QUALITY_SENSOR_KEYS:
+        return bool(roles & _POWER_QUALITY_ROLES)
+    if key == "reactive_power_drift":
+        return SensorRole.REACTIVE_POWER in roles
+    if key == "apparent_power_drift":
+        return SensorRole.APPARENT_POWER in roles
+    if key == "power_factor_drift":
+        return SensorRole.POWER_FACTOR in roles
+    if key in _MAINS_NILM_SENSOR_KEYS:
+        return is_mains
+    if key in _RUN_CYCLE_SENSOR_KEYS:
+        return (
+            profile in _CYCLIC_APPLIANCE_PROFILES
+            and not is_mains
+            and (has_real_power or has_current)
+        )
+    if key in _DEMAND_SENSOR_KEYS:
+        return has_real_power and (
+            is_mains
+            or mode is CircuitMode.DUAL_PHASE
+            or profile in _HIGH_POWER_PROFILES
+        )
+    if key in _CAPACITY_SENSOR_KEYS:
+        return (
+            (has_current or (has_real_power and has_voltage))
+            and _stored_settings(coordinator, "capacity_settings_by_circuit", circuit)
+        )
+    if key in _SPLIT_PHASE_SENSOR_KEYS:
+        return mode in {CircuitMode.DUAL_PHASE, CircuitMode.MAINS_NILM} and (
+            has_real_power or has_current
+        )
+    if key in _BALANCE_SENSOR_KEYS:
+        return is_mains
+    if key in _SOLAR_FLOW_SENSOR_KEYS:
+        return is_mains and _has_solar_flow_sources(coordinator)
+    if key in _UTILITY_COMPARISON_SENSOR_KEYS:
+        return _stored_settings(
+            coordinator,
+            "utility_comparison_settings_by_circuit",
+            circuit,
+        )
+    if key in _BILLING_SENSOR_KEYS:
+        return has_energy and (
+            _configured_positive(circuit, "billing_cycle_budget_kwh")
+            or _stored_settings(coordinator, "billing_settings_by_circuit", circuit)
+        )
+    if key in _COST_SENSOR_KEYS:
+        return has_energy and (
+            _configured_positive(circuit, "default_rate_per_kwh")
+            or _configured_positive(circuit, "tou_rate_per_kwh")
+            or _stored_settings(coordinator, "cost_settings_by_circuit", circuit)
+        )
+    if key in _STANDBY_SENSOR_KEYS:
+        return (
+            not is_mains
+            and has_real_power
+            and (
+                profile in _CYCLIC_APPLIANCE_PROFILES
+                or _stored_settings(coordinator, "standby_settings_by_circuit", circuit)
+            )
+        )
+    return False
+
+
+def _applicable_sensor_descriptions(
+    circuit: Any,
+    coordinator: Any,
+) -> tuple[DiagnosticSensorDescription, ...]:
+    return tuple(
+        description
+        for description in SENSOR_DESCRIPTIONS
+        if sensor_description_applies(description, circuit, coordinator)
+    )
+
+
+def _sensor_roles(circuit: Any) -> set[SensorRole]:
+    sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
+        circuit,
+        "sensors",
+        (),
+    )
+    roles: set[SensorRole] = set()
+    for sensor in sensors or ():
+        role = sensor.get("role") if isinstance(sensor, Mapping) else getattr(
+            sensor,
+            "role",
+            None,
+        )
+        try:
+            roles.add(SensorRole(role))
+        except (TypeError, ValueError):
+            continue
+    return roles
+
+
+def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
+    raw_profile = (
+        circuit.get("appliance_profile")
+        if isinstance(circuit, Mapping)
+        else getattr(circuit, "appliance_profile", None)
+    )
+    try:
+        return ApplianceProfile(raw_profile)
+    except (TypeError, ValueError):
+        return None
+
+
+def _circuit_mode(circuit: Any) -> CircuitMode | None:
+    raw_mode = circuit.get("mode") if isinstance(circuit, Mapping) else getattr(
+        circuit,
+        "mode",
+        None,
+    )
+    try:
+        return CircuitMode(raw_mode)
+    except (TypeError, ValueError):
+        return None
+
+
+def _circuit_id(circuit: Any) -> str:
+    if isinstance(circuit, Mapping):
+        return str(circuit.get("circuit_id") or circuit.get("id") or "")
+    return str(getattr(circuit, "circuit_id", "") or "")
+
+
+def _configured_positive(circuit: Any, field_name: str) -> bool:
+    value = circuit.get(field_name) if isinstance(circuit, Mapping) else getattr(
+        circuit,
+        field_name,
+        None,
+    )
+    try:
+        return float(value) > 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
+    store_data = getattr(coordinator, "store_data", None)
+    settings_by_circuit = getattr(store_data, field_name, {}) if store_data else {}
+    settings = settings_by_circuit.get(_circuit_id(circuit), {})
+    return isinstance(settings, Mapping) and bool(settings)
+
+
+def _has_solar_flow_sources(coordinator: Any) -> bool:
+    for circuit in getattr(coordinator, "circuit_configs", ()) or ():
+        profile = _appliance_profile(circuit)
+        power_flow = (
+            circuit.get("power_flow")
+            if isinstance(circuit, Mapping)
+            else getattr(circuit, "power_flow", None)
+        )
+        if profile is ApplianceProfile.SOLAR_INVERTER:
+            return True
+        try:
+            if PowerFlowMode(power_flow) is PowerFlowMode.GENERATION:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     """Sensor exposing one diagnostic value for an analyzed circuit."""
 
@@ -1259,6 +1573,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        descriptions = _applicable_sensor_descriptions(raw_circuit, coordinator)
         entities.extend(
             CircuitAnalyzerSensor(
                 coordinator,
@@ -1266,7 +1581,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 circuit=circuit,
                 description=description,
             )
-            for description in SENSOR_DESCRIPTIONS
+            for description in descriptions
         )
 
+    prune_stale_entity_registry_entries(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        desired_unique_ids={entity.unique_id for entity in entities},
+    )
     async_add_entities(entities)

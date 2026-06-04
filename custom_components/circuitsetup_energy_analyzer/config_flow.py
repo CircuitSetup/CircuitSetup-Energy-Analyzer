@@ -237,15 +237,7 @@ def _energy_entity_selector_config(
     include_entities: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     entity_ids = list(dict.fromkeys(include_entities or ()))
-    if entity_ids:
-        return {
-            "entity": {
-                "multiple": True,
-                "include_entities": entity_ids,
-            }
-        }
-
-    return {
+    config: dict[str, Any] = {
         "entity": {
             "multiple": True,
             "filter": [
@@ -256,6 +248,10 @@ def _energy_entity_selector_config(
             ],
         }
     }
+    if entity_ids:
+        config["entity"]["include_entities"] = entity_ids
+
+    return config
 
 
 def _energy_entity_list_selector(
@@ -269,11 +265,10 @@ def _select_selector(options: Iterable[str]) -> Any:
 
 
 def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
+    del source_entity_ids
     return vol.Schema(
         {
-            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(
-                source_entity_ids,
-            ),
+            vol.Required(CONF_SOURCE_ENTITIES): _energy_entity_list_selector(),
             vol.Optional(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
                 default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
@@ -281,7 +276,7 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
                 default=[],
-            ): _energy_entity_list_selector(source_entity_ids),
+            ): _energy_entity_list_selector(),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,

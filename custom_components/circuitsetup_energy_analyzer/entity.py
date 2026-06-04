@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +52,50 @@ def circuits_for_entities(entry: Any, coordinator: Any) -> tuple[Any, ...]:
     if runtime_circuits:
         return runtime_circuits
     return tuple(getattr(entry, "data", {}).get(CONF_CIRCUITS, []))
+
+
+def stale_entity_registry_entity_ids(
+    entries: Iterable[Any],
+    *,
+    entry_id: str,
+    entity_domain: str,
+    desired_unique_ids: set[str],
+) -> list[str]:
+    """Return stale integration entity IDs for one platform domain."""
+    prefix = f"{entity_domain}."
+    return [
+        str(entry.entity_id)
+        for entry in entries
+        if getattr(entry, "config_entry_id", None) == entry_id
+        and getattr(entry, "platform", None) == DOMAIN
+        and str(getattr(entry, "entity_id", "")).startswith(prefix)
+        and getattr(entry, "unique_id", None) not in desired_unique_ids
+    ]
+
+
+def prune_stale_entity_registry_entries(
+    hass: Any,
+    *,
+    entry_id: str,
+    entity_domain: str,
+    desired_unique_ids: set[str],
+) -> None:
+    """Remove stale entity registry rows for entities no longer created."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return
+
+    registry = er.async_get(hass)
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    for entity_id in stale_entity_registry_entity_ids(
+        values,
+        entry_id=entry_id,
+        entity_domain=entity_domain,
+        desired_unique_ids=desired_unique_ids,
+    ):
+        registry.async_remove(entity_id)
 
 
 class CircuitAnalyzerEntity(CoordinatorEntity):

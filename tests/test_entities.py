@@ -16,8 +16,11 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
     CircuitMode,
     EventType,
+    SensorRef,
+    SensorRole,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -1044,87 +1047,15 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState())
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
-    entry = SimpleNamespace(entry_id="entry-1", data={CONF_CIRCUITS: [circuit]})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert [entity.name for entity in added_entities] == [
-        "Kitchen Fridge Anomaly Score",
-        "Kitchen Fridge Last Event",
-        "Kitchen Fridge Health Summary",
-        "Kitchen Fridge Readiness",
-        "Kitchen Fridge Learning Progress",
-        "Kitchen Fridge Data Quality Checklist",
-        "Kitchen Fridge Energy Dashboard Status",
-        "Kitchen Fridge Alert Evidence",
-        "Kitchen Fridge Recent Activity",
-        "Kitchen Fridge Recent Activity Count",
-        "Kitchen Fridge Sensitivity",
-        "Kitchen Fridge Power Quality Score",
-        "Kitchen Fridge Power Quality Evidence",
-        "Kitchen Fridge Reactive Power Drift",
-        "Kitchen Fridge Apparent Power Drift",
-        "Kitchen Fridge Power Factor Drift",
-        "Kitchen Fridge NILM Discovered Signatures",
-        "Kitchen Fridge NILM Unmatched Load Percentage",
-        "Kitchen Fridge NILM Topology Status",
-        "Kitchen Fridge Daily Energy Usage",
-        "Kitchen Fridge Energy Usage Share",
-        "Kitchen Fridge Energy Usage Status",
-        "Kitchen Fridge Energy Goal Usage",
-        "Kitchen Fridge Energy Goal Status",
-        "Kitchen Fridge Run Cycle Count",
-        "Kitchen Fridge Run Cycle Runtime",
-        "Kitchen Fridge Run Cycle Duty Cycle",
-        "Kitchen Fridge Run Cycle Status",
-        "Kitchen Fridge Current Demand",
-        "Kitchen Fridge Peak Demand",
-        "Kitchen Fridge Demand Limit Usage",
-        "Kitchen Fridge Demand Peak Rank",
-        "Kitchen Fridge Demand Peak Status",
-        "Kitchen Fridge Demand Status",
-        "Kitchen Fridge Circuit Capacity Usage",
-        "Kitchen Fridge Circuit Capacity Status",
-        "Kitchen Fridge Leg Imbalance",
-        "Kitchen Fridge Leg Imbalance Status",
-        "Kitchen Fridge Metric Consistency Score",
-        "Kitchen Fridge Metric Consistency Status",
-        "Kitchen Fridge Balance Power",
-        "Kitchen Fridge Monitored Power",
-        "Kitchen Fridge Monitored Coverage",
-        "Kitchen Fridge Balance Status",
-        "Kitchen Fridge Solar Generation Power",
-        "Kitchen Fridge Solar Site Consumption Power",
-        "Kitchen Fridge Solar Grid Import Power",
-        "Kitchen Fridge Solar Grid Export Power",
-        "Kitchen Fridge Solar Self Consumption",
-        "Kitchen Fridge Solar Powered",
-        "Kitchen Fridge Solar Flow Status",
-        "Kitchen Fridge Solar Surplus Power",
-        "Kitchen Fridge Solar Load Shift Power",
-        "Kitchen Fridge Solar Flexible Load Power",
-        "Kitchen Fridge Solar Flexible Load Coverage",
-        "Kitchen Fridge Solar Load Shift Status",
-        "Kitchen Fridge Solar Surplus Status",
-        "Kitchen Fridge Utility Comparison Difference",
-        "Kitchen Fridge Utility Comparison Status",
-        "Kitchen Fridge Billing Cycle Usage",
-            "Kitchen Fridge Billing Cycle Forecast",
-            "Kitchen Fridge Billing Cycle Budget Usage",
-            "Kitchen Fridge Billing Cycle Status",
-            "Kitchen Fridge Cost Current Rate",
-            "Kitchen Fridge Cost Cycle",
-            "Kitchen Fridge Cost Cycle Forecast",
-            "Kitchen Fridge Cost Status",
-            "Kitchen Fridge Always On Power",
-        "Kitchen Fridge Standby Threshold",
-        "Kitchen Fridge Standby Status",
-        "Kitchen Fridge Always On Limit Usage",
-    ]
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_fridge_anomaly_score",
         "entry-1_fridge_last_event",
@@ -1137,66 +1068,9 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_recent_activity",
         "entry-1_fridge_recent_activity_count",
         "entry-1_fridge_sensitivity",
-        "entry-1_fridge_power_quality_score",
-        "entry-1_fridge_power_quality_evidence",
-        "entry-1_fridge_reactive_power_drift",
-        "entry-1_fridge_apparent_power_drift",
-        "entry-1_fridge_power_factor_drift",
-        "entry-1_fridge_nilm_signature_count",
-        "entry-1_fridge_nilm_unmatched_load_percentage",
-        "entry-1_fridge_nilm_topology_status",
         "entry-1_fridge_daily_energy_usage",
         "entry-1_fridge_energy_usage_share",
         "entry-1_fridge_energy_usage_status",
-        "entry-1_fridge_energy_goal_usage",
-        "entry-1_fridge_energy_goal_status",
-        "entry-1_fridge_run_cycle_count",
-        "entry-1_fridge_run_cycle_runtime",
-        "entry-1_fridge_run_cycle_duty_cycle",
-        "entry-1_fridge_run_cycle_status",
-        "entry-1_fridge_current_demand",
-        "entry-1_fridge_peak_demand",
-        "entry-1_fridge_demand_limit_usage",
-        "entry-1_fridge_demand_peak_rank",
-        "entry-1_fridge_demand_peak_status",
-        "entry-1_fridge_demand_status",
-        "entry-1_fridge_capacity_usage",
-        "entry-1_fridge_capacity_status",
-        "entry-1_fridge_leg_imbalance",
-        "entry-1_fridge_leg_imbalance_status",
-        "entry-1_fridge_metric_consistency_score",
-        "entry-1_fridge_metric_consistency_status",
-        "entry-1_fridge_balance_power",
-        "entry-1_fridge_monitored_power",
-        "entry-1_fridge_monitored_coverage",
-        "entry-1_fridge_balance_status",
-        "entry-1_fridge_solar_generation_power",
-        "entry-1_fridge_solar_site_consumption_power",
-        "entry-1_fridge_solar_grid_import_power",
-        "entry-1_fridge_solar_grid_export_power",
-        "entry-1_fridge_solar_self_consumption",
-        "entry-1_fridge_solar_powered",
-        "entry-1_fridge_solar_flow_status",
-        "entry-1_fridge_solar_surplus_power",
-        "entry-1_fridge_solar_load_shift_power",
-        "entry-1_fridge_solar_flexible_load_power",
-        "entry-1_fridge_solar_flexible_load_coverage",
-        "entry-1_fridge_solar_load_shift_status",
-        "entry-1_fridge_solar_surplus_status",
-        "entry-1_fridge_utility_comparison_difference",
-        "entry-1_fridge_utility_comparison_status",
-        "entry-1_fridge_billing_cycle_usage",
-        "entry-1_fridge_billing_cycle_forecast",
-        "entry-1_fridge_billing_cycle_budget_usage",
-        "entry-1_fridge_billing_cycle_status",
-        "entry-1_fridge_cost_current_rate",
-        "entry-1_fridge_cost_cycle",
-        "entry-1_fridge_cost_cycle_forecast",
-        "entry-1_fridge_cost_status",
-        "entry-1_fridge_always_on_power",
-        "entry-1_fridge_standby_threshold",
-        "entry-1_fridge_standby_status",
-        "entry-1_fridge_always_on_limit_usage",
     ]
     assert added_entities[0].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
@@ -1206,17 +1080,72 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-        async_setup_entry,
+async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_current", SensorRole.CURRENT),
+            SensorRef("sensor.hvac_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.hvac_reactive", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.hvac_apparent", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.hvac_pf", SensorRole.POWER_FACTOR),
+        ),
     )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={"hvac": {"breaker_amps": 40.0}},
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_hvac_power_quality_score",
+        "entry-1_hvac_reactive_power_drift",
+        "entry-1_hvac_apparent_power_drift",
+        "entry-1_hvac_power_factor_drift",
+        "entry-1_hvac_run_cycle_count",
+        "entry-1_hvac_current_demand",
+        "entry-1_hvac_capacity_usage",
+        "entry-1_hvac_leg_imbalance",
+        "entry-1_hvac_metric_consistency_score",
+    } <= unique_ids
+    assert not {
+        "entry-1_hvac_nilm_signature_count",
+        "entry-1_hvac_balance_power",
+        "entry-1_hvac_solar_generation_power",
+        "entry-1_hvac_utility_comparison_difference",
+        "entry-1_hvac_billing_cycle_usage",
+        "entry-1_hvac_cost_cycle",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
         circuit_id="mains",
         name="Mains NILM",
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_l1_power", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.mains_l2_power", SensorRole.REAL_POWER, leg="b"),
+        ),
     )
     coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -1225,9 +1154,87 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert [entity.circuit_id for entity in added_entities] == [
-        "mains"
-    ] * len(SENSOR_DESCRIPTIONS)
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_mains_nilm_signature_count",
+        "entry-1_mains_nilm_unmatched_load_percentage",
+        "entry-1_mains_nilm_topology_status",
+        "entry-1_mains_balance_power",
+        "entry-1_mains_current_demand",
+    } <= unique_ids
+    assert not {
+        "entry-1_mains_run_cycle_count",
+        "entry-1_mains_daily_energy_usage",
+        "entry-1_mains_standby_status",
+        "entry-1_mains_billing_cycle_usage",
+        "entry-1_mains_cost_cycle",
+    } & unique_ids
+
+
+def test_stale_entity_registry_entries_identifies_only_inapplicable_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        stale_entity_registry_entity_ids,
+    )
+
+    entries = [
+        SimpleNamespace(
+            entity_id="sensor.fridge_anomaly_score",
+            unique_id="entry-1_fridge_anomaly_score",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+        ),
+        SimpleNamespace(
+            entity_id="sensor.fridge_solar_generation_power",
+            unique_id="entry-1_fridge_solar_generation_power",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+        ),
+        SimpleNamespace(
+            entity_id="binary_sensor.fridge_learning",
+            unique_id="entry-1_fridge_learning",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+        ),
+        SimpleNamespace(
+            entity_id="sensor.other",
+            unique_id="other_fridge_solar_generation_power",
+            config_entry_id="other",
+            platform=DOMAIN,
+        ),
+    ]
+
+    assert stale_entity_registry_entity_ids(
+        entries,
+        entry_id="entry-1",
+        entity_domain="sensor",
+        desired_unique_ids={"entry-1_fridge_anomaly_score"},
+    ) == ["sensor.fridge_solar_generation_power"]
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert {entity.unique_id for entity in added_entities} >= {
+        "entry-1_mains_health_summary",
+        "entry-1_mains_nilm_signature_count",
+        "entry-1_mains_balance_power",
+        "entry-1_mains_current_demand",
+    }
 
 
 @pytest.mark.asyncio

@@ -267,6 +267,24 @@ def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None
     ) == {
         "entity": {
             "multiple": True,
+            "filter": [
+                {
+                    "domain": "sensor",
+                    "device_class": sorted(
+                        {
+                            "apparent_power",
+                            "current",
+                            "energy",
+                            "frequency",
+                            "power",
+                            "power_factor",
+                            "reactive_energy",
+                            "reactive_power",
+                            "voltage",
+                        }
+                    ),
+                }
+            ],
             "include_entities": ["sensor.panel_power", "sensor.panel_voltage"],
         }
     }

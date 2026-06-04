@@ -2,252 +2,189 @@ type: sections
 title: Energy Analyzer
 sections:
   - type: grid
-    title: Setup health
+    title: At a glance
     cards:
-      - type: entities
-        title: Overall readiness
+      - type: glance
+        title: At a glance
+        columns: 3
         entities:
           - entity: sensor.refrigerator_health_summary
-          - entity: sensor.refrigerator_readiness
+            name: Refrigerator
           - entity: sensor.hvac_health_summary
-          - entity: sensor.hvac_readiness
+            name: HVAC
           - entity: sensor.mains_health_summary
-          - entity: sensor.mains_readiness
-      - type: entities
-        title: Data quality
-        entities:
-          - entity: sensor.refrigerator_data_quality_checklist
-          - entity: binary_sensor.refrigerator_data_quality_problem
-          - entity: sensor.hvac_data_quality_checklist
-          - entity: binary_sensor.hvac_data_quality_problem
-          - entity: sensor.mains_data_quality_checklist
-          - entity: binary_sensor.mains_data_quality_problem
-  - type: grid
-    title: Learning progress
-    cards:
-      - type: entities
-        title: Appliance baselines
-        entities:
+            name: Mains
           - entity: sensor.refrigerator_learning_progress
-          - entity: binary_sensor.refrigerator_learning
+            name: Fridge learning
           - entity: sensor.hvac_learning_progress
-          - entity: binary_sensor.hvac_learning
+            name: HVAC learning
           - entity: sensor.mains_learning_progress
-          - entity: binary_sensor.mains_learning
-      - type: entities
-        title: Service windows
-        entities:
-          - entity: binary_sensor.refrigerator_maintenance
-          - entity: sensor.refrigerator_sensitivity
-          - entity: binary_sensor.hvac_maintenance
-          - entity: sensor.hvac_sensitivity
-          - entity: binary_sensor.mains_maintenance
-          - entity: sensor.mains_sensitivity
+            name: Mains learning
+      - type: gauge
+        title: Refrigerator anomaly
+        entity: sensor.refrigerator_anomaly_score
+        min: 0
+        max: 1
+        severity:
+          green: 0
+          yellow: 0.35
+          red: 0.7
+      - type: gauge
+        title: HVAC anomaly
+        entity: sensor.hvac_anomaly_score
+        min: 0
+        max: 1
+        severity:
+          green: 0
+          yellow: 0.35
+          red: 0.7
+      - type: gauge
+        title: Mains coverage
+        entity: sensor.mains_monitored_coverage
+        min: 0
+        max: 100
+        severity:
+          red: 0
+          yellow: 50
+          green: 80
   - type: grid
-    title: Circuit summaries
-    cards:
-      - type: entities
-        title: Refrigerator
-        entities:
-          - entity: sensor.refrigerator_anomaly_score
-          - entity: sensor.refrigerator_last_event
-          - entity: sensor.refrigerator_run_cycle_count
-          - entity: sensor.refrigerator_run_cycle_runtime
-          - entity: sensor.refrigerator_run_cycle_duty_cycle
-          - entity: sensor.refrigerator_run_cycle_status
-          - entity: sensor.refrigerator_alert_evidence
-          - entity: sensor.refrigerator_recent_activity
-          - entity: sensor.refrigerator_recent_activity_count
-      - type: entities
-        title: HVAC
-        entities:
-          - entity: sensor.hvac_anomaly_score
-          - entity: sensor.hvac_last_event
-          - entity: sensor.hvac_run_cycle_count
-          - entity: sensor.hvac_run_cycle_runtime
-          - entity: sensor.hvac_run_cycle_duty_cycle
-          - entity: sensor.hvac_run_cycle_status
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.hvac_recent_activity
-          - entity: sensor.hvac_recent_activity_count
-          - entity: sensor.hvac_current_demand
-          - entity: sensor.hvac_peak_demand
-          - entity: sensor.hvac_demand_limit_usage
-          - entity: sensor.hvac_demand_peak_rank
-          - entity: sensor.hvac_demand_peak_status
-          - entity: sensor.hvac_demand_status
-          - entity: sensor.hvac_capacity_usage
-          - entity: sensor.hvac_capacity_status
-          - entity: sensor.hvac_leg_imbalance
-          - entity: sensor.hvac_leg_imbalance_status
-          - entity: sensor.hvac_metric_consistency_score
-          - entity: sensor.hvac_metric_consistency_status
-      - type: entities
-        title: Mains
-        entities:
-          - entity: sensor.mains_anomaly_score
-          - entity: sensor.mains_last_event
-          - entity: sensor.mains_alert_evidence
-          - entity: sensor.mains_recent_activity
-          - entity: sensor.mains_recent_activity_count
-          - entity: sensor.mains_balance_power
-          - entity: sensor.mains_monitored_power
-          - entity: sensor.mains_monitored_coverage
-          - entity: sensor.mains_balance_status
-          - entity: sensor.mains_solar_generation_power
-          - entity: sensor.mains_solar_site_consumption_power
-          - entity: sensor.mains_solar_flow_status
-          - entity: sensor.mains_solar_flexible_load_power
-          - entity: sensor.mains_solar_load_shift_status
-          - entity: sensor.mains_solar_surplus_status
-          - entity: sensor.mains_current_demand
-          - entity: sensor.mains_peak_demand
-          - entity: sensor.mains_demand_peak_rank
-          - entity: sensor.mains_demand_peak_status
-          - entity: sensor.mains_utility_comparison_difference
-          - entity: sensor.mains_utility_comparison_status
-  - type: grid
-    title: Active evidence
+    title: Recent behavior
     cards:
       - type: history-graph
-        title: Recent anomaly score
+        title: Anomaly trend
         hours_to_show: 24
         entities:
           - entity: sensor.refrigerator_anomaly_score
           - entity: sensor.hvac_anomaly_score
           - entity: sensor.mains_anomaly_score
+      - type: history-graph
+        title: Daily energy
+        hours_to_show: 72
+        entities:
+          - entity: sensor.refrigerator_daily_energy_usage
+          - entity: sensor.hvac_daily_energy_usage
       - type: entities
-        title: Alert evidence
+        title: Latest evidence
         entities:
           - entity: sensor.refrigerator_alert_evidence
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.mains_alert_evidence
-      - type: entities
-        title: Recent activity
-        entities:
           - entity: sensor.refrigerator_recent_activity
-          - entity: sensor.refrigerator_recent_activity_count
+          - entity: sensor.hvac_alert_evidence
           - entity: sensor.hvac_recent_activity
-          - entity: sensor.hvac_recent_activity_count
+          - entity: sensor.mains_alert_evidence
           - entity: sensor.mains_recent_activity
-          - entity: sensor.mains_recent_activity_count
   - type: grid
-    title: Power-quality diagnostics
+    title: Power quality
     cards:
-      - type: entities
+      - type: gauge
         title: Refrigerator power quality
+        entity: sensor.refrigerator_power_quality_score
+        min: 0
+        max: 1
+        severity:
+          green: 0
+          yellow: 0.35
+          red: 0.7
+      - type: gauge
+        title: HVAC power quality
+        entity: sensor.hvac_power_quality_score
+        min: 0
+        max: 1
+        severity:
+          green: 0
+          yellow: 0.35
+          red: 0.7
+      - type: entities
+        title: Refrigerator power evidence
         entities:
-          - entity: sensor.refrigerator_power_quality_score
           - entity: sensor.refrigerator_power_quality_evidence
           - entity: sensor.refrigerator_reactive_power_drift
           - entity: sensor.refrigerator_apparent_power_drift
           - entity: sensor.refrigerator_power_factor_drift
       - type: entities
-        title: HVAC power quality
+        title: HVAC power evidence
         entities:
-          - entity: sensor.hvac_power_quality_score
           - entity: sensor.hvac_power_quality_evidence
           - entity: sensor.hvac_reactive_power_drift
           - entity: sensor.hvac_apparent_power_drift
           - entity: sensor.hvac_power_factor_drift
+          - entity: sensor.hvac_metric_consistency_status
   - type: grid
-    title: Energy usage and demand
+    title: HVAC and demand
     cards:
+      - type: gauge
+        title: HVAC demand limit
+        entity: sensor.hvac_demand_limit_usage
+        min: 0
+        max: 120
+        severity:
+          green: 0
+          yellow: 75
+          red: 100
+      - type: gauge
+        title: HVAC capacity
+        entity: sensor.hvac_capacity_usage
+        min: 0
+        max: 120
+        severity:
+          green: 0
+          yellow: 80
+          red: 100
       - type: entities
-        title: Refrigerator energy usage
-        entities:
-          - entity: sensor.refrigerator_daily_energy_usage
-          - entity: sensor.refrigerator_energy_usage_share
-          - entity: sensor.refrigerator_energy_usage_status
-      - type: entities
-        title: Refrigerator billing cycle
-        entities:
-          - entity: sensor.refrigerator_billing_cycle_usage
-          - entity: sensor.refrigerator_billing_cycle_forecast
-          - entity: sensor.refrigerator_billing_cycle_budget_usage
-          - entity: sensor.refrigerator_billing_cycle_status
-      - type: entities
-        title: Refrigerator cost
-        entities:
-          - entity: sensor.refrigerator_cost_current_rate
-          - entity: sensor.refrigerator_cost_cycle
-          - entity: sensor.refrigerator_cost_cycle_forecast
-          - entity: sensor.refrigerator_cost_status
-      - type: entities
-        title: Refrigerator standby
-        entities:
-          - entity: sensor.refrigerator_always_on_power
-          - entity: sensor.refrigerator_standby_threshold
-          - entity: sensor.refrigerator_standby_status
-          - entity: sensor.refrigerator_always_on_limit_usage
-      - type: entities
-        title: HVAC demand
+        title: HVAC detail
         entities:
           - entity: sensor.hvac_current_demand
           - entity: sensor.hvac_peak_demand
-          - entity: sensor.hvac_demand_limit_usage
-          - entity: sensor.hvac_demand_peak_rank
           - entity: sensor.hvac_demand_peak_status
-          - entity: sensor.hvac_demand_status
-      - type: entities
-        title: HVAC capacity
-        entities:
-          - entity: sensor.hvac_capacity_usage
-          - entity: sensor.hvac_capacity_status
-      - type: entities
-        title: HVAC split phase
-        entities:
-          - entity: sensor.hvac_leg_imbalance
           - entity: sensor.hvac_leg_imbalance_status
+          - entity: sensor.hvac_run_cycle_status
+  - type: grid
+    title: Energy usage
+    cards:
+      - type: gauge
+        title: Refrigerator usage share
+        entity: sensor.refrigerator_energy_usage_share
+        min: 0
+        max: 100
+        severity:
+          green: 0
+          yellow: 25
+          red: 40
       - type: entities
-        title: HVAC metric consistency
+        title: Refrigerator usage
         entities:
-          - entity: sensor.hvac_metric_consistency_score
-          - entity: sensor.hvac_metric_consistency_status
-      - type: entities
-        title: Mains balance
+          - entity: sensor.refrigerator_daily_energy_usage
+          - entity: sensor.refrigerator_energy_usage_status
+          - entity: sensor.refrigerator_standby_status
+          - entity: sensor.refrigerator_always_on_power
+  - type: grid
+    title: Mains and NILM
+    cards:
+      - type: glance
+        title: Mains NILM
+        columns: 3
+        entities:
+          - entity: sensor.mains_nilm_discovered_signatures
+            name: Signatures
+          - entity: sensor.mains_nilm_unmatched_load_percentage
+            name: Unmatched
+          - entity: sensor.mains_balance_status
+            name: Balance
+          - entity: sensor.mains_monitored_coverage
+            name: Coverage
+          - entity: sensor.mains_demand_peak_status
+            name: Peak
+          - entity: sensor.mains_readiness
+            name: Readiness
+      - type: history-graph
+        title: Mains power balance
+        hours_to_show: 24
         entities:
           - entity: sensor.mains_balance_power
           - entity: sensor.mains_monitored_power
-          - entity: sensor.mains_monitored_coverage
-          - entity: sensor.mains_balance_status
       - type: entities
-        title: Solar flow
+        title: NILM review
         entities:
-          - entity: sensor.mains_solar_generation_power
-          - entity: sensor.mains_solar_site_consumption_power
-          - entity: sensor.mains_solar_grid_import_power
-          - entity: sensor.mains_solar_grid_export_power
-          - entity: sensor.mains_solar_self_consumption
-          - entity: sensor.mains_solar_powered
-          - entity: sensor.mains_solar_flow_status
-          - entity: sensor.mains_solar_load_shift_power
-          - entity: sensor.mains_solar_flexible_load_power
-          - entity: sensor.mains_solar_flexible_load_coverage
-          - entity: sensor.mains_solar_load_shift_status
-          - entity: sensor.mains_solar_surplus_status
-      - type: entities
-        title: Utility comparison
-        entities:
-          - entity: sensor.mains_current_demand
-          - entity: sensor.mains_peak_demand
-          - entity: sensor.mains_demand_peak_rank
-          - entity: sensor.mains_demand_peak_status
-          - entity: sensor.mains_utility_comparison_difference
-          - entity: sensor.mains_utility_comparison_status
-  - type: grid
-    title: Experimental NILM review
-    cards:
-      - type: entities
-        title: Mains NILM
-        entities:
-          - entity: sensor.mains_nilm_discovered_signatures
-          - entity: sensor.mains_nilm_unmatched_load_percentage
-          - entity: sensor.mains_learning_progress
           - entity: sensor.mains_alert_evidence
-      - type: entities
-        title: Review controls
-        entities:
-          - entity: sensor.mains_readiness
-          - entity: sensor.mains_sensitivity
+          - entity: sensor.mains_recent_activity
+          - entity: sensor.mains_nilm_topology_status
           - entity: binary_sensor.mains_maintenance

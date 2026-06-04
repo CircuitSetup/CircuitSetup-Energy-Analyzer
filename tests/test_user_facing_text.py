@@ -104,3 +104,28 @@ def test_service_fields_have_human_readable_names_and_descriptions() -> None:
             assert "_" not in field["name"]
             assert field["description"].endswith(".")
             assert 20 <= len(field["description"]) <= 160
+
+
+def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None:
+    dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    cards = _dashboard_cards(dashboard)
+    card_types = [card.get("type") for card in cards]
+
+    assert card_types.count("entities") <= 10
+    assert "glance" in card_types
+    assert "history-graph" in card_types
+    assert "gauge" in card_types
+    assert any(card.get("title") == "At a glance" for card in cards)
+
+
+def _dashboard_cards(node: object) -> list[dict[str, object]]:
+    cards: list[dict[str, object]] = []
+    if isinstance(node, dict):
+        if isinstance(node.get("type"), str):
+            cards.append(node)
+        for value in node.values():
+            cards.extend(_dashboard_cards(value))
+    elif isinstance(node, list):
+        for item in node:
+            cards.extend(_dashboard_cards(item))
+    return cards
