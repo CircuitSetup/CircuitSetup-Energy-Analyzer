@@ -4,6 +4,28 @@ CircuitSetup Energy Analyzer is a Home Assistant custom integration for analyzin
 
 The integration learns conservative per-circuit baselines for single-phase appliances, dual-phase appliances, mixed circuits, and opt-in experimental mains NILM discovery. It exposes diagnostic entities, persistent notifications for important events, and Repairs for integration or source-data problems.
 
+## Feature Summary
+
+- Analyzes CircuitSetup 6 Channel Energy Meter data from ESPHome ATM90E32
+  sensors inside Home Assistant.
+- Auto-discovers meter devices and energy-related sensors, with manual circuit
+  assignment and override support.
+- Supports single-phase circuits, dual-phase appliances, mixed circuits, and
+  experimental mains NILM disaggregation.
+- Learns conservative per-circuit baselines before alerting, then requires
+  repeated anomalies and reports them as possible issues with observed evidence.
+- Tracks active power, current, voltage, frequency, power factor, reactive
+  power, apparent power, metric consistency, usage patterns, and kWh changes.
+- Provides appliance-aware analysis for refrigerators, HVAC compressor/blower
+  loads, electric heat, water heaters, pool and water pumps, sump pumps, car
+  chargers, solar/export circuits, and mains feeds.
+- Adds optional usage-spike, daily goal, billing-cycle, cost, demand, breaker
+  capacity, standby, always-on, solar-flow, and utility/Opower comparison
+  diagnostics.
+- Exposes standard Home Assistant entities, diagnostic sensors, binary sensors,
+  persistent notifications, Repairs for setup/data-quality problems, a sample
+  dashboard, and an alert automation blueprint.
+
 ## Home Assistant Energy Dashboard Boundary
 
 Use Home Assistant's built-in Energy Dashboard for normal energy history,
