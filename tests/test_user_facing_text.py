@@ -57,6 +57,7 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "cycle_start_day": "Cycle Start Day",
     "budget_kwh": "Budget kWh",
     "budget_alert_ratio": "Budget Alert Ratio",
+    "billing_min_elapsed_days": "Billing Minimum Elapsed Days",
     "default_rate_per_kwh": "Default Rate Per kWh",
     "tou_rate_per_kwh": "TOU Rate Per kWh",
     "tou_start": "TOU Start",
@@ -70,6 +71,7 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "window_hours": "Standby Window Hours",
     "standby_threshold_w": "Standby Threshold W",
     "always_on_alert_w": "Always On Alert W",
+    "standby_min_samples": "Standby Minimum Samples",
 }
 
 EXPECTED_SERVICE_FIELD_NAMES = {
@@ -148,6 +150,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "assign": "Review Circuit Assignments",
         "sources": "Edit Source Selection",
         "mains": "Edit Mains Sensors",
+        "nilm": "Experimental NILM Settings",
         "utility": "Utility / Opower Comparison",
         "advanced": "Advanced Circuit Settings",
     }
@@ -226,6 +229,8 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
             "circuit_mode": "Circuit Mode",
+            "power_flow": "Power Flow",
+            "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
         assert all("_" not in label for label in data.values())
@@ -236,6 +241,8 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "mains nilm" in descriptions["circuit_mode"].lower()
         assert "only" in descriptions["circuit_mode"].lower()
         assert "mains" in descriptions["circuit_mode"].lower()
+        assert "solar" in descriptions["power_flow"].lower()
+        assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
 
 
 def test_assignment_picker_text_is_human_readable() -> None:
@@ -263,11 +270,13 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
 
     for section, step in (
         ("config", "user"),
-        ("config", "utility"),
-        ("config", "assign"),
-        ("options", "sources"),
-        ("options", "mains"),
-        ("options", "utility"),
+            ("config", "utility"),
+            ("config", "assign"),
+            ("config", "nilm"),
+            ("options", "sources"),
+            ("options", "mains"),
+            ("options", "nilm"),
+            ("options", "utility"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),

@@ -30,14 +30,28 @@
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
-          "circuit_mode": "Circuit Mode"
+          "circuit_mode": "Circuit Mode",
+          "power_flow": "Power Flow",
+          "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
           "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits."
+          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
+          "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
+          "circuit_retention_mode": "Controls how much diagnostic history is kept for this individual circuit."
+        }
+      },
+      "nilm": {
+        "title": "Experimental NILM Settings",
+        "description": "Optional: choose configured appliance circuits whose known events should be masked from mains NILM discovery.",
+        "data": {
+          "known_load_circuits": "Known Load Circuits"
+        },
+        "data_description": {
+          "known_load_circuits": "Select individual load circuits, not mains circuits. These known loads help separate expected events from unknown aggregate mains events."
         }
       },
       "utility": {
@@ -71,18 +85,20 @@
       "invalid_source_entities": "Source sensor entity IDs must be text values.",
       "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
       "invalid_retention_mode": "Select a supported retention mode.",
-      "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values."
+      "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
+      "invalid_known_load_circuits": "Known load circuits must be selected from configured appliance circuits."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, utility comparison, or advanced circuit settings.",
+        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, NILM settings, utility comparison, or advanced circuit settings.",
         "menu_options": {
           "assign": "Review Circuit Assignments",
           "sources": "Edit Source Selection",
           "mains": "Edit Mains Sensors",
+          "nilm": "Experimental NILM Settings",
           "utility": "Utility / Opower Comparison",
           "advanced": "Advanced Circuit Settings"
         }
@@ -113,6 +129,16 @@
         },
         "data_description": {
           "mains_source_entities": "Optional aggregate mains sensors for Mains NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names."
+        }
+      },
+      "nilm": {
+        "title": "Experimental NILM Settings",
+        "description": "Choose configured appliance circuits whose known events should be masked from mains NILM discovery.",
+        "data": {
+          "known_load_circuits": "Known Load Circuits"
+        },
+        "data_description": {
+          "known_load_circuits": "Select individual load circuits, not mains circuits. These known loads help separate expected events from unknown aggregate mains events."
         }
       },
       "utility": {
@@ -173,6 +199,7 @@
           "cycle_start_day": "Cycle Start Day",
           "budget_kwh": "Budget kWh",
           "budget_alert_ratio": "Budget Alert Ratio",
+          "billing_min_elapsed_days": "Billing Minimum Elapsed Days",
           "default_rate_per_kwh": "Default Rate Per kWh",
           "tou_rate_per_kwh": "TOU Rate Per kWh",
           "tou_start": "TOU Start",
@@ -185,7 +212,8 @@
           "warning_ratio": "Capacity Warning Ratio",
           "window_hours": "Standby Window Hours",
           "standby_threshold_w": "Standby Threshold W",
-          "always_on_alert_w": "Always On Alert W"
+          "always_on_alert_w": "Always On Alert W",
+          "standby_min_samples": "Standby Minimum Samples"
         },
         "data_description": {
           "preset": "Controls alert sensitivity for this circuit only.",
@@ -198,6 +226,7 @@
           "cycle_start_day": "Billing or cost cycle start day of the month.",
           "budget_kwh": "Optional billing-cycle kWh budget for this circuit.",
           "budget_alert_ratio": "Alert when projected cycle usage reaches this fraction of the budget.",
+          "billing_min_elapsed_days": "Minimum days into the billing cycle before projected-budget alerts can be raised.",
           "default_rate_per_kwh": "Optional default utility rate for circuit cost tracking.",
           "tou_rate_per_kwh": "Optional time-of-use rate for the configured peak window.",
           "tou_start": "Optional peak-rate start time, such as 16:00.",
@@ -210,7 +239,8 @@
           "warning_ratio": "Alert when estimated capacity reaches this fraction of breaker size.",
           "window_hours": "Hours used to learn the low-power standby watermark.",
           "standby_threshold_w": "Minimum watts considered standby or always-on usage.",
-          "always_on_alert_w": "Optional watts limit for always-on usage alerts."
+          "always_on_alert_w": "Optional watts limit for always-on usage alerts.",
+          "standby_min_samples": "Minimum retained samples before standby and always-on estimates are considered ready."
         }
       },
       "assign": {
@@ -221,14 +251,18 @@
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
-          "circuit_mode": "Circuit Mode"
+          "circuit_mode": "Circuit Mode",
+          "power_flow": "Power Flow",
+          "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
           "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits."
+          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
+          "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
+          "circuit_retention_mode": "Controls how much diagnostic history is kept for this individual circuit."
         }
       }
     }

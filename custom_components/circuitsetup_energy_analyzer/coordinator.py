@@ -579,7 +579,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.billing_settings_by_circuit,
             circuit_id,
             settings,
-            ("cycle_start_day", "budget_kwh", "budget_alert_ratio"),
+            (
+                "cycle_start_day",
+                "budget_kwh",
+                "budget_alert_ratio",
+                "min_elapsed_days",
+            ),
         )
         _replace_if_present(
             self.store_data.cost_settings_by_circuit,
@@ -611,7 +616,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.standby_settings_by_circuit,
             circuit_id,
             settings,
-            ("window_hours", "standby_threshold_w", "always_on_alert_w"),
+            (
+                "window_hours",
+                "standby_threshold_w",
+                "always_on_alert_w",
+                "min_samples",
+            ),
         )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:

@@ -302,6 +302,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
                     "cycle_start_day": 15,
                     "budget_kwh": 90.0,
                     "budget_alert_ratio": 0.85,
+                    "min_elapsed_days": 5,
                     "default_rate_per_kwh": 0.18,
                     "tou_rate_per_kwh": 0.42,
                     "tou_start": "16:00",
@@ -315,6 +316,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
                     "window_hours": 72,
                     "standby_threshold_w": 6.0,
                     "always_on_alert_w": 12.0,
+                    "min_samples": 36,
                 },
             },
         },
@@ -349,6 +351,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "cycle_start_day": 15,
         "budget_kwh": 90.0,
         "budget_alert_ratio": 0.85,
+        "min_elapsed_days": 5,
     }
     assert coordinator.store_data.cost_settings_by_circuit["refrigerator"] == {
         "cycle_start_day": 15,
@@ -371,6 +374,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "window_hours": 72,
         "standby_threshold_w": 6.0,
         "always_on_alert_w": 12.0,
+        "min_samples": 36,
     }
 
 

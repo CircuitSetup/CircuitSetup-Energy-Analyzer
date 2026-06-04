@@ -113,6 +113,7 @@ from .const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_EXTRA_SOURCE_ENTITIES,
+    CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
@@ -134,7 +135,13 @@ from .discovery import (
     infer_sensor_role,
 )
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
-from .models import ApplianceProfile, CircuitMode, RetentionMode, SensorRole
+from .models import (
+    ApplianceProfile,
+    CircuitMode,
+    PowerFlowMode,
+    RetentionMode,
+    SensorRole,
+)
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_SOURCE_TYPE,
@@ -155,6 +162,8 @@ FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
+FIELD_POWER_FLOW = "power_flow"
+FIELD_CIRCUIT_RETENTION_MODE = "circuit_retention_mode"
 FIELD_ENABLE_UTILITY_COMPARISON = "enable_utility_comparison"
 FIELD_CIRCUIT_ID = "circuit_id"
 FIELD_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
@@ -173,6 +182,7 @@ FIELD_MAX_IDLE_MINUTES = "max_idle_minutes"
 FIELD_CYCLE_START_DAY = "cycle_start_day"
 FIELD_BUDGET_KWH = "budget_kwh"
 FIELD_BUDGET_ALERT_RATIO = "budget_alert_ratio"
+FIELD_BILLING_MIN_ELAPSED_DAYS = "billing_min_elapsed_days"
 FIELD_DEFAULT_RATE_PER_KWH = "default_rate_per_kwh"
 FIELD_TOU_RATE_PER_KWH = "tou_rate_per_kwh"
 FIELD_TOU_START = "tou_start"
@@ -186,6 +196,7 @@ FIELD_WARNING_RATIO = "warning_ratio"
 FIELD_WINDOW_HOURS = "window_hours"
 FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
 FIELD_ALWAYS_ON_ALERT_W = "always_on_alert_w"
+FIELD_STANDBY_MIN_SAMPLES = "standby_min_samples"
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
     ApplianceProfile.REFRIGERATOR.value,
@@ -600,6 +611,16 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 FIELD_CIRCUIT_MODE,
                 default=str(group.get("mode") or CircuitMode.MIXED),
             ): _select_selector(circuit_mode_options()),
+            vol.Required(
+                FIELD_POWER_FLOW,
+                default=_default_assignment_power_flow(group),
+            ): _select_selector(power_flow_options()),
+            vol.Required(
+                FIELD_CIRCUIT_RETENTION_MODE,
+                default=str(
+                    group.get("retention_mode") or DEFAULT_RETENTION_MODE
+                ),
+            ): _select_selector(sorted(_VALID_RETENTION_MODES)),
         }
     )
 
@@ -760,6 +781,20 @@ def _advanced_circuit_schema(config: Mapping[str, Any]) -> Any:
     )
 
 
+def _nilm_schema(
+    config: Mapping[str, Any],
+    known_load_circuits: Iterable[str] = (),
+) -> Any:
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_KNOWN_LOAD_CIRCUITS,
+                default=list(known_load_circuits),
+            ): _multi_select_selector(_known_load_circuit_options_from_config(config)),
+        }
+    )
+
+
 def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None) -> Any:
     settings = dict(current_settings or {})
     return vol.Schema(
@@ -804,6 +839,10 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
                 FIELD_BUDGET_ALERT_RATIO,
                 default=float(settings.get(FIELD_BUDGET_ALERT_RATIO, 1.0)),
             ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
+            vol.Optional(
+                FIELD_BILLING_MIN_ELAPSED_DAYS,
+                default=int(settings.get("min_elapsed_days", 3)),
+            ): _number_selector(minimum=1, maximum=31, step=1),
             vol.Optional(
                 FIELD_DEFAULT_RATE_PER_KWH,
                 default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
@@ -856,6 +895,10 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
                 FIELD_ALWAYS_ON_ALERT_W,
                 default=float(settings.get(FIELD_ALWAYS_ON_ALERT_W, 0.0)),
             ): _number_selector(minimum=0.0, step=0.1),
+            vol.Optional(
+                FIELD_STANDBY_MIN_SAMPLES,
+                default=int(settings.get("min_samples", 24)),
+            ): _number_selector(minimum=1, maximum=720, step=1),
         }
     )
 
@@ -866,6 +909,21 @@ def circuit_mode_options() -> list[dict[str, str]]:
         {"value": CircuitMode.DUAL_PHASE.value, "label": "Dual Phase"},
         {"value": CircuitMode.MIXED.value, "label": "Mixed"},
         {"value": CircuitMode.MAINS_NILM.value, "label": "Mains NILM"},
+    ]
+
+
+def power_flow_options() -> list[dict[str, str]]:
+    """Return real-power sign convention options with readable labels."""
+    return [
+        {"value": PowerFlowMode.LOAD.value, "label": "Load"},
+        {
+            "value": PowerFlowMode.GENERATION.value,
+            "label": "Generation / Solar Export",
+        },
+        {
+            "value": PowerFlowMode.MAINS_NET.value,
+            "label": "Mains Net / Import-Export",
+        },
     ]
 
 
@@ -899,6 +957,22 @@ def assignment_picker_options(
 
 def friendly_circuit_mode_label(mode: str) -> str:
     return _CIRCUIT_MODE_LABELS.get(mode, _friendly_name_from_id(mode))
+
+
+def _default_assignment_power_flow(group: Mapping[str, Any]) -> str:
+    raw = str(group.get("power_flow") or "").strip()
+    if raw:
+        return _normalize_power_flow(raw)
+    profile = str(group.get("appliance_profile") or "").strip()
+    mode = str(group.get("mode") or "").strip()
+    if profile == ApplianceProfile.SOLAR_INVERTER.value:
+        return PowerFlowMode.GENERATION.value
+    if (
+        profile == ApplianceProfile.MAINS_NILM.value
+        or mode == CircuitMode.MAINS_NILM.value
+    ):
+        return PowerFlowMode.MAINS_NET.value
+    return PowerFlowMode.LOAD.value
 
 
 def assignment_groups_from_sources(
@@ -960,6 +1034,17 @@ def assignment_groups_from_sources(
                     ),
                     "mode": _normalize_assignment_mode(
                         str(saved_circuit.get("mode", group["mode"]))
+                    ),
+                    "power_flow": _normalize_power_flow(
+                        str(saved_circuit.get("power_flow") or "")
+                    ),
+                    "retention_mode": _normalize_retention_mode(
+                        str(
+                            saved_circuit.get(
+                                "retention_mode",
+                                DEFAULT_RETENTION_MODE,
+                            )
+                        )
                     ),
                     "selected_entity_ids": selected_entity_ids,
                 }
@@ -1171,6 +1256,20 @@ def _circuit_from_assignment_group(
             or CircuitMode.MIXED.value
         )
     )
+    power_flow = _normalize_power_flow(
+        str(
+            user_input.get(FIELD_POWER_FLOW)
+            or group.get("power_flow")
+            or _default_assignment_power_flow(group)
+        )
+    )
+    retention_mode = _normalize_retention_mode(
+        str(
+            user_input.get(FIELD_CIRCUIT_RETENTION_MODE)
+            or group.get("retention_mode")
+            or DEFAULT_RETENTION_MODE
+        )
+    )
     if profile not in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
 
@@ -1188,6 +1287,8 @@ def _circuit_from_assignment_group(
         "name": name,
         "appliance_profile": profile,
         "mode": mode,
+        "power_flow": power_flow,
+        "retention_mode": retention_mode,
         "sensors": sensors,
     }
 
@@ -1251,6 +1352,20 @@ def _final_config_from_reviewed_circuits(
     final_config = dict(pending_config)
     final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
     final_config[CONF_CIRCUITS] = circuit_list
+    circuit_ids = {
+        str(circuit.get("circuit_id") or circuit.get("id") or "")
+        for circuit in circuit_list
+    }
+    known_loads = [
+        circuit_id
+        for circuit_id in _strict_string_list(
+            final_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            invalid_error_key="invalid_known_load_circuits",
+        )
+        if circuit_id in circuit_ids
+    ]
+    if known_loads or CONF_KNOWN_LOAD_CIRCUITS in final_config:
+        final_config[CONF_KNOWN_LOAD_CIRCUITS] = known_loads
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
         circuit_list
     )
@@ -1430,6 +1545,33 @@ def _normalize_assignment_mode(raw_mode: str) -> str:
     if mode not in _ASSIGNMENT_MODE_OPTIONS:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
     return mode
+
+
+def _normalize_power_flow(raw_power_flow: str) -> str:
+    normalized = _slugify(raw_power_flow)
+    aliases = {
+        "bidirectional": PowerFlowMode.MAINS_NET.value,
+        "net": PowerFlowMode.MAINS_NET.value,
+        "mains": PowerFlowMode.MAINS_NET.value,
+        "mains_net": PowerFlowMode.MAINS_NET.value,
+        "import_export": PowerFlowMode.MAINS_NET.value,
+        "solar": PowerFlowMode.GENERATION.value,
+        "export": PowerFlowMode.GENERATION.value,
+        "generation": PowerFlowMode.GENERATION.value,
+        "generator": PowerFlowMode.GENERATION.value,
+        "load": PowerFlowMode.LOAD.value,
+    }
+    value = aliases.get(normalized, normalized)
+    if value not in {mode.value for mode in PowerFlowMode}:
+        return PowerFlowMode.LOAD.value
+    return value
+
+
+def _normalize_retention_mode(raw_retention_mode: str) -> str:
+    value = str(raw_retention_mode or DEFAULT_RETENTION_MODE).strip().lower()
+    if value not in _VALID_RETENTION_MODES:
+        return DEFAULT_RETENTION_MODE
+    return value
 
 
 def _assignment_sensor_role(entity_id: str) -> SensorRole:
@@ -1635,9 +1777,47 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
                 return assignment_result
             final_config = assignment_result
             self._pending_final_config = final_config
+            if _should_show_setup_nilm_step(final_config):
+                return await self.async_step_nilm()
             return await self.async_step_utility()
 
         return _assignment_review_form(self)
+
+    async def async_step_nilm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Optionally choose known-load circuits for experimental NILM."""
+        final_config = dict(
+            getattr(
+                self,
+                "_pending_final_config",
+                None,
+            )
+            or getattr(self, "_pending_config", None)
+            or {}
+        )
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                final_config[CONF_KNOWN_LOAD_CIRCUITS] = (
+                    _known_load_circuits_from_input(user_input, final_config)
+                )
+            except SetupValidationError as err:
+                errors["base"] = err.error_key
+            else:
+                self._pending_final_config = final_config
+                return await self.async_step_utility()
+
+        return self.async_show_form(
+            step_id="nilm",
+            data_schema=_nilm_schema(
+                final_config,
+                final_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            ),
+            errors=errors,
+        )
 
     async def async_step_utility(
         self,
@@ -1710,7 +1890,14 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         if user_input is None:
             return self.async_show_menu(
                 step_id="init",
-                menu_options=["assign", "sources", "mains", "utility", "advanced"],
+                menu_options=[
+                    "assign",
+                    "sources",
+                    "mains",
+                    "nilm",
+                    "utility",
+                    "advanced",
+                ],
             )
 
         return await self.async_step_sources(user_input)
@@ -1818,6 +2005,44 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         return await self._async_show_mains_form()
+
+    async def async_step_nilm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit experimental NILM known-load settings."""
+        config = _entry_config(self._config_entry)
+        if user_input is not None:
+            try:
+                known_load_circuits = _known_load_circuits_from_input(
+                    user_input,
+                    config,
+                )
+            except SetupValidationError as err:
+                return self.async_show_form(
+                    step_id="nilm",
+                    data_schema=_nilm_schema(
+                        config,
+                        _known_load_circuits_from_entry(self._config_entry),
+                    ),
+                    errors={"base": err.error_key},
+                )
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_KNOWN_LOAD_CIRCUITS: known_load_circuits},
+                ),
+            )
+
+        return self.async_show_form(
+            step_id="nilm",
+            data_schema=_nilm_schema(
+                config,
+                _known_load_circuits_from_entry(self._config_entry),
+            ),
+            errors={},
+        )
 
     async def async_step_utility(
         self,
@@ -2089,6 +2314,13 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
             ),
             invalid_error_key="invalid_mains_source_entities",
         ),
+        CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
+            options.get(
+                CONF_KNOWN_LOAD_CIRCUITS,
+                data.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            ),
+            invalid_error_key="invalid_known_load_circuits",
+        ),
         CONF_SENSITIVITY: str(
             options.get(
                 CONF_SENSITIVITY,
@@ -2178,6 +2410,31 @@ def _circuit_options_from_config(
     return options
 
 
+def _known_load_circuit_options_from_config(
+    config: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for circuit in config.get(CONF_CIRCUITS, []) or []:
+        if not isinstance(circuit, Mapping):
+            continue
+        circuit_id = str(circuit.get("circuit_id") or circuit.get("id") or "").strip()
+        if not circuit_id or circuit_id in seen:
+            continue
+        mode = str(circuit.get("mode") or "").strip()
+        profile = str(circuit.get("appliance_profile") or "").strip()
+        if (
+            circuit_id == "mains"
+            or mode == CircuitMode.MAINS_NILM.value
+            or profile == ApplianceProfile.MAINS_NILM.value
+        ):
+            continue
+        name = str(circuit.get("name") or circuit_id)
+        options.append({"value": circuit_id, "label": f"{name} ({circuit_id})"})
+        seen.add(circuit_id)
+    return options
+
+
 def _default_circuit_id(options: Iterable[Mapping[str, str]]) -> str:
     option_list = list(options)
     for option in option_list:
@@ -2250,6 +2507,36 @@ def _utility_settings_from_input(
     return circuit_id, settings
 
 
+def _known_load_circuits_from_input(
+    user_input: Mapping[str, Any],
+    config: Mapping[str, Any],
+) -> list[str]:
+    selected = _strict_string_list(
+        user_input.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+        invalid_error_key="invalid_known_load_circuits",
+    )
+    allowed = {
+        str(option["value"])
+        for option in _known_load_circuit_options_from_config(config)
+    }
+    if any(circuit_id not in allowed for circuit_id in selected):
+        raise SetupValidationError("invalid_known_load_circuits")
+    return list(dict.fromkeys(selected))
+
+
+def _known_load_circuits_from_entry(
+    config_entry: config_entries.ConfigEntry,
+) -> list[str]:
+    return _strict_string_list(
+        _entry_value(config_entry, CONF_KNOWN_LOAD_CIRCUITS, []),
+        invalid_error_key="invalid_known_load_circuits",
+    )
+
+
+def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
+    return bool(config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False))
+
+
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     preset = str(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY).strip()
@@ -2266,6 +2553,12 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     _set_optional_int(settings, user_input, FIELD_CYCLE_START_DAY)
     _set_optional_float(settings, user_input, FIELD_BUDGET_KWH)
     _set_optional_float(settings, user_input, FIELD_BUDGET_ALERT_RATIO)
+    _set_optional_int_as(
+        settings,
+        user_input,
+        FIELD_BILLING_MIN_ELAPSED_DAYS,
+        "min_elapsed_days",
+    )
     _set_optional_float(settings, user_input, FIELD_DEFAULT_RATE_PER_KWH)
     _set_optional_float(settings, user_input, FIELD_TOU_RATE_PER_KWH)
     _set_optional_string(settings, user_input, FIELD_TOU_START)
@@ -2279,6 +2572,12 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     _set_optional_int(settings, user_input, FIELD_WINDOW_HOURS)
     _set_optional_float(settings, user_input, FIELD_STANDBY_THRESHOLD_W)
     _set_optional_float(settings, user_input, FIELD_ALWAYS_ON_ALERT_W)
+    _set_optional_int_as(
+        settings,
+        user_input,
+        FIELD_STANDBY_MIN_SAMPLES,
+        "min_samples",
+    )
     return settings
 
 
@@ -2309,6 +2608,18 @@ def _set_optional_int(
         raise SetupValidationError("invalid_advanced_settings") from None
     if parsed >= 0:
         settings[key] = parsed
+
+
+def _set_optional_int_as(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    input_key: str,
+    output_key: str,
+) -> None:
+    before = set(settings)
+    _set_optional_int(settings, user_input, input_key)
+    if input_key in settings and input_key not in before:
+        settings[output_key] = settings.pop(input_key)
 
 
 def _set_optional_float(
