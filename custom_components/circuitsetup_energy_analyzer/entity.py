@@ -98,6 +98,78 @@ def prune_stale_entity_registry_entries(
         registry.async_remove(entity_id)
 
 
+def stale_device_registry_device_ids(
+    entries: Iterable[Any],
+    *,
+    entry_id: str,
+    desired_identifiers: set[tuple[str, str]],
+) -> list[str]:
+    """Return stale integration device IDs for one config entry."""
+    identifier_prefix = f"{entry_id}_"
+    stale_device_ids: list[str] = []
+    for entry in entries:
+        config_entries = set(getattr(entry, "config_entries", ()) or ())
+        if entry_id not in config_entries:
+            continue
+        identifiers = {
+            (str(identifier[0]), str(identifier[1]))
+            for identifier in getattr(entry, "identifiers", ()) or ()
+            if isinstance(identifier, (list, tuple)) and len(identifier) == 2
+        }
+        integration_identifiers = {
+            identifier
+            for identifier in identifiers
+            if identifier[0] == DOMAIN and identifier[1].startswith(identifier_prefix)
+        }
+        if integration_identifiers and not (
+            integration_identifiers & desired_identifiers
+        ):
+            device_id = getattr(entry, "id", None)
+            if device_id:
+                stale_device_ids.append(str(device_id))
+    return stale_device_ids
+
+
+def prune_stale_device_registry_entries(
+    hass: Any,
+    *,
+    entry_id: str,
+    desired_identifiers: set[tuple[str, str]],
+) -> None:
+    """Remove stale integration devices no longer used by platform entities."""
+    try:
+        from homeassistant.helpers import device_registry as dr
+    except ImportError:
+        return
+
+    registry = dr.async_get(hass)
+    devices = getattr(registry, "devices", {})
+    values = devices.values() if hasattr(devices, "values") else devices
+    update_device = getattr(registry, "async_update_device", None)
+    if not callable(update_device):
+        return
+
+    for device_id in stale_device_registry_device_ids(
+        values,
+        entry_id=entry_id,
+        desired_identifiers=desired_identifiers,
+    ):
+        update_device(device_id, remove_config_entry_id=entry_id)
+
+
+def device_identifiers_for_entities(entities: Iterable[Any]) -> set[tuple[str, str]]:
+    """Return Home Assistant device identifiers exposed by entity objects."""
+    identifiers: set[tuple[str, str]] = set()
+    for entity in entities:
+        device_info = getattr(entity, "device_info", None)
+        if not isinstance(device_info, dict):
+            continue
+        for identifier in device_info.get("identifiers", ()) or ():
+            if isinstance(identifier, (list, tuple)) and len(identifier) == 2:
+                identifiers.add((str(identifier[0]), str(identifier[1])))
+    return identifiers
+
+
 class CircuitAnalyzerEntity(CoordinatorEntity):
     """Base entity for diagnostics associated with one configured circuit."""
 

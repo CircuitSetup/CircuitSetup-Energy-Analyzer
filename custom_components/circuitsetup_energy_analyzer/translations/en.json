@@ -27,12 +27,14 @@
         "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
         "data": {
           "include_circuit": "Include Circuit",
+          "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
           "circuit_mode": "Circuit Mode"
         },
         "data_description": {
           "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
           "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."
@@ -83,12 +85,14 @@
         "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
         "data": {
           "include_circuit": "Include Circuit",
+          "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
           "circuit_mode": "Circuit Mode"
         },
         "data_description": {
           "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
           "circuit_mode": "Choose whether this is single-phase, dual-phase, mixed, or mains NILM."

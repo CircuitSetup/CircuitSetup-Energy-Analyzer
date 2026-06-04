@@ -10,6 +10,8 @@ from .entity import (
     EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
+    device_identifiers_for_entities,
+    prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
 )
 
@@ -149,5 +151,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entry_id=entry_id,
         entity_domain="binary_sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
+    )
+    prune_stale_device_registry_entries(
+        hass,
+        entry_id=entry_id,
+        desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)

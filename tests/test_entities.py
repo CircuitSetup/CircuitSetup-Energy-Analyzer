@@ -23,6 +23,91 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
+def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        stale_device_registry_device_ids,
+    )
+
+    entries = [
+        SimpleNamespace(
+            id="old-circuit",
+            config_entries={"entry-1"},
+            identifiers={(DOMAIN, "entry-1_old_circuit")},
+        ),
+        SimpleNamespace(
+            id="current-circuit",
+            config_entries={"entry-1"},
+            identifiers={(DOMAIN, "entry-1_current_circuit")},
+        ),
+        SimpleNamespace(
+            id="other-entry",
+            config_entries={"entry-2"},
+            identifiers={(DOMAIN, "entry-1_old_circuit")},
+        ),
+        SimpleNamespace(
+            id="other-domain",
+            config_entries={"entry-1"},
+            identifiers={("other_domain", "entry-1_old_circuit")},
+        ),
+    ]
+
+    assert stale_device_registry_device_ids(
+        entries,
+        entry_id="entry-1",
+        desired_identifiers={(DOMAIN, "entry-1_current_circuit")},
+    ) == ["old-circuit"]
+
+
+def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> (
+    None
+):
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.devices = {
+                "old-circuit": SimpleNamespace(
+                    id="old-circuit",
+                    config_entries={"entry-1"},
+                    identifiers={(DOMAIN, "entry-1_old_circuit")},
+                ),
+                "current-circuit": SimpleNamespace(
+                    id="current-circuit",
+                    config_entries={"entry-1"},
+                    identifiers={(DOMAIN, "entry-1_current_circuit")},
+                ),
+            }
+            self.updated: list[tuple[str, str]] = []
+
+        def async_update_device(self, device_id, **kwargs) -> None:
+            self.updated.append((device_id, kwargs["remove_config_entry_id"]))
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    device_registry_module = ModuleType("homeassistant.helpers.device_registry")
+    device_registry_module.async_get = lambda hass: hass.device_registry
+    helpers_module.device_registry = device_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.device_registry",
+        device_registry_module,
+    )
+
+    entity.prune_stale_device_registry_entries(
+        SimpleNamespace(device_registry=fake_registry),
+        entry_id="entry-1",
+        desired_identifiers={(DOMAIN, "entry-1_current_circuit")},
+    )
+
+    assert fake_registry.updated == [("old-circuit", "entry-1")]
+
+
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         alert_evidence_value,

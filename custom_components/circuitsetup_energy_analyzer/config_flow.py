@@ -139,6 +139,7 @@ ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("standard", "high", "low")
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
+FIELD_INCLUDED_SENSORS = "included_sensors"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
@@ -403,6 +404,19 @@ def _select_selector(options: Iterable[str]) -> Any:
     return _selector({"select": {"options": list(options)}}, vol.In(tuple(options)))
 
 
+def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
+    return _selector(
+        {
+            "select": {
+                "multiple": True,
+                "mode": "dropdown",
+                "options": list(options),
+            }
+        },
+        list,
+    )
+
+
 def _selectable_source_entity_ids(
     source_entity_ids: Iterable[str] | None,
 ) -> tuple[str, ...]:
@@ -447,12 +461,17 @@ DATA_SCHEMA = _setup_schema()
 
 
 def _assignment_schema(group: Mapping[str, Any]) -> Any:
+    entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
     return vol.Schema(
         {
             vol.Required(
                 FIELD_INCLUDE_CIRCUIT,
                 default=True,
             ): bool,
+            vol.Required(
+                FIELD_INCLUDED_SENSORS,
+                default=_selected_entity_ids_for_group(group),
+            ): _multi_select_selector(_assignment_sensor_options(entity_ids)),
             vol.Required(
                 FIELD_CIRCUIT_NAME,
                 default=str(group.get("name") or ""),
@@ -503,8 +522,20 @@ def assignment_groups_from_sources(
         }
         saved_circuit = _saved_circuit_for_group(group, existing_circuit_list)
         if saved_circuit is not None:
+            saved_sensor_entities = _sensor_entity_ids_from_circuit(saved_circuit)
+            selected_entity_ids = tuple(
+                entity_id
+                for entity_id in entity_ids
+                if entity_id in saved_sensor_entities
+            ) or tuple(entity_ids)
+            stable_circuit_id = str(
+                saved_circuit.get("circuit_id")
+                or saved_circuit.get("id")
+                or ""
+            ).strip()
             group.update(
                 {
+                    "circuit_id": stable_circuit_id or group["group_id"],
                     "name": str(saved_circuit.get("name") or group["name"]),
                     "appliance_profile": _normalize_assignment_profile(
                         str(
@@ -517,6 +548,7 @@ def assignment_groups_from_sources(
                     "mode": _normalize_assignment_mode(
                         str(saved_circuit.get("mode", group["mode"]))
                     ),
+                    "selected_entity_ids": selected_entity_ids,
                 }
             )
         assignment_groups.append(group)
@@ -530,16 +562,22 @@ def _saved_circuit_for_group(
     group_entities = set(group.get("entity_ids", ()))
     group_id = str(group.get("group_id") or "")
     for circuit in existing_circuits:
-        sensor_entities = {
-            str(sensor.get("entity_id"))
-            for sensor in circuit.get("sensors", ())
-            if isinstance(sensor, Mapping) and sensor.get("entity_id")
-        }
+        sensor_entities = set(_sensor_entity_ids_from_circuit(circuit))
         if group_entities and group_entities <= sensor_entities:
             return circuit
         if str(circuit.get("circuit_id") or circuit.get("id") or "") == group_id:
             return circuit
+        if group_entities and sensor_entities and group_entities & sensor_entities:
+            return circuit
     return None
+
+
+def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(sensor.get("entity_id"))
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+    )
 
 
 def _assignment_review_form(
@@ -674,7 +712,7 @@ def _circuit_from_assignment_group(
     if profile not in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
 
-    entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
+    entity_ids = _included_entity_ids_for_assignment(group, user_input)
     sensors = [
         {
             "entity_id": entity_id,
@@ -684,12 +722,52 @@ def _circuit_from_assignment_group(
         for entity_id in entity_ids
     ]
     return {
-        "circuit_id": _slugify(name),
+        "circuit_id": str(group.get("circuit_id") or "").strip() or _slugify(name),
         "name": name,
         "appliance_profile": profile,
         "mode": mode,
         "sensors": sensors,
     }
+
+
+def _included_entity_ids_for_assignment(
+    group: Mapping[str, Any],
+    user_input: Mapping[str, Any],
+) -> list[str]:
+    allowed_entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
+    allowed = set(allowed_entity_ids)
+    raw_selected = user_input.get(
+        FIELD_INCLUDED_SENSORS,
+        _selected_entity_ids_for_group(group),
+    )
+    selected = _strict_string_list(
+        raw_selected,
+        invalid_error_key=ERROR_INVALID_CIRCUIT_ASSIGNMENTS,
+    )
+    if not selected:
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+    if any(entity_id not in allowed for entity_id in selected):
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+    selected_set = set(selected)
+    return [entity_id for entity_id in allowed_entity_ids if entity_id in selected_set]
+
+
+def _selected_entity_ids_for_group(group: Mapping[str, Any]) -> list[str]:
+    selected = group.get("selected_entity_ids", group.get("entity_ids", ()))
+    return [str(entity_id) for entity_id in selected]
+
+
+def _assignment_sensor_options(entity_ids: Iterable[str]) -> list[dict[str, str]]:
+    return [
+        {
+            "value": entity_id,
+            "label": (
+                f"{_friendly_name_from_id(entity_id.split('.')[-1])} "
+                f"({entity_id})"
+            ),
+        }
+        for entity_id in entity_ids
+    ]
 
 
 def _final_config_from_reviewed_circuits(

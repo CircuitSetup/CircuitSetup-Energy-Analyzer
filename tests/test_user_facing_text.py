@@ -122,6 +122,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         descriptions = strings[section]["step"]["assign"]["data_description"]
         assert data == {
             "include_circuit": "Include Circuit",
+            "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
             "circuit_mode": "Circuit Mode",
@@ -131,6 +132,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert all(description.endswith(".") for description in descriptions.values())
         assert "appliance" in descriptions["appliance_profile"].lower()
         assert "selected sensors" in descriptions["include_circuit"].lower()
+        assert "unchecked" in descriptions["included_sensors"].lower()
 
 
 def test_runtime_english_translations_include_setup_and_options_text() -> None:

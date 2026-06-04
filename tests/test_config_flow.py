@@ -311,6 +311,7 @@ async def test_options_flow_preserves_valid_options() -> None:
     assert result["step_id"] == "assign"
     assert _schema_keys(result["data_schema"]) == {
         "include_circuit",
+        "included_sensors",
         "circuit_name",
         "appliance_profile",
         "circuit_mode",
@@ -345,6 +346,7 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     assert result["step_id"] == "assign"
     assert _schema_keys(result["data_schema"]) == {
         "include_circuit",
+        "included_sensors",
         "circuit_name",
         "appliance_profile",
         "circuit_mode",
@@ -666,6 +668,122 @@ async def test_options_assignment_step_starts_from_saved_sources() -> None:
     assert _schema_default(result["data_schema"], "circuit_name") == "HVAC Blower"
     assert _schema_default(result["data_schema"], "appliance_profile") == "hvac_blower"
     assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "cs_energy_analyzer_demo_hvac",
+                    "name": "HVAC",
+                    "appliance_profile": "hvac",
+                    "mode": "dual_phase",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power"
+                            ),
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power"
+                            ),
+                            "role": "real_power",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+
+    assert result["type"] == "form"
+    assert _schema_default(result["data_schema"], "circuit_name") == "HVAC"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Upstairs HVAC",
+            "appliance_profile": "hvac",
+            "circuit_mode": "dual_phase",
+            "included_sensors": [
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == (
+        "cs_energy_analyzer_demo_hvac"
+    )
+    assert result["data"][CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
+
+
+@pytest.mark.asyncio
+async def test_assignment_step_allows_sensor_level_inclusion() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.refrigerator_active_power",
+                "sensor.refrigerator_current",
+                "sensor.refrigerator_power_factor",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert "included_sensors" in _schema_keys(result["data_schema"])
+    assert _schema_default(result["data_schema"], "included_sensors") == [
+        "sensor.refrigerator_active_power",
+        "sensor.refrigerator_current",
+        "sensor.refrigerator_power_factor",
+    ]
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+            "circuit_mode": "single_phase",
+            "included_sensors": [
+                "sensor.refrigerator_active_power",
+                "sensor.refrigerator_power_factor",
+            ],
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_active_power",
+        "sensor.refrigerator_power_factor",
+    ]
+    assert [
+        sensor["entity_id"] for sensor in result["data"][CONF_CIRCUITS][0]["sensors"]
+    ] == [
+        "sensor.refrigerator_active_power",
+        "sensor.refrigerator_power_factor",
+    ]
 
 
 @pytest.mark.asyncio
