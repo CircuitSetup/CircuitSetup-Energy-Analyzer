@@ -339,6 +339,12 @@ possible-issue alert with the observed mains topology, leg deltas, match
 confidence, and configured circuit mode so the user can check mapping,
 overlapping loads, or CT orientation.
 
+For single-phase known loads, the same evidence records the observed mains leg
+and a suggested leg. If the circuit already has a configured leg and repeated
+high-confidence mains matches point to the other leg, the status becomes
+`leg_mismatch`. The integration does not rewrite the circuit mapping; it exposes
+evidence for user confirmation.
+
 ## Alert Philosophy
 
 The analyzer is evidence-first. It learns for at least 7 days or enough profile-specific cycles before sending appliance-behavior alerts. Alerts require repeated evidence and are phrased as a possible issue or behavior change, not a diagnosis.

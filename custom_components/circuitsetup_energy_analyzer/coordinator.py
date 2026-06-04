@@ -1767,14 +1767,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         status = str(evidence["status"])
         self.state.nilm_topology_status_by_circuit[circuit_id] = status
         self.state.nilm_topology_evidence_by_circuit[circuit_id] = evidence
-        if status != "topology_mismatch":
+        if status not in {"topology_mismatch", "leg_mismatch"}:
             return None
 
         policy = self._nilm_topology_alert_policy_for_circuit(circuit_id)
+        feature = _nilm_topology_alert_feature(status)
         return policy.observe(
             Observation(
                 circuit_id=circuit_id,
-                feature="nilm_topology_mismatch",
+                feature=feature,
                 score=1.0,
                 baseline_confidence=1.0,
                 observed_at=match.edge.timestamp,
@@ -4154,6 +4155,11 @@ def _nilm_topology_evidence_payload(
 ) -> dict[str, Any]:
     expected_types = _expected_nilm_split_phase_types(known_config)
     observed_type = str(match.edge.split_phase_type or "unknown")
+    configured_leg = _configured_single_phase_leg(known_config)
+    observed_leg = _observed_single_phase_leg(observed_type, match.edge.dominant_leg)
+    suggested_leg = (
+        observed_leg if known_config.mode is CircuitMode.SINGLE_PHASE else None
+    )
     if not expected_types:
         status = "not_evaluated"
     elif observed_type in {"unknown", "missing_leg_data"}:
@@ -4162,15 +4168,28 @@ def _nilm_topology_evidence_payload(
         status = "consistent"
     else:
         status = "topology_mismatch"
+    if (
+        status == "consistent"
+        and configured_leg is not None
+        and observed_leg is not None
+        and configured_leg != observed_leg
+    ):
+        status = "leg_mismatch"
 
     return {
         "status": status,
         "matched_mains_circuit_id": mains_config.circuit_id,
         "event_type": "start" if match.edge.direction == "on" else "stop",
         "configured_mode": known_config.mode.value,
+        "configured_leg": configured_leg,
         "expected_split_phase_types": list(expected_types),
+        "expected_dominant_legs": list(
+            _expected_nilm_dominant_legs(known_config, configured_leg)
+        ),
         "observed_split_phase_type": observed_type,
         "observed_dominant_leg": match.edge.dominant_leg,
+        "observed_leg": observed_leg,
+        "suggested_leg": suggested_leg,
         "observed_leg_a_delta_w": _round_optional_number(match.edge.leg_a_delta_w),
         "observed_leg_b_delta_w": _round_optional_number(match.edge.leg_b_delta_w),
         "observed_leg_balance_ratio": _round_optional_number(
@@ -4190,10 +4209,64 @@ def _expected_nilm_split_phase_types(config: CircuitConfig) -> tuple[str, ...]:
     return ()
 
 
+def _expected_nilm_dominant_legs(
+    config: CircuitConfig,
+    configured_leg: str | None,
+) -> tuple[str, ...]:
+    if config.mode is CircuitMode.SINGLE_PHASE:
+        if configured_leg is not None:
+            return (configured_leg,)
+        return ("a", "b")
+    if config.mode is CircuitMode.DUAL_PHASE:
+        return ("balanced",)
+    return ()
+
+
+def _configured_single_phase_leg(config: CircuitConfig) -> str | None:
+    if config.mode is not CircuitMode.SINGLE_PHASE:
+        return None
+    legs = {
+        normalized
+        for sensor in config.sensors
+        if (normalized := _normalized_leg(sensor.leg)) is not None
+    }
+    if len(legs) == 1:
+        return next(iter(legs))
+    return None
+
+
+def _observed_single_phase_leg(
+    observed_type: str,
+    dominant_leg: str,
+) -> str | None:
+    if observed_type == "single_leg_a":
+        return "a"
+    if observed_type == "single_leg_b":
+        return "b"
+    return None
+
+
+def _nilm_topology_alert_feature(status: str) -> str:
+    if status == "leg_mismatch":
+        return "nilm_leg_mismatch"
+    return "nilm_topology_mismatch"
+
+
 def _nilm_topology_mismatch_message(
     config: CircuitConfig,
     evidence: dict[str, Any],
 ) -> str:
+    if evidence.get("status") == "leg_mismatch":
+        configured_leg = evidence.get("configured_leg", "unknown")
+        observed_leg = evidence.get("observed_leg", "unknown")
+        return (
+            f"Possible issue: {config.name} is configured on leg "
+            f"{configured_leg}, but mains NILM repeatedly matched it on leg "
+            f"{observed_leg}. Verify circuit mapping, CT orientation, and "
+            "whether another appliance changed at the same time before "
+            "treating this as an appliance problem."
+        )
+
     observed_type = evidence.get("observed_split_phase_type", "unknown")
     expected = ", ".join(evidence.get("expected_split_phase_types") or [])
     return (
@@ -4901,7 +4974,11 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
         return raw_sensor
     if isinstance(raw_sensor, str):
-        return SensorRef(entity_id=raw_sensor, role=SensorRole.REAL_POWER)
+        return SensorRef(
+            entity_id=raw_sensor,
+            role=SensorRole.REAL_POWER,
+            leg=_entity_id_leg_hint(raw_sensor),
+        )
     if not isinstance(raw_sensor, dict):
         return None
 

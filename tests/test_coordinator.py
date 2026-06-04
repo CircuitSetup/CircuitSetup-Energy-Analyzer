@@ -1708,9 +1708,13 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "matched_mains_circuit_id": "mains",
         "event_type": "start",
         "configured_mode": "single_phase",
+        "configured_leg": None,
         "expected_split_phase_types": ["single_leg_a", "single_leg_b"],
+        "expected_dominant_legs": ["a", "b"],
         "observed_split_phase_type": "single_leg_a",
         "observed_dominant_leg": "a",
+        "observed_leg": "a",
+        "suggested_leg": "a",
         "observed_leg_a_delta_w": 300.0,
         "observed_leg_b_delta_w": 0.0,
         "observed_leg_balance_ratio": 2.0,
@@ -1718,6 +1722,269 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "known_event_power_w": 300.0,
         "match_confidence": 1.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_detects_known_load_configured_leg_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_l1_power": holder["l1"],
+                "sensor.mains_l2_power": holder["l2"],
+                "sensor.fridge_power": holder["fridge"],
+            }
+            return SimpleNamespace(
+                state=str(values[entity_id]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_l1_power", "role": "real_power"},
+                        {"entity_id": "sensor.mains_l2_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                },
+            ],
+        },
+        options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        now_fn=lambda: holder["time"],
+    )
+
+    readings = [
+        (100.0, 100.0, 0.0),
+        (400.0, 100.0, 300.0),
+        (100.0, 100.0, 0.0),
+        (410.0, 100.0, 310.0),
+        (100.0, 100.0, 0.0),
+        (420.0, 100.0, 320.0),
+    ]
+    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+        holder.update(
+            {
+                "l1": l1_w,
+                "l2": l2_w,
+                "fridge": fridge_w,
+                "time": now + timedelta(seconds=index * 30),
+            }
+        )
+        await coordinator.async_process_update()
+
+    assert coordinator.state.nilm_topology_status_by_circuit["fridge"] == (
+        "leg_mismatch"
+    )
+    evidence = coordinator.state.nilm_topology_evidence_by_circuit["fridge"]
+    assert evidence["configured_leg"] == "b"
+    assert evidence["observed_leg"] == "a"
+    assert evidence["suggested_leg"] == "a"
+
+    leg_alerts = [
+        alert for alert in notifications if alert.feature == "nilm_leg_mismatch"
+    ]
+    assert leg_alerts
+    assert "configured on leg b" in leg_alerts[0].message
+    assert "mains NILM repeatedly matched it on leg a" in leg_alerts[0].message
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_suggest_leg_from_mixed_topology_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_l1_power": holder["l1"],
+                "sensor.mains_l2_power": holder["l2"],
+                "sensor.fridge_power": holder["fridge"],
+            }
+            return SimpleNamespace(
+                state=str(values[entity_id]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_l1_power", "role": "real_power"},
+                        {"entity_id": "sensor.mains_l2_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        now_fn=lambda: holder["time"],
+    )
+
+    await coordinator.async_process_update()
+    holder.update(
+        {
+            "l1": 175.0,
+            "l2": 150.0,
+            "fridge": 125.0,
+            "time": now + timedelta(seconds=30),
+        }
+    )
+    await coordinator.async_process_update()
+
+    evidence = coordinator.state.nilm_topology_evidence_by_circuit["fridge"]
+    assert evidence["status"] == "topology_mismatch"
+    assert evidence["observed_split_phase_type"] == "imbalanced_240v_or_mixed"
+    assert evidence["observed_dominant_leg"] == "a"
+    assert evidence["observed_leg"] is None
+    assert evidence["suggested_leg"] is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_infers_configured_leg_from_single_phase_entity_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_l1_power": holder["l1"],
+                "sensor.mains_l2_power": holder["l2"],
+                "sensor.fridge_l2_power": holder["fridge"],
+            }
+            return SimpleNamespace(
+                state=str(values[entity_id]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_l1_power", "role": "real_power"},
+                        {"entity_id": "sensor.mains_l2_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": ["sensor.fridge_l2_power"],
+                },
+            ],
+        },
+        options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        now_fn=lambda: holder["time"],
+    )
+
+    readings = [
+        (100.0, 100.0, 0.0),
+        (400.0, 100.0, 300.0),
+        (100.0, 100.0, 0.0),
+        (410.0, 100.0, 310.0),
+        (100.0, 100.0, 0.0),
+        (420.0, 100.0, 320.0),
+    ]
+    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+        holder.update(
+            {
+                "l1": l1_w,
+                "l2": l2_w,
+                "fridge": fridge_w,
+                "time": now + timedelta(seconds=index * 30),
+            }
+        )
+        await coordinator.async_process_update()
+
+    evidence = coordinator.state.nilm_topology_evidence_by_circuit["fridge"]
+    assert evidence["configured_leg"] == "b"
+    assert evidence["observed_leg"] == "a"
+    assert coordinator.state.nilm_topology_status_by_circuit["fridge"] == (
+        "leg_mismatch"
+    )
 
 
 @pytest.mark.asyncio
