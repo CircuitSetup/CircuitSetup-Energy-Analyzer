@@ -12,13 +12,13 @@ sections:
             name: Refrigerator
           - entity: sensor.hvac_health_summary
             name: HVAC
-          - entity: sensor.mains_health_summary
+          - entity: sensor.mains_nilm_health_summary
             name: Mains
           - entity: sensor.refrigerator_learning_progress
             name: Fridge learning
           - entity: sensor.hvac_learning_progress
             name: HVAC learning
-          - entity: sensor.mains_learning_progress
+          - entity: sensor.mains_nilm_learning_progress
             name: Mains learning
       - type: gauge
         title: Refrigerator anomaly
@@ -40,7 +40,7 @@ sections:
           red: 0.7
       - type: gauge
         title: Mains coverage
-        entity: sensor.mains_monitored_coverage
+        entity: sensor.mains_nilm_monitored_coverage
         min: 0
         max: 100
         severity:
@@ -56,7 +56,7 @@ sections:
         entities:
           - entity: sensor.refrigerator_anomaly_score
           - entity: sensor.hvac_anomaly_score
-          - entity: sensor.mains_anomaly_score
+          - entity: sensor.mains_nilm_anomaly_score
       - type: history-graph
         title: Daily energy
         hours_to_show: 72
@@ -70,8 +70,8 @@ sections:
           - entity: sensor.refrigerator_recent_activity
           - entity: sensor.hvac_alert_evidence
           - entity: sensor.hvac_recent_activity
-          - entity: sensor.mains_alert_evidence
-          - entity: sensor.mains_recent_activity
+          - entity: sensor.mains_nilm_alert_evidence
+          - entity: sensor.mains_nilm_recent_activity
   - type: grid
     title: Power quality
     cards:
@@ -163,28 +163,28 @@ sections:
         title: Mains NILM
         columns: 3
         entities:
-          - entity: sensor.mains_nilm_discovered_signatures
+          - entity: sensor.mains_nilm_nilm_discovered_signatures
             name: Signatures
-          - entity: sensor.mains_nilm_unmatched_load_percentage
+          - entity: sensor.mains_nilm_nilm_unmatched_load_percentage
             name: Unmatched
-          - entity: sensor.mains_balance_status
+          - entity: sensor.mains_nilm_balance_status
             name: Balance
-          - entity: sensor.mains_monitored_coverage
+          - entity: sensor.mains_nilm_monitored_coverage
             name: Coverage
-          - entity: sensor.mains_demand_peak_status
+          - entity: sensor.mains_nilm_demand_peak_status
             name: Peak
-          - entity: sensor.mains_readiness
+          - entity: sensor.mains_nilm_readiness
             name: Readiness
       - type: history-graph
         title: Mains power balance
         hours_to_show: 24
         entities:
-          - entity: sensor.mains_balance_power
-          - entity: sensor.mains_monitored_power
+          - entity: sensor.mains_nilm_balance_power
+          - entity: sensor.mains_nilm_monitored_power
       - type: entities
         title: NILM review
         entities:
-          - entity: sensor.mains_alert_evidence
-          - entity: sensor.mains_recent_activity
-          - entity: sensor.mains_nilm_topology_status
-          - entity: binary_sensor.mains_maintenance
+          - entity: sensor.mains_nilm_alert_evidence
+          - entity: sensor.mains_nilm_recent_activity
+          - entity: sensor.mains_nilm_nilm_topology_status
+          - entity: binary_sensor.mains_nilm_maintenance

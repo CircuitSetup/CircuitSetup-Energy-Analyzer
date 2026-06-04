@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -240,6 +241,33 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert any(card.get("title") == "At a glance" for card in cards)
 
 
+def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+
+    stale_entities = {
+        "sensor.mains_health_summary",
+        "sensor.mains_learning_progress",
+        "sensor.mains_anomaly_score",
+        "sensor.mains_alert_evidence",
+        "sensor.mains_recent_activity",
+        "sensor.mains_balance_power",
+        "sensor.mains_monitored_power",
+        "sensor.mains_monitored_coverage",
+        "sensor.mains_balance_status",
+        "sensor.mains_demand_peak_status",
+        "sensor.mains_readiness",
+        "sensor.mains_nilm_discovered_signatures",
+        "sensor.mains_nilm_unmatched_load_percentage",
+        "sensor.mains_nilm_topology_status",
+        "binary_sensor.mains_maintenance",
+    }
+
+    assert stale_entities.isdisjoint(set(_dashboard_entity_refs(dashboard_text)))
+    assert "sensor.mains_nilm_health_summary" in dashboard_text
+    assert "sensor.mains_nilm_nilm_discovered_signatures" in dashboard_text
+    assert "binary_sensor.mains_nilm_maintenance" in dashboard_text
+
+
 def _dashboard_cards(node: object) -> list[dict[str, object]]:
     cards: list[dict[str, object]] = []
     if isinstance(node, dict):
@@ -251,3 +279,10 @@ def _dashboard_cards(node: object) -> list[dict[str, object]]:
         for item in node:
             cards.extend(_dashboard_cards(item))
     return cards
+
+
+def _dashboard_entity_refs(dashboard_text: str) -> list[str]:
+    return [
+        match.group(1)
+        for match in re.finditer(r"entity:\s*([a-z_]+\.[A-Za-z0-9_]+)", dashboard_text)
+    ]
