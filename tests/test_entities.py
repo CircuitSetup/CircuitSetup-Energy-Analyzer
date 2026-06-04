@@ -1196,6 +1196,42 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="pool_pump",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.pool_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.pool_current", SensorRole.CURRENT),
+            SensorRef("sensor.pool_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.pool_pf", SensorRole.POWER_FACTOR),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_pool_pump_metric_consistency_score",
+        "entry-1_pool_pump_metric_consistency_status",
+    } <= unique_ids
+    assert not {
+        "entry-1_pool_pump_leg_imbalance",
+        "entry-1_pool_pump_leg_imbalance_status",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 

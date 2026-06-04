@@ -1323,6 +1323,8 @@ _CAPACITY_SENSOR_KEYS = {"capacity_usage", "capacity_status"}
 _SPLIT_PHASE_SENSOR_KEYS = {
     "leg_imbalance",
     "leg_imbalance_status",
+}
+_METRIC_CONSISTENCY_SENSOR_KEYS = {
     "metric_consistency_score",
     "metric_consistency_status",
 }
@@ -1465,6 +1467,19 @@ def sensor_description_applies(
     if key in _SPLIT_PHASE_SENSOR_KEYS:
         return mode in {CircuitMode.DUAL_PHASE, CircuitMode.MAINS_NILM} and (
             has_real_power or has_current
+        )
+    if key in _METRIC_CONSISTENCY_SENSOR_KEYS:
+        has_consistency_context = (
+            SensorRole.APPARENT_POWER in roles
+            or SensorRole.POWER_FACTOR in roles
+            or (has_voltage and has_current)
+        )
+        is_dedicated_appliance = (
+            mode is not CircuitMode.MIXED
+            and profile is not ApplianceProfile.MIXED
+        )
+        return has_real_power and has_consistency_context and (
+            is_mains or is_dedicated_appliance
         )
     if key in _BALANCE_SENSOR_KEYS:
         return is_mains
