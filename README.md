@@ -329,6 +329,8 @@ long-term energy charts, tariffs, costs, and device energy rollups.
 
 ![Utility and Opower comparison options](docs/images/readme/utility-comparison.png)
 
+The Utility / Opower screenshot redacts account-specific utility text.
+
 Use the `set_utility_comparison_settings` service on a mains or aggregate
 circuit. Set `utility_energy_entity` to a current-bill or utility kWh sensor,
 or set `utility_statistic_id` and `utility_source_type: statistics` to compare
