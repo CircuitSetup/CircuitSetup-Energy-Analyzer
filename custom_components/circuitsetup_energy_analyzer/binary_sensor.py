@@ -61,6 +61,13 @@ class DiagnosticBinarySensorDescription:
     unit_of_measurement: str | None = None
 
 
+BINARY_SENSOR_ICONS = {
+    "learning": "mdi:school-outline",
+    "data_quality_problem": "mdi:database-alert-outline",
+    "maintenance": "mdi:wrench-clock",
+}
+
+
 BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
     DiagnosticBinarySensorDescription(
         key="learning",
@@ -99,6 +106,12 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
             name_suffix=description.name_suffix,
         )
         self.entity_description = description
+        self._attr_icon = description.icon or BINARY_SENSOR_ICONS.get(description.key)
+
+    @property
+    def icon(self) -> str | None:
+        """Return the purpose-specific icon for fallback tests."""
+        return self._attr_icon
 
     @property
     def is_on(self) -> bool:

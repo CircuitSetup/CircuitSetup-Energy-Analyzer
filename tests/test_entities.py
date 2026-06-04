@@ -499,6 +499,39 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
         assert description.unit_of_measurement is None
 
 
+def test_sensor_entities_use_purpose_specific_icons() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+
+    expected_icons = {
+        "health_summary": "mdi:heart-pulse",
+        "learning_progress": "mdi:school-outline",
+        "power_quality_score": "mdi:sine-wave",
+        "reactive_power_drift": "mdi:flash-triangle-outline",
+        "power_factor_drift": "mdi:cosine-wave",
+        "daily_energy_usage": "mdi:counter",
+        "current_demand": "mdi:gauge",
+        "metric_consistency_status": "mdi:clipboard-check-outline",
+        "standby_status": "mdi:power-sleep",
+    }
+
+    for key, icon in expected_icons.items():
+        entity = CircuitAnalyzerSensor(
+            coordinator,
+            entry_id="entry-1",
+            circuit=circuit,
+            description=descriptions[key],
+        )
+        assert entity.icon == icon
+        assert entity.icon != "mdi:eye"
+
+
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,
@@ -526,6 +559,35 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
         assert missing_attrs == []
         assert description.entity_registry_enabled_default is True
         assert description.unit_of_measurement is None
+
+
+def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerBinarySensor,
+    )
+
+    descriptions = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+
+    expected_icons = {
+        "learning": "mdi:school-outline",
+        "data_quality_problem": "mdi:database-alert-outline",
+        "maintenance": "mdi:wrench-clock",
+    }
+
+    for key, icon in expected_icons.items():
+        entity = CircuitAnalyzerBinarySensor(
+            coordinator,
+            entry_id="entry-1",
+            circuit=circuit,
+            description=descriptions[key],
+        )
+        assert entity.icon == icon
+        assert entity.icon != "mdi:eye"
 
 
 def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:

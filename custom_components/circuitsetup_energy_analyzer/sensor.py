@@ -712,6 +712,81 @@ class DiagnosticSensorDescription:
     attributes_fn: Callable[[Any, str], dict[str, Any] | None] | None = None
 
 
+SENSOR_ICONS: Mapping[str, str] = {
+    "anomaly_score": "mdi:alert-octagon-outline",
+    "last_event": "mdi:timeline-clock-outline",
+    "health_summary": "mdi:heart-pulse",
+    "readiness": "mdi:check-decagram-outline",
+    "learning_progress": "mdi:school-outline",
+    "data_quality_checklist": "mdi:database-alert-outline",
+    "energy_dashboard_status": "mdi:view-dashboard-outline",
+    "alert_evidence": "mdi:clipboard-alert-outline",
+    "recent_activity": "mdi:timeline-text-outline",
+    "recent_activity_count": "mdi:counter",
+    "sensitivity": "mdi:tune-variant",
+    "power_quality_score": "mdi:sine-wave",
+    "power_quality_evidence": "mdi:lightning-bolt-circle",
+    "reactive_power_drift": "mdi:flash-triangle-outline",
+    "apparent_power_drift": "mdi:alpha-v-circle-outline",
+    "power_factor_drift": "mdi:cosine-wave",
+    "nilm_signature_count": "mdi:graph-outline",
+    "nilm_unmatched_load_percentage": "mdi:chart-scatter-plot",
+    "nilm_topology_status": "mdi:source-branch",
+    "daily_energy_usage": "mdi:counter",
+    "energy_usage_share": "mdi:chart-pie",
+    "energy_usage_status": "mdi:lightning-bolt-outline",
+    "energy_goal_usage": "mdi:target",
+    "energy_goal_status": "mdi:flag-checkered",
+    "run_cycle_count": "mdi:counter",
+    "run_cycle_runtime": "mdi:timer-outline",
+    "run_cycle_duty_cycle": "mdi:percent-outline",
+    "run_cycle_status": "mdi:run",
+    "current_demand": "mdi:gauge",
+    "peak_demand": "mdi:chart-line-variant",
+    "demand_limit_usage": "mdi:gauge-full",
+    "demand_peak_rank": "mdi:podium",
+    "demand_peak_status": "mdi:chart-timeline-variant",
+    "demand_status": "mdi:transmission-tower",
+    "capacity_usage": "mdi:fuse",
+    "capacity_status": "mdi:fuse-alert",
+    "leg_imbalance": "mdi:scale-balance",
+    "leg_imbalance_status": "mdi:scale-unbalanced",
+    "metric_consistency_score": "mdi:clipboard-check-outline",
+    "metric_consistency_status": "mdi:clipboard-check-outline",
+    "balance_power": "mdi:scale-balance",
+    "monitored_power": "mdi:flash-outline",
+    "monitored_coverage": "mdi:radar",
+    "balance_status": "mdi:scale-balance",
+    "solar_generation_power": "mdi:solar-power-variant",
+    "solar_site_consumption_power": "mdi:home-lightning-bolt-outline",
+    "solar_grid_import_power": "mdi:transmission-tower-import",
+    "solar_grid_export_power": "mdi:transmission-tower-export",
+    "solar_self_consumption": "mdi:home-percent-outline",
+    "solar_powered": "mdi:solar-power",
+    "solar_flow_status": "mdi:swap-horizontal-bold",
+    "solar_surplus_power": "mdi:weather-sunny-alert",
+    "solar_load_shift_power": "mdi:clock-fast",
+    "solar_flexible_load_power": "mdi:power-plug-outline",
+    "solar_flexible_load_coverage": "mdi:chart-donut",
+    "solar_load_shift_status": "mdi:clock-check-outline",
+    "solar_surplus_status": "mdi:weather-sunny",
+    "utility_comparison_difference": "mdi:file-compare",
+    "utility_comparison_status": "mdi:receipt-text-check-outline",
+    "billing_cycle_usage": "mdi:calendar-counter",
+    "billing_cycle_forecast": "mdi:calendar-clock",
+    "billing_cycle_budget_usage": "mdi:cash-clock",
+    "billing_cycle_status": "mdi:calendar-check",
+    "cost_current_rate": "mdi:currency-usd",
+    "cost_cycle": "mdi:cash-multiple",
+    "cost_cycle_forecast": "mdi:chart-line",
+    "cost_status": "mdi:cash-check",
+    "always_on_power": "mdi:power-plug",
+    "standby_threshold": "mdi:power-standby",
+    "standby_status": "mdi:power-sleep",
+    "always_on_limit_usage": "mdi:power-cycle",
+}
+
+
 SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     DiagnosticSensorDescription(
         key="anomaly_score",
@@ -1541,8 +1616,14 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             name_suffix=description.name_suffix,
         )
         self.entity_description = description
+        self._attr_icon = description.icon or SENSOR_ICONS.get(description.key)
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
+
+    @property
+    def icon(self) -> str | None:
+        """Return the purpose-specific icon for fallback tests."""
+        return self._attr_icon
 
     @property
     def native_value(self) -> Any:
