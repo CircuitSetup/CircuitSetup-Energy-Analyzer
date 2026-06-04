@@ -1056,6 +1056,24 @@ def test_circuit_mode_options_use_human_labels() -> None:
     ]
 
 
+def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema({})
+
+    assert _schema_default(schema, "daily_goal_kwh") == 0.0
+    assert _schema_default(schema, "max_active_minutes") == 0
+    assert _schema_default(schema, "max_idle_minutes") == 0
+    assert _schema_default(schema, "budget_kwh") == 0.0
+    assert _schema_default(schema, "default_rate_per_kwh") == 0.0
+    assert _schema_default(schema, "tou_rate_per_kwh") == 0.0
+    assert _schema_default(schema, "demand_limit_w") == 0.0
+    assert _schema_default(schema, "breaker_amps") == 0.0
+    assert _schema_default(schema, "always_on_alert_w") == 0.0
+
+
 @pytest.mark.asyncio
 async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (

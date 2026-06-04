@@ -778,7 +778,7 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             ): _number_selector(minimum=0.01, maximum=5.0, step=0.01),
             vol.Optional(
                 FIELD_DAILY_GOAL_KWH,
-                default=settings.get(FIELD_DAILY_GOAL_KWH),
+                default=float(settings.get(FIELD_DAILY_GOAL_KWH, 0.0)),
             ): _number_selector(minimum=0.0, step=0.1),
             vol.Optional(
                 FIELD_GOAL_ALERT_RATIO,
@@ -786,19 +786,19 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
             vol.Optional(
                 FIELD_MAX_ACTIVE_MINUTES,
-                default=settings.get(FIELD_MAX_ACTIVE_MINUTES),
-            ): _number_selector(minimum=1, step=1),
+                default=int(settings.get(FIELD_MAX_ACTIVE_MINUTES, 0)),
+            ): _number_selector(minimum=0, step=1),
             vol.Optional(
                 FIELD_MAX_IDLE_MINUTES,
-                default=settings.get(FIELD_MAX_IDLE_MINUTES),
-            ): _number_selector(minimum=1, step=1),
+                default=int(settings.get(FIELD_MAX_IDLE_MINUTES, 0)),
+            ): _number_selector(minimum=0, step=1),
             vol.Optional(
                 FIELD_CYCLE_START_DAY,
                 default=int(settings.get(FIELD_CYCLE_START_DAY, 1)),
             ): _number_selector(minimum=1, maximum=31, step=1),
             vol.Optional(
                 FIELD_BUDGET_KWH,
-                default=settings.get(FIELD_BUDGET_KWH),
+                default=float(settings.get(FIELD_BUDGET_KWH, 0.0)),
             ): _number_selector(minimum=0.0, step=0.1),
             vol.Optional(
                 FIELD_BUDGET_ALERT_RATIO,
@@ -806,11 +806,11 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
             vol.Optional(
                 FIELD_DEFAULT_RATE_PER_KWH,
-                default=settings.get(FIELD_DEFAULT_RATE_PER_KWH),
+                default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
             ): _number_selector(minimum=0.0, step="any"),
             vol.Optional(
                 FIELD_TOU_RATE_PER_KWH,
-                default=settings.get(FIELD_TOU_RATE_PER_KWH),
+                default=float(settings.get(FIELD_TOU_RATE_PER_KWH, 0.0)),
             ): _number_selector(minimum=0.0, step="any"),
             vol.Optional(
                 FIELD_TOU_START,
@@ -834,11 +834,11 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             ): _number_selector(minimum=1, maximum=240, step=1),
             vol.Optional(
                 FIELD_DEMAND_LIMIT_W,
-                default=settings.get(FIELD_DEMAND_LIMIT_W),
+                default=float(settings.get(FIELD_DEMAND_LIMIT_W, 0.0)),
             ): _number_selector(minimum=0.0, step=1),
             vol.Optional(
                 FIELD_BREAKER_AMPS,
-                default=settings.get(FIELD_BREAKER_AMPS),
+                default=float(settings.get(FIELD_BREAKER_AMPS, 0.0)),
             ): _number_selector(minimum=0.0, step=0.1),
             vol.Optional(
                 FIELD_WARNING_RATIO,
@@ -854,7 +854,7 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
             ): _number_selector(minimum=0.0, step=0.1),
             vol.Optional(
                 FIELD_ALWAYS_ON_ALERT_W,
-                default=settings.get(FIELD_ALWAYS_ON_ALERT_W),
+                default=float(settings.get(FIELD_ALWAYS_ON_ALERT_W, 0.0)),
             ): _number_selector(minimum=0.0, step=0.1),
         }
     )
@@ -2307,7 +2307,7 @@ def _set_optional_int(
         parsed = int(value)
     except (TypeError, ValueError):
         raise SetupValidationError("invalid_advanced_settings") from None
-    if parsed > 0:
+    if parsed >= 0:
         settings[key] = parsed
 
 
