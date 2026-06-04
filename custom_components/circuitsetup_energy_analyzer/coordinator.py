@@ -4665,17 +4665,20 @@ def _source_entity_configs_from_sources(
             )
         )
 
-    return tuple(
-        CircuitConfig(
-            circuit_id=circuit_id,
-            name=_friendly_name_from_circuit_id(circuit_id),
-            appliance_profile=ApplianceProfile.MIXED,
-            mode=CircuitMode.MIXED,
-            sensors=tuple(sensors),
-            retention_mode=retention_mode,
+    configs: list[CircuitConfig] = []
+    for circuit_id, sensors in sensors_by_circuit_id.items():
+        appliance_profile, mode = _appliance_profile_mode_from_circuit_id(circuit_id)
+        configs.append(
+            CircuitConfig(
+                circuit_id=circuit_id,
+                name=_friendly_name_from_circuit_id(circuit_id),
+                appliance_profile=appliance_profile,
+                mode=mode,
+                sensors=tuple(sensors),
+                retention_mode=retention_mode,
+            )
         )
-        for circuit_id, sensors in sensors_by_circuit_id.items()
-    )
+    return tuple(configs)
 
 
 def _experimental_nilm_enabled(
@@ -5126,3 +5129,57 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
 
 def _friendly_name_from_circuit_id(circuit_id: str) -> str:
     return str(circuit_id).replace("_", " ").strip().title()
+
+
+def _appliance_profile_mode_from_circuit_id(
+    circuit_id: str,
+) -> tuple[ApplianceProfile, CircuitMode]:
+    normalized = f"_{str(circuit_id).strip().lower()}_"
+    for tokens, profile, mode in (
+        (
+            ("_refrigerator_", "_fridge_"),
+            ApplianceProfile.REFRIGERATOR,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (("_freezer_",), ApplianceProfile.FREEZER, CircuitMode.SINGLE_PHASE),
+        (
+            ("_hvac_", "_heat_pump_", "_air_conditioner_", "_ac_"),
+            ApplianceProfile.HVAC,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (
+            ("_water_heater_", "_waterheater_"),
+            ApplianceProfile.WATER_HEATER,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (("_oven_", "_range_"), ApplianceProfile.OVEN, CircuitMode.DUAL_PHASE),
+        (("_dryer_",), ApplianceProfile.DRYER, CircuitMode.DUAL_PHASE),
+        (
+            ("_pool_pump_", "_poolpump_"),
+            ApplianceProfile.POOL_PUMP,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_well_pump_", "_wellpump_"),
+            ApplianceProfile.WELL_PUMP,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_sump_pump_", "_sumppump_"),
+            ApplianceProfile.SUMP_PUMP,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_ev_", "_evse_", "_charger_"),
+            ApplianceProfile.EV_CHARGER,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (
+            ("_solar_", "_inverter_", "_pv_"),
+            ApplianceProfile.SOLAR_INVERTER,
+            CircuitMode.SINGLE_PHASE,
+        ),
+    ):
+        if any(token in normalized for token in tokens):
+            return profile, mode
+    return ApplianceProfile.MIXED, CircuitMode.MIXED

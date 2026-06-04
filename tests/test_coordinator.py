@@ -1342,11 +1342,12 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
     assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
 
 
-def test_runtime_creates_mixed_energy_circuits_from_source_entities() -> None:
+def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
     from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
         CircuitMode,
         SensorRole,
     )
@@ -1357,6 +1358,9 @@ def test_runtime_creates_mixed_energy_circuits_from_source_entities() -> None:
             CONF_SOURCE_ENTITIES: [
                 "sensor.cs_energy_analyzer_demo_refrigerator_energy",
                 "sensor.cs_energy_analyzer_demo_hvac_energy",
+                "sensor.cs_energy_analyzer_demo_water_heater_energy",
+                "sensor.cs_energy_analyzer_demo_pool_pump_energy",
+                "sensor.cs_energy_analyzer_demo_basement_lights_energy",
             ],
             CONF_MAINS_SOURCE_ENTITIES: [
                 "sensor.cs_energy_analyzer_demo_mains_l1_energy",
@@ -1372,12 +1376,34 @@ def test_runtime_creates_mixed_energy_circuits_from_source_entities() -> None:
     assert set(by_sensor) == {
         "sensor.cs_energy_analyzer_demo_refrigerator_energy",
         "sensor.cs_energy_analyzer_demo_hvac_energy",
+        "sensor.cs_energy_analyzer_demo_water_heater_energy",
+        "sensor.cs_energy_analyzer_demo_pool_pump_energy",
+        "sensor.cs_energy_analyzer_demo_basement_lights_energy",
     }
     fridge = by_sensor["sensor.cs_energy_analyzer_demo_refrigerator_energy"]
     assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
     assert fridge.name == "Cs Energy Analyzer Demo Refrigerator"
-    assert fridge.mode is CircuitMode.MIXED
+    assert fridge.appliance_profile is ApplianceProfile.REFRIGERATOR
+    assert fridge.mode is CircuitMode.SINGLE_PHASE
     assert fridge.sensors[0].role is SensorRole.ENERGY
+
+    hvac = by_sensor["sensor.cs_energy_analyzer_demo_hvac_energy"]
+    assert hvac.appliance_profile is ApplianceProfile.HVAC
+    assert hvac.mode is CircuitMode.DUAL_PHASE
+
+    water_heater = by_sensor[
+        "sensor.cs_energy_analyzer_demo_water_heater_energy"
+    ]
+    assert water_heater.appliance_profile is ApplianceProfile.WATER_HEATER
+    assert water_heater.mode is CircuitMode.DUAL_PHASE
+
+    pool_pump = by_sensor["sensor.cs_energy_analyzer_demo_pool_pump_energy"]
+    assert pool_pump.appliance_profile is ApplianceProfile.POOL_PUMP
+    assert pool_pump.mode is CircuitMode.SINGLE_PHASE
+
+    lights = by_sensor["sensor.cs_energy_analyzer_demo_basement_lights_energy"]
+    assert lights.appliance_profile is ApplianceProfile.MIXED
+    assert lights.mode is CircuitMode.MIXED
 
 
 def test_runtime_infers_mains_source_entity_role_from_entity_id() -> None:
