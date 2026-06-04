@@ -235,6 +235,27 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_sources_step_shows_source_selection_form() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(
+            data={},
+            options={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
+        )
+    )
+
+    result = await flow.async_step_sources()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "sources"
+    assert CONF_SOURCE_DEVICES in _schema_keys(result["data_schema"])
+    assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(result["data_schema"])
+
+
+@pytest.mark.asyncio
 async def test_options_flow_rejects_bogus_retention_mode() -> None:
     from types import SimpleNamespace
 

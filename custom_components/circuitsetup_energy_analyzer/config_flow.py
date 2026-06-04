@@ -1161,7 +1161,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             getattr(self, "hass", None),
         )
         return self.async_show_form(
-            step_id="init",
+            step_id="sources",
             data_schema=_options_schema(self._config_entry, source_entity_ids),
             errors=errors or {},
         )
