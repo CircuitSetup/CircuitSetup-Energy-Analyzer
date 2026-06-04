@@ -80,7 +80,7 @@ def evaluate_metric_consistency(
         )
 
     apparent_difference_percent = _difference_percent(reported_va, expected_va)
-    expected_pf = _expected_power_factor(real_power, reported_va)
+    expected_pf = _expected_power_factor(real_power, reported_va or expected_va)
     pf_difference = _pf_difference(reported_pf, expected_pf)
 
     apparent_mismatch = (

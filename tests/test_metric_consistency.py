@@ -65,6 +65,25 @@ def test_metric_consistency_flags_power_factor_mismatch() -> None:
     assert result.power_factor_tolerance == DEFAULT_POWER_FACTOR_TOLERANCE
 
 
+def test_metric_consistency_uses_voltage_current_for_power_factor_without_va() -> None:
+    result = evaluate_metric_consistency(
+        real_power_w=600.0,
+        apparent_power_va=None,
+        power_factor=0.9,
+        voltage_v=120.0,
+        current_a=10.0,
+    )
+
+    assert result.status == "power_factor_mismatch"
+    assert result.mismatch_score_percent == 40.0
+    assert result.expected_apparent_power_va == 1200.0
+    assert result.reported_apparent_power_va is None
+    assert result.apparent_power_source == "voltage_current"
+    assert result.expected_power_factor == 0.5
+    assert result.reported_power_factor == 0.9
+    assert result.power_factor_difference == 0.4
+
+
 def test_metric_consistency_sums_dual_phase_leg_va_when_available() -> None:
     result = evaluate_metric_consistency(
         real_power_w=1800.0,
