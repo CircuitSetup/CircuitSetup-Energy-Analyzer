@@ -697,13 +697,16 @@ class DiagnosticSensorDescription:
     force_update: bool = False
     has_entity_name: bool = False
     icon: str | None = None
+    last_reset: Any | None = None
     name: str | None = None
     native_unit_of_measurement: str | None = None
+    options: list[str] | None = None
     state_class: str | None = None
     suggested_display_precision: int | None = None
     suggested_unit_of_measurement: str | None = None
     translation_key: str | None = None
     translation_placeholders: Mapping[str, str] | None = None
+    unit_of_measurement: None = None
     attributes_fn: Callable[[Any, str], dict[str, Any] | None] | None = None
 
 

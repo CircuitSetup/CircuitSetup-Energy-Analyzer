@@ -57,6 +57,7 @@ class DiagnosticBinarySensorDescription:
     name: str | None = None
     translation_key: str | None = None
     translation_placeholders: dict[str, str] | None = None
+    unit_of_measurement: str | None = None
 
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (

@@ -473,13 +473,16 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
         "force_update",
         "has_entity_name",
         "icon",
+        "last_reset",
         "name",
         "native_unit_of_measurement",
+        "options",
         "state_class",
         "suggested_display_precision",
         "suggested_unit_of_measurement",
         "translation_key",
         "translation_placeholders",
+        "unit_of_measurement",
     }
 
     for description in SENSOR_DESCRIPTIONS:
@@ -488,6 +491,9 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
         )
         assert missing_attrs == []
         assert description.entity_registry_enabled_default is True
+        assert description.last_reset is None
+        assert description.options is None
+        assert description.unit_of_measurement is None
 
 
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
@@ -507,6 +513,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
         "name",
         "translation_key",
         "translation_placeholders",
+        "unit_of_measurement",
     }
 
     for description in BINARY_SENSOR_DESCRIPTIONS:
@@ -515,6 +522,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
         )
         assert missing_attrs == []
         assert description.entity_registry_enabled_default is True
+        assert description.unit_of_measurement is None
 
 
 def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
