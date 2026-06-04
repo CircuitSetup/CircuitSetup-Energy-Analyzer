@@ -16,6 +16,9 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     mask_known_loads,
     unmatched_load_percentage,
 )
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    NormalizedCircuitSample,
+)
 
 BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
@@ -43,6 +46,34 @@ def sample(
     )
 
 
+def split_sample(
+    seconds: int,
+    leg_a_w: float | None,
+    leg_b_w: float | None,
+    *,
+    reactive_power: float = 0.0,
+    apparent_power: float | None = None,
+    power_factor: float | None = 1.0,
+) -> NormalizedCircuitSample:
+    watts = None
+    if leg_a_w is not None or leg_b_w is not None:
+        watts = float(leg_a_w or 0.0) + float(leg_b_w or 0.0)
+    return NormalizedCircuitSample(
+        timestamp=BASE_TIME + timedelta(seconds=seconds),
+        circuit_id="mains",
+        real_power=watts,
+        current=None,
+        voltage=None,
+        reactive_power=reactive_power,
+        apparent_power=apparent_power if apparent_power is not None else watts,
+        power_factor=power_factor,
+        frequency=60.0,
+        energy=0.0,
+        leg_a_real_power=leg_a_w,
+        leg_b_real_power=leg_b_w,
+    )
+
+
 def edge(
     seconds: int,
     delta_w: float,
@@ -51,6 +82,10 @@ def edge(
     delta_va: float | None = None,
     delta_pf: float = 0.0,
     direction: str | None = None,
+    leg_a_delta_w: float | None = None,
+    leg_b_delta_w: float | None = None,
+    split_phase_type: str = "unknown",
+    dominant_leg: str = "unknown",
 ) -> NilmEdge:
     return NilmEdge(
         timestamp=BASE_TIME + timedelta(seconds=seconds),
@@ -59,6 +94,10 @@ def edge(
         delta_va=delta_va if delta_va is not None else delta_w,
         delta_pf=delta_pf,
         direction=direction or ("on" if delta_w > 0 else "off"),
+        leg_a_delta_w=leg_a_delta_w,
+        leg_b_delta_w=leg_b_delta_w,
+        split_phase_type=split_phase_type,
+        dominant_leg=dominant_leg,
     )
 
 
@@ -98,6 +137,92 @@ def test_edge_detector_emits_on_and_off_edges_from_current_sample_fields() -> No
     assert edges[0].delta_va == 184.0
     assert round(edges[0].delta_pf, 2) == -0.07
     assert edges[1].delta_w == -165.0
+
+
+def test_edge_detector_infers_balanced_split_phase_transition() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many(
+        [
+            split_sample(0, 100.0, 95.0),
+            split_sample(10, 400.0, 405.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 610.0
+    assert edges[0].leg_a_delta_w == 300.0
+    assert edges[0].leg_b_delta_w == 310.0
+    assert edges[0].split_phase_type == "balanced_240v"
+    assert edges[0].dominant_leg == "balanced"
+    assert edges[0].leg_balance_ratio == 0.033
+
+
+def test_edge_detector_infers_single_leg_transition() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many(
+        [
+            split_sample(0, 100.0, 95.0),
+            split_sample(10, 455.0, 100.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 360.0
+    assert edges[0].leg_a_delta_w == 355.0
+    assert edges[0].leg_b_delta_w == 5.0
+    assert edges[0].split_phase_type == "single_leg_a"
+    assert edges[0].dominant_leg == "a"
+
+
+def test_edge_detector_treats_borderline_secondary_leg_as_mixed() -> None:
+    detector = NilmEdgeDetector(min_delta_w=50.0)
+
+    edges = detector.process_many(
+        [
+            split_sample(0, 0.0, 0.0),
+            split_sample(10, 75.0, 50.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].split_phase_type == "imbalanced_240v_or_mixed"
+    assert edges[0].dominant_leg == "a"
+
+
+def test_edge_detector_treats_opposing_leg_changes_as_mixed() -> None:
+    detector = NilmEdgeDetector(min_delta_w=50.0)
+
+    edges = detector.process_many(
+        [
+            split_sample(0, 100.0, 100.0),
+            split_sample(10, 220.0, 40.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].leg_a_delta_w == 120.0
+    assert edges[0].leg_b_delta_w == -60.0
+    assert edges[0].split_phase_type == "imbalanced_240v_or_mixed"
+    assert edges[0].dominant_leg == "mixed"
+
+
+def test_edge_detector_treats_small_opposing_leg_change_as_mixed() -> None:
+    detector = NilmEdgeDetector(min_delta_w=50.0)
+
+    edges = detector.process_many(
+        [
+            split_sample(0, 100.0, 100.0),
+            split_sample(10, 220.0, 90.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].leg_a_delta_w == 120.0
+    assert edges[0].leg_b_delta_w == -10.0
+    assert edges[0].split_phase_type == "imbalanced_240v_or_mixed"
+    assert edges[0].dominant_leg == "mixed"
 
 
 def test_edge_detector_ignores_missing_real_power_and_small_changes() -> None:
@@ -208,6 +333,192 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert signatures[0].confidence >= 0.6
 
 
+def test_cluster_recurring_signatures_keeps_split_phase_topologies_separate() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            edge(
+                0,
+                600.0,
+                leg_a_delta_w=600.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                30,
+                610.0,
+                leg_a_delta_w=610.0,
+                leg_b_delta_w=5.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                60,
+                590.0,
+                leg_a_delta_w=590.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                90,
+                600.0,
+                leg_a_delta_w=300.0,
+                leg_b_delta_w=300.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                120,
+                620.0,
+                leg_a_delta_w=310.0,
+                leg_b_delta_w=310.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                150,
+                580.0,
+                leg_a_delta_w=290.0,
+                leg_b_delta_w=290.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+        ]
+    )
+
+    by_topology = {signature.split_phase_type: signature for signature in signatures}
+    assert set(by_topology) == {"single_leg_a", "balanced_240v"}
+    assert by_topology["single_leg_a"].median_leg_a_delta_w == 600.0
+    assert by_topology["single_leg_a"].median_leg_b_delta_w == 0.0
+    assert by_topology["balanced_240v"].median_leg_a_delta_w == 300.0
+    assert by_topology["balanced_240v"].median_leg_b_delta_w == 300.0
+
+
+def test_cluster_recurring_signatures_does_not_let_unknown_bridge_topologies() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            edge(
+                0,
+                600.0,
+                leg_a_delta_w=600.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                30,
+                605.0,
+                split_phase_type="unknown",
+                dominant_leg="unknown",
+            ),
+            edge(
+                60,
+                590.0,
+                leg_a_delta_w=590.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                90,
+                600.0,
+                leg_a_delta_w=300.0,
+                leg_b_delta_w=300.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                120,
+                610.0,
+                leg_a_delta_w=305.0,
+                leg_b_delta_w=305.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                150,
+                580.0,
+                leg_a_delta_w=290.0,
+                leg_b_delta_w=290.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+        ]
+    )
+
+    by_topology = {signature.split_phase_type: signature for signature in signatures}
+    assert set(by_topology) == {"balanced_240v"}
+    assert by_topology["balanced_240v"].median_leg_a_delta_w == 300.0
+    assert by_topology["balanced_240v"].median_leg_b_delta_w == 300.0
+
+
+def test_cluster_recurring_signatures_blocks_unknown_seed_bridge() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            edge(
+                0,
+                605.0,
+                split_phase_type="unknown",
+                dominant_leg="unknown",
+            ),
+            edge(
+                30,
+                600.0,
+                leg_a_delta_w=600.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                60,
+                590.0,
+                leg_a_delta_w=590.0,
+                leg_b_delta_w=0.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                90,
+                610.0,
+                leg_a_delta_w=610.0,
+                leg_b_delta_w=5.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            edge(
+                120,
+                600.0,
+                leg_a_delta_w=300.0,
+                leg_b_delta_w=300.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                150,
+                610.0,
+                leg_a_delta_w=305.0,
+                leg_b_delta_w=305.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+            edge(
+                180,
+                580.0,
+                leg_a_delta_w=290.0,
+                leg_b_delta_w=290.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            ),
+        ]
+    )
+
+    by_topology = {signature.split_phase_type: signature for signature in signatures}
+    assert set(by_topology) == {"single_leg_a", "balanced_240v"}
+    assert by_topology["single_leg_a"].occurrence_count == 3
+    assert by_topology["balanced_240v"].occurrence_count == 3
+
+
 def test_cluster_recurring_signatures_is_stable_for_permuted_similar_edges() -> None:
     first_order = cluster_recurring_signatures(
         [
@@ -248,6 +559,30 @@ def test_classify_signature_is_conservative_and_allows_user_label_override() -> 
     assert classify_signature(
         NilmSignature("resistive", 500.0, 10.0, 501.0, 0.0, 4, 0.7)
     ) == "possible resistive load"
+    assert classify_signature(
+        NilmSignature(
+            "balanced",
+            500.0,
+            10.0,
+            501.0,
+            0.0,
+            4,
+            0.7,
+            split_phase_type="balanced_240v",
+        )
+    ) == "possible 240 V resistive load"
+    assert classify_signature(
+        NilmSignature(
+            "single",
+            500.0,
+            220.0,
+            548.0,
+            -0.18,
+            4,
+            0.7,
+            split_phase_type="single_leg_b",
+        )
+    ) == "possible 120 V motor-like load"
     assert classify_signature(
         NilmSignature("motor", 500.0, 220.0, 548.0, -0.18, 4, 0.7)
     ) == "possible motor-like load"

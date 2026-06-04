@@ -1422,6 +1422,165 @@ async def test_runtime_synthetic_mains_sums_multiple_source_entities() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_synthetic_mains_keeps_split_phase_nilm_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 100.0, "l2": 95.0, "time": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.mains_l1_power": holder["l1"],
+                "sensor.mains_l2_power": holder["l2"],
+            }
+            return SimpleNamespace(
+                state=str(values[entity_id]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.mains_l1_power",
+                "sensor.mains_l2_power",
+            ],
+        },
+        now_fn=lambda: holder["time"],
+    )
+
+    readings = [
+        (100.0, 95.0),
+        (400.0, 395.0),
+        (105.0, 100.0),
+        (405.0, 400.0),
+        (110.0, 105.0),
+        (410.0, 405.0),
+    ]
+    for index, (l1_w, l2_w) in enumerate(readings, start=1):
+        holder["l1"] = l1_w
+        holder["l2"] = l2_w
+        holder["time"] = now + timedelta(seconds=index * 30)
+        await coordinator.async_process_update()
+
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assert signature["split_phase_type"] == "balanced_240v"
+    assert signature["dominant_leg"] == "balanced"
+    assert signature["median_leg_a_delta_w"] == 300.0
+    assert signature["median_leg_b_delta_w"] == 300.0
+    assert signature["classification"] == "possible 240 V resistive load"
+
+
+@pytest.mark.asyncio
+async def test_runtime_mains_requires_leg_hints_for_split_phase_nilm() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"first": 100.0, "second": 95.0, "time": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            values = {
+                "sensor.panel_import_power": holder["first"],
+                "sensor.panel_aux_power": holder["second"],
+            }
+            return SimpleNamespace(
+                state=str(values[entity_id]),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=holder["time"],
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.panel_import_power",
+                "sensor.panel_aux_power",
+            ],
+        },
+        now_fn=lambda: holder["time"],
+    )
+
+    readings = [
+        (100.0, 95.0),
+        (400.0, 395.0),
+        (105.0, 100.0),
+        (405.0, 400.0),
+        (110.0, 105.0),
+        (410.0, 405.0),
+    ]
+    for index, (first_w, second_w) in enumerate(readings, start=1):
+        holder["first"] = first_w
+        holder["second"] = second_w
+        holder["time"] = now + timedelta(seconds=index * 30)
+        await coordinator.async_process_update()
+
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assert signature["split_phase_type"] == "unknown"
+    assert signature["median_leg_a_delta_w"] is None
+    assert signature["median_leg_b_delta_w"] is None
+    assert signature["classification"] == "possible resistive load"
+
+
+def test_nilm_signature_payloads_do_not_reuse_label_for_changed_topology() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmSignature
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-1",
+                        "median_delta_w": 600.0,
+                        "median_delta_var": 20.0,
+                        "split_phase_type": "single_leg_a",
+                        "user_label": "Kitchen circuit",
+                        "expected": True,
+                    }
+                ]
+            }
+        ),
+    )
+
+    payloads = coordinator._nilm_signature_payloads(
+        "mains",
+        [
+            NilmSignature(
+                signature_id="on-1",
+                median_delta_w=600.0,
+                median_delta_var=20.0,
+                median_delta_va=600.0,
+                median_delta_pf=0.0,
+                occurrence_count=3,
+                confidence=0.6,
+                median_leg_a_delta_w=300.0,
+                median_leg_b_delta_w=300.0,
+                split_phase_type="balanced_240v",
+                dominant_leg="balanced",
+            )
+        ],
+    )
+
+    assert "user_label" not in payloads[0]
+    assert "expected" not in payloads[0]
+    assert payloads[0]["classification"] == "possible 240 V resistive load"
+
+
+@pytest.mark.asyncio
 async def test_runtime_known_load_option_controls_nilm_masking() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

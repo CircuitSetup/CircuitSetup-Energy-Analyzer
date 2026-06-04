@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from statistics import median
+from statistics import median, multimode
 
 from .models import CircuitEvent, CircuitSample, EventType
 
@@ -18,6 +18,11 @@ class NilmEdge:
     delta_va: float
     delta_pf: float
     direction: str
+    leg_a_delta_w: float | None = None
+    leg_b_delta_w: float | None = None
+    leg_balance_ratio: float | None = None
+    dominant_leg: str = "unknown"
+    split_phase_type: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +54,11 @@ class NilmSignature:
     occurrence_count: int
     confidence: float
     user_label: str | None = None
+    median_leg_a_delta_w: float | None = None
+    median_leg_b_delta_w: float | None = None
+    leg_balance_ratio: float | None = None
+    dominant_leg: str = "unknown"
+    split_phase_type: str = "unknown"
 
 
 class NilmEdgeDetector:
@@ -74,6 +84,16 @@ class NilmEdgeDetector:
         if abs(delta_w) < self.min_delta_w:
             return []
 
+        leg_a_delta = _optional_delta(
+            getattr(sample, "leg_a_real_power", None),
+            getattr(previous, "leg_a_real_power", None),
+        )
+        leg_b_delta = _optional_delta(
+            getattr(sample, "leg_b_real_power", None),
+            getattr(previous, "leg_b_real_power", None),
+        )
+        topology = _split_phase_topology(leg_a_delta, leg_b_delta)
+
         return [
             NilmEdge(
                 timestamp=sample.timestamp,
@@ -82,6 +102,11 @@ class NilmEdgeDetector:
                 delta_va=_delta(sample.apparent_power, previous.apparent_power),
                 delta_pf=_delta(sample.power_factor, previous.power_factor),
                 direction="on" if delta_w > 0 else "off",
+                leg_a_delta_w=_round_optional(leg_a_delta),
+                leg_b_delta_w=_round_optional(leg_b_delta),
+                leg_balance_ratio=topology["leg_balance_ratio"],
+                dominant_leg=topology["dominant_leg"],
+                split_phase_type=topology["split_phase_type"],
             )
         ]
 
@@ -194,6 +219,19 @@ def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignatur
         median_var = float(median(candidate.delta_var for candidate in cluster))
         median_va = float(median(candidate.delta_va for candidate in cluster))
         median_pf = float(median(candidate.delta_pf for candidate in cluster))
+        median_leg_a = _median_optional(
+            candidate.leg_a_delta_w for candidate in cluster
+        )
+        median_leg_b = _median_optional(
+            candidate.leg_b_delta_w for candidate in cluster
+        )
+        split_phase_type = _dominant_text(
+            candidate.split_phase_type for candidate in cluster
+        )
+        dominant_leg = _dominant_text(candidate.dominant_leg for candidate in cluster)
+        leg_balance_ratio = _median_optional(
+            candidate.leg_balance_ratio for candidate in cluster
+        )
         confidence = min(0.95, 0.6 + ((len(cluster) - 3) * 0.1))
         direction = cluster[0].direction
         signatures.append(
@@ -205,6 +243,11 @@ def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignatur
                 median_delta_pf=median_pf,
                 occurrence_count=len(cluster),
                 confidence=confidence,
+                median_leg_a_delta_w=median_leg_a,
+                median_leg_b_delta_w=median_leg_b,
+                leg_balance_ratio=leg_balance_ratio,
+                dominant_leg=dominant_leg,
+                split_phase_type=split_phase_type,
             )
         )
 
@@ -227,11 +270,11 @@ def classify_signature(signature: NilmSignature) -> str:
         and reactive_ratio <= 0.12
         and abs(signature.median_delta_pf) <= 0.08
     ):
-        return "possible resistive load"
+        return _split_phase_label(signature, "resistive load")
     if abs_w >= 200 and reactive_ratio >= 0.3:
-        return "possible motor-like load"
+        return _split_phase_label(signature, "motor-like load")
     if abs_va >= 100 and reactive_ratio >= 0.75:
-        return "possible power-electronics load"
+        return _split_phase_label(signature, "power-electronics load")
     return "unknown recurring load"
 
 
@@ -247,6 +290,18 @@ def _delta(current: float | None, previous: float | None) -> float:
     if current is None or previous is None:
         return 0.0
     return current - previous
+
+
+def _optional_delta(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous is None:
+        return None
+    return current - previous
+
+
+def _round_optional(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 3)
 
 
 def _event_power_w(event: CircuitEvent) -> float | None:
@@ -272,6 +327,8 @@ def _event_power_w(event: CircuitEvent) -> float | None:
 def _edge_similar(edge: NilmEdge, reference: NilmEdge) -> bool:
     if edge.direction != reference.direction:
         return False
+    if not _split_phase_types_compatible(edge, reference):
+        return False
     return _within_ratio(edge.delta_w, reference.delta_w, 0.2) and _within_ratio(
         edge.delta_var, reference.delta_var, 0.35
     )
@@ -285,6 +342,10 @@ def _edge_similar_to_cluster(edge: NilmEdge, cluster: list[NilmEdge]) -> bool:
         delta_va=float(median(candidate.delta_va for candidate in cluster)),
         delta_pf=float(median(candidate.delta_pf for candidate in cluster)),
         direction=cluster[0].direction,
+        split_phase_type=_dominant_text(
+            candidate.split_phase_type for candidate in cluster
+        ),
+        dominant_leg=_dominant_text(candidate.dominant_leg for candidate in cluster),
     )
     return _edge_similar(edge, reference) or any(
         _edge_similar(edge, candidate) for candidate in cluster
@@ -294,3 +355,111 @@ def _edge_similar_to_cluster(edge: NilmEdge, cluster: list[NilmEdge]) -> bool:
 def _within_ratio(value: float, reference: float, tolerance_ratio: float) -> bool:
     tolerance = max(abs(reference) * tolerance_ratio, 25.0)
     return abs(value - reference) <= tolerance
+
+
+def _split_phase_topology(
+    leg_a_delta_w: float | None,
+    leg_b_delta_w: float | None,
+) -> dict[str, float | str | None]:
+    if leg_a_delta_w is None and leg_b_delta_w is None:
+        return _topology("unknown", "unknown", None)
+    if leg_a_delta_w is None or leg_b_delta_w is None:
+        return _topology("missing_leg_data", "unknown", None)
+
+    abs_a = abs(float(leg_a_delta_w))
+    abs_b = abs(float(leg_b_delta_w))
+    balance_ratio = _leg_balance_ratio(abs_a, abs_b)
+    dominant_leg = _dominant_leg(abs_a, abs_b, balance_ratio)
+    leg_threshold_w = 50.0
+    single_leg_ratio = 0.25
+
+    if abs_a < leg_threshold_w and abs_b < leg_threshold_w:
+        return _topology("unknown", "unknown", balance_ratio)
+    if leg_a_delta_w * leg_b_delta_w < 0:
+        return _topology("imbalanced_240v_or_mixed", "mixed", balance_ratio)
+    if (
+        abs_a >= leg_threshold_w
+        and abs_b <= leg_threshold_w
+        and abs_b <= abs_a * single_leg_ratio
+    ):
+        return _topology("single_leg_a", "a", balance_ratio)
+    if (
+        abs_b >= leg_threshold_w
+        and abs_a <= leg_threshold_w
+        and abs_a <= abs_b * single_leg_ratio
+    ):
+        return _topology("single_leg_b", "b", balance_ratio)
+    if balance_ratio is not None and balance_ratio <= 0.25:
+        return _topology("balanced_240v", "balanced", balance_ratio)
+    return _topology("imbalanced_240v_or_mixed", dominant_leg, balance_ratio)
+
+
+def _topology(
+    split_phase_type: str,
+    dominant_leg: str,
+    leg_balance_ratio: float | None,
+) -> dict[str, float | str | None]:
+    return {
+        "split_phase_type": split_phase_type,
+        "dominant_leg": dominant_leg,
+        "leg_balance_ratio": leg_balance_ratio,
+    }
+
+
+def _leg_balance_ratio(abs_a: float, abs_b: float) -> float | None:
+    average = (abs_a + abs_b) / 2.0
+    if average <= 0.0:
+        return None
+    return round(abs(abs_a - abs_b) / average, 3)
+
+
+def _dominant_leg(
+    abs_a: float,
+    abs_b: float,
+    balance_ratio: float | None,
+) -> str:
+    if balance_ratio is not None and balance_ratio <= 0.25:
+        return "balanced"
+    if abs_a > abs_b:
+        return "a"
+    if abs_b > abs_a:
+        return "b"
+    return "balanced"
+
+
+def _median_optional(values: Iterable[float | None]) -> float | None:
+    usable = [float(value) for value in values if value is not None]
+    if not usable:
+        return None
+    return round(float(median(usable)), 3)
+
+
+def _dominant_text(values: Iterable[str]) -> str:
+    usable = [value for value in values if value and value != "unknown"]
+    if not usable:
+        return "unknown"
+    return sorted(multimode(usable))[0]
+
+
+def _split_phase_types_compatible(edge: NilmEdge, reference: NilmEdge) -> bool:
+    edge_type = edge.split_phase_type
+    reference_type = reference.split_phase_type
+    if _uncertain_split_phase_type(edge_type) or _uncertain_split_phase_type(
+        reference_type
+    ):
+        return _uncertain_split_phase_type(edge_type) and _uncertain_split_phase_type(
+            reference_type
+        )
+    return edge_type == reference_type
+
+
+def _uncertain_split_phase_type(value: str) -> bool:
+    return value in {"unknown", "missing_leg_data"}
+
+
+def _split_phase_label(signature: NilmSignature, label: str) -> str:
+    if signature.split_phase_type == "balanced_240v":
+        return f"possible 240 V {label}"
+    if signature.split_phase_type in {"single_leg_a", "single_leg_b"}:
+        return f"possible 120 V {label}"
+    return f"possible {label}"

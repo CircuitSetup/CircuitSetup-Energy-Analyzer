@@ -321,6 +321,16 @@ evidence.
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
 
+When mains NILM has two real-power source channels that can be mapped to
+split-phase legs, such as L1/L2 or leg A/B entity names, the analyzer keeps leg
+context on recurring signatures. This lets review evidence separate likely
+single-leg 120 V transitions from balanced 240 V transitions and mixed or
+overlapping events. Signature payloads include leg A/B median delta watts,
+dominant leg, leg balance ratio, and split-phase type such as `single_leg_a`,
+`single_leg_b`, `balanced_240v`, or `imbalanced_240v_or_mixed`. These are
+review clues for mapping, CT orientation, or unknown-load investigation rather
+than appliance diagnoses.
+
 ## Alert Philosophy
 
 The analyzer is evidence-first. It learns for at least 7 days or enough profile-specific cycles before sending appliance-behavior alerts. Alerts require repeated evidence and are phrased as a possible issue or behavior change, not a diagnosis.

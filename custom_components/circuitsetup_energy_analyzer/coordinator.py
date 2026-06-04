@@ -1595,18 +1595,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> NormalizedCircuitSample:
-        samples = [
-            build_circuit_sample(
-                replace(config, sensors=(sensor,)),
-                self._source_states_for(replace(config, sensors=(sensor,)), now),
-                now,
+        sensor_samples = [
+            (
+                sensor,
+                build_circuit_sample(
+                    replace(config, sensors=(sensor,)),
+                    self._source_states_for(replace(config, sensors=(sensor,)), now),
+                    now,
+                ),
             )
             for sensor in config.sensors
         ]
+        samples = [sample for _sensor, sample in sensor_samples]
         if not samples:
             return build_circuit_sample(config, {}, now)
 
         raw_real_power = _sum_sample_values(samples, "raw_real_power")
+        leg_a_sample, leg_b_sample = _parallel_leg_samples(sensor_samples)
         return NormalizedCircuitSample(
             timestamp=max(sample.timestamp for sample in samples),
             circuit_id=config.circuit_id,
@@ -1630,6 +1635,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 raw_real_power,
                 config.power_flow,
             ),
+            leg_a_real_power=_sample_value_or_none(leg_a_sample, "real_power"),
+            leg_b_real_power=_sample_value_or_none(leg_b_sample, "real_power"),
+            leg_a_current=_sample_value_or_none(leg_a_sample, "current"),
+            leg_b_current=_sample_value_or_none(leg_b_sample, "current"),
+            leg_a_voltage=_sample_value_or_none(leg_a_sample, "voltage"),
+            leg_b_voltage=_sample_value_or_none(leg_b_sample, "voltage"),
         )
 
     async def _sync_data_quality_repairs(
@@ -1734,18 +1745,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         seen: set[str] = set()
         for signature in signatures:
             current = existing.get(signature.signature_id, {})
-            user_label = current.get("user_label")
+            metadata_current = (
+                current
+                if _nilm_signature_metadata_compatible(signature, current)
+                else {}
+            )
+            user_label = metadata_current.get("user_label")
             classified_signature = replace(signature, user_label=user_label)
-            ignored = bool(current.get("ignored")) or (
+            ignored = bool(metadata_current.get("ignored")) or (
                 circuit_id,
                 signature.signature_id,
-            ) in self.ignored_nilm_signatures
+            ) in self.ignored_nilm_signatures and bool(metadata_current)
             payload = {
                 "signature_id": signature.signature_id,
                 "median_delta_w": signature.median_delta_w,
                 "median_delta_var": signature.median_delta_var,
                 "median_delta_va": signature.median_delta_va,
                 "median_delta_pf": signature.median_delta_pf,
+                "median_leg_a_delta_w": signature.median_leg_a_delta_w,
+                "median_leg_b_delta_w": signature.median_leg_b_delta_w,
+                "leg_balance_ratio": signature.leg_balance_ratio,
+                "dominant_leg": signature.dominant_leg,
+                "split_phase_type": signature.split_phase_type,
                 "occurrence_count": signature.occurrence_count,
                 "confidence": signature.confidence,
                 "classification": classify_signature(classified_signature),
@@ -1755,8 +1776,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if ignored:
                 payload["ignored"] = True
             for key in ("review_state", "expected", "merged_into"):
-                if key in current:
-                    payload[key] = current[key]
+                if key in metadata_current:
+                    payload[key] = metadata_current[key]
             payloads.append(payload)
             seen.add(signature.signature_id)
 
@@ -4025,6 +4046,158 @@ def _nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
     else:
         payload["review_state"] = "new"
     return payload
+
+
+def _nilm_signature_metadata_compatible(
+    signature: Any,
+    current: dict[str, Any],
+) -> bool:
+    if not current:
+        return False
+
+    current_type = str(current.get("split_phase_type") or "")
+    signature_type = str(getattr(signature, "split_phase_type", "unknown") or "unknown")
+    if current_type:
+        if not _nilm_split_phase_metadata_compatible(current_type, signature_type):
+            return False
+    elif signature_type not in {"unknown", "missing_leg_data"}:
+        return False
+
+    checks = (
+        ("median_delta_w", 0.2),
+        ("median_delta_var", 0.35),
+        ("median_delta_va", 0.35),
+    )
+    for key, tolerance_ratio in checks:
+        current_value = _float_or_none(current.get(key))
+        signature_value = _float_or_none(getattr(signature, key, None))
+        if current_value is None or signature_value is None:
+            continue
+        tolerance = max(abs(signature_value) * tolerance_ratio, 25.0)
+        if abs(current_value - signature_value) > tolerance:
+            return False
+
+    return True
+
+
+def _nilm_split_phase_metadata_compatible(
+    current_type: str,
+    signature_type: str,
+) -> bool:
+    uncertain = {"unknown", "missing_leg_data"}
+    if current_type in uncertain or signature_type in uncertain:
+        return current_type in uncertain and signature_type in uncertain
+    return current_type == signature_type
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parallel_leg_samples(
+    sensor_samples: Iterable[tuple[SensorRef, NormalizedCircuitSample]],
+) -> tuple[NormalizedCircuitSample | None, NormalizedCircuitSample | None]:
+    items = list(sensor_samples)
+    leg_a = next(
+        (
+            sample
+            for sensor, sample in items
+            if sensor.role is SensorRole.REAL_POWER
+            and _normalized_leg(sensor.leg) == "a"
+        ),
+        None,
+    )
+    leg_b = next(
+        (
+            sample
+            for sensor, sample in items
+            if sensor.role is SensorRole.REAL_POWER
+            and _normalized_leg(sensor.leg) == "b"
+        ),
+        None,
+    )
+    if leg_a is not None or leg_b is not None:
+        return leg_a, leg_b
+
+    hinted_leg_a = next(
+        (
+            sample
+            for sensor, sample in items
+            if sensor.role is SensorRole.REAL_POWER
+            and _entity_id_leg_hint(sensor.entity_id) == "a"
+        ),
+        None,
+    )
+    hinted_leg_b = next(
+        (
+            sample
+            for sensor, sample in items
+            if sensor.role is SensorRole.REAL_POWER
+            and _entity_id_leg_hint(sensor.entity_id) == "b"
+        ),
+        None,
+    )
+    if hinted_leg_a is not None or hinted_leg_b is not None:
+        return hinted_leg_a, hinted_leg_b
+    return None, None
+
+
+def _entity_id_leg_hint(entity_id: str) -> str | None:
+    normalized = "".join(
+        character if character.isalnum() else "_"
+        for character in str(entity_id).lower()
+    )
+    padded = f"_{normalized}_"
+    if any(
+        pattern in padded
+        for pattern in (
+            "_l1_",
+            "_leg1_",
+            "_leg_1_",
+            "_line1_",
+            "_line_1_",
+            "_phase1_",
+            "_phase_1_",
+            "_leg_a_",
+            "_line_a_",
+            "_phase_a_",
+        )
+    ):
+        return "a"
+    if any(
+        pattern in padded
+        for pattern in (
+            "_l2_",
+            "_leg2_",
+            "_leg_2_",
+            "_line2_",
+            "_line_2_",
+            "_phase2_",
+            "_phase_2_",
+            "_leg_b_",
+            "_line_b_",
+            "_phase_b_",
+        )
+    ):
+        return "b"
+    return None
+
+
+def _sample_value_or_none(
+    sample: NormalizedCircuitSample | None,
+    attribute: str,
+) -> float | None:
+    if sample is None:
+        return None
+    value = getattr(sample, attribute, None)
+    if value is None:
+        return None
+    return float(value)
 
 
 def _sum_sample_values(
