@@ -76,6 +76,28 @@ def test_recommended_v1_appliance_profiles_have_distinct_analysis_contexts() -> 
     assert "storm_frequency_hint" in sump_pump.features
 
 
+def test_washer_profile_supports_single_phase_motor_analysis_context() -> None:
+    washer_profile = next(
+        (profile for profile in ApplianceProfile if profile.value == "washer"),
+        None,
+    )
+
+    assert washer_profile is not None
+
+    definition = get_profile_definition(washer_profile)
+
+    assert definition.supported_modes == {CircuitMode.SINGLE_PHASE}
+    assert SensorRole.REAL_POWER in definition.required_roles
+    assert SensorRole.CURRENT in definition.required_roles
+    assert SensorRole.REACTIVE_POWER in definition.recommended_roles
+    assert SensorRole.APPARENT_POWER in definition.recommended_roles
+    assert SensorRole.POWER_FACTOR in definition.recommended_roles
+    assert SensorRole.ENERGY in definition.recommended_roles
+    assert "spin_motor" in definition.features
+    assert "unbalanced_load_hint" in definition.features
+    assert definition.minimum_cycles >= 8
+
+
 def test_ev_charger_profile_supports_car_charger_analysis_context() -> None:
     definition = get_profile_definition(ApplianceProfile.EV_CHARGER)
 

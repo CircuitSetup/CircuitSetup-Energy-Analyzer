@@ -212,6 +212,7 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.ELECTRIC_HEAT.value,
     ApplianceProfile.WATER_HEATER.value,
     ApplianceProfile.OVEN.value,
+    ApplianceProfile.WASHER.value,
     ApplianceProfile.DRYER.value,
     ApplianceProfile.POOL_PUMP.value,
     ApplianceProfile.WATER_PUMP.value,
@@ -1574,6 +1575,12 @@ def _normalize_assignment_profile(raw_profile: str) -> str:
         "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
         "well_pump": ApplianceProfile.WATER_PUMP.value,
         "booster_pump": ApplianceProfile.WATER_PUMP.value,
+        "clothes_washer": ApplianceProfile.WASHER.value,
+        "laundry_washer": ApplianceProfile.WASHER.value,
+        "washing_machine": ApplianceProfile.WASHER.value,
+        "clothes_dryer": ApplianceProfile.DRYER.value,
+        "electric_dryer": ApplianceProfile.DRYER.value,
+        "gas_dryer": ApplianceProfile.DRYER.value,
         "car_charger": ApplianceProfile.EV_CHARGER.value,
     }
     return aliases.get(normalized, normalized)
@@ -1735,6 +1742,37 @@ def _suggest_assignment_profile_mode(
             CircuitMode.DUAL_PHASE.value,
         ),
         ("_oven_", ApplianceProfile.OVEN.value, CircuitMode.DUAL_PHASE.value),
+        (
+            "_clothes_washer_",
+            ApplianceProfile.WASHER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        (
+            "_laundry_washer_",
+            ApplianceProfile.WASHER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        (
+            "_washing_machine_",
+            ApplianceProfile.WASHER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        ("_washer_", ApplianceProfile.WASHER.value, CircuitMode.SINGLE_PHASE.value),
+        (
+            "_clothes_dryer_",
+            ApplianceProfile.DRYER.value,
+            CircuitMode.DUAL_PHASE.value,
+        ),
+        (
+            "_electric_dryer_",
+            ApplianceProfile.DRYER.value,
+            CircuitMode.DUAL_PHASE.value,
+        ),
+        (
+            "_gas_dryer_",
+            ApplianceProfile.DRYER.value,
+            CircuitMode.DUAL_PHASE.value,
+        ),
         ("_dryer_", ApplianceProfile.DRYER.value, CircuitMode.DUAL_PHASE.value),
         (
             "_solar_",

@@ -5448,7 +5448,16 @@ def _appliance_profile_mode_from_circuit_id(
             CircuitMode.DUAL_PHASE,
         ),
         (("_oven_", "_range_"), ApplianceProfile.OVEN, CircuitMode.DUAL_PHASE),
-        (("_dryer_",), ApplianceProfile.DRYER, CircuitMode.DUAL_PHASE),
+        (
+            ("_washer_", "_clothes_washer_", "_laundry_washer_", "_washing_machine_"),
+            ApplianceProfile.WASHER,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_dryer_", "_clothes_dryer_", "_electric_dryer_", "_gas_dryer_"),
+            ApplianceProfile.DRYER,
+            CircuitMode.DUAL_PHASE,
+        ),
         (
             ("_pool_pump_", "_poolpump_"),
             ApplianceProfile.POOL_PUMP,

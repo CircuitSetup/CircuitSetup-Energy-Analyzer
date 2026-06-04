@@ -128,6 +128,21 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         features=frozenset({"preheat", "temperature_hold", "element_cycle"}),
         minimum_cycles=8,
     ),
+    ApplianceProfile.WASHER: ProfileDefinition(
+        appliance_profile=ApplianceProfile.WASHER,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=_BASIC_POWER_ROLES,
+        recommended_roles=_POWER_CONTEXT,
+        features=_MOTOR_FEATURES
+        | frozenset({
+            "wash_motor",
+            "drain_pump",
+            "spin_motor",
+            "fill_valve_cycle",
+            "unbalanced_load_hint",
+        }),
+        minimum_cycles=8,
+    ),
     ApplianceProfile.DRYER: ProfileDefinition(
         appliance_profile=ApplianceProfile.DRYER,
         supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),

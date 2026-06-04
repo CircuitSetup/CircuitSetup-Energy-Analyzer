@@ -16,9 +16,9 @@ The integration learns conservative per-circuit baselines for single-phase appli
   repeated anomalies and reports them as possible issues with observed evidence.
 - Tracks active power, current, voltage, frequency, power factor, reactive
   power, apparent power, metric consistency, usage patterns, and kWh changes.
-- Provides appliance-aware analysis for refrigerators, HVAC compressor/blower
-  loads, electric heat, water heaters, pool and water pumps, sump pumps, car
-  chargers, solar/export circuits, and mains feeds.
+- Provides appliance-aware analysis for refrigerators, washers, dryers, HVAC
+  compressor/blower loads, electric heat, water heaters, pool and water pumps,
+  sump pumps, car chargers, solar/export circuits, and mains feeds.
 - Adds optional usage-spike, daily goal, billing-cycle, cost, demand, breaker
   capacity, standby, always-on, solar-flow, and utility/Opower comparison
   diagnostics.
@@ -80,8 +80,8 @@ The setup and options screens are designed to avoid hand-written JSON:
 
 Recommended v1 appliance types include broad `hvac`, more specific
 `hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus
-`water_pump`, `pool_pump`, and `sump_pump` pump profiles. Existing
-`well_pump` input is accepted as a legacy alias for `water_pump`.
+`washer`, `dryer`, `water_pump`, `pool_pump`, and `sump_pump` profiles.
+Existing `well_pump` input is accepted as a legacy alias for `water_pump`.
 
 Mains sensors are optional, but they are required for the whole-home balance,
 Mains NILM, solar-flow, and utility comparison features.
@@ -105,7 +105,7 @@ selected analyzer entities report possible issue states.
 
 CircuitSetup Energy Analyzer supports four analysis modes:
 
-- Single-phase circuits monitor one CT/channel mapped to one primary appliance, such as a refrigerator, freezer, pump, or other 120 V load.
+- Single-phase circuits monitor one CT/channel mapped to one primary appliance, such as a refrigerator, freezer, washer, pump, or other 120 V load.
 - Dual-phase circuits combine two CT/channels into one appliance model for 240 V loads, such as an HVAC compressor, electric heat, water heater, oven, dryer, pool pump, or car/EV charger. The analyzer keeps leg-level context so it can surface suspicious imbalance or phase-pairing problems without treating each leg as an unrelated appliance.
 - Mixed circuits are useful when one branch circuit feeds multiple small loads. The integration reports data quality, large changes, and recurring evidence conservatively instead of pretending the circuit is a clean appliance signature.
 - Mains NILM circuits are whole-home aggregate inputs. Experimental NILM can look for recurring aggregate signatures after known directly monitored circuits are masked out.
@@ -169,8 +169,8 @@ specific failed part.
 
 For user-defined activity alerts, use the `set_activity_alert_settings` service
 to set `max_active_minutes` and/or `max_idle_minutes` values. This is useful
-for appliance-style "left on too long" notices, such as a pump, oven, dryer, or
-refrigerator compressor run that exceeds a user-selected duration, and for
+for appliance-style "left on too long" notices, such as a pump, oven, washer,
+dryer, or refrigerator compressor run that exceeds a user-selected duration, and for
 "no activity for too long" notices when an expected cycling load has not run.
 
 ## Recent Activity Timeline
@@ -465,7 +465,7 @@ Power Flow to Generation / Solar Export.
 ### Core Health, Learning, And Evidence
 
 These sensors are created for every configured circuit, including refrigerators,
-freezers, HVAC, water heaters, ovens, dryers, pumps, EV chargers, mixed
+freezers, HVAC, water heaters, ovens, washers, dryers, pumps, EV chargers, mixed
 circuits, mains, and solar-related circuits.
 
 - Anomaly Score (`sensor.<circuit>_anomaly_score`) - Numeric summary of current anomaly evidence for the circuit. Possible outputs: `0.0` when quiet, higher numbers as repeated evidence accumulates.
@@ -483,8 +483,8 @@ circuits, mains, and solar-related circuits.
 ### Appliance Behavior And Power Quality
 
 These sensors are most useful for dedicated appliance circuits: refrigerator,
-freezer, HVAC compressor, HVAC blower, electric heat, water heater, oven, dryer,
-pool pump, water pump, sump pump, motor loads, resistive loads, and similar
+freezer, HVAC compressor, HVAC blower, electric heat, water heater, oven,
+washer, dryer, pool pump, water pump, sump pump, motor loads, resistive loads, and similar
 single-load circuits. Mixed circuits may expose fewer appliance-specific
 signals.
 
@@ -503,8 +503,8 @@ signals.
 ### Energy Usage, Goals, Billing, And Cost
 
 These sensors require cumulative energy inputs. They are useful for appliances
-where usage over a day or billing cycle matters, such as refrigerators, HVAC,
-water heaters, pool pumps, EV chargers, ovens, dryers, and other large loads.
+where usage over a day or billing cycle matters, such as refrigerators, washers,
+dryers, HVAC, water heaters, pool pumps, EV chargers, ovens, and other large loads.
 Use Home Assistant's Energy Dashboard for normal energy history; these entities
 exist for analyzer evidence and alerts.
 

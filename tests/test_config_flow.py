@@ -1258,6 +1258,30 @@ async def test_assignment_step_exposes_power_flow_for_solar_and_mains() -> None:
     assert result["data"][CONF_CIRCUITS][0]["power_flow"] == "generation"
 
 
+@pytest.mark.asyncio
+async def test_assignment_step_auto_suggests_washer_profile() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.laundry_washer_active_power",
+                "sensor.laundry_washer_current",
+                "sensor.laundry_washer_power_factor",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "appliance_profile") == "washer"
+    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+
+
 def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         _advanced_settings_schema,
@@ -1482,6 +1506,8 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
         appliance_options
     )
     assert {"value": "hvac_blower", "label": "HVAC Blower"} in appliance_options
+    assert {"value": "washer", "label": "Washer"} in appliance_options
+    assert {"value": "dryer", "label": "Dryer"} in appliance_options
     assert {"value": "ev_charger", "label": "EV Charger"} in appliance_options
     assert all("_" not in option["label"] for option in appliance_options)
 

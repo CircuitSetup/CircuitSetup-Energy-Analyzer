@@ -41,6 +41,7 @@ MOTOR_PROFILES = frozenset(
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
         ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.WASHER,
         ApplianceProfile.POOL_PUMP,
         ApplianceProfile.WATER_PUMP,
         ApplianceProfile.WELL_PUMP,

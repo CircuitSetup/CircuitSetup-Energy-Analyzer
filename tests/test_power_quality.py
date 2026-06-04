@@ -536,6 +536,36 @@ def test_select_evidence_treats_hvac_compressor_as_motor_load() -> None:
     assert evidence.feature == "motor_relationship_changed"
 
 
+def test_select_evidence_treats_washer_as_motor_load() -> None:
+    scores = score_power_quality_features(
+        extract_power_quality_features(
+            sample(
+                real_power=850.0,
+                reactive_power=390.0,
+                apparent_power=935.0,
+                power_factor=0.82,
+            )
+        ),
+        {
+            "real_power": baseline("real_power", 700.0, 40.0),
+            "reactive_power": baseline("reactive_power", 180.0, 25.0),
+            "apparent_power": baseline("apparent_power", 872.0, 30.0),
+            "power_factor": baseline("power_factor", 0.94, 0.02),
+            "reactive_to_real_ratio": baseline("reactive_to_real_ratio", 0.22, 0.03),
+            "apparent_to_real_ratio": baseline("apparent_to_real_ratio", 1.06, 0.02),
+            "power_factor_deficit": baseline("power_factor_deficit", 0.06, 0.02),
+        },
+    )
+
+    evidence = select_power_quality_evidence(
+        config(ApplianceProfile.WASHER, CircuitMode.SINGLE_PHASE),
+        scores,
+    )
+
+    assert evidence is not None
+    assert evidence.feature == "motor_relationship_changed"
+
+
 def test_select_evidence_ignores_raw_var_when_real_power_changed() -> None:
     scores = score_power_quality_features(
         extract_power_quality_features(

@@ -20,6 +20,7 @@ class ApplianceProfile(StrEnum):
     ELECTRIC_HEAT = "electric_heat"
     WATER_HEATER = "water_heater"
     OVEN = "oven"
+    WASHER = "washer"
     DRYER = "dryer"
     POOL_PUMP = "pool_pump"
     WATER_PUMP = "water_pump"
