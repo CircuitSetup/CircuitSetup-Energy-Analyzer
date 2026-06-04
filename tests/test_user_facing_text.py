@@ -84,6 +84,9 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "power, voltage, current" in descriptions["extra_source_entities"].lower()
     assert "power factor" in descriptions["extra_source_entities"].lower()
     assert "optional" in descriptions["mains_source_entities"].lower()
+    assert "review circuit assignments" in strings["config"]["step"]["user"][
+        "description"
+    ].lower()
 
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
@@ -97,6 +100,9 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 160 for description in descriptions.values())
     assert "optional" in descriptions["mains_source_entities"].lower()
+    assert "review circuit assignments" in strings["options"]["step"]["init"][
+        "description"
+    ].lower()
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:

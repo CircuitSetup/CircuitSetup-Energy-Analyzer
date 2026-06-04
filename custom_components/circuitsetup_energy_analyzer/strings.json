@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Configure CircuitSetup Energy Analyzer",
-        "description": "Select source meter devices or extra source sensors. Source pickers show sensors that look like power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+        "description": "Step 1: select source devices or extra source sensors. Submit opens review circuit assignments before settings are saved.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
@@ -52,7 +52,7 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Tune source meter devices, extra source sensors, diagnostics, and experimental NILM settings.",
+        "description": "Step 1: tune source devices, extra source sensors, diagnostics, and NILM. Submit opens review circuit assignments before settings are saved.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
