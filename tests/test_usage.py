@@ -86,6 +86,31 @@ def test_record_energy_usage_marks_first_sample_waiting_for_delta() -> None:
     assert result.status_reason == "first_cumulative_sample"
 
 
+def test_record_energy_usage_keeps_waiting_until_positive_delta() -> None:
+    history = {}
+
+    record_energy_usage(
+        history,
+        circuit_id="hvac",
+        timestamp=datetime(2026, 6, 5, 12, 0, tzinfo=UTC),
+        energy_kwh=108.4,
+        settings=EnergyUsageSettings(),
+    )
+    result = record_energy_usage(
+        history,
+        circuit_id="hvac",
+        timestamp=datetime(2026, 6, 5, 18, 0, tzinfo=UTC),
+        energy_kwh=108.4,
+        settings=EnergyUsageSettings(),
+    )
+
+    assert result is not None
+    assert result.daily_usage_kwh == 0.0
+    assert result.tracking_status == "waiting_for_delta"
+    assert result.status_reason == "no_positive_delta_observed"
+    assert history["days"] == []
+
+
 def test_record_energy_usage_distinguishes_true_zero_after_tracking() -> None:
     history = {
         "last_energy_kwh": 108.4,

@@ -91,9 +91,15 @@ def record_energy_usage(
     daily_usage_share = (
         round(today_usage / baseline_total, 4) if baseline_total > 0.0 else 0.0
     )
+    has_observed_positive_delta = any(
+        float(day["usage_kwh"]) > 0.0 for day in days
+    )
     if initial_sample:
         tracking_status = "waiting_for_delta"
         status_reason = "first_cumulative_sample"
+    elif delta_kwh <= 0.0 and not has_observed_positive_delta:
+        tracking_status = "waiting_for_delta"
+        status_reason = "no_positive_delta_observed"
     elif baseline_day_count < window_days:
         tracking_status = "learning"
         status_reason = "building_energy_window"

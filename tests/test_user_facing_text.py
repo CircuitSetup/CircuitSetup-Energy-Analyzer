@@ -518,6 +518,7 @@ def test_readme_includes_status_glossary_for_machine_values() -> None:
         "not_dual_phase",
         "missing_mains",
         "inconsistent_export",
+        "waiting_for_delta",
         "no_match",
         "projected_over_budget",
         "active_solar_supported",
@@ -548,6 +549,7 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "Core Appliance Status Sensors" in readme_text
     assert "Daily Energy Usage can show 0 kWh for two different reasons" in readme_text
     assert "Waiting For Energy Change" in readme_text
+    assert "waiting_for_delta" in readme_text
     assert "true zero usage" in readme_text
     assert "not observed a cumulative kWh increase" in readme_text
 

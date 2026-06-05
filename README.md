@@ -558,6 +558,7 @@ Common status values:
 | Tracking | `tracking` | The analyzer has enough inputs and is tracking this check. |
 | Unavailable | `unavailable` | This check does not have enough retained data yet. |
 | Unconfigured | `unconfigured` | This optional check has not been configured. |
+| Waiting For Energy Change | `waiting_for_delta` | A cumulative kWh source is present, but no positive energy increase has been observed yet. |
 | Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
 
 ## Core Appliance Status Sensors
@@ -647,7 +648,7 @@ exist for analyzer evidence and alerts.
 
 - Daily Energy Usage (`sensor.<circuit>_daily_energy_usage`) - kWh derived from today's positive energy delta. Possible outputs: `kWh`.
 - Energy Usage Share (`sensor.<circuit>_energy_usage_share`) - Today's usage as a percent of the learned rolling energy window. Possible outputs: percentage values.
-- Energy Usage Status (`sensor.<circuit>_energy_usage_status`) - Daily spike tracker state. Possible outputs include `learning`, `tracking`, or `over_threshold`.
+- Energy Usage Status (`sensor.<circuit>_energy_usage_status`) - Daily spike tracker state. Possible outputs include `waiting_for_delta`, `learning`, `tracking`, or `over_threshold`.
 - Energy Goal Usage (`sensor.<circuit>_energy_goal_usage`) - Today's usage as a percent of the configured daily goal. Possible outputs: percentage values when a goal is configured.
 - Energy Goal Status (`sensor.<circuit>_energy_goal_status`) - Daily goal tracker state. Possible outputs include `unconfigured`, `tracking`, `near_goal`, or `over_goal`.
 - Billing Cycle Usage (`sensor.<circuit>_billing_cycle_usage`) - Current billing-cycle usage for the circuit. Possible outputs: `kWh`.
