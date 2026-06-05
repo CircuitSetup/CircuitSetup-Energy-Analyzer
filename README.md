@@ -547,6 +547,24 @@ Common status values:
 | Unconfigured | `unconfigured` | This optional check has not been configured. |
 | Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
 
+## Core Appliance Status Sensors
+
+Start with these entities on dashboards:
+
+- Health Summary: one short state for the circuit, such as `Ready`, `Learning`, `Needs data`, or `Possible issue`.
+- Readiness: machine-readable status plus attributes explaining learning progress and blocked checks.
+- Alert Evidence: the strongest current evidence, written as observed behavior rather than diagnosis.
+- Recent Activity: the most recent start, stop, or possible-issue event.
+- Energy Usage Status: whether daily kWh tracking is waiting for a first increase, learning, tracking, or over threshold.
+- Data Quality Checklist: missing, stale, or invalid source data that can block analysis.
+
+Daily Energy Usage can show 0 kWh for two different reasons:
+
+- true zero usage: the analyzer has already started tracking the cumulative kWh source and the source has not increased today.
+- Waiting For Energy Change: a cumulative kWh source is present, but the analyzer has not observed a cumulative kWh increase since tracking started.
+
+Use the `Energy Usage Status` entity and the `status_explanation` attribute to distinguish these cases.
+
 ### Source Measurement Inputs
 
 These are the ESPHome/CircuitSetup sensors selected during setup. They may come

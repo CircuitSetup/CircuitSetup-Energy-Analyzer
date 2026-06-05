@@ -462,6 +462,16 @@ def test_readme_includes_status_glossary_for_machine_values() -> None:
     assert "status_explanation" in readme_text
 
 
+def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Core Appliance Status Sensors" in readme_text
+    assert "Daily Energy Usage can show 0 kWh for two different reasons" in readme_text
+    assert "Waiting For Energy Change" in readme_text
+    assert "true zero usage" in readme_text
+    assert "not observed a cumulative kWh increase" in readme_text
+
+
 def _dashboard_cards(node: object) -> list[dict[str, object]]:
     cards: list[dict[str, object]] = []
     if isinstance(node, dict):

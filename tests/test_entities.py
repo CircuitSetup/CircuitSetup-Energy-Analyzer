@@ -615,6 +615,33 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
         assert description.unit_of_measurement is None
 
 
+def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+
+    assert descriptions["health_summary"].entity_registry_visible_default is True
+    assert descriptions["readiness"].entity_registry_visible_default is True
+    assert descriptions["daily_energy_usage"].entity_registry_visible_default is True
+    assert descriptions["energy_usage_status"].entity_registry_visible_default is True
+    assert (
+        descriptions["power_quality_evidence"].entity_registry_visible_default is True
+    )
+
+    assert descriptions["reactive_power_drift"].entity_category == (
+        EntityCategory.DIAGNOSTIC
+    )
+    assert descriptions["apparent_power_drift"].entity_category == (
+        EntityCategory.DIAGNOSTIC
+    )
+    assert descriptions["power_factor_drift"].entity_category == (
+        EntityCategory.DIAGNOSTIC
+    )
+
+
 def test_sensor_entities_use_purpose_specific_icons() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
