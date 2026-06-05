@@ -697,11 +697,19 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
     }
 
     assert expected <= set(refs)
+    focused_native_refs = {
+        "docs/images/readme/energy-usage-spikes.png",
+        "docs/images/readme/daily-energy-goals.png",
+        "docs/images/readme/notifications-panel.png",
+    }
     for ref in sorted(set(refs)):
         path = ROOT / ref
         assert path.exists(), f"{ref} is referenced by README but missing"
         width, height = _png_dimensions(path)
-        assert width >= 500, f"{ref} is too narrow to show readable UI"
+        min_width = 350 if ref in focused_native_refs else 500
+        assert width >= min_width, f"{ref} is too narrow to show readable UI"
+        if ref in focused_native_refs:
+            assert width <= 520, f"{ref} should stay at native card/panel scale"
         assert height >= 250, f"{ref} is too short to show readable UI"
         assert not (
             width >= 1800 and height >= 1000
