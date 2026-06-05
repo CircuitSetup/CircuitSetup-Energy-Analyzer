@@ -4206,6 +4206,7 @@ def _energy_usage_spike_message(
 
 
 def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
+    status = "over_threshold" if result.spike is not None else result.tracking_status
     return {
         "date": result.date,
         "daily_usage_kwh": result.daily_usage_kwh,
@@ -4215,16 +4216,50 @@ def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
         "threshold_ratio": result.threshold_ratio,
         "threshold_kwh": result.threshold_kwh,
         "daily_usage_share_percent": round(result.daily_usage_share * 100, 1),
-        "status": (
-            "over_threshold"
-            if result.spike is not None
-            else (
-                "tracking"
-                if result.baseline_day_count >= result.window_days
-                else "learning"
-            )
-        ),
+        "status": status,
+        "raw_status": status,
+        "status_label": _status_label_for_evidence(status),
+        "status_explanation": _status_explanation_for_evidence(status),
+        "status_reason": result.status_reason,
+        "suggested_next_check": _energy_usage_next_check(status),
     }
+
+
+def _status_label_for_evidence(status: str) -> str:
+    overrides = {"waiting_for_delta": "Waiting For Energy Change"}
+    if status in overrides:
+        return overrides[status]
+    return " ".join(part.capitalize() for part in status.split("_"))
+
+
+def _status_explanation_for_evidence(status: str) -> str:
+    if status == "waiting_for_delta":
+        return (
+            "A cumulative kWh source is present, but the analyzer has not "
+            "observed it increase since tracking started."
+        )
+    if status == "learning":
+        return "The analyzer is still collecting the rolling daily kWh baseline."
+    if status == "tracking":
+        return "The analyzer is tracking daily usage from cumulative kWh changes."
+    if status == "over_threshold":
+        return "Today usage is above the configured rolling-window threshold."
+    return f"{_status_label_for_evidence(status)} status reported by the analyzer."
+
+
+def _energy_usage_next_check(status: str) -> str:
+    if status == "waiting_for_delta":
+        return (
+            "Let the analyzer see the energy sensor increase, or confirm the "
+            "circuit has a cumulative kWh source."
+        )
+    if status == "learning":
+        return "Let the analyzer retain enough full days for the rolling baseline."
+    if status == "tracking":
+        return "No action is needed unless the usage looks wrong for the appliance."
+    if status == "over_threshold":
+        return "Review recent appliance runtime and confirm the mapped kWh source."
+    return "Review the sensor attributes for the observed evidence."
 
 
 def _energy_goal_message(

@@ -715,6 +715,48 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
     ]
 
 
+def test_energy_usage_sensors_explain_waiting_for_delta() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC")
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            energy_usage_evidence_by_circuit={
+                "hvac": {
+                    "status": "waiting_for_delta",
+                    "status_label": "Waiting For Energy Change",
+                    "raw_status": "waiting_for_delta",
+                    "status_explanation": (
+                        "A cumulative kWh source is present, but the analyzer has "
+                        "not observed it increase since tracking started."
+                    ),
+                    "suggested_next_check": (
+                        "Let the analyzer see the energy sensor increase, or "
+                        "confirm the circuit has a cumulative kWh source."
+                    ),
+                }
+            },
+            daily_energy_usage_by_circuit={"hvac": 0.0},
+        )
+    )
+
+    attrs = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["daily_energy_usage"],
+    ).extra_state_attributes
+
+    assert attrs["status_label"] == "Waiting For Energy Change"
+    assert attrs["raw_status"] == "waiting_for_delta"
+    assert "cumulative kWh" in attrs["status_explanation"]
+    assert "energy sensor increase" in attrs["suggested_next_check"]
+
+
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,

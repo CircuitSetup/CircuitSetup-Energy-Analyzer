@@ -4024,6 +4024,55 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_marks_energy_usage_waiting_for_delta() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.hvac_energy"
+            return SimpleNamespace(
+                state="108.4",
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=now,
+            )
+
+    hass = SimpleNamespace(states=FakeStates(), data={DOMAIN: {}})
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        hass,
+        entry_id="entry-1",
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_energy", "role": "energy"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    evidence = coordinator.state.energy_usage_evidence_by_circuit["hvac"]
+    assert evidence["status"] == "waiting_for_delta"
+    assert evidence["status_label"] == "Waiting For Energy Change"
+    assert evidence["status_reason"] == "first_cumulative_sample"
+    assert "cumulative kWh" in evidence["status_explanation"]
+    assert evidence["suggested_next_check"] == (
+        "Let the analyzer see the energy sensor increase, or confirm the circuit "
+        "has a cumulative kWh source."
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_persists_energy_usage_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

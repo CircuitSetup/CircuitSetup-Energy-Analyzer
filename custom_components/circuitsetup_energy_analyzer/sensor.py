@@ -703,6 +703,7 @@ def _sensitivity_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
 _STATUS_LABEL_OVERRIDES: Mapping[str, str] = {
     "nilm_review": "NILM Review",
     "tou_peak": "TOU Peak",
+    "waiting_for_delta": "Waiting For Energy Change",
 }
 
 _STATUS_EXPLANATIONS: Mapping[str, str] = {
@@ -803,6 +804,10 @@ _STATUS_EXPLANATIONS: Mapping[str, str] = {
     "unavailable": "This check does not have enough retained data yet.",
     "unconfigured": "This optional check has not been configured for this circuit.",
     "waiting_for_surplus": "No idle flexible load currently has enough solar surplus.",
+    "waiting_for_delta": (
+        "A cumulative kWh source is present, but the analyzer has not observed it "
+        "increase since tracking started."
+    ),
 }
 
 
