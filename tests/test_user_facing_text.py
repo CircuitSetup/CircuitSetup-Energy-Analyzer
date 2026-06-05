@@ -368,6 +368,31 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert any(card.get("title") == "At a glance" for card in cards)
 
 
+def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text(
+        encoding="utf-8"
+    )
+    dashboard = yaml.safe_load(dashboard_text)
+    section_titles = {
+        section.get("title")
+        for section in dashboard.get("sections", [])
+        if isinstance(section, dict)
+    }
+
+    assert {
+        "Needs attention",
+        "Appliance overview",
+        "Energy tracking",
+        "Power quality detail",
+        "Mains, solar, and NILM",
+    } <= section_titles
+    assert "Waiting For Energy Change" in dashboard_text
+    assert "sensor.hvac_energy_usage_status" in dashboard_text
+    assert "sensor.hvac_daily_energy_usage" in dashboard_text
+    assert "sensor.hvac_health_summary" in dashboard_text
+    assert "sensor.hvac_alert_evidence" in dashboard_text
+
+
 def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
 

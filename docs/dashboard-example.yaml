@@ -2,7 +2,36 @@ type: sections
 title: Energy Analyzer
 sections:
   - type: grid
-    title: At a glance
+    title: Needs attention
+    cards:
+      - type: markdown
+        title: What to check first
+        content: >
+          Start with health summaries and alert evidence. A warning here means
+          the analyzer has observed a possible issue or needs better source data
+          before its appliance status should be trusted.
+      - type: glance
+        title: Health summary
+        columns: 3
+        entities:
+          - entity: sensor.refrigerator_health_summary
+            name: Refrigerator
+          - entity: sensor.hvac_health_summary
+            name: HVAC
+          - entity: sensor.mains_nilm_health_summary
+            name: Mains NILM
+      - type: entities
+        title: Alert evidence
+        entities:
+          - entity: sensor.refrigerator_alert_evidence
+          - entity: sensor.hvac_alert_evidence
+          - entity: sensor.mains_nilm_alert_evidence
+          - entity: sensor.refrigerator_recent_activity
+          - entity: sensor.hvac_recent_activity
+          - entity: sensor.mains_nilm_recent_activity
+
+  - type: grid
+    title: Appliance overview
     cards:
       - type: glance
         title: At a glance
@@ -12,18 +41,18 @@ sections:
             name: Refrigerator
           - entity: sensor.hvac_health_summary
             name: HVAC
-          - entity: sensor.mains_nilm_health_summary
-            name: Mains
           - entity: sensor.refrigerator_learning_progress
             name: Fridge learning
           - entity: sensor.hvac_learning_progress
             name: HVAC learning
-          - entity: sensor.mains_nilm_learning_progress
-            name: Mains learning
           - entity: sensor.refrigerator_circuit_mode
             name: Fridge mode
           - entity: sensor.refrigerator_power_flow
             name: Fridge flow
+          - entity: sensor.refrigerator_energy_usage_status
+            name: Fridge energy
+          - entity: sensor.hvac_run_cycle_status
+            name: HVAC cycle
       - type: gauge
         title: Refrigerator anomaly
         entity: sensor.refrigerator_anomaly_score
@@ -42,42 +71,56 @@ sections:
           green: 0
           yellow: 0.35
           red: 0.7
-      - type: gauge
-        title: Mains coverage
-        entity: sensor.mains_nilm_monitored_coverage
-        min: 0
-        max: 100
-        severity:
-          red: 0
-          yellow: 50
-          green: 80
-  - type: grid
-    title: Recent behavior
-    cards:
-      - type: history-graph
-        title: Anomaly trend
-        hours_to_show: 24
+      - type: entities
+        title: Current classification
         entities:
-          - entity: sensor.refrigerator_anomaly_score
-          - entity: sensor.hvac_anomaly_score
-          - entity: sensor.mains_nilm_anomaly_score
+          - entity: sensor.refrigerator_circuit_mode
+          - entity: sensor.refrigerator_power_flow
+          - entity: sensor.refrigerator_standby_status
+          - entity: sensor.hvac_run_cycle_status
+
+  - type: grid
+    title: Energy tracking
+    cards:
+      - type: markdown
+        title: Reading daily kWh
+        content: >
+          Daily Energy Usage can show 0 kWh when the appliance truly used no
+          energy, or when the analyzer is Waiting For Energy Change because it
+          has not observed a cumulative kWh increase yet.
       - type: history-graph
-        title: Daily energy
+        title: Daily energy trend
         hours_to_show: 72
         entities:
           - entity: sensor.refrigerator_daily_energy_usage
           - entity: sensor.hvac_daily_energy_usage
+          - entity: sensor.water_heater_daily_energy_usage
       - type: entities
-        title: Latest evidence
+        title: Daily kWh status
         entities:
-          - entity: sensor.refrigerator_alert_evidence
-          - entity: sensor.refrigerator_recent_activity
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.hvac_recent_activity
-          - entity: sensor.mains_nilm_alert_evidence
-          - entity: sensor.mains_nilm_recent_activity
+          - entity: sensor.refrigerator_daily_energy_usage
+          - entity: sensor.refrigerator_energy_usage_status
+          - entity: sensor.refrigerator_energy_goal_status
+          - entity: sensor.hvac_daily_energy_usage
+          - entity: sensor.hvac_energy_usage_status
+          - entity: sensor.water_heater_daily_energy_usage
+      - type: entities
+        title: Cost and billing
+        entities:
+          - entity: sensor.refrigerator_billing_cycle_status
+          - entity: sensor.refrigerator_cost_status
+          - entity: sensor.refrigerator_always_on_power
+      - type: button
+        name: Export refrigerator history CSV
+        icon: mdi:file-delimited-outline
+        tap_action:
+          action: call-service
+          service: circuitsetup_energy_analyzer.export_history_csv
+          data:
+            circuit_id: refrigerator
+
   - type: grid
-    title: Power quality
+    title: Power quality detail
     cards:
       - type: gauge
         title: Refrigerator power quality
@@ -88,33 +131,6 @@ sections:
           green: 0
           yellow: 0.35
           red: 0.7
-      - type: gauge
-        title: HVAC power quality
-        entity: sensor.hvac_power_quality_score
-        min: 0
-        max: 1
-        severity:
-          green: 0
-          yellow: 0.35
-          red: 0.7
-      - type: entities
-        title: Refrigerator power evidence
-        entities:
-          - entity: sensor.refrigerator_power_quality_evidence
-          - entity: sensor.refrigerator_reactive_power_drift
-          - entity: sensor.refrigerator_apparent_power_drift
-          - entity: sensor.refrigerator_power_factor_drift
-      - type: entities
-        title: HVAC power evidence
-        entities:
-          - entity: sensor.hvac_power_quality_evidence
-          - entity: sensor.hvac_reactive_power_drift
-          - entity: sensor.hvac_apparent_power_drift
-          - entity: sensor.hvac_power_factor_drift
-          - entity: sensor.hvac_metric_consistency_status
-  - type: grid
-    title: HVAC and demand
-    cards:
       - type: gauge
         title: HVAC demand limit
         entity: sensor.hvac_demand_limit_usage
@@ -134,50 +150,27 @@ sections:
           yellow: 80
           red: 100
       - type: entities
-        title: HVAC detail
+        title: Refrigerator power evidence
         entities:
-          - entity: sensor.hvac_current_demand
-          - entity: sensor.hvac_peak_demand
+          - entity: sensor.refrigerator_power_quality_evidence
+          - entity: sensor.refrigerator_reactive_power_drift
+          - entity: sensor.refrigerator_apparent_power_drift
+          - entity: sensor.refrigerator_power_factor_drift
+      - type: entities
+        title: HVAC power and demand
+        entities:
+          - entity: sensor.hvac_power_quality_evidence
           - entity: sensor.hvac_demand_peak_status
           - entity: sensor.hvac_capacity_status
           - entity: sensor.hvac_leg_imbalance_status
           - entity: sensor.hvac_metric_consistency_status
           - entity: sensor.hvac_run_cycle_status
+
   - type: grid
-    title: Energy usage
-    cards:
-      - type: gauge
-        title: Refrigerator usage share
-        entity: sensor.refrigerator_energy_usage_share
-        min: 0
-        max: 100
-        severity:
-          green: 0
-          yellow: 25
-          red: 40
-      - type: entities
-        title: Refrigerator usage
-        entities:
-          - entity: sensor.refrigerator_daily_energy_usage
-          - entity: sensor.refrigerator_energy_usage_status
-          - entity: sensor.refrigerator_energy_goal_status
-          - entity: sensor.refrigerator_billing_cycle_status
-          - entity: sensor.refrigerator_cost_status
-          - entity: sensor.refrigerator_standby_status
-          - entity: sensor.refrigerator_always_on_power
-      - type: button
-        name: Export refrigerator history CSV
-        icon: mdi:file-delimited-outline
-        tap_action:
-          action: call-service
-          service: circuitsetup_energy_analyzer.export_history_csv
-          data:
-            circuit_id: refrigerator
-  - type: grid
-    title: Mains and NILM
+    title: Mains, solar, and NILM
     cards:
       - type: glance
-        title: Mains NILM
+        title: Mains overview
         columns: 3
         entities:
           - entity: sensor.mains_nilm_nilm_discovered_signatures
@@ -194,6 +187,15 @@ sections:
             name: Peak
           - entity: sensor.mains_nilm_readiness
             name: Readiness
+      - type: gauge
+        title: Mains coverage
+        entity: sensor.mains_nilm_monitored_coverage
+        min: 0
+        max: 100
+        severity:
+          red: 0
+          yellow: 50
+          green: 80
       - type: history-graph
         title: Mains power balance
         hours_to_show: 24
@@ -201,11 +203,11 @@ sections:
           - entity: sensor.mains_nilm_balance_power
           - entity: sensor.mains_nilm_monitored_power
       - type: entities
-        title: NILM review
+        title: NILM and maintenance
         entities:
+          - entity: sensor.mains_nilm_nilm_topology_status
           - entity: sensor.mains_nilm_alert_evidence
           - entity: sensor.mains_nilm_recent_activity
-          - entity: sensor.mains_nilm_nilm_topology_status
           - entity: binary_sensor.mains_nilm_maintenance
       - type: markdown
         title: Alert philosophy
