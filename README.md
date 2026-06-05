@@ -46,7 +46,7 @@ recommended handoff action.
 
 This repository is structured for HACS as a custom integration. The integration files live under `custom_components/circuitsetup_energy_analyzer`.
 
-![CircuitSetup Energy Analyzer integration entry in Home Assistant HACS](docs/images/readme/integration-overview.png)
+![CircuitSetup Energy Analyzer integration overview in Home Assistant Devices and services](docs/images/readme/integration-overview.png)
 
 To install with HACS:
 
@@ -123,7 +123,7 @@ handled differently:
 - Solar inverter circuits treat negative real power as exported generation and analyze the export magnitude.
 - Mains NILM circuits keep signed net power so import and export behavior can be disaggregated without losing direction.
 
-![Power flow assignment controls for load and generation sign handling](docs/images/readme/power-flow.png)
+![Power flow assignment controls showing the selected Load mode](docs/images/readme/power-flow.png)
 
 ## Energy Usage Spikes
 
@@ -141,7 +141,7 @@ total, the threshold, and the percentage of the learned window used today.
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
 
-![Energy usage status showing Waiting For Energy Change and daily kWh evidence](docs/images/readme/energy-usage-spikes.png)
+![Seven-day energy totals card used as daily kWh spike context](docs/images/readme/energy-usage-spikes.png)
 
 ## Daily Energy Goals
 
@@ -155,7 +155,7 @@ optional `goal_alert_ratio`. By default, goal notices trigger at 100% of the
 daily goal after repeated observations. Setting the ratio below 1.0 can warn
 before the goal is reached, while setting the daily goal to 0 clears the goal.
 
-![Daily energy goal card showing recent seven-day energy context](docs/images/readme/daily-energy-goals.png)
+![Seven-day source and energy context for daily energy goals](docs/images/readme/daily-energy-goals.png)
 
 ## Run Cycle Diagnostics
 
@@ -210,7 +210,7 @@ optional kWh budget for a circuit. When a budget is configured, projected
 over-budget notifications require repeated evidence and include the current
 usage, projected usage, configured budget, and billing-cycle dates.
 
-![Billing cycle forecast card with seven-day energy chart context](docs/images/readme/billing-cycle-forecasts.png)
+![Seven-day energy totals card used for billing-cycle forecast context](docs/images/readme/billing-cycle-forecasts.png)
 
 ## Cost And Time-of-Use Tracking
 
@@ -225,7 +225,7 @@ cost, and whether the circuit is currently in the TOU period. These values are
 estimates and do not include fixed fees, demand charges, taxes, tiered rates,
 or every utility billing rule.
 
-![Cost and Time-of-Use card with energy totals context](docs/images/readme/cost-time-of-use.png)
+![Seven-day active power chart used with cost and Time-of-Use estimates](docs/images/readme/cost-time-of-use.png)
 
 ## History CSV Export
 
@@ -370,7 +370,7 @@ If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
 
-![Solar flow diagnostic entities in an observed evidence card](docs/images/readme/solar-flow-diagnostics.png)
+![Reactive power trend used with solar-flow diagnostic evidence](docs/images/readme/solar-flow-diagnostics.png)
 
 ## Utility And Opower Comparison
 
@@ -420,7 +420,7 @@ Always On load repeatedly exceeds that configured limit, the notification
 reports the observed watts, window, and configured limit as possible-issue
 evidence.
 
-![Always On and standby card with seven-day active power evidence](docs/images/readme/always-on-standby.png)
+![Seven-day active power trend used for Always On and standby evidence](docs/images/readme/always-on-standby.png)
 
 ## Experimental NILM
 
@@ -466,7 +466,7 @@ Persistent notifications are reserved for important evidence about appliance beh
 
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
 
-![Notifications and Repairs evidence card showing possible issue and repair entities](docs/images/readme/notifications-repairs.png)
+![Observed evidence card used for possible-issue notifications and setup review](docs/images/readme/notifications-repairs.png)
 
 ## Sensor Reference
 
