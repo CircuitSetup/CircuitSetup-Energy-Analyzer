@@ -1675,10 +1675,70 @@ _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     "energy_summary",
     "daily_energy_usage",
 }
+_NORMAL_ENTITY_SENSOR_KEYS = {
+    "health_summary",
+    "activity_summary",
+    "electrical_health",
+    "energy_summary",
+    "daily_energy_usage",
+    "energy_usage_share",
+    "energy_usage_status",
+    "energy_goal_usage",
+    "energy_goal_status",
+    "run_cycle_count",
+    "run_cycle_runtime",
+    "run_cycle_duty_cycle",
+    "run_cycle_status",
+    "current_demand",
+    "peak_demand",
+    "demand_limit_usage",
+    "demand_status",
+    "capacity_usage",
+    "capacity_status",
+    "balance_power",
+    "monitored_power",
+    "monitored_coverage",
+    "balance_status",
+    "solar_generation_power",
+    "solar_site_consumption_power",
+    "solar_grid_import_power",
+    "solar_grid_export_power",
+    "solar_self_consumption",
+    "solar_powered",
+    "solar_flow_status",
+    "solar_surplus_power",
+    "solar_load_shift_power",
+    "solar_flexible_load_power",
+    "solar_flexible_load_coverage",
+    "solar_load_shift_status",
+    "solar_surplus_status",
+    "utility_comparison_difference",
+    "utility_comparison_status",
+    "billing_cycle_usage",
+    "billing_cycle_forecast",
+    "billing_cycle_budget_usage",
+    "billing_cycle_status",
+    "cost_current_rate",
+    "cost_cycle",
+    "cost_cycle_forecast",
+    "cost_status",
+    "always_on_power",
+    "standby_threshold",
+    "standby_status",
+    "always_on_limit_usage",
+}
 SENSOR_DESCRIPTIONS = tuple(
-    replace(description, entity_registry_visible_default=False)
-    if description.key not in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
-    else description
+    replace(
+        description,
+        entity_category=(
+            None
+            if description.key in _NORMAL_ENTITY_SENSOR_KEYS
+            else description.entity_category
+        ),
+        entity_registry_visible_default=(
+            description.key in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
+        ),
+    )
     for description in SENSOR_DESCRIPTIONS
 )
 
@@ -2236,7 +2296,7 @@ def _has_solar_flow_sources(coordinator: Any) -> bool:
 
 
 class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
-    """Sensor exposing one diagnostic value for an analyzed circuit."""
+    """Sensor exposing one analyzed value for a configured circuit."""
 
     def __init__(
         self,
@@ -2254,6 +2314,7 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             name_suffix=description.name_suffix,
         )
         self.entity_description = description
+        self._attr_entity_category = description.entity_category
         self._attr_icon = description.icon or SENSOR_ICONS.get(description.key)
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class

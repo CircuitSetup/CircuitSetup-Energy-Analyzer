@@ -44,17 +44,18 @@ Most users should start with four rollup entities for each appliance or circuit:
   condition.
 
 The detailed diagnostic entities are still available for advanced detail and
-automations, but most `... Status` entities are intentionally secondary. For
-example, Metric Consistency Status, Leg Imbalance Status, Energy Usage Status,
-Billing Cycle Status, and Standby Status explain why a summary changed; they do
-not need to be the first thing a household user sees.
+automations, but internal `... Status` entities are intentionally secondary. For
+example, Metric Consistency Status and Leg Imbalance Status explain why a
+summary changed; they do not need to be the first thing a household user sees.
 
 New installs show only the summary-first device surface by default: Health
 Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy
-Usage, and appliance Running binary sensors where applicable. Detailed
-evidence and machine-readable status entities remain enabled for advanced users,
-but are hidden by default and older installs are migrated to the same quieter
-device-level layout.
+Usage, and appliance Running binary sensors where applicable. Everyday summary,
+usage, cycle, demand, solar-flow, billing, cost, and standby entities are normal
+Home Assistant entities rather than diagnostic entities. Detailed evidence and
+machine-readable internals remain diagnostic, enabled for advanced users, but
+hidden by default; older installs are migrated to the same quieter device-level
+layout.
 
 For power-meter interpretation, think of watts as "what is it doing right now,"
 kWh as "how much did it use," amps as "how hard is the circuit being loaded,"
@@ -283,7 +284,7 @@ a service call.
 
 The analyzer also tracks rolling power demand for each circuit with real-power
 data. The default demand window is 15 minutes, matching a common utility and
-energy-monitoring view for peak demand. Diagnostic entities show current rolling
+energy-monitoring view for peak demand. Normal entities show current rolling
 demand and today's peak demand even when no alert limit is configured.
 
 Use the `set_demand_settings` service to set a per-circuit demand window and an
@@ -311,7 +312,7 @@ analyzer can estimate current from real power and voltage when both are present.
 
 Use the `set_capacity_settings` service to set `breaker_amps` and an optional
 `warning_ratio` for a circuit. The default warning ratio is 0.8, so a 40 A
-circuit warns at 32 A after repeated observations. Diagnostic entities show
+circuit warns at 32 A after repeated observations. Normal entities show
 capacity usage percentage and status. Alerts report the observed amps, the
 configured circuit rating, the warning threshold, and whether the value came
 from a current sensor or a power/voltage estimate.
@@ -379,7 +380,7 @@ the same convention as common solar monitoring tools: grid import is positive,
 grid export is negative, and site consumption is solar generation plus signed
 grid power.
 
-Diagnostic entities expose current solar generation, estimated site
+Normal entities expose current solar generation, estimated site
 consumption, grid import, grid export, solar self-consumption percentage, and
 the percentage of current site load powered by solar. This is intended as
 CircuitSetup setup and sign-convention evidence. Use Home Assistant's Energy
@@ -645,6 +646,9 @@ Power Flow to Generation / Solar Export.
 These sensors are created for every configured circuit, including refrigerators,
 freezers, HVAC, water heaters, ovens, washers, dryers, pumps, EV chargers, mixed
 circuits, mains, and solar-related circuits.
+The summary sensors are normal Home Assistant entities. Learning, readiness,
+data-quality, alert evidence, retained activity detail, and configuration
+readbacks remain diagnostic entities.
 
 - Anomaly Score (`sensor.<circuit>_anomaly_score`) - Numeric summary of current anomaly evidence for the circuit. Possible outputs: `0.0` when quiet, higher numbers as repeated evidence accumulates.
 - Last Event (`sensor.<circuit>_last_event`) - Latest retained event type. Possible outputs include `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, or `unknown`.

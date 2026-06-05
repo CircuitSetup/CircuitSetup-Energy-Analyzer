@@ -866,6 +866,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
     )
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
@@ -883,9 +884,84 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "daily_energy_usage",
     }
 
+    normal_entity_keys = {
+        "health_summary",
+        "activity_summary",
+        "electrical_health",
+        "energy_summary",
+        "daily_energy_usage",
+        "energy_usage_share",
+        "energy_usage_status",
+        "energy_goal_usage",
+        "energy_goal_status",
+        "run_cycle_count",
+        "run_cycle_runtime",
+        "run_cycle_duty_cycle",
+        "run_cycle_status",
+        "current_demand",
+        "peak_demand",
+        "demand_limit_usage",
+        "demand_status",
+        "capacity_usage",
+        "capacity_status",
+        "balance_power",
+        "monitored_power",
+        "monitored_coverage",
+        "balance_status",
+        "solar_generation_power",
+        "solar_site_consumption_power",
+        "solar_grid_import_power",
+        "solar_grid_export_power",
+        "solar_self_consumption",
+        "solar_powered",
+        "solar_flow_status",
+        "solar_surplus_power",
+        "solar_load_shift_power",
+        "solar_flexible_load_power",
+        "solar_flexible_load_coverage",
+        "solar_load_shift_status",
+        "solar_surplus_status",
+        "utility_comparison_difference",
+        "utility_comparison_status",
+        "billing_cycle_usage",
+        "billing_cycle_forecast",
+        "billing_cycle_budget_usage",
+        "billing_cycle_status",
+        "cost_current_rate",
+        "cost_cycle",
+        "cost_cycle_forecast",
+        "cost_status",
+        "always_on_power",
+        "standby_threshold",
+        "standby_status",
+        "always_on_limit_usage",
+    }
+
+    assert normal_entity_keys <= set(descriptions)
+
     for key, description in descriptions.items():
-        assert descriptions[key].entity_category == EntityCategory.DIAGNOSTIC
+        expected_category = (
+            None if key in normal_entity_keys else EntityCategory.DIAGNOSTIC
+        )
+        assert descriptions[key].entity_category == expected_category
         assert description.entity_registry_enabled_default is True
+
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    normal_entity = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["health_summary"],
+    )
+    diagnostic_entity = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["power_quality_evidence"],
+    )
+    assert normal_entity._attr_entity_category is None
+    assert diagnostic_entity._attr_entity_category == EntityCategory.DIAGNOSTIC
 
 
 def test_sensor_entities_use_purpose_specific_icons() -> None:
