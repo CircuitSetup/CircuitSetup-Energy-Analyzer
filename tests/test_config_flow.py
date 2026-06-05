@@ -1667,6 +1667,13 @@ def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> N
         in include_entities
     )
     assert (
+        "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power"
+        in include_entities
+    )
+    assert "sensor.cs_energy_analyzer_demo_washer_active_power" in include_entities
+    assert "sensor.cs_energy_analyzer_demo_dryer_l1_active_power" in include_entities
+    assert "sensor.cs_energy_analyzer_demo_dryer_l2_active_power" in include_entities
+    assert (
         "sensor.cs_energy_analyzer_demo_car_charger_voltage"
         not in include_entities
     )

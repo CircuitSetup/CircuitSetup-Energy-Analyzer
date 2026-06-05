@@ -585,6 +585,10 @@ These are the ESPHome/CircuitSetup sensors selected during setup. They may come
 from a CircuitSetup ATM90E32 meter, manually selected entities, or the included
 demo sensors. The analyzer does not require every source role for every
 appliance, but each additional role improves the evidence it can produce.
+The included demo sensors are intentionally shaped to exercise dashboard states:
+HVAC has a visible split-phase/metric-consistency issue, washer and dryer are
+running, the refrigerator and pump show motor-style reactive/PF behavior, and
+the car charger is drawing a high but plausible load.
 
 For single-phase appliances, use one set of source entities for the circuit.
 For dual-phase appliances, use L1/L2 or leg A/B source entities where possible.

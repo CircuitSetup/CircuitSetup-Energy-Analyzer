@@ -578,6 +578,61 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     )
 
 
+def test_demo_source_values_are_intentionally_triggerable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        LAUNDRY_RUNNING_POWER_THRESHOLDS_W,
+    )
+    from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
+        evaluate_metric_consistency,
+    )
+    from custom_components.circuitsetup_energy_analyzer.phase_balance import (
+        evaluate_dual_phase_leg_imbalance,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        _demo_source_value,
+    )
+
+    hvac_l1_w = _demo_source_value("hvac_l1", SensorRole.REAL_POWER)
+    hvac_l2_w = _demo_source_value("hvac_l2", SensorRole.REAL_POWER)
+    imbalance = evaluate_dual_phase_leg_imbalance(
+        left_real_power_w=hvac_l1_w,
+        right_real_power_w=hvac_l2_w,
+    )
+    assert imbalance.status == "imbalanced"
+    assert imbalance.imbalance_percent >= 50.0
+
+    reported_va = (
+        (_demo_source_value("hvac_l1", SensorRole.APPARENT_POWER) or 0.0)
+        + (_demo_source_value("hvac_l2", SensorRole.APPARENT_POWER) or 0.0)
+    )
+    reported_pf = (
+        (_demo_source_value("hvac_l1", SensorRole.POWER_FACTOR) or 0.0)
+        + (_demo_source_value("hvac_l2", SensorRole.POWER_FACTOR) or 0.0)
+    ) / 2.0
+    consistency = evaluate_metric_consistency(
+        real_power_w=(hvac_l1_w or 0.0) + (hvac_l2_w or 0.0),
+        apparent_power_va=reported_va,
+        power_factor=reported_pf,
+        voltage_v=None,
+        current_a=None,
+        leg_a_voltage_v=_demo_source_value("mains_l1", SensorRole.VOLTAGE),
+        leg_a_current_a=_demo_source_value("hvac_l1", SensorRole.CURRENT),
+        leg_b_voltage_v=_demo_source_value("mains_l2", SensorRole.VOLTAGE),
+        leg_b_current_a=_demo_source_value("hvac_l2", SensorRole.CURRENT),
+    )
+    assert consistency.status in {"apparent_power_mismatch", "metric_mismatch"}
+
+    assert (
+        (_demo_source_value("washer", SensorRole.REAL_POWER) or 0.0)
+        > LAUNDRY_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
+    )
+    assert (
+        (_demo_source_value("dryer_l1", SensorRole.REAL_POWER) or 0.0)
+        + (_demo_source_value("dryer_l2", SensorRole.REAL_POWER) or 0.0)
+        > LAUNDRY_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
+    )
+
+
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1642,19 +1697,19 @@ async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> Non
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power"
         ].native_value
-        == 3600.0
+        == 4600.0
     )
     assert (
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power"
         ].native_value
-        == 3580.0
+        == 4550.0
     )
     assert (
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_car_charger_l1_current"
         ].native_value
-        == 30.1
+        == 38.5
     )
     assert (
         by_entity_id[
@@ -1666,7 +1721,7 @@ async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> Non
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_car_charger_l2_reactive_power"
         ].native_value
-        == 320.0
+        == 450.0
     )
     assert "sensor.cs_energy_analyzer_demo_car_charger_voltage" not in by_entity_id
 
