@@ -45,6 +45,8 @@ class EnergyUsageResult:
     threshold_ratio: float
     threshold_kwh: float
     daily_usage_share: float
+    tracking_status: str
+    status_reason: str
     spike: EnergyUsageSpike | None = None
 
 
@@ -69,7 +71,8 @@ def record_energy_usage(
 
     last_energy = _float_or_none(history.get("last_energy_kwh"))
     last_sample_at = _datetime_or_none(history.get("last_sample_at"))
-    if last_energy is None or last_sample_at is None:
+    initial_sample = last_energy is None or last_sample_at is None
+    if initial_sample:
         delta_kwh = 0.0
     else:
         delta_kwh = max(float(energy_kwh) - last_energy, 0.0)
@@ -88,6 +91,19 @@ def record_energy_usage(
     daily_usage_share = (
         round(today_usage / baseline_total, 4) if baseline_total > 0.0 else 0.0
     )
+    if initial_sample:
+        tracking_status = "waiting_for_delta"
+        status_reason = "first_cumulative_sample"
+    elif baseline_day_count < window_days:
+        tracking_status = "learning"
+        status_reason = "building_energy_window"
+    elif delta_kwh <= 0.0:
+        tracking_status = "tracking"
+        status_reason = "no_delta_today"
+    else:
+        tracking_status = "tracking"
+        status_reason = "observed_energy_delta"
+
     result = EnergyUsageResult(
         circuit_id=circuit_id,
         date=today,
@@ -98,6 +114,8 @@ def record_energy_usage(
         threshold_ratio=threshold_ratio,
         threshold_kwh=threshold_kwh,
         daily_usage_share=daily_usage_share,
+        tracking_status=tracking_status,
+        status_reason=status_reason,
     )
     if (
         baseline_day_count < window_days
@@ -127,7 +145,12 @@ def record_energy_usage(
             "daily_usage_share": daily_usage_share,
         },
     )
-    return replace(result, spike=spike)
+    return replace(
+        result,
+        tracking_status="over_threshold",
+        status_reason="daily_usage_above_threshold",
+        spike=spike,
+    )
 
 
 def _coerce_days(raw_days: Any) -> list[dict[str, float | str]]:
