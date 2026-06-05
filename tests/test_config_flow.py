@@ -1335,6 +1335,29 @@ async def test_assignment_step_auto_suggests_washer_profile() -> None:
     assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
 
 
+@pytest.mark.asyncio
+async def test_assignment_step_uses_clean_demo_circuit_names() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+                "sensor.cs_energy_analyzer_demo_washer_current",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == "Washer"
+    assert result["description_placeholders"]["circuit_name"] == "Washer"
+
+
 def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         _advanced_settings_schema,

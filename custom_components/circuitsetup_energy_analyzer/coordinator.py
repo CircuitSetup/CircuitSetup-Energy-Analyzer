@@ -5755,7 +5755,8 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
 
 
 def _friendly_name_from_circuit_id(circuit_id: str) -> str:
-    return str(circuit_id).replace("_", " ").strip().title()
+    text = str(circuit_id).removeprefix("cs_energy_analyzer_demo_")
+    return text.replace("_", " ").strip().title()
 
 
 def _appliance_profile_mode_from_circuit_id(

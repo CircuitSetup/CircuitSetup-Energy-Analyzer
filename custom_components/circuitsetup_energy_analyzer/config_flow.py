@@ -1912,7 +1912,8 @@ def _suggest_assignment_profile_mode(
 
 
 def _friendly_name_from_id(value: str) -> str:
-    return value.replace("_", " ").strip().title()
+    text = str(value).removeprefix("cs_energy_analyzer_demo_")
+    return text.replace("_", " ").strip().title()
 
 
 def _slugify(value: str) -> str:

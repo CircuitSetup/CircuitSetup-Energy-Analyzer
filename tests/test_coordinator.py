@@ -1666,7 +1666,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     }
     fridge = by_circuit["cs_energy_analyzer_demo_refrigerator"]
     assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
-    assert fridge.name == "Cs Energy Analyzer Demo Refrigerator"
+    assert fridge.name == "Refrigerator"
     assert fridge.appliance_profile is ApplianceProfile.REFRIGERATOR
     assert fridge.mode is CircuitMode.SINGLE_PHASE
     assert fridge.sensors[0].role is SensorRole.ENERGY
@@ -1742,7 +1742,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     )
 
     washer = by_circuit["cs_energy_analyzer_demo_washer"]
-    assert washer.name == "Cs Energy Analyzer Demo Washer"
+    assert washer.name == "Washer"
     assert washer.appliance_profile is ApplianceProfile.WASHER
     assert washer.mode is CircuitMode.SINGLE_PHASE
     assert {
@@ -1781,7 +1781,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     }
 
     dryer = by_circuit["cs_energy_analyzer_demo_dryer"]
-    assert dryer.name == "Cs Energy Analyzer Demo Dryer"
+    assert dryer.name == "Dryer"
     assert dryer.appliance_profile is ApplianceProfile.DRYER
     assert dryer.mode is CircuitMode.DUAL_PHASE
     assert {
