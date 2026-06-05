@@ -2380,6 +2380,7 @@ class DemoSourceSensor(SensorEntity):
     """Synthetic source sensor used by the installed demo dashboard."""
 
     _attr_has_entity_name = False
+    _attr_entity_registry_visible_default = False
 
     def __init__(self, *, entry_id: str, sensor: SensorRef) -> None:
         object_id = sensor.entity_id.removeprefix("sensor.")
@@ -2565,6 +2566,15 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             description.key
             for description in SENSOR_DESCRIPTIONS
             if description.entity_registry_visible_default is False
+        }
+        | {
+            unique_id.removeprefix(f"{entry_id}_")
+            for unique_id in {
+                str(getattr(entity, "unique_id", ""))
+                for entity in entities
+                if isinstance(entity, DemoSourceSensor)
+            }
+            if unique_id.startswith(f"{entry_id}_demo_source_")
         },
     )
     sync_entity_registry_categories(

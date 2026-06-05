@@ -2089,6 +2089,10 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         for entity in added_entities
         if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
     ]
+    assert all(
+        entity._attr_entity_registry_visible_default is False
+        for entity in source_entities
+    )
     by_entity_id = {
         f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
     }
@@ -2187,6 +2191,94 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         ].native_value
         == 2576.0
     )
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_hides_existing_demo_source_entities(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    class FakeHider:
+        INTEGRATION = "integration"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.cs_energy_analyzer_demo_washer_active_power": SimpleNamespace(
+                    entity_id="sensor.cs_energy_analyzer_demo_washer_active_power",
+                    unique_id=(
+                        "entry-1_demo_source_exact_"
+                        "cs_energy_analyzer_demo_washer_active_power"
+                    ),
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                    entity_category=None,
+                ),
+                "sensor.washer_health_summary": SimpleNamespace(
+                    entity_id="sensor.washer_health_summary",
+                    unique_id="entry-1_cs_energy_analyzer_demo_washer_health_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                    entity_category=None,
+                ),
+            }
+            self.removed: list[str] = []
+            self.updated: list[tuple[str, dict[str, object]]] = []
+
+        def async_remove(self, entity_id) -> None:
+            self.removed.append(entity_id)
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs))
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryHider = FakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+                SensorRole.REAL_POWER,
+            ),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert (
+        "sensor.cs_energy_analyzer_demo_washer_active_power",
+        {"hidden_by": "integration"},
+    ) in fake_registry.updated
+    assert fake_registry.removed == []
 
 
 @pytest.mark.asyncio
