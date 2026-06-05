@@ -9,10 +9,9 @@ sections:
         content: >
           Start with Health, Activity, Electrical Health, and Energy Summary.
           These rollups answer whether an appliance is okay, what it is doing,
-          and which detail area needs review. A possible issue
-          notification describes observed behavior; Repairs point to missing
-          sensors, stale data, or setup problems before appliance status should
-          be trusted.
+          and which area needs review. Detailed evidence stays in attributes,
+          possible issue notifications, Repairs, and advanced entity views
+          instead of being rendered as hidden dashboard entities.
       - type: glance
         title: Health summary
         columns: 3
@@ -24,17 +23,17 @@ sections:
           - entity: sensor.mains_nilm_health_summary
             name: Mains NILM
       - type: entities
-        title: Latest evidence
+        title: Appliance state
         entities:
           - entity: sensor.refrigerator_activity_summary
           - entity: sensor.refrigerator_electrical_health
           - entity: sensor.refrigerator_energy_summary
-          - entity: sensor.refrigerator_alert_evidence
-          - entity: sensor.refrigerator_recent_activity
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.hvac_recent_activity
-          - entity: sensor.mains_nilm_alert_evidence
-          - entity: sensor.mains_nilm_recent_activity
+          - entity: sensor.hvac_activity_summary
+          - entity: sensor.hvac_electrical_health
+          - entity: sensor.hvac_energy_summary
+          - entity: sensor.mains_nilm_activity_summary
+          - entity: sensor.mains_nilm_electrical_health
+          - entity: sensor.mains_nilm_energy_summary
 
   - type: grid
     title: Appliance overview
@@ -59,33 +58,24 @@ sections:
             name: Washer activity
           - entity: sensor.dryer_activity_summary
             name: Dryer activity
-      - type: gauge
-        title: Refrigerator anomaly
-        entity: sensor.refrigerator_anomaly_score
-        min: 0
-        max: 1
-        severity:
-          green: 0
-          yellow: 0.35
-          red: 0.7
-      - type: gauge
-        title: HVAC anomaly
-        entity: sensor.hvac_anomaly_score
-        min: 0
-        max: 1
-        severity:
-          green: 0
-          yellow: 0.35
-          red: 0.7
       - type: entities
-        title: Current classification
+        title: Running now
         entities:
-          - entity: sensor.refrigerator_circuit_mode
-          - entity: sensor.refrigerator_power_flow
-          - entity: sensor.refrigerator_activity_summary
-          - entity: sensor.hvac_activity_summary
+          - entity: binary_sensor.refrigerator_running
+          - entity: binary_sensor.hvac_running
+          - entity: binary_sensor.water_heater_running
+          - entity: binary_sensor.pool_pump_running
+          - entity: binary_sensor.washer_running
+          - entity: binary_sensor.dryer_running
+      - type: entities
+        title: Electrical health
+        entities:
+          - entity: sensor.refrigerator_electrical_health
           - entity: sensor.hvac_electrical_health
-          - entity: sensor.hvac_energy_summary
+          - entity: sensor.water_heater_electrical_health
+          - entity: sensor.pool_pump_electrical_health
+          - entity: sensor.washer_electrical_health
+          - entity: sensor.dryer_electrical_health
 
   - type: grid
     title: Energy tracking
@@ -95,7 +85,8 @@ sections:
         content: >
           Daily Energy Usage can show 0 kWh when the appliance truly used no
           energy, or when the analyzer is Waiting For Energy Change because it
-          has not observed a cumulative kWh increase yet.
+          has not observed a cumulative kWh increase yet. Energy Summary
+          includes the current high-usage, goal, billing, and cost result.
       - type: history-graph
         title: Daily energy trend
         hours_to_show: 72
@@ -103,25 +94,21 @@ sections:
           - entity: sensor.refrigerator_daily_energy_usage
           - entity: sensor.hvac_daily_energy_usage
           - entity: sensor.water_heater_daily_energy_usage
+          - entity: sensor.washer_daily_energy_usage
+          - entity: sensor.dryer_daily_energy_usage
       - type: entities
         title: Daily kWh status
         entities:
           - entity: sensor.refrigerator_energy_summary
           - entity: sensor.refrigerator_daily_energy_usage
-          - entity: sensor.refrigerator_energy_usage_status
-          - entity: sensor.refrigerator_energy_goal_status
           - entity: sensor.hvac_energy_summary
           - entity: sensor.hvac_daily_energy_usage
-          - entity: sensor.hvac_energy_usage_status
           - entity: sensor.water_heater_energy_summary
           - entity: sensor.water_heater_daily_energy_usage
-          - entity: sensor.water_heater_energy_usage_status
-      - type: entities
-        title: Cost and billing
-        entities:
-          - entity: sensor.refrigerator_billing_cycle_status
-          - entity: sensor.refrigerator_cost_status
-          - entity: sensor.refrigerator_always_on_power
+          - entity: sensor.washer_energy_summary
+          - entity: sensor.washer_daily_energy_usage
+          - entity: sensor.dryer_energy_summary
+          - entity: sensor.dryer_daily_energy_usage
       - type: button
         name: Export refrigerator history CSV
         icon: mdi:file-delimited-outline
@@ -134,63 +121,39 @@ sections:
   - type: grid
     title: Power quality detail
     cards:
-      - type: gauge
-        title: Refrigerator power quality
-        entity: sensor.refrigerator_power_quality_score
-        min: 0
-        max: 1
-        severity:
-          green: 0
-          yellow: 0.35
-          red: 0.7
-      - type: gauge
-        title: HVAC power quality
-        entity: sensor.hvac_power_quality_score
-        min: 0
-        max: 1
-        severity:
-          green: 0
-          yellow: 0.35
-          red: 0.7
-      - type: gauge
-        title: HVAC demand limit
-        entity: sensor.hvac_demand_limit_usage
-        min: 0
-        max: 120
-        severity:
-          green: 0
-          yellow: 75
-          red: 100
-      - type: gauge
-        title: HVAC capacity
-        entity: sensor.hvac_capacity_usage
-        min: 0
-        max: 120
-        severity:
-          green: 0
-          yellow: 80
-          red: 100
-      - type: entities
-        title: Refrigerator power and standby evidence
+      - type: markdown
+        title: What the rollups include
+        content: >
+          Electrical Health combines power-quality changes, power metric
+          consistency, dual-phase leg imbalance, solar flow diagnostics, and
+          mains balance where those checks apply. When a possible issue is
+          detected, use the entity attributes, persistent notification, or
+          repair item for the observed evidence.
+      - type: glance
+        title: Electrical health rollups
+        columns: 3
         entities:
           - entity: sensor.refrigerator_electrical_health
-          - entity: sensor.refrigerator_activity_summary
-          - entity: sensor.refrigerator_power_quality_evidence
-          - entity: sensor.refrigerator_reactive_power_drift
-          - entity: sensor.refrigerator_apparent_power_drift
-          - entity: sensor.refrigerator_power_factor_drift
-          - entity: sensor.refrigerator_standby_status
-      - type: entities
-        title: HVAC power and demand
-        entities:
-          - entity: sensor.hvac_activity_summary
+            name: Refrigerator
           - entity: sensor.hvac_electrical_health
-          - entity: sensor.hvac_power_quality_evidence
-          - entity: sensor.hvac_demand_peak_status
-          - entity: sensor.hvac_capacity_status
-          - entity: sensor.hvac_leg_imbalance_status
-          - entity: sensor.hvac_metric_consistency_status
-          - entity: sensor.hvac_run_cycle_status
+            name: HVAC
+          - entity: sensor.water_heater_electrical_health
+            name: Water heater
+          - entity: sensor.pool_pump_electrical_health
+            name: Pool pump
+          - entity: sensor.mains_nilm_electrical_health
+            name: Mains
+          - entity: sensor.dryer_electrical_health
+            name: Dryer
+      - type: entities
+        title: Activity context
+        entities:
+          - entity: sensor.refrigerator_activity_summary
+          - entity: sensor.hvac_activity_summary
+          - entity: sensor.water_heater_activity_summary
+          - entity: sensor.pool_pump_activity_summary
+          - entity: sensor.washer_activity_summary
+          - entity: sensor.dryer_activity_summary
 
   - type: grid
     title: Mains, solar, and NILM
@@ -199,50 +162,27 @@ sections:
         title: Mains overview
         columns: 3
         entities:
-          - entity: sensor.mains_nilm_nilm_discovered_signatures
-            name: Signatures
-          - entity: sensor.mains_nilm_nilm_unmatched_load_percentage
-            name: Unmatched
+          - entity: sensor.mains_nilm_health_summary
+            name: Health
+          - entity: sensor.mains_nilm_activity_summary
+            name: Activity
           - entity: sensor.mains_nilm_electrical_health
             name: Electrical
           - entity: sensor.mains_nilm_energy_summary
             name: Energy
-          - entity: sensor.mains_nilm_balance_status
-            name: Balance
-          - entity: sensor.mains_nilm_solar_flow_status
-            name: Solar flow
-          - entity: sensor.mains_nilm_monitored_coverage
-            name: Coverage
-          - entity: sensor.mains_nilm_learning_progress
-            name: Learning
-          - entity: sensor.mains_nilm_anomaly_score
-            name: Anomaly
-          - entity: sensor.mains_nilm_demand_peak_status
-            name: Peak
-          - entity: sensor.mains_nilm_readiness
-            name: Readiness
-      - type: gauge
-        title: Mains coverage
-        entity: sensor.mains_nilm_monitored_coverage
-        min: 0
-        max: 100
-        severity:
-          red: 0
-          yellow: 50
-          green: 80
       - type: history-graph
-        title: Mains power balance
-        hours_to_show: 24
+        title: Mains daily energy
+        hours_to_show: 72
         entities:
-          - entity: sensor.mains_nilm_balance_power
-          - entity: sensor.mains_nilm_monitored_power
+          - entity: sensor.mains_nilm_daily_energy_usage
       - type: entities
-        title: NILM and maintenance
+        title: Mains rollups
         entities:
-          - entity: sensor.mains_nilm_nilm_topology_status
-          - entity: sensor.mains_nilm_alert_evidence
-          - entity: sensor.mains_nilm_recent_activity
-          - entity: binary_sensor.mains_nilm_maintenance
+          - entity: sensor.mains_nilm_health_summary
+          - entity: sensor.mains_nilm_activity_summary
+          - entity: sensor.mains_nilm_electrical_health
+          - entity: sensor.mains_nilm_energy_summary
+          - entity: sensor.mains_nilm_daily_energy_usage
       - type: markdown
         title: Alert philosophy
         content: >

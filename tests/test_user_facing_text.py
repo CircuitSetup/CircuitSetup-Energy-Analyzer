@@ -365,8 +365,44 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert card_types.count("entities") <= 10
     assert "glance" in card_types
     assert "history-graph" in card_types
-    assert "gauge" in card_types
     assert any(card.get("title") == "At a glance" for card in cards)
+
+
+def test_dashboard_example_omits_hidden_default_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    refs = set(_dashboard_entity_refs(dashboard_text))
+    hidden_sensor_keys = {
+        description.key
+        for description in SENSOR_DESCRIPTIONS
+        if description.entity_registry_visible_default is False
+    }
+    hidden_binary_sensor_keys = {
+        description.key
+        for description in BINARY_SENSOR_DESCRIPTIONS
+        if description.entity_registry_visible_default is False
+    }
+
+    hidden_refs = sorted(
+        ref
+        for ref in refs
+        if (
+            ref.startswith("sensor.")
+            and any(ref.endswith(f"_{key}") for key in hidden_sensor_keys)
+        )
+        or (
+            ref.startswith("binary_sensor.")
+            and any(ref.endswith(f"_{key}") for key in hidden_binary_sensor_keys)
+        )
+    )
+
+    assert hidden_refs == []
 
 
 def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> None:
@@ -393,13 +429,12 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     assert "sensor.hvac_energy_summary" in dashboard_text
     assert "sensor.washer_activity_summary" in dashboard_text
     assert "sensor.dryer_activity_summary" in dashboard_text
-    assert "sensor.hvac_energy_usage_status" in dashboard_text
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
     assert "sensor.hvac_health_summary" in dashboard_text
-    assert "sensor.hvac_alert_evidence" in dashboard_text
-    assert "sensor.water_heater_energy_usage_status" in dashboard_text
-    assert "sensor.mains_nilm_learning_progress" in dashboard_text
-    assert "sensor.mains_nilm_anomaly_score" in dashboard_text
+    assert "sensor.water_heater_energy_summary" in dashboard_text
+    assert "sensor.mains_nilm_activity_summary" in dashboard_text
+    assert "binary_sensor.washer_running" in dashboard_text
+    assert "binary_sensor.dryer_running" in dashboard_text
 
     needs_attention = yaml.safe_dump(
         next(
@@ -435,8 +470,8 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
             if section.get("title") == "Power quality detail"
         )
     )
-    assert "sensor.hvac_power_quality_score" in power_quality_detail
-    assert "sensor.refrigerator_standby_status" in power_quality_detail
+    assert "sensor.hvac_electrical_health" in power_quality_detail
+    assert "sensor.refrigerator_activity_summary" in power_quality_detail
 
 
 def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
@@ -462,8 +497,8 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
 
     assert stale_entities.isdisjoint(set(_dashboard_entity_refs(dashboard_text)))
     assert "sensor.mains_nilm_health_summary" in dashboard_text
-    assert "sensor.mains_nilm_nilm_discovered_signatures" in dashboard_text
-    assert "binary_sensor.mains_nilm_maintenance" in dashboard_text
+    assert "sensor.mains_nilm_activity_summary" in dashboard_text
+    assert "sensor.mains_nilm_electrical_health" in dashboard_text
 
 
 def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
@@ -471,25 +506,41 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     refs = set(_dashboard_entity_refs(dashboard_text))
 
     expected_entities = {
+        "sensor.refrigerator_health_summary",
         "sensor.refrigerator_activity_summary",
         "sensor.refrigerator_electrical_health",
         "sensor.refrigerator_energy_summary",
-        "sensor.refrigerator_circuit_mode",
-        "sensor.refrigerator_power_flow",
-        "sensor.refrigerator_energy_usage_status",
-        "sensor.refrigerator_energy_goal_status",
-        "sensor.hvac_run_cycle_status",
-        "sensor.refrigerator_recent_activity",
-        "sensor.refrigerator_billing_cycle_status",
-        "sensor.refrigerator_cost_status",
-        "sensor.hvac_demand_peak_status",
-        "sensor.hvac_capacity_status",
-        "sensor.hvac_leg_imbalance_status",
-        "sensor.hvac_metric_consistency_status",
-        "sensor.mains_nilm_balance_status",
-        "sensor.mains_nilm_solar_flow_status",
-        "sensor.refrigerator_standby_status",
-        "sensor.mains_nilm_nilm_topology_status",
+        "sensor.refrigerator_daily_energy_usage",
+        "sensor.hvac_health_summary",
+        "sensor.hvac_activity_summary",
+        "sensor.hvac_electrical_health",
+        "sensor.hvac_energy_summary",
+        "sensor.hvac_daily_energy_usage",
+        "sensor.water_heater_health_summary",
+        "sensor.water_heater_electrical_health",
+        "sensor.water_heater_energy_summary",
+        "sensor.water_heater_daily_energy_usage",
+        "sensor.washer_health_summary",
+        "sensor.washer_activity_summary",
+        "sensor.washer_electrical_health",
+        "sensor.washer_energy_summary",
+        "sensor.washer_daily_energy_usage",
+        "sensor.dryer_health_summary",
+        "sensor.dryer_activity_summary",
+        "sensor.dryer_electrical_health",
+        "sensor.dryer_energy_summary",
+        "sensor.dryer_daily_energy_usage",
+        "sensor.mains_nilm_health_summary",
+        "sensor.mains_nilm_activity_summary",
+        "sensor.mains_nilm_electrical_health",
+        "sensor.mains_nilm_energy_summary",
+        "sensor.mains_nilm_daily_energy_usage",
+        "binary_sensor.refrigerator_running",
+        "binary_sensor.hvac_running",
+        "binary_sensor.water_heater_running",
+        "binary_sensor.pool_pump_running",
+        "binary_sensor.washer_running",
+        "binary_sensor.dryer_running",
     }
     assert expected_entities <= refs
     assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
@@ -555,10 +606,11 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
     assert "Appliance Drilldown Pattern" in readme_text
     for phrase in (
         "Current state",
+        "Appliance automations",
         "Energy tracking",
-        "Power quality evidence",
-        "Recent activity",
+        "Electrical review",
         "Setup and data quality",
+        "advanced diagnostic entities",
     ):
         assert phrase in readme_text
 

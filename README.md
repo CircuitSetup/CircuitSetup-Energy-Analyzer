@@ -511,23 +511,28 @@ The integration exposes standard Home Assistant diagnostic entities per
 configured circuit. In the entity IDs below, `<circuit>` is the configured
 circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
 
-The installed demo dashboard shows how these entities can be arranged without
-recreating Home Assistant's Energy Dashboard.
+The installed demo dashboard uses the visible rollup entities first, without
+placing hidden diagnostic/detail entities directly on cards. If Home Assistant
+shows an entity name with `(Hidden)` on a dashboard, that usually means a card
+explicitly references an entity that the integration intentionally hid by
+default.
 
 ![Appliance-first Energy Analyzer dashboard with health summaries and evidence cards](docs/images/readme/demo-dashboard.png)
 
 ## Appliance Drilldown Pattern
 
-For each important appliance, use the same card order so the dashboard is easy to scan:
+For each important appliance, use the same card order so the dashboard is easy
+to scan without surfacing internal detail sensors:
 
-1. Current state: Health Summary, Readiness, Recent Activity, and Alert Evidence.
-2. Energy tracking: Daily Energy Usage, Energy Usage Status, Daily Goal, Billing Cycle, and Cost.
-3. Power quality evidence: Power Quality Score, Power Quality Evidence, Metric Consistency Status, and any drift sensors relevant to the appliance.
-4. Run behavior: Run Cycle Status, Run Cycle Runtime, Run Cycle Duty Cycle, and Recent Activity Count.
-5. Capacity and phase checks: Capacity Status, Demand Peak Status, and Dual-Phase Leg Imbalance for dual-phase appliances.
-6. Setup and data quality: Data Quality Checklist, Energy Dashboard Status, Circuit Mode, and Power Flow.
+1. Current state: Health Summary, Activity Summary, Electrical Health, and Energy Summary.
+2. Appliance automations: the Running binary sensor for on/off automation triggers.
+3. Energy tracking: Daily Energy Usage plus Energy Summary, which rolls daily goals, billing, cost, and usage-spike evidence together.
+4. Electrical review: Electrical Health, which rolls power quality, power metric consistency, leg imbalance, mains balance, and solar flow diagnostics together.
+5. Setup and data quality: Repairs, notifications, and entity attributes for missing sensors, stale data, and advanced evidence.
 
-This keeps the first card useful for daily use while leaving the detailed evidence nearby when something looks unusual.
+This keeps the first card useful for daily use while leaving detailed evidence
+available in attributes, persistent notifications, Repairs, and advanced entity
+views when something looks unusual.
 
 ## Status Glossary
 
@@ -603,6 +608,15 @@ Common status values:
 Start with these entities on dashboards:
 
 - Health Summary: one short state for the circuit, such as `Ready`, `Learning`, `Needs data`, or `Possible issue`.
+- Activity Summary: one readable activity state, such as `Running`, `Idle`, `Standby`, `On`, `Off`, or `No Activity`.
+- Electrical Health: the combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow.
+- Energy Summary: the combined energy condition for daily usage, goals, billing, cost, and high-usage evidence.
+- Daily Energy Usage: the current daily kWh value when cumulative energy data is available.
+- Running: a binary sensor for appliance on/off automations and notifications.
+
+Use these advanced diagnostic entities in attributes, automations, or a
+temporary troubleshooting view instead of the default dashboard:
+
 - Readiness: machine-readable status plus attributes explaining learning progress and blocked checks.
 - Alert Evidence: the strongest current evidence, written as observed behavior rather than diagnosis.
 - Recent Activity: the most recent start, stop, or possible-issue event.
