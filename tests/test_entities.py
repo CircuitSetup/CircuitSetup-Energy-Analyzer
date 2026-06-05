@@ -710,6 +710,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         has_data_quality_problem,
+        is_appliance_running,
         is_laundry_appliance_running,
         is_learning,
         is_maintenance_active,
@@ -746,20 +747,32 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
 
     state.latest_real_power_w_by_circuit["washer"] = 20.0
     state.latest_real_power_w_by_circuit["dryer"] = 100.0
+    state.latest_real_power_w_by_circuit["refrigerator"] = 40.0
+    state.latest_real_power_w_by_circuit["microwave"] = 650.0
+    state.latest_real_power_w_by_circuit["mixed"] = 1200.0
     assert (
         is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
         is True
     )
     assert is_laundry_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
     assert (
-        is_laundry_appliance_running(state, "washer", ApplianceProfile.REFRIGERATOR)
-        is False
+        is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
+        is True
     )
+    assert is_appliance_running(state, "microwave", ApplianceProfile.MICROWAVE) is True
+    assert is_appliance_running(state, "mixed", ApplianceProfile.MIXED) is False
+
+    state.run_cycle_status_by_circuit["refrigerator"] = "running"
+    state.run_cycle_status_by_circuit["oven"] = "idle"
+    state.latest_real_power_w_by_circuit["refrigerator"] = 0.0
+    state.latest_real_power_w_by_circuit["oven"] = 2000.0
+    assert is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
+    assert is_appliance_running(state, "oven", ApplianceProfile.OVEN) is False
 
 
 def test_demo_source_values_are_intentionally_triggerable() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
-        LAUNDRY_RUNNING_POWER_THRESHOLDS_W,
+        APPLIANCE_RUNNING_POWER_THRESHOLDS_W,
     )
     from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
         evaluate_metric_consistency,
@@ -803,12 +816,12 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
 
     assert (
         (_demo_source_value("washer", SensorRole.REAL_POWER) or 0.0)
-        > LAUNDRY_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
+        > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
     )
     assert (
         (_demo_source_value("dryer_l1", SensorRole.REAL_POWER) or 0.0)
         + (_demo_source_value("dryer_l2", SensorRole.REAL_POWER) or 0.0)
-        > LAUNDRY_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
+        > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
     )
 
 
@@ -2267,7 +2280,7 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_entry_adds_laundry_running_entities() -> None:
+async def test_binary_sensor_setup_entry_adds_appliance_running_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         async_setup_entry,
     )
@@ -2293,16 +2306,49 @@ async def test_binary_sensor_setup_entry_adds_laundry_running_entities() -> None
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.refrigerator_power", SensorRole.REAL_POWER),),
     )
+    microwave = CircuitConfig(
+        circuit_id="microwave",
+        name="Microwave",
+        appliance_profile=ApplianceProfile.MICROWAVE,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.microwave_power", SensorRole.REAL_POWER),),
+    )
+    mixed = CircuitConfig(
+        circuit_id="mixed_lights",
+        name="Mixed Lights",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_lights_power", SensorRole.REAL_POWER),),
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.solar_power", SensorRole.REAL_POWER),),
+    )
     state = AnalyzerState(
         latest_real_power_w_by_circuit={
             "washer": 35.0,
             "dryer": 70.0,
             "refrigerator": 180.0,
+            "microwave": 650.0,
+            "mixed_lights": 1200.0,
+            "mains": 2600.0,
+            "solar": 1800.0,
         }
     )
+    state.run_cycle_status_by_circuit["refrigerator"] = "running"
     coordinator = SimpleNamespace(
         data=state,
-        circuit_configs=(washer, dryer, refrigerator),
+        circuit_configs=(washer, dryer, refrigerator, microwave, mixed, mains, solar),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
@@ -2315,14 +2361,20 @@ async def test_binary_sensor_setup_entry_adds_laundry_running_entities() -> None
         for entity in added_entities
         if entity.entity_description.key == "running"
     }
-    assert set(running_entities) == {"washer", "dryer"}
+    assert set(running_entities) == {"washer", "dryer", "refrigerator", "microwave"}
     assert running_entities["washer"].name == "Washer Running"
     assert running_entities["dryer"].name == "Dryer Running"
+    assert running_entities["refrigerator"].name == "Refrigerator Running"
+    assert running_entities["microwave"].name == "Microwave Running"
     assert running_entities["washer"].is_on is True
     assert running_entities["dryer"].is_on is False
+    assert running_entities["refrigerator"].is_on is True
+    assert running_entities["microwave"].is_on is True
     assert {entity.unique_id for entity in running_entities.values()} == {
         "entry-1_washer_running",
         "entry-1_dryer_running",
+        "entry-1_refrigerator_running",
+        "entry-1_microwave_running",
     }
 
 

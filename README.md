@@ -51,7 +51,7 @@ not need to be the first thing a household user sees.
 
 New installs show only the summary-first device surface by default: Health
 Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy
-Usage, and washer/dryer Running binary sensors where applicable. Detailed
+Usage, and appliance Running binary sensors where applicable. Detailed
 evidence and machine-readable status entities remain enabled for advanced users,
 but are hidden by default and older installs are migrated to the same quieter
 device-level layout.
@@ -115,7 +115,8 @@ The setup and options screens are designed to avoid hand-written JSON:
 
 Recommended v1 appliance types include broad `hvac`, more specific
 `hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus
-`washer`, `dryer`, `water_pump`, `pool_pump`, and `sump_pump` profiles.
+`microwave`, `washer`, `dryer`, `water_pump`, `pool_pump`, and `sump_pump`
+profiles.
 Existing `well_pump` input is accepted as a legacy alias for `water_pump`.
 
 Mains sensors are optional, but they are required for the whole-home balance,
@@ -768,7 +769,7 @@ appliance profile and source data.
 - Learning (`binary_sensor.<circuit>_learning`) - On while the circuit is still learning baseline evidence. Possible outputs: `on` or `off`.
 - Data Quality Problem (`binary_sensor.<circuit>_data_quality_problem`) - On when the circuit has a current data-quality issue. Possible outputs: `on` or `off`.
 - Maintenance (`binary_sensor.<circuit>_maintenance`) - On when the circuit is marked as in maintenance. Possible outputs: `on` or `off`.
-- Running (`binary_sensor.<circuit>_running`) - Created for washer and dryer circuits with active-power sensors. On when the latest watts are above the appliance running threshold. Possible outputs: `on` or `off`.
+- Running (`binary_sensor.<circuit>_running`) - Created for appliance circuits with active-power sensors, excluding mixed circuits, mains NILM, and solar inverter feeds. On when the latest watts are above the appliance running threshold, or when the cycle analyzer reports `running`. Possible outputs: `on` or `off`.
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator,
 HVAC, Mains NILM, and utility comparison cards.

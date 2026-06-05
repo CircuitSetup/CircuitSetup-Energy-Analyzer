@@ -1336,6 +1336,29 @@ async def test_assignment_step_auto_suggests_washer_profile() -> None:
 
 
 @pytest.mark.asyncio
+async def test_assignment_step_auto_suggests_microwave_profile() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.kitchen_microwave_active_power",
+                "sensor.kitchen_microwave_current",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "appliance_profile") == "microwave"
+    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+
+
+@pytest.mark.asyncio
 async def test_assignment_step_uses_clean_demo_circuit_names() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerConfigFlow,
@@ -1615,6 +1638,7 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
         appliance_options
     )
     assert {"value": "hvac_blower", "label": "HVAC Blower"} in appliance_options
+    assert {"value": "microwave", "label": "Microwave"} in appliance_options
     assert {"value": "washer", "label": "Washer"} in appliance_options
     assert {"value": "dryer", "label": "Dryer"} in appliance_options
     assert {"value": "ev_charger", "label": "EV Charger"} in appliance_options

@@ -25,9 +25,34 @@ except ModuleNotFoundError:
         """Fallback binary sensor base for tests without Home Assistant."""
 
 
-LAUNDRY_RUNNING_POWER_THRESHOLDS_W = {
+APPLIANCE_RUNNING_POWER_THRESHOLDS_W = {
+    ApplianceProfile.REFRIGERATOR: 25.0,
+    ApplianceProfile.FREEZER: 25.0,
+    ApplianceProfile.HVAC: 250.0,
+    ApplianceProfile.HVAC_COMPRESSOR: 500.0,
+    ApplianceProfile.HVAC_BLOWER: 80.0,
+    ApplianceProfile.ELECTRIC_HEAT: 500.0,
+    ApplianceProfile.WATER_HEATER: 500.0,
+    ApplianceProfile.OVEN: 500.0,
+    ApplianceProfile.MICROWAVE: 500.0,
     ApplianceProfile.WASHER: 20.0,
     ApplianceProfile.DRYER: 100.0,
+    ApplianceProfile.POOL_PUMP: 100.0,
+    ApplianceProfile.WATER_PUMP: 100.0,
+    ApplianceProfile.WELL_PUMP: 100.0,
+    ApplianceProfile.SUMP_PUMP: 80.0,
+    ApplianceProfile.EV_CHARGER: 500.0,
+    ApplianceProfile.MOTOR_LOAD: 80.0,
+    ApplianceProfile.RESISTIVE_LOAD: 100.0,
+}
+
+LAUNDRY_RUNNING_POWER_THRESHOLDS_W = {
+    ApplianceProfile.WASHER: APPLIANCE_RUNNING_POWER_THRESHOLDS_W[
+        ApplianceProfile.WASHER
+    ],
+    ApplianceProfile.DRYER: APPLIANCE_RUNNING_POWER_THRESHOLDS_W[
+        ApplianceProfile.DRYER
+    ],
 }
 
 
@@ -62,16 +87,24 @@ def is_maintenance_active(
     return maintenance.get("active") is True
 
 
-def is_laundry_appliance_running(
+def is_appliance_running(
     state: Any,
     circuit_id: str,
     appliance_profile: ApplianceProfile | str | None = None,
 ) -> bool:
-    """Return whether a washer or dryer appears active from latest watts."""
+    """Return whether an appliance appears active from cycle status or watts."""
     profile = _appliance_profile(appliance_profile)
-    threshold = LAUNDRY_RUNNING_POWER_THRESHOLDS_W.get(profile)
+    threshold = APPLIANCE_RUNNING_POWER_THRESHOLDS_W.get(profile)
     if threshold is None:
         return False
+
+    cycle_status_by_circuit = getattr(state, "run_cycle_status_by_circuit", {})
+    if isinstance(cycle_status_by_circuit, dict):
+        cycle_status = str(cycle_status_by_circuit.get(circuit_id, "")).lower()
+        if cycle_status == "running":
+            return True
+        if cycle_status == "idle":
+            return False
 
     power_by_circuit = getattr(state, "latest_real_power_w_by_circuit", {})
     if not isinstance(power_by_circuit, dict):
@@ -83,6 +116,15 @@ def is_laundry_appliance_running(
         return float(power_w) >= threshold
     except (TypeError, ValueError):
         return False
+
+
+def is_laundry_appliance_running(
+    state: Any,
+    circuit_id: str,
+    appliance_profile: ApplianceProfile | str | None = None,
+) -> bool:
+    """Return whether a washer or dryer appears active from latest watts."""
+    return is_appliance_running(state, circuit_id, appliance_profile)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +178,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
     DiagnosticBinarySensorDescription(
         key="running",
         name_suffix="Running",
-        value_fn=is_laundry_appliance_running,
+        value_fn=is_appliance_running,
         device_class="running",
         entity_category=None,
     ),
@@ -244,7 +286,7 @@ def binary_sensor_description_applies(
         return True
     return (
         _appliance_profile(getattr(circuit, "appliance_profile", None))
-        in LAUNDRY_RUNNING_POWER_THRESHOLDS_W
+        in APPLIANCE_RUNNING_POWER_THRESHOLDS_W
         and _has_real_power_sensor(circuit)
     )
 

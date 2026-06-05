@@ -1914,6 +1914,7 @@ def test_runtime_infers_recommended_v1_appliance_taxonomy_from_sources() -> None
                 "sensor.well_pump_active_power",
                 "sensor.pool_pump_active_power",
                 "sensor.sump_pump_active_power",
+                "sensor.kitchen_microwave_active_power",
             ],
         },
     )
@@ -1931,6 +1932,10 @@ def test_runtime_infers_recommended_v1_appliance_taxonomy_from_sources() -> None
     assert by_circuit["well_pump"].appliance_profile is ApplianceProfile.WATER_PUMP
     assert by_circuit["pool_pump"].appliance_profile is ApplianceProfile.POOL_PUMP
     assert by_circuit["sump_pump"].appliance_profile is ApplianceProfile.SUMP_PUMP
+    assert by_circuit["kitchen_microwave"].appliance_profile is (
+        ApplianceProfile.MICROWAVE
+    )
+    assert by_circuit["kitchen_microwave"].mode is CircuitMode.SINGLE_PHASE
 
 
 def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None:
@@ -1972,6 +1977,37 @@ def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None
 
     assert config.appliance_profile is ApplianceProfile.EV_CHARGER
     assert config.mode is CircuitMode.DUAL_PHASE
+
+
+def test_runtime_accepts_microwave_oven_as_manual_appliance_profile_alias() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "kitchen_microwave",
+                    "name": "Kitchen Microwave",
+                    "mode": "single_phase",
+                    "appliance_profile": "microwave_oven",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.kitchen_microwave_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    config = coordinator.circuit_configs[0]
+
+    assert config.appliance_profile is ApplianceProfile.MICROWAVE
 
 
 def test_runtime_uses_circuits_saved_from_options_flow_assignments() -> None:

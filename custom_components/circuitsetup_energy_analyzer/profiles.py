@@ -128,6 +128,24 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         features=frozenset({"preheat", "temperature_hold", "element_cycle"}),
         minimum_cycles=8,
     ),
+    ApplianceProfile.MICROWAVE: ProfileDefinition(
+        appliance_profile=ApplianceProfile.MICROWAVE,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=frozenset({
+            SensorRole.CURRENT,
+            SensorRole.VOLTAGE,
+            SensorRole.POWER_FACTOR,
+            SensorRole.ENERGY,
+        }),
+        features=frozenset({
+            "cook_cycle",
+            "short_cycle",
+            "door_open_hint",
+            "large_persistent_change",
+        }),
+        minimum_cycles=8,
+    ),
     ApplianceProfile.WASHER: ProfileDefinition(
         appliance_profile=ApplianceProfile.WASHER,
         supported_modes=_SINGLE_PHASE_POWER,

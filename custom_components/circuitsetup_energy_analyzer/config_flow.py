@@ -238,6 +238,7 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.ELECTRIC_HEAT.value,
     ApplianceProfile.WATER_HEATER.value,
     ApplianceProfile.OVEN.value,
+    ApplianceProfile.MICROWAVE.value,
     ApplianceProfile.WASHER.value,
     ApplianceProfile.DRYER.value,
     ApplianceProfile.POOL_PUMP.value,
@@ -1698,6 +1699,8 @@ def _normalize_assignment_profile(raw_profile: str) -> str:
         "clothes_dryer": ApplianceProfile.DRYER.value,
         "electric_dryer": ApplianceProfile.DRYER.value,
         "gas_dryer": ApplianceProfile.DRYER.value,
+        "microwave_oven": ApplianceProfile.MICROWAVE.value,
+        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
         "car_charger": ApplianceProfile.EV_CHARGER.value,
     }
     return aliases.get(normalized, normalized)
@@ -1857,6 +1860,16 @@ def _suggest_assignment_profile_mode(
             "_water_heater_",
             ApplianceProfile.WATER_HEATER.value,
             CircuitMode.DUAL_PHASE.value,
+        ),
+        (
+            "_microwave_",
+            ApplianceProfile.MICROWAVE.value,
+            CircuitMode.SINGLE_PHASE.value,
+        ),
+        (
+            "_microwave_oven_",
+            ApplianceProfile.MICROWAVE.value,
+            CircuitMode.SINGLE_PHASE.value,
         ),
         ("_oven_", ApplianceProfile.OVEN.value, CircuitMode.DUAL_PHASE.value),
         (

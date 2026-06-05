@@ -5366,6 +5366,8 @@ def _appliance_profile_from_raw_value(value: Any) -> ApplianceProfile:
         "level2_charger": ApplianceProfile.EV_CHARGER.value,
         "level_2_charger": ApplianceProfile.EV_CHARGER.value,
         "wall_connector": ApplianceProfile.EV_CHARGER.value,
+        "microwave_oven": ApplianceProfile.MICROWAVE.value,
+        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
     }
     normalized = aliases.get(normalized, normalized)
     return ApplianceProfile(normalized)
@@ -5801,6 +5803,11 @@ def _appliance_profile_mode_from_circuit_id(
             ("_water_heater_", "_waterheater_"),
             ApplianceProfile.WATER_HEATER,
             CircuitMode.DUAL_PHASE,
+        ),
+        (
+            ("_microwave_", "_microwave_oven_"),
+            ApplianceProfile.MICROWAVE,
+            CircuitMode.SINGLE_PHASE,
         ),
         (("_oven_", "_range_"), ApplianceProfile.OVEN, CircuitMode.DUAL_PHASE),
         (
