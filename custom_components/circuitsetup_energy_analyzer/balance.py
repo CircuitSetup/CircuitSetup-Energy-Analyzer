@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W = 100.0
+
 
 @dataclass(frozen=True, slots=True)
 class BalanceInput:
@@ -29,7 +31,7 @@ def calculate_balance(
     *,
     mains: BalanceInput | None,
     monitored: list[BalanceInput],
-    negative_tolerance_w: float = 100.0,
+    negative_tolerance_w: float = DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
 ) -> BalanceResult:
     """Calculate unmonitored balance from mains and monitored circuit power."""
     if mains is None or mains.real_power_w is None:

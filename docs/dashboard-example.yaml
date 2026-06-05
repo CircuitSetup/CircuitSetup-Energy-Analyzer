@@ -6,7 +6,7 @@ sections:
     cards:
       - type: glance
         title: At a glance
-        columns: 3
+        columns: 4
         entities:
           - entity: sensor.refrigerator_health_summary
             name: Refrigerator
@@ -20,6 +20,10 @@ sections:
             name: HVAC learning
           - entity: sensor.mains_nilm_learning_progress
             name: Mains learning
+          - entity: sensor.refrigerator_circuit_mode
+            name: Fridge mode
+          - entity: sensor.refrigerator_power_flow
+            name: Fridge flow
       - type: gauge
         title: Refrigerator anomaly
         entity: sensor.refrigerator_anomaly_score
@@ -135,7 +139,9 @@ sections:
           - entity: sensor.hvac_current_demand
           - entity: sensor.hvac_peak_demand
           - entity: sensor.hvac_demand_peak_status
+          - entity: sensor.hvac_capacity_status
           - entity: sensor.hvac_leg_imbalance_status
+          - entity: sensor.hvac_metric_consistency_status
           - entity: sensor.hvac_run_cycle_status
   - type: grid
     title: Energy usage
@@ -154,8 +160,19 @@ sections:
         entities:
           - entity: sensor.refrigerator_daily_energy_usage
           - entity: sensor.refrigerator_energy_usage_status
+          - entity: sensor.refrigerator_energy_goal_status
+          - entity: sensor.refrigerator_billing_cycle_status
+          - entity: sensor.refrigerator_cost_status
           - entity: sensor.refrigerator_standby_status
           - entity: sensor.refrigerator_always_on_power
+      - type: button
+        name: Export refrigerator history CSV
+        icon: mdi:file-delimited-outline
+        tap_action:
+          action: call-service
+          service: circuitsetup_energy_analyzer.export_history_csv
+          data:
+            circuit_id: refrigerator
   - type: grid
     title: Mains and NILM
     cards:
@@ -169,6 +186,8 @@ sections:
             name: Unmatched
           - entity: sensor.mains_nilm_balance_status
             name: Balance
+          - entity: sensor.mains_nilm_solar_flow_status
+            name: Solar flow
           - entity: sensor.mains_nilm_monitored_coverage
             name: Coverage
           - entity: sensor.mains_nilm_demand_peak_status
@@ -188,3 +207,15 @@ sections:
           - entity: sensor.mains_nilm_recent_activity
           - entity: sensor.mains_nilm_nilm_topology_status
           - entity: binary_sensor.mains_nilm_maintenance
+      - type: markdown
+        title: Alert philosophy
+        content: >
+          Alert philosophy: diagnostic entities are always available, important
+          possible-issue events use persistent notifications, and Repairs are
+          reserved for setup, configuration, or data-quality problems.
+      - type: markdown
+        title: Notifications and repairs
+        content: >
+          Notifications and repairs: appliance alerts describe observed evidence
+          and avoid diagnosis; Repairs should point to missing sensors, bad
+          mappings, stale data, or setup problems.

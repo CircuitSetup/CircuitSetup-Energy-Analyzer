@@ -283,6 +283,10 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_SET_DEMAND_SETTINGS,
         SERVICE_SET_ENERGY_GOAL_SETTINGS,
         SERVICE_SET_ENERGY_USAGE_SETTINGS,
+        SERVICE_SET_LEG_IMBALANCE_SETTINGS,
+        SERVICE_SET_MAINS_BALANCE_SETTINGS,
+        SERVICE_SET_METRIC_CONSISTENCY_SETTINGS,
+        SERVICE_SET_SOLAR_FLOW_SETTINGS,
         SERVICE_SET_STANDBY_SETTINGS,
         SERVICE_SET_UTILITY_COMPARISON_SETTINGS,
         SERVICE_START_MAINTENANCE,
@@ -304,7 +308,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             return None
 
         def has_circuit(self, circuit_id: str) -> bool:
-            return circuit_id in {"fridge", "mains"}
+            return circuit_id in {"fridge", "hvac", "mains"}
 
         async def async_set_circuit_sensitivity(
             self,
@@ -440,6 +444,71 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                 (
                     "async_set_capacity_settings",
                     (circuit_id, breaker_amps, warning_ratio),
+                )
+            )
+
+        async def async_set_leg_imbalance_settings(
+            self,
+            circuit_id: str,
+            warning_ratio: object = None,
+            minimum_total_power_w: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_leg_imbalance_settings",
+                    (circuit_id, warning_ratio, minimum_total_power_w),
+                )
+            )
+
+        async def async_set_metric_consistency_settings(
+            self,
+            circuit_id: str,
+            apparent_power_tolerance_percent: object = None,
+            power_factor_tolerance: object = None,
+            minimum_apparent_power_va: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_metric_consistency_settings",
+                    (
+                        circuit_id,
+                        apparent_power_tolerance_percent,
+                        power_factor_tolerance,
+                        minimum_apparent_power_va,
+                    ),
+                )
+            )
+
+        async def async_set_mains_balance_settings(
+            self,
+            circuit_id: str,
+            negative_tolerance_w: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_mains_balance_settings",
+                    (circuit_id, negative_tolerance_w),
+                )
+            )
+
+        async def async_set_solar_flow_settings(
+            self,
+            circuit_id: str,
+            export_tolerance_w: object = None,
+            solar_surplus_threshold_w: object = None,
+            high_solar_surplus_threshold_w: object = None,
+            flexible_load_running_threshold_w: object = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_set_solar_flow_settings",
+                    (
+                        circuit_id,
+                        export_tolerance_w,
+                        solar_surplus_threshold_w,
+                        high_solar_surplus_threshold_w,
+                        flexible_load_running_threshold_w,
+                    ),
                 )
             )
 
@@ -610,6 +679,44 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             }
         )
     )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_LEG_IMBALANCE_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "hvac",
+                "warning_ratio": 0.4,
+                "minimum_total_power_w": 800.0,
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_METRIC_CONSISTENCY_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "hvac",
+                "apparent_power_tolerance_percent": 12.0,
+                "power_factor_tolerance": 0.08,
+                "minimum_apparent_power_va": 120.0,
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_MAINS_BALANCE_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "negative_tolerance_w": 250.0,
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_SET_SOLAR_FLOW_SETTINGS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "export_tolerance_w": 150.0,
+                "solar_surplus_threshold_w": 750.0,
+                "high_solar_surplus_threshold_w": 2000.0,
+                "flexible_load_running_threshold_w": 175.0,
+            }
+        )
+    )
     await hass.services.registered[(DOMAIN, SERVICE_SET_UTILITY_COMPARISON_SETTINGS)](
         SimpleNamespace(
             data={
@@ -671,6 +778,13 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
         ("async_set_capacity_settings", ("fridge", 20.0, 0.8)),
+        ("async_set_leg_imbalance_settings", ("hvac", 0.4, 800.0)),
+        ("async_set_metric_consistency_settings", ("hvac", 12.0, 0.08, 120.0)),
+        ("async_set_mains_balance_settings", ("mains", 250.0)),
+        (
+            "async_set_solar_flow_settings",
+            ("mains", 150.0, 750.0, 2000.0, 175.0),
+        ),
         (
             "async_set_utility_comparison_settings",
             (

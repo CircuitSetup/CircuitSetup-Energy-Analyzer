@@ -1302,6 +1302,40 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert _schema_default(schema, "standby_min_samples") == 24
 
 
+def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema(
+        {
+            "leg_imbalance_warning_ratio": 0.4,
+            "leg_imbalance_min_total_power_w": 800.0,
+            "apparent_power_tolerance_percent": 12.0,
+            "power_factor_tolerance": 0.08,
+            "minimum_apparent_power_va": 120.0,
+            "balance_negative_tolerance_w": 250.0,
+            "solar_export_tolerance_w": 150.0,
+            "solar_surplus_threshold_w": 750.0,
+            "high_solar_surplus_threshold_w": 2000.0,
+            "flexible_load_running_threshold_w": 175.0,
+        }
+    )
+
+    assert _schema_default(schema, "leg_imbalance_warning_ratio") == 0.4
+    assert _schema_default(schema, "leg_imbalance_min_total_power_w") == 800.0
+    assert _schema_default(schema, "apparent_power_tolerance_percent") == 12.0
+    assert _schema_default(schema, "power_factor_tolerance") == 0.08
+    assert _schema_default(schema, "minimum_apparent_power_va") == 120.0
+    assert _schema_default(schema, "balance_negative_tolerance_w") == 250.0
+    assert _schema_default(schema, "solar_export_tolerance_w") == 150.0
+    assert _schema_default(schema, "solar_surplus_threshold_w") == 750.0
+    assert _schema_default(schema, "high_solar_surplus_threshold_w") == 2000.0
+    assert _schema_default(schema, "flexible_load_running_threshold_w") == 175.0
+
+
 @pytest.mark.asyncio
 async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (

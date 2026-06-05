@@ -72,6 +72,16 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "standby_threshold_w": "Standby Threshold W",
     "always_on_alert_w": "Always On Alert W",
     "standby_min_samples": "Standby Minimum Samples",
+    "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
+    "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
+    "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
+    "power_factor_tolerance": "Power Factor Tolerance",
+    "minimum_apparent_power_va": "Minimum Apparent Power VA",
+    "balance_negative_tolerance_w": "Balance Negative Tolerance W",
+    "solar_export_tolerance_w": "Solar Export Tolerance W",
+    "solar_surplus_threshold_w": "Solar Surplus Threshold W",
+    "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
+    "flexible_load_running_threshold_w": "Flexible Load Running Threshold W",
 }
 
 EXPECTED_SERVICE_FIELD_NAMES = {
@@ -89,15 +99,24 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "duration": "Duration",
     "goal_alert_ratio": "Goal Alert Ratio",
     "label": "Label",
+    "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
+    "export_tolerance_w": "Export Tolerance W",
+    "flexible_load_running_threshold_w": "Flexible Load Running Threshold W",
+    "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
+    "minimum_apparent_power_va": "Minimum Apparent Power VA",
+    "minimum_total_power_w": "Minimum Total Power W",
     "max_active_minutes": "Max Active Minutes",
     "max_idle_minutes": "Max Idle Minutes",
     "measured_energy_entities": "Measured Energy Entities",
+    "negative_tolerance_w": "Negative Tolerance W",
     "note": "Note",
+    "power_factor_tolerance": "Power Factor Tolerance",
     "preset": "Preset",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
     "source_signature_id": "Source Signature ID",
+    "solar_surplus_threshold_w": "Solar Surplus Threshold W",
     "standby_threshold_w": "Standby Threshold W",
     "target_signature_id": "Target Signature ID",
     "tou_end": "TOU End",
@@ -374,6 +393,34 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_health_summary" in dashboard_text
     assert "sensor.mains_nilm_nilm_discovered_signatures" in dashboard_text
     assert "binary_sensor.mains_nilm_maintenance" in dashboard_text
+
+
+def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    refs = set(_dashboard_entity_refs(dashboard_text))
+
+    expected_entities = {
+        "sensor.refrigerator_circuit_mode",
+        "sensor.refrigerator_power_flow",
+        "sensor.refrigerator_energy_usage_status",
+        "sensor.refrigerator_energy_goal_status",
+        "sensor.hvac_run_cycle_status",
+        "sensor.refrigerator_recent_activity",
+        "sensor.refrigerator_billing_cycle_status",
+        "sensor.refrigerator_cost_status",
+        "sensor.hvac_demand_peak_status",
+        "sensor.hvac_capacity_status",
+        "sensor.hvac_leg_imbalance_status",
+        "sensor.hvac_metric_consistency_status",
+        "sensor.mains_nilm_balance_status",
+        "sensor.mains_nilm_solar_flow_status",
+        "sensor.refrigerator_standby_status",
+        "sensor.mains_nilm_nilm_topology_status",
+    }
+    assert expected_entities <= refs
+    assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
+    assert "Alert philosophy" in dashboard_text
+    assert "Notifications and repairs" in dashboard_text
 
 
 def test_alert_blueprint_is_user_friendly_and_actionable() -> None:

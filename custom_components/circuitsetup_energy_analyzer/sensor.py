@@ -176,6 +176,20 @@ def sensitivity_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def circuit_mode_value(state: Any, circuit_id: str) -> str:
+    """Return the configured circuit mode label for a circuit."""
+    return str(
+        getattr(state, "circuit_mode_by_circuit", {}).get(circuit_id, "Unknown")
+    )
+
+
+def power_flow_value(state: Any, circuit_id: str) -> str:
+    """Return the configured power-flow label for a circuit."""
+    return str(
+        getattr(state, "power_flow_by_circuit", {}).get(circuit_id, "Unknown")
+    )
+
+
 def power_quality_score_value(state: Any, circuit_id: str) -> float:
     """Return the current power-quality relationship score for a circuit."""
     return float(
@@ -726,6 +740,8 @@ SENSOR_ICONS: Mapping[str, str] = {
     "recent_activity": "mdi:timeline-text-outline",
     "recent_activity_count": "mdi:counter",
     "sensitivity": "mdi:tune-variant",
+    "circuit_mode": "mdi:transmission-tower",
+    "power_flow": "mdi:swap-horizontal",
     "power_quality_score": "mdi:sine-wave",
     "power_quality_evidence": "mdi:lightning-bolt-circle",
     "reactive_power_drift": "mdi:flash-triangle-outline",
@@ -856,6 +872,16 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Sensitivity",
         value_fn=sensitivity_value,
         attributes_fn=_sensitivity_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="circuit_mode",
+        name_suffix="Circuit Mode",
+        value_fn=circuit_mode_value,
+    ),
+    DiagnosticSensorDescription(
+        key="power_flow",
+        name_suffix="Power Flow",
+        value_fn=power_flow_value,
     ),
     DiagnosticSensorDescription(
         key="power_quality_score",
@@ -1299,6 +1325,8 @@ _CORE_SENSOR_KEYS = {
     "recent_activity",
     "recent_activity_count",
     "sensitivity",
+    "circuit_mode",
+    "power_flow",
 }
 _ENERGY_USAGE_SENSOR_KEYS = {
     "daily_energy_usage",

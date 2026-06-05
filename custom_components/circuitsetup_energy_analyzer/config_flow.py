@@ -125,6 +125,7 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DOMAIN,
 )
+from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
     async_discover_energy_source_entities,
@@ -134,13 +135,28 @@ from .discovery import (
     async_discover_utility_statistic_ids,
     infer_sensor_role,
 )
+from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
+from .metric_consistency import (
+    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+    DEFAULT_MIN_APPARENT_POWER_VA,
+    DEFAULT_POWER_FACTOR_TOLERANCE,
+)
 from .models import (
     ApplianceProfile,
     CircuitMode,
     PowerFlowMode,
     RetentionMode,
     SensorRole,
+)
+from .phase_balance import (
+    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+)
+from .solar_flow import (
+    EXPORT_TOLERANCE_W,
+    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    SOLAR_SURPLUS_THRESHOLD_W,
 )
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
@@ -202,6 +218,16 @@ FIELD_WINDOW_HOURS = "window_hours"
 FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
 FIELD_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 FIELD_STANDBY_MIN_SAMPLES = "standby_min_samples"
+FIELD_LEG_IMBALANCE_WARNING_RATIO = "leg_imbalance_warning_ratio"
+FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W = "leg_imbalance_min_total_power_w"
+FIELD_APPARENT_POWER_TOLERANCE_PERCENT = "apparent_power_tolerance_percent"
+FIELD_POWER_FACTOR_TOLERANCE = "power_factor_tolerance"
+FIELD_MINIMUM_APPARENT_POWER_VA = "minimum_apparent_power_va"
+FIELD_BALANCE_NEGATIVE_TOLERANCE_W = "balance_negative_tolerance_w"
+FIELD_SOLAR_EXPORT_TOLERANCE_W = "solar_export_tolerance_w"
+FIELD_SOLAR_SURPLUS_THRESHOLD_W = "solar_surplus_threshold_w"
+FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W = "high_solar_surplus_threshold_w"
+FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
     ApplianceProfile.REFRIGERATOR.value,
@@ -950,6 +976,96 @@ def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None)
                 FIELD_STANDBY_MIN_SAMPLES,
                 default=int(settings.get("min_samples", 24)),
             ): _number_selector(minimum=1, maximum=720, step=1),
+            vol.Optional(
+                FIELD_LEG_IMBALANCE_WARNING_RATIO,
+                default=float(
+                    settings.get(
+                        FIELD_LEG_IMBALANCE_WARNING_RATIO,
+                        DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+                    )
+                ),
+            ): _number_selector(minimum=0.01, maximum=2.0, step=0.01),
+            vol.Optional(
+                FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                default=float(
+                    settings.get(
+                        FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                        DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+                default=float(
+                    settings.get(
+                        FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+                        DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+                    )
+                ),
+            ): _number_selector(minimum=0.1, maximum=100.0, step=0.1),
+            vol.Optional(
+                FIELD_POWER_FACTOR_TOLERANCE,
+                default=float(
+                    settings.get(
+                        FIELD_POWER_FACTOR_TOLERANCE,
+                        DEFAULT_POWER_FACTOR_TOLERANCE,
+                    )
+                ),
+            ): _number_selector(minimum=0.001, maximum=1.0, step=0.001),
+            vol.Optional(
+                FIELD_MINIMUM_APPARENT_POWER_VA,
+                default=float(
+                    settings.get(
+                        FIELD_MINIMUM_APPARENT_POWER_VA,
+                        DEFAULT_MIN_APPARENT_POWER_VA,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
+                default=float(
+                    settings.get(
+                        FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
+                        DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_SOLAR_EXPORT_TOLERANCE_W,
+                default=float(
+                    settings.get(
+                        FIELD_SOLAR_EXPORT_TOLERANCE_W,
+                        EXPORT_TOLERANCE_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_SOLAR_SURPLUS_THRESHOLD_W,
+                default=float(
+                    settings.get(
+                        FIELD_SOLAR_SURPLUS_THRESHOLD_W,
+                        SOLAR_SURPLUS_THRESHOLD_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                default=float(
+                    settings.get(
+                        FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                        HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+            vol.Optional(
+                FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                default=float(
+                    settings.get(
+                        FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                        FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
         }
     )
 
@@ -2666,6 +2782,16 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
         FIELD_STANDBY_MIN_SAMPLES,
         "min_samples",
     )
+    _set_optional_float(settings, user_input, FIELD_LEG_IMBALANCE_WARNING_RATIO)
+    _set_optional_float(settings, user_input, FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W)
+    _set_optional_float(settings, user_input, FIELD_APPARENT_POWER_TOLERANCE_PERCENT)
+    _set_optional_float(settings, user_input, FIELD_POWER_FACTOR_TOLERANCE)
+    _set_optional_float(settings, user_input, FIELD_MINIMUM_APPARENT_POWER_VA)
+    _set_optional_float(settings, user_input, FIELD_BALANCE_NEGATIVE_TOLERANCE_W)
+    _set_optional_float(settings, user_input, FIELD_SOLAR_EXPORT_TOLERANCE_W)
+    _set_optional_float(settings, user_input, FIELD_SOLAR_SURPLUS_THRESHOLD_W)
+    _set_optional_float(settings, user_input, FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W)
+    _set_optional_float(settings, user_input, FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W)
     return settings
 
 

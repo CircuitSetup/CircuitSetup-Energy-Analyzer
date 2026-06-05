@@ -63,6 +63,18 @@ class FeatureStoreData:
     capacity_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    leg_imbalance_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    metric_consistency_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    balance_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    solar_flow_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     utility_comparison_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -201,6 +213,18 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "capacity_settings_by_circuit": _dict_of_dicts(
             data.capacity_settings_by_circuit
         ),
+        "leg_imbalance_settings_by_circuit": _dict_of_dicts(
+            data.leg_imbalance_settings_by_circuit
+        ),
+        "metric_consistency_settings_by_circuit": _dict_of_dicts(
+            data.metric_consistency_settings_by_circuit
+        ),
+        "balance_settings_by_circuit": _dict_of_dicts(
+            data.balance_settings_by_circuit
+        ),
+        "solar_flow_settings_by_circuit": _dict_of_dicts(
+            data.solar_flow_settings_by_circuit
+        ),
         "utility_comparison_settings_by_circuit": _dict_of_dicts(
             data.utility_comparison_settings_by_circuit
         ),
@@ -265,6 +289,18 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         capacity_settings_by_circuit=_dict_of_dicts(
             raw.get("capacity_settings_by_circuit", {}),
         ),
+        leg_imbalance_settings_by_circuit=_dict_of_dicts(
+            raw.get("leg_imbalance_settings_by_circuit", {}),
+        ),
+        metric_consistency_settings_by_circuit=_dict_of_dicts(
+            raw.get("metric_consistency_settings_by_circuit", {}),
+        ),
+        balance_settings_by_circuit=_dict_of_dicts(
+            raw.get("balance_settings_by_circuit", {}),
+        ),
+        solar_flow_settings_by_circuit=_dict_of_dicts(
+            raw.get("solar_flow_settings_by_circuit", {}),
+        ),
         utility_comparison_settings_by_circuit=_dict_of_dicts(
             raw.get("utility_comparison_settings_by_circuit", {}),
         ),
@@ -303,6 +339,12 @@ def prune_events(
         demand_settings_by_circuit=data.demand_settings_by_circuit,
         demand_by_circuit=data.demand_by_circuit,
         capacity_settings_by_circuit=data.capacity_settings_by_circuit,
+        leg_imbalance_settings_by_circuit=data.leg_imbalance_settings_by_circuit,
+        metric_consistency_settings_by_circuit=(
+            data.metric_consistency_settings_by_circuit
+        ),
+        balance_settings_by_circuit=data.balance_settings_by_circuit,
+        solar_flow_settings_by_circuit=data.solar_flow_settings_by_circuit,
         utility_comparison_settings_by_circuit=(
             data.utility_comparison_settings_by_circuit
         ),

@@ -317,6 +317,16 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
                     "standby_threshold_w": 6.0,
                     "always_on_alert_w": 12.0,
                     "min_samples": 36,
+                    "leg_imbalance_warning_ratio": 0.4,
+                    "leg_imbalance_min_total_power_w": 800.0,
+                    "apparent_power_tolerance_percent": 12.0,
+                    "power_factor_tolerance": 0.08,
+                    "minimum_apparent_power_va": 120.0,
+                    "balance_negative_tolerance_w": 250.0,
+                    "solar_export_tolerance_w": 150.0,
+                    "solar_surplus_threshold_w": 750.0,
+                    "high_solar_surplus_threshold_w": 2000.0,
+                    "flexible_load_running_threshold_w": 175.0,
                 },
             },
         },
@@ -375,6 +385,28 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "standby_threshold_w": 6.0,
         "always_on_alert_w": 12.0,
         "min_samples": 36,
+    }
+    assert coordinator.store_data.leg_imbalance_settings_by_circuit[
+        "refrigerator"
+    ] == {
+        "warning_ratio": 0.4,
+        "minimum_total_power_w": 800.0,
+    }
+    assert coordinator.store_data.metric_consistency_settings_by_circuit[
+        "refrigerator"
+    ] == {
+        "apparent_power_tolerance_percent": 12.0,
+        "power_factor_tolerance": 0.08,
+        "minimum_apparent_power_va": 120.0,
+    }
+    assert coordinator.store_data.balance_settings_by_circuit["refrigerator"] == {
+        "negative_tolerance_w": 250.0,
+    }
+    assert coordinator.store_data.solar_flow_settings_by_circuit["refrigerator"] == {
+        "export_tolerance_w": 150.0,
+        "solar_surplus_threshold_w": 750.0,
+        "high_solar_surplus_threshold_w": 2000.0,
+        "flexible_load_running_threshold_w": 175.0,
     }
 
 
@@ -522,6 +554,57 @@ async def test_runtime_tracks_latest_real_power_for_running_binary_sensors() -> 
     await coordinator.async_process_update()
 
     assert coordinator.state.latest_real_power_w_by_circuit == {"washer": 35.0}
+
+
+@pytest.mark.asyncio
+async def test_runtime_tracks_config_metadata_for_dashboard_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.solar_power"
+            return SimpleNamespace(
+                state="-1200",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar Inverter",
+                    "mode": "dual_phase",
+                    "appliance_profile": "solar_inverter",
+                    "power_flow": "generation",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.solar_power",
+                            "role": "real_power",
+                            "unit": "W",
+                        }
+                    ],
+                    "retention_mode": RetentionMode.STANDARD.value,
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.circuit_mode_by_circuit == {
+        "solar": "Dual Phase",
+    }
+    assert coordinator.state.power_flow_by_circuit == {
+        "solar": "Generation / Solar Export",
+    }
 
 
 @pytest.mark.asyncio

@@ -187,7 +187,7 @@
       },
       "advanced_settings": {
         "title": "Advanced Circuit Settings",
-        "description": "Tune sensitivity, usage spike, goal, activity, billing, cost, demand, capacity, and standby settings for {circuit_name}.",
+        "description": "Tune sensitivity, usage spike, goal, activity, billing, cost, demand, capacity, standby, power-quality, balance, and solar settings for {circuit_name}.",
         "data": {
           "preset": "Sensitivity",
           "window_days": "Energy Window Days",
@@ -213,7 +213,17 @@
           "window_hours": "Standby Window Hours",
           "standby_threshold_w": "Standby Threshold W",
           "always_on_alert_w": "Always On Alert W",
-          "standby_min_samples": "Standby Minimum Samples"
+          "standby_min_samples": "Standby Minimum Samples",
+          "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
+          "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
+          "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
+          "power_factor_tolerance": "Power Factor Tolerance",
+          "minimum_apparent_power_va": "Minimum Apparent Power VA",
+          "balance_negative_tolerance_w": "Balance Negative Tolerance W",
+          "solar_export_tolerance_w": "Solar Export Tolerance W",
+          "solar_surplus_threshold_w": "Solar Surplus Threshold W",
+          "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
+          "flexible_load_running_threshold_w": "Flexible Load Running Threshold W"
         },
         "data_description": {
           "preset": "Controls alert sensitivity for this circuit only.",
@@ -240,7 +250,17 @@
           "window_hours": "Hours used to learn the low-power standby watermark.",
           "standby_threshold_w": "Minimum watts considered standby or always-on usage.",
           "always_on_alert_w": "Optional watts limit for always-on usage alerts.",
-          "standby_min_samples": "Minimum retained samples before standby and always-on estimates are considered ready."
+          "standby_min_samples": "Minimum retained samples before standby and always-on estimates are considered ready.",
+          "leg_imbalance_warning_ratio": "Split-phase imbalance ratio that can trigger repeated possible-issue alerts.",
+          "leg_imbalance_min_total_power_w": "Minimum combined watts before dual-phase leg imbalance is evaluated.",
+          "apparent_power_tolerance_percent": "Allowed percent mismatch between reported VA and voltage-current VA.",
+          "power_factor_tolerance": "Allowed mismatch between reported and expected power factor.",
+          "minimum_apparent_power_va": "Minimum apparent power before W, VA, and power-factor consistency is evaluated.",
+          "balance_negative_tolerance_w": "Negative mains balance watts allowed before monitored loads are flagged.",
+          "solar_export_tolerance_w": "Extra export watts allowed before solar flow is considered inconsistent.",
+          "solar_surplus_threshold_w": "Export watts required before solar surplus is considered available.",
+          "high_solar_surplus_threshold_w": "Export watts required before solar surplus is classified as high.",
+          "flexible_load_running_threshold_w": "Watts required before a flexible load is treated as active."
         }
       },
       "assign": {

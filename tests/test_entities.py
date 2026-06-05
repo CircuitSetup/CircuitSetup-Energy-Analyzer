@@ -123,6 +123,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         billing_cycle_usage_value,
         capacity_status_value,
         capacity_usage_value,
+        circuit_mode_value,
         cost_current_rate_value,
         cost_cycle_forecast_value,
         cost_cycle_value,
@@ -152,6 +153,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         nilm_topology_status_value,
         nilm_unmatched_load_percentage_value,
         peak_demand_value,
+        power_flow_value,
         power_factor_drift_value,
         power_quality_evidence_value,
         power_quality_score_value,
@@ -253,6 +255,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
             }
         },
         sensitivity_by_circuit={"fridge": "quiet"},
+        circuit_mode_by_circuit={"fridge": "Dual Phase"},
+        power_flow_by_circuit={"fridge": "Generation / Solar Export"},
         daily_energy_usage_by_circuit={"fridge": 12.9},
         energy_usage_share_by_circuit={"fridge": 25.8},
         energy_usage_evidence_by_circuit={
@@ -393,6 +397,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert recent_activity_value(state, "fridge") == "Possible issue: cycle duration"
     assert recent_activity_count_value(state, "fridge") == 2
     assert sensitivity_value(state, "fridge") == "quiet"
+    assert circuit_mode_value(state, "fridge") == "Dual Phase"
+    assert power_flow_value(state, "fridge") == "Generation / Solar Export"
     assert daily_energy_usage_value(state, "fridge") == 12.9
     assert energy_usage_share_value(state, "fridge") == 25.8
     assert energy_usage_status_value(state, "fridge") == "over_threshold"
@@ -622,6 +628,8 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
     expected_icons = {
         "health_summary": "mdi:heart-pulse",
         "learning_progress": "mdi:school-outline",
+        "circuit_mode": "mdi:transmission-tower",
+        "power_flow": "mdi:swap-horizontal",
         "power_quality_score": "mdi:sine-wave",
         "reactive_power_drift": "mdi:flash-triangle-outline",
         "power_factor_drift": "mdi:cosine-wave",
@@ -1241,6 +1249,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_recent_activity",
         "entry-1_fridge_recent_activity_count",
         "entry-1_fridge_sensitivity",
+        "entry-1_fridge_circuit_mode",
+        "entry-1_fridge_power_flow",
         "entry-1_fridge_daily_energy_usage",
         "entry-1_fridge_energy_usage_share",
         "entry-1_fridge_energy_usage_status",

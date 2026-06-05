@@ -22,6 +22,10 @@ SERVICE_SET_BILLING_CYCLE_SETTINGS = "set_billing_cycle_settings"
 SERVICE_SET_COST_SETTINGS = "set_cost_settings"
 SERVICE_SET_DEMAND_SETTINGS = "set_demand_settings"
 SERVICE_SET_CAPACITY_SETTINGS = "set_capacity_settings"
+SERVICE_SET_LEG_IMBALANCE_SETTINGS = "set_leg_imbalance_settings"
+SERVICE_SET_METRIC_CONSISTENCY_SETTINGS = "set_metric_consistency_settings"
+SERVICE_SET_MAINS_BALANCE_SETTINGS = "set_mains_balance_settings"
+SERVICE_SET_SOLAR_FLOW_SETTINGS = "set_solar_flow_settings"
 SERVICE_SET_STANDBY_SETTINGS = "set_standby_settings"
 SERVICE_SET_UTILITY_COMPARISON_SETTINGS = "set_utility_comparison_settings"
 SERVICE_START_MAINTENANCE = "start_maintenance"
@@ -56,6 +60,15 @@ ATTR_WINDOW_MINUTES = "window_minutes"
 ATTR_DEMAND_LIMIT_W = "demand_limit_w"
 ATTR_BREAKER_AMPS = "breaker_amps"
 ATTR_WARNING_RATIO = "warning_ratio"
+ATTR_MINIMUM_TOTAL_POWER_W = "minimum_total_power_w"
+ATTR_APPARENT_POWER_TOLERANCE_PERCENT = "apparent_power_tolerance_percent"
+ATTR_POWER_FACTOR_TOLERANCE = "power_factor_tolerance"
+ATTR_MINIMUM_APPARENT_POWER_VA = "minimum_apparent_power_va"
+ATTR_NEGATIVE_TOLERANCE_W = "negative_tolerance_w"
+ATTR_EXPORT_TOLERANCE_W = "export_tolerance_w"
+ATTR_SOLAR_SURPLUS_THRESHOLD_W = "solar_surplus_threshold_w"
+ATTR_HIGH_SOLAR_SURPLUS_THRESHOLD_W = "high_solar_surplus_threshold_w"
+ATTR_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
 ATTR_WINDOW_HOURS = "window_hours"
 ATTR_STANDBY_THRESHOLD_W = "standby_threshold_w"
 ATTR_ALWAYS_ON_ALERT_W = "always_on_alert_w"
@@ -143,6 +156,31 @@ CAPACITY_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_BREAKER_AMPS, ATTR_WARNING_RATIO),
 )
+LEG_IMBALANCE_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_WARNING_RATIO, ATTR_MINIMUM_TOTAL_POWER_W),
+)
+METRIC_CONSISTENCY_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(
+        ATTR_APPARENT_POWER_TOLERANCE_PERCENT,
+        ATTR_POWER_FACTOR_TOLERANCE,
+        ATTR_MINIMUM_APPARENT_POWER_VA,
+    ),
+)
+MAINS_BALANCE_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(ATTR_NEGATIVE_TOLERANCE_W,),
+)
+SOLAR_FLOW_SETTINGS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,),
+    optional=(
+        ATTR_EXPORT_TOLERANCE_W,
+        ATTR_SOLAR_SURPLUS_THRESHOLD_W,
+        ATTR_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+        ATTR_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+    ),
+)
 STANDBY_SETTINGS_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,),
     optional=(ATTR_WINDOW_HOURS, ATTR_STANDBY_THRESHOLD_W, ATTR_ALWAYS_ON_ALERT_W),
@@ -199,6 +237,12 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_SET_COST_SETTINGS: COST_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_DEMAND_SETTINGS: DEMAND_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_CAPACITY_SETTINGS: CAPACITY_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_LEG_IMBALANCE_SETTINGS: LEG_IMBALANCE_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_METRIC_CONSISTENCY_SETTINGS: (
+        METRIC_CONSISTENCY_SETTINGS_SERVICE_SCHEMA
+    ),
+    SERVICE_SET_MAINS_BALANCE_SETTINGS: MAINS_BALANCE_SETTINGS_SERVICE_SCHEMA,
+    SERVICE_SET_SOLAR_FLOW_SETTINGS: SOLAR_FLOW_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_STANDBY_SETTINGS: STANDBY_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_UTILITY_COMPARISON_SETTINGS: (
         UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA
@@ -350,6 +394,40 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_BREAKER_AMPS),
                 data.get(ATTR_WARNING_RATIO),
+            )
+        elif service == SERVICE_SET_LEG_IMBALANCE_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_leg_imbalance_settings",
+                circuit_id,
+                data.get(ATTR_WARNING_RATIO),
+                data.get(ATTR_MINIMUM_TOTAL_POWER_W),
+            )
+        elif service == SERVICE_SET_METRIC_CONSISTENCY_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_metric_consistency_settings",
+                circuit_id,
+                data.get(ATTR_APPARENT_POWER_TOLERANCE_PERCENT),
+                data.get(ATTR_POWER_FACTOR_TOLERANCE),
+                data.get(ATTR_MINIMUM_APPARENT_POWER_VA),
+            )
+        elif service == SERVICE_SET_MAINS_BALANCE_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_mains_balance_settings",
+                circuit_id,
+                data.get(ATTR_NEGATIVE_TOLERANCE_W),
+            )
+        elif service == SERVICE_SET_SOLAR_FLOW_SETTINGS:
+            await _call_if_present(
+                coordinator,
+                "async_set_solar_flow_settings",
+                circuit_id,
+                data.get(ATTR_EXPORT_TOLERANCE_W),
+                data.get(ATTR_SOLAR_SURPLUS_THRESHOLD_W),
+                data.get(ATTR_HIGH_SOLAR_SURPLUS_THRESHOLD_W),
+                data.get(ATTR_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W),
             )
         elif service == SERVICE_SET_ACTIVITY_ALERT_SETTINGS:
             await _call_if_present(

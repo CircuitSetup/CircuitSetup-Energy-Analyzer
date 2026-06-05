@@ -15,7 +15,11 @@ from .activity_timeline import (
 )
 from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
-from .balance import BalanceInput, calculate_balance
+from .balance import (
+    DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+    BalanceInput,
+    calculate_balance,
+)
 from .baseline import build_baseline
 from .billing import (
     BillingCycleBudgetEvidence,
@@ -66,8 +70,15 @@ from .goals import (
     EnergyGoalSettings,
     evaluate_daily_energy_goal,
 )
-from .load_shift import FlexibleLoadInput, evaluate_solar_load_shift
+from .load_shift import (
+    FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+    FlexibleLoadInput,
+    evaluate_solar_load_shift,
+)
 from .metric_consistency import (
+    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+    DEFAULT_MIN_APPARENT_POWER_VA,
+    DEFAULT_POWER_FACTOR_TOLERANCE,
     MetricConsistencyResult,
     evaluate_metric_consistency,
 )
@@ -95,6 +106,8 @@ from .nilm import (
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .phase_balance import (
+    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
     LegImbalanceResult,
     evaluate_dual_phase_leg_imbalance,
 )
@@ -106,7 +119,13 @@ from .power_quality import (
     select_power_quality_evidence,
 )
 from .profiles import get_profile_definition
-from .solar_flow import SolarFlowInput, calculate_solar_flow
+from .solar_flow import (
+    EXPORT_TOLERANCE_W,
+    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    SOLAR_SURPLUS_THRESHOLD_W,
+    SolarFlowInput,
+    calculate_solar_flow,
+)
 from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -214,6 +233,8 @@ class AnalyzerState:
         default_factory=dict
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
+    circuit_mode_by_circuit: dict[str, str] = field(default_factory=dict)
+    power_flow_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
@@ -391,6 +412,21 @@ def _replace_if_present(
     keys: tuple[str, ...],
 ) -> None:
     values = {key: source[key] for key in keys if key in source}
+    if values:
+        target[circuit_id] = values
+
+
+def _replace_if_present_as(
+    target: dict[str, dict[str, Any]],
+    circuit_id: str,
+    source: Mapping[str, Any],
+    key_map: Mapping[str, str],
+) -> None:
+    values = {
+        output_key: source[input_key]
+        for input_key, output_key in key_map.items()
+        if input_key in source
+    }
     if values:
         target[circuit_id] = values
 
@@ -624,6 +660,46 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 "min_samples",
             ),
         )
+        _replace_if_present_as(
+            self.store_data.leg_imbalance_settings_by_circuit,
+            circuit_id,
+            settings,
+            {
+                "leg_imbalance_warning_ratio": "warning_ratio",
+                "leg_imbalance_min_total_power_w": "minimum_total_power_w",
+            },
+        )
+        _replace_if_present(
+            self.store_data.metric_consistency_settings_by_circuit,
+            circuit_id,
+            settings,
+            (
+                "apparent_power_tolerance_percent",
+                "power_factor_tolerance",
+                "minimum_apparent_power_va",
+            ),
+        )
+        _replace_if_present_as(
+            self.store_data.balance_settings_by_circuit,
+            circuit_id,
+            settings,
+            {"balance_negative_tolerance_w": "negative_tolerance_w"},
+        )
+        _replace_if_present_as(
+            self.store_data.solar_flow_settings_by_circuit,
+            circuit_id,
+            settings,
+            {
+                "solar_export_tolerance_w": "export_tolerance_w",
+                "solar_surplus_threshold_w": "solar_surplus_threshold_w",
+                "high_solar_surplus_threshold_w": (
+                    "high_solar_surplus_threshold_w"
+                ),
+                "flexible_load_running_threshold_w": (
+                    "flexible_load_running_threshold_w"
+                ),
+            },
+        )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
@@ -639,6 +715,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
             samples.append((config, sample))
+            self._refresh_config_metadata_state(config)
             self._refresh_latest_real_power_state(config, sample)
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
@@ -746,6 +823,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
         return self.state
+
+    def _refresh_config_metadata_state(self: Self, config: CircuitConfig) -> None:
+        """Expose configured circuit classification metadata as diagnostic state."""
+        self.state.circuit_mode_by_circuit[config.circuit_id] = (
+            _friendly_circuit_mode(config.mode)
+        )
+        self.state.power_flow_by_circuit[config.circuit_id] = (
+            _friendly_power_flow(config.power_flow)
+        )
 
     def _refresh_latest_real_power_state(
         self: Self,
@@ -1058,6 +1144,152 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if capacity_amps is not None:
             settings["breaker_amps"] = capacity_amps
         self.store_data.capacity_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_leg_imbalance_settings(
+        self: Self,
+        circuit_id: str,
+        warning_ratio: Any = None,
+        minimum_total_power_w: Any = None,
+    ) -> None:
+        """Persist dual-phase leg imbalance thresholds for one circuit."""
+        current = self.store_data.leg_imbalance_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        settings = {
+            "warning_ratio": _positive_float_value(
+                warning_ratio,
+                default=_positive_float_value(
+                    current.get("warning_ratio"),
+                    default=DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+                ),
+            ),
+            "minimum_total_power_w": _nonnegative_float_value(
+                minimum_total_power_w,
+                default=_nonnegative_float_value(
+                    current.get("minimum_total_power_w"),
+                    default=DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                ),
+            ),
+        }
+        self.store_data.leg_imbalance_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_metric_consistency_settings(
+        self: Self,
+        circuit_id: str,
+        apparent_power_tolerance_percent: Any = None,
+        power_factor_tolerance: Any = None,
+        minimum_apparent_power_va: Any = None,
+    ) -> None:
+        """Persist W/VA/PF consistency thresholds for one circuit."""
+        current = self.store_data.metric_consistency_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        settings = {
+            "apparent_power_tolerance_percent": _positive_float_value(
+                apparent_power_tolerance_percent,
+                default=_positive_float_value(
+                    current.get("apparent_power_tolerance_percent"),
+                    default=DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+                ),
+            ),
+            "power_factor_tolerance": _positive_float_value(
+                power_factor_tolerance,
+                default=_positive_float_value(
+                    current.get("power_factor_tolerance"),
+                    default=DEFAULT_POWER_FACTOR_TOLERANCE,
+                ),
+            ),
+            "minimum_apparent_power_va": _nonnegative_float_value(
+                minimum_apparent_power_va,
+                default=_nonnegative_float_value(
+                    current.get("minimum_apparent_power_va"),
+                    default=DEFAULT_MIN_APPARENT_POWER_VA,
+                ),
+            ),
+        }
+        self.store_data.metric_consistency_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_mains_balance_settings(
+        self: Self,
+        circuit_id: str,
+        negative_tolerance_w: Any = None,
+    ) -> None:
+        """Persist mains-minus-monitored balance thresholds."""
+        current = self.store_data.balance_settings_by_circuit.get(circuit_id, {})
+        settings = {
+            "negative_tolerance_w": _nonnegative_float_value(
+                negative_tolerance_w,
+                default=_nonnegative_float_value(
+                    current.get("negative_tolerance_w"),
+                    default=DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+                ),
+            ),
+        }
+        self.store_data.balance_settings_by_circuit[circuit_id] = settings
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_set_solar_flow_settings(
+        self: Self,
+        circuit_id: str,
+        export_tolerance_w: Any = None,
+        solar_surplus_threshold_w: Any = None,
+        high_solar_surplus_threshold_w: Any = None,
+        flexible_load_running_threshold_w: Any = None,
+    ) -> None:
+        """Persist solar flow and flexible-load thresholds."""
+        current = self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
+        settings = {
+            "export_tolerance_w": _nonnegative_float_value(
+                export_tolerance_w,
+                default=_nonnegative_float_value(
+                    current.get("export_tolerance_w"),
+                    default=EXPORT_TOLERANCE_W,
+                ),
+            ),
+            "solar_surplus_threshold_w": _nonnegative_float_value(
+                solar_surplus_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("solar_surplus_threshold_w"),
+                    default=SOLAR_SURPLUS_THRESHOLD_W,
+                ),
+            ),
+            "high_solar_surplus_threshold_w": _nonnegative_float_value(
+                high_solar_surplus_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("high_solar_surplus_threshold_w"),
+                    default=HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                ),
+            ),
+            "flexible_load_running_threshold_w": _nonnegative_float_value(
+                flexible_load_running_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("flexible_load_running_threshold_w"),
+                    default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                ),
+            ),
+        }
+        self.store_data.solar_flow_settings_by_circuit[circuit_id] = settings
         self._mark_store_dirty()
         now = self._now_fn()
         self._refresh_ux_state_for_circuit(circuit_id, now)
@@ -2057,12 +2289,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if config not in {item[0] for item in mains_items}
         ]
         for config, sample in mains_items:
+            settings = self.store_data.balance_settings_by_circuit.get(
+                config.circuit_id,
+                {},
+            )
             result = calculate_balance(
                 mains=BalanceInput(
                     circuit_id=config.circuit_id,
                     real_power_w=sample.real_power,
                 ),
                 monitored=monitored,
+                negative_tolerance_w=_nonnegative_float_value(
+                    settings.get("negative_tolerance_w"),
+                    default=DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+                ),
             )
             circuit_id = config.circuit_id
             self.state.balance_power_w_by_circuit[circuit_id] = (
@@ -2113,18 +2353,38 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if _is_flexible_solar_load(config)
         ]
         for config, sample in mains_items:
+            settings = self.store_data.solar_flow_settings_by_circuit.get(
+                config.circuit_id,
+                {},
+            )
             result = calculate_solar_flow(
                 mains=SolarFlowInput(
                     circuit_id=config.circuit_id,
                     real_power_w=sample.real_power,
                 ),
                 generation=generation,
+                export_tolerance_w=_nonnegative_float_value(
+                    settings.get("export_tolerance_w"),
+                    default=EXPORT_TOLERANCE_W,
+                ),
+                solar_surplus_threshold_w=_nonnegative_float_value(
+                    settings.get("solar_surplus_threshold_w"),
+                    default=SOLAR_SURPLUS_THRESHOLD_W,
+                ),
+                high_solar_surplus_threshold_w=_nonnegative_float_value(
+                    settings.get("high_solar_surplus_threshold_w"),
+                    default=HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                ),
             )
             load_shift = evaluate_solar_load_shift(
                 solar_load_shift_available_w=result.load_shift_available_w,
                 solar_surplus_status=result.solar_surplus_status,
                 grid_import_w=result.grid_import_w,
                 flexible_loads=flexible_loads,
+                running_threshold_w=_nonnegative_float_value(
+                    settings.get("flexible_load_running_threshold_w"),
+                    default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                ),
             )
             circuit_id = config.circuit_id
             self.state.solar_generation_w_by_circuit[circuit_id] = (
@@ -3433,6 +3693,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if config.mode is not CircuitMode.DUAL_PHASE:
             result = LegImbalanceResult(status="not_dual_phase")
         else:
+            settings = self.store_data.leg_imbalance_settings_by_circuit.get(
+                config.circuit_id,
+                {},
+            )
             result = evaluate_dual_phase_leg_imbalance(
                 left_real_power_w=getattr(sample, "leg_a_real_power", None),
                 right_real_power_w=getattr(sample, "leg_b_real_power", None),
@@ -3440,6 +3704,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 right_current_a=getattr(sample, "leg_b_current", None),
                 left_voltage_v=getattr(sample, "leg_a_voltage", None),
                 right_voltage_v=getattr(sample, "leg_b_voltage", None),
+                threshold_ratio=_positive_float_value(
+                    settings.get("warning_ratio"),
+                    default=DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+                ),
+                minimum_total_power_w=_nonnegative_float_value(
+                    settings.get("minimum_total_power_w"),
+                    default=DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                ),
             )
 
         self.state.leg_imbalance_percent_by_circuit[config.circuit_id] = (
@@ -3477,6 +3749,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         sample: Any,
     ) -> None:
+        settings = self.store_data.metric_consistency_settings_by_circuit.get(
+            config.circuit_id,
+            {},
+        )
         result = evaluate_metric_consistency(
             real_power_w=getattr(sample, "real_power", None),
             apparent_power_va=getattr(sample, "apparent_power", None),
@@ -3487,6 +3763,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             leg_a_current_a=getattr(sample, "leg_a_current", None),
             leg_b_voltage_v=getattr(sample, "leg_b_voltage", None),
             leg_b_current_a=getattr(sample, "leg_b_current", None),
+            apparent_power_tolerance_percent=_positive_float_value(
+                settings.get("apparent_power_tolerance_percent"),
+                default=DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+            ),
+            power_factor_tolerance=_positive_float_value(
+                settings.get("power_factor_tolerance"),
+                default=DEFAULT_POWER_FACTOR_TOLERANCE,
+            ),
+            minimum_apparent_power_va=_nonnegative_float_value(
+                settings.get("minimum_apparent_power_va"),
+                default=DEFAULT_MIN_APPARENT_POWER_VA,
+            ),
         )
         self.state.metric_consistency_score_by_circuit[config.circuit_id] = (
             result.mismatch_score_percent
@@ -5070,6 +5358,23 @@ def _power_flow_mode_from_raw(
     if appliance_profile is ApplianceProfile.SOLAR_INVERTER:
         return PowerFlowMode.GENERATION
     return PowerFlowMode.LOAD
+
+
+def _friendly_circuit_mode(mode: CircuitMode) -> str:
+    return {
+        CircuitMode.SINGLE_PHASE: "Single Phase",
+        CircuitMode.DUAL_PHASE: "Dual Phase",
+        CircuitMode.MIXED: "Mixed",
+        CircuitMode.MAINS_NILM: "Mains NILM",
+    }.get(mode, "Unknown")
+
+
+def _friendly_power_flow(power_flow: PowerFlowMode) -> str:
+    return {
+        PowerFlowMode.LOAD: "Load",
+        PowerFlowMode.GENERATION: "Generation / Solar Export",
+        PowerFlowMode.MAINS_NET: "Mains Net / Import-Export",
+    }.get(power_flow, "Unknown")
 
 
 def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:

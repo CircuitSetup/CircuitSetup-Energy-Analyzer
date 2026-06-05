@@ -110,6 +110,8 @@ CircuitSetup Energy Analyzer supports four analysis modes:
 - Mixed circuits are useful when one branch circuit feeds multiple small loads. The integration reports data quality, large changes, and recurring evidence conservatively instead of pretending the circuit is a clean appliance signature.
 - Mains NILM circuits are whole-home aggregate inputs. Experimental NILM can look for recurring aggregate signatures after known directly monitored circuits are masked out.
 
+![Circuit mode assignment controls](docs/images/readme/circuit-modes.png)
+
 ## Power Flow
 
 CircuitSetup real-power sensors may report negative watts when a CT is reversed
@@ -120,6 +122,8 @@ handled differently:
 - Load circuits treat sustained negative real power as a data-quality problem and raise a Repair suggesting CT orientation review or a different power-flow setting.
 - Solar inverter circuits treat negative real power as exported generation and analyze the export magnitude.
 - Mains NILM circuits keep signed net power so import and export behavior can be disaggregated without losing direction.
+
+![Power flow assignment controls](docs/images/readme/power-flow.png)
 
 ## Energy Usage Spikes
 
@@ -137,6 +141,8 @@ total, the threshold, and the percentage of the learned window used today.
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
 
+![Energy usage spike evidence](docs/images/readme/energy-usage-spikes.png)
+
 ## Daily Energy Goals
 
 For circuits with cumulative energy sensors, the analyzer can add a repeated
@@ -148,6 +154,8 @@ Use the `set_energy_goal_settings` service to set a `daily_goal_kwh` and an
 optional `goal_alert_ratio`. By default, goal notices trigger at 100% of the
 daily goal after repeated observations. Setting the ratio below 1.0 can warn
 before the goal is reached, while setting the daily goal to 0 clears the goal.
+
+![Daily energy goal dashboard context](docs/images/readme/daily-energy-goals.png)
 
 ## Run Cycle Diagnostics
 
@@ -173,6 +181,8 @@ for appliance-style "left on too long" notices, such as a pump, oven, washer,
 dryer, or refrigerator compressor run that exceeds a user-selected duration, and for
 "no activity for too long" notices when an expected cycling load has not run.
 
+![Run cycle diagnostic evidence](docs/images/readme/run-cycle-diagnostics.png)
+
 ## Recent Activity Timeline
 
 Each configured circuit exposes a compact recent-activity timeline from the
@@ -186,6 +196,8 @@ sensor shows how much activity was retained in the recent window. These entities
 are intended for quick operational review and dashboard cards, not as a
 replacement for Home Assistant recorder history or Energy Dashboard graphs.
 
+![Recent activity timeline evidence](docs/images/readme/recent-activity-timeline.png)
+
 ## Billing Cycle Forecasts
 
 The analyzer can also track circuit usage against a utility-style billing
@@ -197,6 +209,8 @@ Use the `set_billing_cycle_settings` service to set a cycle start day and an
 optional kWh budget for a circuit. When a budget is configured, projected
 over-budget notifications require repeated evidence and include the current
 usage, projected usage, configured budget, and billing-cycle dates.
+
+![Billing cycle forecast context](docs/images/readme/billing-cycle-forecasts.png)
 
 ## Cost And Time-of-Use Tracking
 
@@ -211,6 +225,8 @@ cost, and whether the circuit is currently in the TOU period. These values are
 estimates and do not include fixed fees, demand charges, taxes, tiered rates,
 or every utility billing rule.
 
+![Cost and time-of-use context](docs/images/readme/cost-time-of-use.png)
+
 ## History CSV Export
 
 Use the `export_history_csv` service to build a CSV snapshot of retained
@@ -224,6 +240,8 @@ from Home Assistant's full recorder database. The current service stores the
 latest CSV snapshot in runtime state so future UI, diagnostics, or download
 surfaces can reuse the same export builder without writing arbitrary files from
 a service call.
+
+![History CSV export action](docs/images/readme/history-csv-export.png)
 
 ## Peak Demand Tracking
 
@@ -245,6 +263,8 @@ possible-issue notification with the current demand, monthly cutoff, rank, and
 window length. This is demand evidence, not a replacement for Home Assistant's
 Energy Dashboard energy graphs.
 
+![Peak demand tracking evidence](docs/images/readme/peak-demand-tracking.png)
+
 ## Circuit Capacity Tracking
 
 For circuits with current sensors, the analyzer can compare measured amps with
@@ -264,6 +284,8 @@ These diagnostics are operational evidence only. They do not verify breaker,
 wire, plug, appliance, or electrical-code suitability; use a qualified
 electrician for circuit sizing and safety decisions.
 
+![Circuit capacity tracking evidence](docs/images/readme/circuit-capacity-tracking.png)
+
 ## Dual-Phase Leg Imbalance
 
 For dual-phase circuits with leg A and leg B real-power sensors, the analyzer
@@ -278,6 +300,8 @@ alerts. Diagnostic entities expose the current imbalance percentage, status,
 dominant leg, both leg wattages, optional currents/voltages, and the threshold
 used. Notifications are created only after repeated over-threshold observations
 and are labeled as possible issues.
+
+![Dual-phase leg imbalance evidence](docs/images/readme/dual-phase-leg-imbalance.png)
 
 ## Power Metric Consistency
 
@@ -295,6 +319,8 @@ incorrect units, stale/missing optional sensors, or calibration problems. The
 diagnostic entities expose the expected VA, reported VA, VA percent difference,
 expected PF, reported PF, PF difference, and tolerance values.
 
+![Power metric consistency evidence](docs/images/readme/power-metric-consistency.png)
+
 ## Mains Balance
 
 For mains/NILM circuits, the analyzer calculates an Emporia-style Balance view:
@@ -306,6 +332,8 @@ solar configuration, or multiplier problems.
 
 Generation circuits, such as solar inverter channels, are excluded from the
 monitored load sum so they do not look like household consumption.
+
+![Mains balance evidence](docs/images/readme/mains-balance.png)
 
 ## Solar Flow Diagnostics
 
@@ -341,6 +369,8 @@ estimated solar coverage, and status such as `active_solar_supported`,
 If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
+
+![Solar flow diagnostic evidence](docs/images/readme/solar-flow-diagnostics.png)
 
 ## Utility And Opower Comparison
 
@@ -390,6 +420,8 @@ Always On load repeatedly exceeds that configured limit, the notification
 reports the observed watts, window, and configured limit as possible-issue
 evidence.
 
+![Always on and standby evidence](docs/images/readme/always-on-standby.png)
+
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
@@ -418,17 +450,23 @@ high-confidence mains matches point to the other leg, the status becomes
 `leg_mismatch`. The integration does not rewrite the circuit mapping; it exposes
 evidence for user confirmation.
 
+![Experimental NILM evidence](docs/images/readme/experimental-nilm.png)
+
 ## Alert Philosophy
 
 The analyzer is evidence-first. It learns for at least 7 days or enough profile-specific cycles before sending appliance-behavior alerts. Alerts require repeated evidence and are phrased as a possible issue or behavior change, not a diagnosis.
 
 This means a refrigerator alert might say that cycle duration appears unusual compared with its learned baseline. It should not claim that a compressor, fan, seal, or refrigerant problem has been diagnosed.
 
+![Alert philosophy dashboard evidence](docs/images/readme/alert-philosophy.png)
+
 ## Notifications And Repairs
 
 Persistent notifications are reserved for important evidence about appliance behavior, such as repeated anomaly evidence after the learning period.
 
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
+
+![Notifications and repairs evidence](docs/images/readme/notifications-repairs.png)
 
 ## Sensor Reference
 
