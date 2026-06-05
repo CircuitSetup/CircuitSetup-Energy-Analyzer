@@ -480,6 +480,51 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
 
 
 @pytest.mark.asyncio
+async def test_runtime_tracks_latest_real_power_for_running_binary_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.washer_power"
+            return SimpleNamespace(
+                state="35",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "mode": "single_phase",
+                    "appliance_profile": "washer",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.washer_power",
+                            "role": "real_power",
+                            "unit": "W",
+                        }
+                    ],
+                    "retention_mode": RetentionMode.STANDARD.value,
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.latest_real_power_w_by_circuit == {"washer": 35.0}
+
+
+@pytest.mark.asyncio
 async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

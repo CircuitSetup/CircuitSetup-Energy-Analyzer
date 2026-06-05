@@ -215,6 +215,7 @@ class AnalyzerState:
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -638,6 +639,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
             samples.append((config, sample))
+            self._refresh_latest_real_power_state(config, sample)
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
             detector = self._detectors.setdefault(
@@ -744,6 +746,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
         return self.state
+
+    def _refresh_latest_real_power_state(
+        self: Self,
+        config: CircuitConfig,
+        sample: NormalizedCircuitSample,
+    ) -> None:
+        """Store the latest normalized watts for lightweight state entities."""
+        power_w = getattr(sample, "real_power", None)
+        if power_w is None:
+            self.state.latest_real_power_w_by_circuit.pop(config.circuit_id, None)
+            return
+        self.state.latest_real_power_w_by_circuit[config.circuit_id] = float(power_w)
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""

@@ -579,13 +579,16 @@ motor loads, and any appliance with known standby behavior.
 - Standby Status (`sensor.<circuit>_standby_status`) - Current standby state. Possible outputs include `learning`, `off`, `standby`, or `on`.
 - Always On Limit Usage (`sensor.<circuit>_always_on_limit_usage`) - Always-on estimate as a percent of configured limit. Possible outputs: percentage values.
 
-### Binary Diagnostic Sensors
+### Binary Sensors
 
-These binary sensors are created for every configured circuit.
+The diagnostic binary sensors are created for every configured circuit.
+Operational binary sensors are created only when the circuit has the required
+appliance profile and source data.
 
 - Learning (`binary_sensor.<circuit>_learning`) - On while the circuit is still learning baseline evidence. Possible outputs: `on` or `off`.
 - Data Quality Problem (`binary_sensor.<circuit>_data_quality_problem`) - On when the circuit has a current data-quality issue. Possible outputs: `on` or `off`.
 - Maintenance (`binary_sensor.<circuit>_maintenance`) - On when the circuit is marked as in maintenance. Possible outputs: `on` or `off`.
+- Running (`binary_sensor.<circuit>_running`) - Created for washer and dryer circuits with active-power sensors. On when the latest watts are above the appliance running threshold. Possible outputs: `on` or `off`.
 
 See `docs/dashboard-example.yaml` for a starting dashboard with Refrigerator,
 HVAC, Mains NILM, and utility comparison cards.

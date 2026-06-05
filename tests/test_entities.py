@@ -525,6 +525,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         has_data_quality_problem,
+        is_laundry_appliance_running,
         is_learning,
         is_maintenance_active,
     )
@@ -545,6 +546,30 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert has_data_quality_problem(state, "unknown") is False
     assert is_maintenance_active(state, "fridge") is True
     assert is_maintenance_active(state, "unknown") is False
+    assert (
+        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
+        is False
+    )
+
+    state.latest_real_power_w_by_circuit["washer"] = 19.9
+    state.latest_real_power_w_by_circuit["dryer"] = 99.9
+    assert (
+        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
+        is False
+    )
+    assert is_laundry_appliance_running(state, "dryer", ApplianceProfile.DRYER) is False
+
+    state.latest_real_power_w_by_circuit["washer"] = 20.0
+    state.latest_real_power_w_by_circuit["dryer"] = 100.0
+    assert (
+        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
+        is True
+    )
+    assert is_laundry_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
+    assert (
+        is_laundry_appliance_running(state, "washer", ApplianceProfile.REFRIGERATOR)
+        is False
+    )
 
 
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
@@ -662,6 +687,7 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
         "learning": "mdi:school-outline",
         "data_quality_problem": "mdi:database-alert-outline",
         "maintenance": "mdi:wrench-clock",
+        "running": "mdi:power-cycle",
     }
 
     for key, icon in expected_icons.items():
@@ -1704,6 +1730,66 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
         "entry-1_well_pump_data_quality_problem",
         "entry-1_well_pump_maintenance",
     ]
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_entry_adds_laundry_running_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        async_setup_entry,
+    )
+
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+    )
+    dryer = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(SensorRef("sensor.dryer_power", SensorRole.REAL_POWER),),
+    )
+    refrigerator = CircuitConfig(
+        circuit_id="refrigerator",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.refrigerator_power", SensorRole.REAL_POWER),),
+    )
+    state = AnalyzerState(
+        latest_real_power_w_by_circuit={
+            "washer": 35.0,
+            "dryer": 70.0,
+            "refrigerator": 180.0,
+        }
+    )
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(washer, dryer, refrigerator),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    running_entities = {
+        entity.circuit_id: entity
+        for entity in added_entities
+        if entity.entity_description.key == "running"
+    }
+    assert set(running_entities) == {"washer", "dryer"}
+    assert running_entities["washer"].name == "Washer Running"
+    assert running_entities["dryer"].name == "Dryer Running"
+    assert running_entities["washer"].is_on is True
+    assert running_entities["dryer"].is_on is False
+    assert {entity.unique_id for entity in running_entities.values()} == {
+        "entry-1_washer_running",
+        "entry-1_dryer_running",
+    }
 
 
 @pytest.mark.asyncio

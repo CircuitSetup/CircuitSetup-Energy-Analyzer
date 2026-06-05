@@ -29,6 +29,8 @@ class CircuitInfo:
 
     circuit_id: str
     name: str
+    appliance_profile: str | None = None
+    sensors: tuple[Any, ...] = ()
 
 
 def circuit_info_from_config(circuit: Any) -> CircuitInfo | None:
@@ -36,14 +38,23 @@ def circuit_info_from_config(circuit: Any) -> CircuitInfo | None:
     if isinstance(circuit, dict):
         circuit_id = circuit.get("circuit_id") or circuit.get("id")
         name = circuit.get("name") or circuit_id
+        appliance_profile = circuit.get("appliance_profile")
+        sensors = circuit.get("sensors") or ()
     else:
         circuit_id = getattr(circuit, "circuit_id", None)
         name = getattr(circuit, "name", None) or circuit_id
+        appliance_profile = getattr(circuit, "appliance_profile", None)
+        sensors = getattr(circuit, "sensors", ()) or ()
 
     if not circuit_id:
         return None
 
-    return CircuitInfo(circuit_id=str(circuit_id), name=str(name))
+    return CircuitInfo(
+        circuit_id=str(circuit_id),
+        name=str(name),
+        appliance_profile=str(appliance_profile) if appliance_profile else None,
+        sensors=tuple(sensors),
+    )
 
 
 def circuits_for_entities(entry: Any, coordinator: Any) -> tuple[Any, ...]:
