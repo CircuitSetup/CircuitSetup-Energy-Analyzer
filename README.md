@@ -46,7 +46,7 @@ recommended handoff action.
 
 This repository is structured for HACS as a custom integration. The integration files live under `custom_components/circuitsetup_energy_analyzer`.
 
-![CircuitSetup Energy Analyzer integration overview](docs/images/readme/integration-overview.png)
+![CircuitSetup Energy Analyzer integration entry in Home Assistant HACS](docs/images/readme/integration-overview.png)
 
 To install with HACS:
 
@@ -60,7 +60,7 @@ To install with HACS:
 
 The setup and options screens are designed to avoid hand-written JSON:
 
-![CircuitSetup Energy Analyzer options menu](docs/images/readme/options-menu.png)
+![CircuitSetup Energy Analyzer options menu with setup actions](docs/images/readme/options-menu.png)
 
 - Source Devices: choose ESPHome meter devices, such as a CircuitSetup
   ATM90E32 meter. The integration expands the selected devices into matching
@@ -76,7 +76,7 @@ The setup and options screens are designed to avoid hand-written JSON:
   Turn off Include Circuit for plugs, lights, or other groups that should not
   receive appliance-specific analysis.
 
-![Circuit assignment editor](docs/images/readme/assignment-editor.png)
+![Circuit assignment editor showing circuit mode and power flow controls](docs/images/readme/assignment-editor.png)
 
 Recommended v1 appliance types include broad `hvac`, more specific
 `hvac_compressor`, `hvac_blower`, and `electric_heat` HVAC profiles, plus
@@ -86,13 +86,13 @@ Existing `well_pump` input is accepted as a legacy alias for `water_pump`.
 Mains sensors are optional, but they are required for the whole-home balance,
 Mains NILM, solar-flow, and utility comparison features.
 
-![Mains sensor selection](docs/images/readme/mains-sensors.png)
+![Mains sensor selection controls for optional whole-panel sources](docs/images/readme/mains-sensors.png)
 
 Advanced settings expose per-circuit tuning for sensitivity, usage spike
 thresholds, daily goals, billing/cost settings, demand and capacity settings,
 and standby/always-on behavior.
 
-![Advanced circuit settings](docs/images/readme/advanced-settings.png)
+![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
 
 ## Alert Blueprint
 
@@ -110,7 +110,7 @@ CircuitSetup Energy Analyzer supports four analysis modes:
 - Mixed circuits are useful when one branch circuit feeds multiple small loads. The integration reports data quality, large changes, and recurring evidence conservatively instead of pretending the circuit is a clean appliance signature.
 - Mains NILM circuits are whole-home aggregate inputs. Experimental NILM can look for recurring aggregate signatures after known directly monitored circuits are masked out.
 
-![Circuit mode assignment controls](docs/images/readme/circuit-modes.png)
+![Circuit mode assignment controls with single-phase, dual-phase, mixed, and Mains NILM options](docs/images/readme/circuit-modes.png)
 
 ## Power Flow
 
@@ -123,7 +123,7 @@ handled differently:
 - Solar inverter circuits treat negative real power as exported generation and analyze the export magnitude.
 - Mains NILM circuits keep signed net power so import and export behavior can be disaggregated without losing direction.
 
-![Power flow assignment controls](docs/images/readme/power-flow.png)
+![Power flow assignment controls for load and generation sign handling](docs/images/readme/power-flow.png)
 
 ## Energy Usage Spikes
 
@@ -141,7 +141,7 @@ total, the threshold, and the percentage of the learned window used today.
 The `set_energy_usage_settings` service can adjust the rolling window and daily
 spike ratio for a specific circuit.
 
-![Energy usage spike evidence](docs/images/readme/energy-usage-spikes.png)
+![Energy usage status showing Waiting For Energy Change and daily kWh evidence](docs/images/readme/energy-usage-spikes.png)
 
 ## Daily Energy Goals
 
@@ -155,7 +155,7 @@ optional `goal_alert_ratio`. By default, goal notices trigger at 100% of the
 daily goal after repeated observations. Setting the ratio below 1.0 can warn
 before the goal is reached, while setting the daily goal to 0 clears the goal.
 
-![Daily energy goal dashboard context](docs/images/readme/daily-energy-goals.png)
+![Daily energy goal card showing recent seven-day energy context](docs/images/readme/daily-energy-goals.png)
 
 ## Run Cycle Diagnostics
 
@@ -181,7 +181,7 @@ for appliance-style "left on too long" notices, such as a pump, oven, washer,
 dryer, or refrigerator compressor run that exceeds a user-selected duration, and for
 "no activity for too long" notices when an expected cycling load has not run.
 
-![Run cycle diagnostic evidence](docs/images/readme/run-cycle-diagnostics.png)
+![Run cycle diagnostic entities in an observed evidence card](docs/images/readme/run-cycle-diagnostics.png)
 
 ## Recent Activity Timeline
 
@@ -196,7 +196,7 @@ sensor shows how much activity was retained in the recent window. These entities
 are intended for quick operational review and dashboard cards, not as a
 replacement for Home Assistant recorder history or Energy Dashboard graphs.
 
-![Recent activity timeline evidence](docs/images/readme/recent-activity-timeline.png)
+![Recent activity timeline evidence in an observed evidence card](docs/images/readme/recent-activity-timeline.png)
 
 ## Billing Cycle Forecasts
 
@@ -210,7 +210,7 @@ optional kWh budget for a circuit. When a budget is configured, projected
 over-budget notifications require repeated evidence and include the current
 usage, projected usage, configured budget, and billing-cycle dates.
 
-![Billing cycle forecast context](docs/images/readme/billing-cycle-forecasts.png)
+![Billing cycle forecast card with seven-day energy chart context](docs/images/readme/billing-cycle-forecasts.png)
 
 ## Cost And Time-of-Use Tracking
 
@@ -225,7 +225,7 @@ cost, and whether the circuit is currently in the TOU period. These values are
 estimates and do not include fixed fees, demand charges, taxes, tiered rates,
 or every utility billing rule.
 
-![Cost and time-of-use context](docs/images/readme/cost-time-of-use.png)
+![Cost and Time-of-Use card with energy totals context](docs/images/readme/cost-time-of-use.png)
 
 ## History CSV Export
 
@@ -241,7 +241,7 @@ latest CSV snapshot in runtime state so future UI, diagnostics, or download
 surfaces can reuse the same export builder without writing arbitrary files from
 a service call.
 
-![History CSV export action](docs/images/readme/history-csv-export.png)
+![Home Assistant action UI for exporting Energy Analyzer history CSV](docs/images/readme/history-csv-export.png)
 
 ## Peak Demand Tracking
 
@@ -263,7 +263,7 @@ possible-issue notification with the current demand, monthly cutoff, rank, and
 window length. This is demand evidence, not a replacement for Home Assistant's
 Energy Dashboard energy graphs.
 
-![Peak demand tracking evidence](docs/images/readme/peak-demand-tracking.png)
+![Peak demand tracking entities with current demand evidence](docs/images/readme/peak-demand-tracking.png)
 
 ## Circuit Capacity Tracking
 
@@ -284,7 +284,7 @@ These diagnostics are operational evidence only. They do not verify breaker,
 wire, plug, appliance, or electrical-code suitability; use a qualified
 electrician for circuit sizing and safety decisions.
 
-![Circuit capacity tracking evidence](docs/images/readme/circuit-capacity-tracking.png)
+![Circuit capacity tracking entities with breaker capacity evidence](docs/images/readme/circuit-capacity-tracking.png)
 
 ## Dual-Phase Leg Imbalance
 
@@ -301,7 +301,7 @@ dominant leg, both leg wattages, optional currents/voltages, and the threshold
 used. Notifications are created only after repeated over-threshold observations
 and are labeled as possible issues.
 
-![Dual-phase leg imbalance evidence](docs/images/readme/dual-phase-leg-imbalance.png)
+![Dual-phase leg imbalance entities with car charger leg status evidence](docs/images/readme/dual-phase-leg-imbalance.png)
 
 ## Power Metric Consistency
 
@@ -319,7 +319,7 @@ incorrect units, stale/missing optional sensors, or calibration problems. The
 diagnostic entities expose the expected VA, reported VA, VA percent difference,
 expected PF, reported PF, PF difference, and tolerance values.
 
-![Power metric consistency evidence](docs/images/readme/power-metric-consistency.png)
+![Power metric consistency entities in an observed evidence card](docs/images/readme/power-metric-consistency.png)
 
 ## Mains Balance
 
@@ -333,7 +333,7 @@ solar configuration, or multiplier problems.
 Generation circuits, such as solar inverter channels, are excluded from the
 monitored load sum so they do not look like household consumption.
 
-![Mains balance evidence](docs/images/readme/mains-balance.png)
+![Mains balance evidence card with monitored and balance power values](docs/images/readme/mains-balance.png)
 
 ## Solar Flow Diagnostics
 
@@ -370,7 +370,7 @@ If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
 
-![Solar flow diagnostic evidence](docs/images/readme/solar-flow-diagnostics.png)
+![Solar flow diagnostic entities in an observed evidence card](docs/images/readme/solar-flow-diagnostics.png)
 
 ## Utility And Opower Comparison
 
@@ -379,7 +379,7 @@ measured same-period kWh source. This is intended for sanity-check evidence,
 not normal energy history. Use Home Assistant's Energy Dashboard for standard
 long-term energy charts, tariffs, costs, and device energy rollups.
 
-![Utility and Opower comparison options](docs/images/readme/utility-comparison.png)
+![Utility and Opower comparison options with private utility text redacted](docs/images/readme/utility-comparison.png)
 
 The Utility / Opower screenshot redacts account-specific utility text.
 
@@ -420,7 +420,7 @@ Always On load repeatedly exceeds that configured limit, the notification
 reports the observed watts, window, and configured limit as possible-issue
 evidence.
 
-![Always on and standby evidence](docs/images/readme/always-on-standby.png)
+![Always On and standby card with seven-day active power evidence](docs/images/readme/always-on-standby.png)
 
 ## Experimental NILM
 
@@ -450,7 +450,7 @@ high-confidence mains matches point to the other leg, the status becomes
 `leg_mismatch`. The integration does not rewrite the circuit mapping; it exposes
 evidence for user confirmation.
 
-![Experimental NILM evidence](docs/images/readme/experimental-nilm.png)
+![Experimental NILM evidence card with mains topology and maintenance entities](docs/images/readme/experimental-nilm.png)
 
 ## Alert Philosophy
 
@@ -458,7 +458,7 @@ The analyzer is evidence-first. It learns for at least 7 days or enough profile-
 
 This means a refrigerator alert might say that cycle duration appears unusual compared with its learned baseline. It should not claim that a compressor, fan, seal, or refrigerant problem has been diagnosed.
 
-![Alert philosophy dashboard evidence](docs/images/readme/alert-philosophy.png)
+![Alert philosophy dashboard card showing circuit health and observed evidence](docs/images/readme/alert-philosophy.png)
 
 ## Notifications And Repairs
 
@@ -466,7 +466,7 @@ Persistent notifications are reserved for important evidence about appliance beh
 
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
 
-![Notifications and repairs evidence](docs/images/readme/notifications-repairs.png)
+![Notifications and Repairs evidence card showing possible issue and repair entities](docs/images/readme/notifications-repairs.png)
 
 ## Sensor Reference
 
@@ -477,7 +477,7 @@ circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
 The installed demo dashboard shows how these entities can be arranged without
 recreating Home Assistant's Energy Dashboard.
 
-![Energy Analyzer demo dashboard](docs/images/readme/demo-dashboard.png)
+![Appliance-first Energy Analyzer dashboard with health summaries and evidence cards](docs/images/readme/demo-dashboard.png)
 
 ## Status Glossary
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 from pathlib import Path
 
 import yaml
@@ -537,6 +538,54 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "not observed a cumulative kWh increase" in readme_text
 
 
+def test_readme_screenshot_references_exist_and_are_cropped() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    refs = re.findall(
+        r"!\[[^\]]+\]\((docs/images/readme/[^)]+\.png)\)",
+        readme_text,
+    )
+
+    expected = {
+        "docs/images/readme/integration-overview.png",
+        "docs/images/readme/options-menu.png",
+        "docs/images/readme/assignment-editor.png",
+        "docs/images/readme/mains-sensors.png",
+        "docs/images/readme/advanced-settings.png",
+        "docs/images/readme/circuit-modes.png",
+        "docs/images/readme/power-flow.png",
+        "docs/images/readme/energy-usage-spikes.png",
+        "docs/images/readme/daily-energy-goals.png",
+        "docs/images/readme/run-cycle-diagnostics.png",
+        "docs/images/readme/recent-activity-timeline.png",
+        "docs/images/readme/billing-cycle-forecasts.png",
+        "docs/images/readme/cost-time-of-use.png",
+        "docs/images/readme/history-csv-export.png",
+        "docs/images/readme/peak-demand-tracking.png",
+        "docs/images/readme/circuit-capacity-tracking.png",
+        "docs/images/readme/dual-phase-leg-imbalance.png",
+        "docs/images/readme/power-metric-consistency.png",
+        "docs/images/readme/mains-balance.png",
+        "docs/images/readme/solar-flow-diagnostics.png",
+        "docs/images/readme/utility-comparison.png",
+        "docs/images/readme/always-on-standby.png",
+        "docs/images/readme/experimental-nilm.png",
+        "docs/images/readme/alert-philosophy.png",
+        "docs/images/readme/notifications-repairs.png",
+        "docs/images/readme/demo-dashboard.png",
+    }
+
+    assert expected <= set(refs)
+    for ref in sorted(set(refs)):
+        path = ROOT / ref
+        assert path.exists(), f"{ref} is referenced by README but missing"
+        width, height = _png_dimensions(path)
+        assert width >= 500, f"{ref} is too narrow to show readable UI"
+        assert height >= 250, f"{ref} is too short to show readable UI"
+        assert not (
+            width >= 1800 and height >= 1000
+        ), f"{ref} looks like a full-screen capture rather than a cropped UI panel"
+
+
 def _dashboard_cards(node: object) -> list[dict[str, object]]:
     cards: list[dict[str, object]] = []
     if isinstance(node, dict):
@@ -555,3 +604,9 @@ def _dashboard_entity_refs(dashboard_text: str) -> list[str]:
         match.group(1)
         for match in re.finditer(r"entity:\s*([a-z_]+\.[A-Za-z0-9_]+)", dashboard_text)
     ]
+
+
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{path} is not a PNG"
+    return struct.unpack(">II", data[16:24])
