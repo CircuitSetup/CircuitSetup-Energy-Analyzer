@@ -479,6 +479,74 @@ recreating Home Assistant's Energy Dashboard.
 
 ![Energy Analyzer demo dashboard](docs/images/readme/demo-dashboard.png)
 
+## Status Glossary
+
+Status sensors display readable values in Home Assistant, such as `Missing
+Metrics`, `Not Dual Phase`, or `Projected Over Budget`. For automations and
+debugging, each status sensor also exposes:
+
+- `raw_status`: the stable machine value, such as `missing_metrics`.
+- `status_label`: the display label shown as the sensor state.
+- `status_explanation`: a short explanation of what the state means.
+
+Common status values:
+
+| Display label | `raw_status` | Meaning |
+| --- | --- | --- |
+| Active Grid Supported | `active_grid_supported` | A flexible load is running, but current solar surplus does not cover it. |
+| Active Solar Supported | `active_solar_supported` | A flexible load is running and appears to be covered by current solar surplus. |
+| Apparent Power Mismatch | `apparent_power_mismatch` | Reported VA does not match the relationship expected from voltage, current, and real power. |
+| Consistent | `consistent` | The available measurements are internally consistent. |
+| Exporting | `exporting` | Signed mains power currently indicates grid export. |
+| High Surplus | `high_surplus` | Solar export is above the configured high-surplus threshold. |
+| Idle | `idle` | The circuit is below the active-load threshold for this check. |
+| Imbalanced | `imbalanced` | Dual-phase leg difference is repeatedly above the configured warning threshold. |
+| Importing | `importing` | Signed mains power currently indicates grid import. |
+| Inconsistent Export | `inconsistent_export` | Grid export is larger than measured generation; check CT orientation, solar mapping, batteries, or missing generation channels. |
+| Leg Mismatch | `leg_mismatch` | Mains NILM evidence repeatedly points to a different split-phase leg than the assignment. |
+| Metric Mismatch | `metric_mismatch` | One or more power relationships changed beyond tolerance. |
+| Missing Current | `missing_current` | The check needs a current sensor, or enough power and voltage data to estimate current. |
+| Missing Generation | `missing_generation` | Solar-flow checks need at least one generation circuit. |
+| Missing Mains | `missing_mains` | The check needs a mains, whole-home, or aggregate source. |
+| Missing Measured | `missing_measured` | Utility comparison needs a measured kWh source. |
+| Missing Metrics | `missing_metrics` | Metric consistency needs more matching voltage, current, real power, apparent power, or power factor sensors. |
+| Missing Utility | `missing_utility` | Utility comparison needs a utility or Opower source. |
+| Mismatch | `mismatch` | The measured value differs from the comparison source beyond tolerance. |
+| Monthly Peak | `monthly_peak` | The current rolling demand is the highest retained monthly demand window. |
+| Near Goal | `near_goal` | Daily energy usage is near the configured goal threshold. |
+| Near Monthly Peak | `near_monthly_peak` | The current rolling demand is near the highest retained monthly demand windows. |
+| Negative Balance | `negative_balance` | Monitored load power is higher than mains power beyond tolerance; check mapping, signs, solar, or CT orientation. |
+| No Activity | `no_activity` | No recent run-cycle activity has been observed. |
+| No Budget | `no_budget` | No billing-cycle budget is configured. |
+| No Generation | `no_generation` | No solar generation is currently being measured. |
+| No Match | `no_match` | No matching NILM event has been observed yet. |
+| No Monitored Circuits | `no_monitored_circuits` | Mains balance needs at least one monitored load circuit. |
+| No Surplus | `no_surplus` | No solar export surplus is currently available. |
+| Not Applicable | `not_applicable` | The check does not apply to the current circuit configuration. |
+| Not Dual Phase | `not_dual_phase` | The check only applies to dual-phase circuits. |
+| Off | `off` | Latest power is below the configured standby threshold. |
+| On | `on` | Latest power is above the standby range. |
+| Over Budget | `over_budget` | Billing-cycle usage is over the configured budget. |
+| Over Goal | `over_goal` | Daily energy usage is over the configured goal. |
+| Over Limit | `over_limit` | The measured value is over the configured limit. |
+| Over Threshold | `over_threshold` | The measured value is over the configured threshold. |
+| Possible Issue | `possible_issue` | Repeated evidence has crossed an alert threshold. |
+| Power Factor Mismatch | `power_factor_mismatch` | Reported power factor does not match real power divided by apparent power. |
+| Projected Over Budget | `projected_over_budget` | Current usage projects above the configured billing-cycle budget. |
+| Ready | `ready` | The analyzer has enough data for this check. |
+| Running | `running` | The circuit is currently above the active-load threshold. |
+| Self Powered | `self_powered` | Solar generation is approximately covering current site load. |
+| Standby | `standby` | Latest power is within the configured standby range. |
+| Surplus Available | `surplus_available` | Solar export is above the configured surplus threshold. |
+| Surplus Candidate | `surplus_candidate` | An idle flexible load could be a candidate while solar surplus is available. |
+| Topology Match | `topology_match` | Mains NILM evidence matches the configured circuit mode. |
+| Topology Mismatch | `topology_mismatch` | Mains NILM evidence conflicts with the configured circuit mode. |
+| TOU Peak | `tou_peak` | Current time is inside the configured time-of-use peak period. |
+| Tracking | `tracking` | The analyzer has enough inputs and is tracking this check. |
+| Unavailable | `unavailable` | This check does not have enough retained data yet. |
+| Unconfigured | `unconfigured` | This optional check has not been configured. |
+| Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
+
 ### Source Measurement Inputs
 
 These are the ESPHome/CircuitSetup sensors selected during setup. They may come

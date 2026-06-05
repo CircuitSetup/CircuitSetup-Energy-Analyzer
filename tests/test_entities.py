@@ -650,6 +650,71 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
         assert entity.icon != "mdi:eye"
 
 
+def test_status_sensor_entities_explain_machine_status_values() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    state = AnalyzerState(
+        metric_consistency_status_by_circuit={"pool": "missing_metrics"},
+        metric_consistency_evidence_by_circuit={
+            "pool": {
+                "status": "missing_metrics",
+                "missing_roles": ["voltage", "current", "apparent_power"],
+            }
+        },
+        leg_imbalance_status_by_circuit={"pool": "not_dual_phase"},
+        solar_flow_status_by_circuit={"pool": "inconsistent_export"},
+    )
+    coordinator = SimpleNamespace(data=state)
+    circuit = SimpleNamespace(circuit_id="pool", name="Pool Pump")
+
+    metric_status = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["metric_consistency_status"],
+    )
+    assert metric_status.native_value == "Missing Metrics"
+    assert metric_status.extra_state_attributes == {
+        "status": "missing_metrics",
+        "missing_roles": ["voltage", "current", "apparent_power"],
+        "raw_status": "missing_metrics",
+        "status_label": "Missing Metrics",
+        "status_explanation": (
+            "This check needs more matching voltage, current, real power, "
+            "apparent power, or power factor sensors."
+        ),
+    }
+
+    leg_status = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["leg_imbalance_status"],
+    )
+    assert leg_status.native_value == "Not Dual Phase"
+    assert leg_status.extra_state_attributes == {
+        "raw_status": "not_dual_phase",
+        "status_label": "Not Dual Phase",
+        "status_explanation": "This check only applies to dual-phase circuits.",
+    }
+
+    solar_status = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["solar_flow_status"],
+    )
+    assert solar_status.native_value == "Inconsistent Export"
+    assert solar_status.extra_state_attributes["raw_status"] == "inconsistent_export"
+    assert "CT orientation" in solar_status.extra_state_attributes[
+        "status_explanation"
+    ]
+
+
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,
@@ -851,6 +916,24 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
     circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
 
+    def assert_status_attributes(
+        sensor_key: str,
+        evidence_mapping: dict[str, object],
+    ) -> None:
+        attributes = CircuitAnalyzerSensor(
+            coordinator,
+            entry_id="entry-1",
+            circuit=circuit,
+            description=descriptions[sensor_key],
+        ).extra_state_attributes
+
+        assert attributes is not None
+        for key, value in evidence_mapping.items():
+            assert attributes[key] == value
+        assert attributes["raw_status"] == evidence_mapping["status"]
+        assert attributes["status_label"] != evidence_mapping["status"]
+        assert attributes["status_explanation"]
+
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -869,12 +952,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["data_quality_checklist"],
     ).extra_state_attributes == checklist
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["energy_dashboard_status"],
-    ).extra_state_attributes == energy_dashboard
+    assert_status_attributes("energy_dashboard_status", energy_dashboard)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -911,24 +989,14 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["energy_usage_share"],
     ).extra_state_attributes == energy_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["energy_usage_status"],
-    ).extra_state_attributes == energy_evidence
+    assert_status_attributes("energy_usage_status", energy_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["energy_goal_usage"],
     ).extra_state_attributes == energy_goal_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["energy_goal_status"],
-    ).extra_state_attributes == energy_goal_evidence
+    assert_status_attributes("energy_goal_status", energy_goal_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -947,12 +1015,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["run_cycle_duty_cycle"],
     ).extra_state_attributes == run_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["run_cycle_status"],
-    ).extra_state_attributes == run_cycle_evidence
+    assert_status_attributes("run_cycle_status", run_cycle_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -977,54 +1040,29 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["demand_peak_rank"],
     ).extra_state_attributes == demand_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["demand_peak_status"],
-    ).extra_state_attributes == demand_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["demand_status"],
-    ).extra_state_attributes == demand_evidence
+    assert_status_attributes("demand_peak_status", demand_evidence)
+    assert_status_attributes("demand_status", demand_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["capacity_usage"],
     ).extra_state_attributes == capacity_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["capacity_status"],
-    ).extra_state_attributes == capacity_evidence
+    assert_status_attributes("capacity_status", capacity_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["leg_imbalance"],
     ).extra_state_attributes == leg_imbalance_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["leg_imbalance_status"],
-    ).extra_state_attributes == leg_imbalance_evidence
+    assert_status_attributes("leg_imbalance_status", leg_imbalance_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["metric_consistency_score"],
     ).extra_state_attributes == metric_consistency_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["metric_consistency_status"],
-    ).extra_state_attributes == metric_consistency_evidence
+    assert_status_attributes("metric_consistency_status", metric_consistency_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1043,12 +1081,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["monitored_coverage"],
     ).extra_state_attributes == balance_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["balance_status"],
-    ).extra_state_attributes == balance_evidence
+    assert_status_attributes("balance_status", balance_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1085,12 +1118,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["solar_powered"],
     ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_flow_status"],
-    ).extra_state_attributes == solar_flow_evidence
+    assert_status_attributes("solar_flow_status", solar_flow_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1115,36 +1143,16 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["solar_flexible_load_coverage"],
     ).extra_state_attributes == solar_load_shift_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_load_shift_status"],
-    ).extra_state_attributes == solar_load_shift_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_surplus_status"],
-    ).extra_state_attributes == solar_flow_evidence
+    assert_status_attributes("solar_load_shift_status", solar_load_shift_evidence)
+    assert_status_attributes("solar_surplus_status", solar_flow_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["utility_comparison_difference"],
     ).extra_state_attributes == utility_comparison_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["utility_comparison_status"],
-    ).extra_state_attributes == utility_comparison_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["nilm_topology_status"],
-    ).extra_state_attributes == nilm_topology_evidence
+    assert_status_attributes("utility_comparison_status", utility_comparison_evidence)
+    assert_status_attributes("nilm_topology_status", nilm_topology_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1163,12 +1171,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["billing_cycle_budget_usage"],
     ).extra_state_attributes == billing_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["billing_cycle_status"],
-    ).extra_state_attributes == billing_cycle_evidence
+    assert_status_attributes("billing_cycle_status", billing_cycle_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1187,12 +1190,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["cost_cycle_forecast"],
     ).extra_state_attributes == cost_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["cost_status"],
-    ).extra_state_attributes == cost_evidence
+    assert_status_attributes("cost_status", cost_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1205,12 +1203,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         circuit=circuit,
         description=descriptions["standby_threshold"],
     ).extra_state_attributes == standby_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["standby_status"],
-    ).extra_state_attributes == standby_evidence
+    assert_status_attributes("standby_status", standby_evidence)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",

@@ -443,6 +443,25 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "alert_actions:" in blueprint_text
 
 
+def test_readme_includes_status_glossary_for_machine_values() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "## Status Glossary" in readme_text
+    for raw_status in (
+        "missing_metrics",
+        "not_dual_phase",
+        "missing_mains",
+        "inconsistent_export",
+        "no_match",
+        "projected_over_budget",
+        "active_solar_supported",
+    ):
+        assert raw_status in readme_text
+    assert "Missing Metrics" in readme_text
+    assert "raw_status" in readme_text
+    assert "status_explanation" in readme_text
+
+
 def _dashboard_cards(node: object) -> list[dict[str, object]]:
     cards: list[dict[str, object]] = []
     if isinstance(node, dict):

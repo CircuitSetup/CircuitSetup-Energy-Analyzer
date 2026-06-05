@@ -700,6 +700,153 @@ def _sensitivity_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     return {"preset": sensitivity_value(state, circuit_id)}
 
 
+_STATUS_LABEL_OVERRIDES: Mapping[str, str] = {
+    "nilm_review": "NILM Review",
+    "tou_peak": "TOU Peak",
+}
+
+_STATUS_EXPLANATIONS: Mapping[str, str] = {
+    "active_grid_supported": (
+        "A flexible load is running, but the current solar surplus does not cover it."
+    ),
+    "active_solar_supported": (
+        "A flexible load is running and the current solar surplus appears to cover it."
+    ),
+    "apparent_power_mismatch": (
+        "Reported apparent power does not match the relationship expected from "
+        "voltage, current, and real power."
+    ),
+    "consistent": "The available measurements are internally consistent.",
+    "exporting": "Signed mains power currently indicates export to the grid.",
+    "high_surplus": (
+        "Solar export is above the high-surplus threshold configured for load shifting."
+    ),
+    "idle": "The circuit is below the active-load threshold for this check.",
+    "imbalanced": (
+        "A dual-phase load has a repeated leg-to-leg difference above the configured "
+        "warning threshold."
+    ),
+    "importing": "Signed mains power currently indicates import from the grid.",
+    "inconsistent_export": (
+        "Grid export is larger than measured generation; check CT orientation, solar "
+        "mapping, batteries, or missing generation channels."
+    ),
+    "learning": "The analyzer is still collecting baseline evidence.",
+    "leg_mismatch": (
+        "Mains NILM evidence repeatedly points to a different split-phase leg than "
+        "the circuit assignment."
+    ),
+    "metric_mismatch": (
+        "One or more power relationships changed beyond the configured tolerance."
+    ),
+    "missing_current": (
+        "This check needs a current sensor, or power and voltage sensors that can "
+        "estimate current."
+    ),
+    "missing_generation": "Solar-flow checks need at least one generation circuit.",
+    "missing_mains": "This check needs a mains, whole-home, or aggregate source.",
+    "missing_measured": "Utility comparison needs a measured kWh source.",
+    "missing_metrics": (
+        "This check needs more matching voltage, current, real power, apparent power, "
+        "or power factor sensors."
+    ),
+    "missing_utility": "Utility comparison needs a utility or Opower source.",
+    "mismatch": "The measured value differs from the comparison source beyond tolerance.",
+    "monthly_peak": "The current rolling demand is the highest retained monthly window.",
+    "near_goal": "Daily energy usage is near the configured goal threshold.",
+    "near_monthly_peak": (
+        "The current rolling demand is near the highest retained monthly windows."
+    ),
+    "negative_balance": (
+        "Monitored load power is higher than mains power beyond tolerance; check "
+        "mapping, signs, solar, or CT orientation."
+    ),
+    "no_activity": "No recent run-cycle activity has been observed.",
+    "no_budget": "No billing-cycle budget is configured for this circuit.",
+    "no_generation": "No solar generation is currently being measured.",
+    "no_match": "No matching NILM event has been observed yet.",
+    "no_monitored_circuits": "Mains balance needs at least one monitored load circuit.",
+    "no_surplus": "No solar export surplus is currently available.",
+    "not_applicable": "This check does not apply to the current circuit configuration.",
+    "not_dual_phase": "This check only applies to dual-phase circuits.",
+    "off": "The latest power sample is below the configured standby threshold.",
+    "on": "The latest power sample is above the standby range.",
+    "over_budget": "Billing-cycle usage is over the configured budget.",
+    "over_goal": "Daily energy usage is over the configured goal.",
+    "over_limit": "The measured value is over the configured limit.",
+    "over_threshold": "The measured value is over the configured threshold.",
+    "paused": "Analysis is paused for this circuit.",
+    "possible_issue": "Repeated evidence has crossed an alert threshold.",
+    "power_factor_mismatch": (
+        "Reported power factor does not match real power divided by apparent power."
+    ),
+    "power_ready": "Power metadata is ready for Home Assistant energy features.",
+    "projected_over_budget": (
+        "Current usage projects above the configured billing-cycle budget."
+    ),
+    "ready": "The analyzer has enough data for this check.",
+    "running": "The circuit is currently above the active-load threshold.",
+    "self_powered": "Solar generation is approximately covering current site load.",
+    "standby": "The latest power sample is within the configured standby range.",
+    "surplus_available": (
+        "Solar export is above the surplus threshold configured for load shifting."
+    ),
+    "surplus_candidate": (
+        "An idle flexible load could be a candidate while solar surplus is available."
+    ),
+    "topology_match": "Mains NILM evidence matches the configured circuit mode.",
+    "topology_mismatch": (
+        "Mains NILM evidence conflicts with the configured circuit mode."
+    ),
+    "tou_peak": "The current time is inside the configured time-of-use peak period.",
+    "tracking": "The analyzer has enough inputs and is tracking this check.",
+    "unavailable": "This check does not have enough retained data yet.",
+    "unconfigured": "This optional check has not been configured for this circuit.",
+    "waiting_for_surplus": "No idle flexible load currently has enough solar surplus.",
+}
+
+
+def _is_status_sensor_key(key: str) -> bool:
+    return key.endswith("_status")
+
+
+def _status_label(raw_status: Any) -> str:
+    status = str(raw_status or "")
+    if status in _STATUS_LABEL_OVERRIDES:
+        return _STATUS_LABEL_OVERRIDES[status]
+
+    words = status.replace("-", "_").split("_")
+    formatted_words = []
+    for word in words:
+        lower = word.lower()
+        if lower in {"ct", "nilm", "pf", "tou", "va"}:
+            formatted_words.append(lower.upper())
+        elif lower == "kwh":
+            formatted_words.append("kWh")
+        else:
+            formatted_words.append(lower.capitalize())
+    return " ".join(formatted_words)
+
+
+def _status_explanation(raw_status: Any) -> str:
+    status = str(raw_status or "")
+    return _STATUS_EXPLANATIONS.get(
+        status,
+        f"{_status_label(status)} status reported by the analyzer.",
+    )
+
+
+def _status_raw_value(
+    description: DiagnosticSensorDescription,
+    state: Any,
+    circuit_id: str,
+    attributes: Mapping[str, Any] | None = None,
+) -> Any:
+    if attributes is not None and attributes.get("status"):
+        return attributes["status"]
+    return description.value_fn(state, circuit_id)
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticSensorDescription:
     """Description for one diagnostic sensor entity."""
@@ -1863,19 +2010,51 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the latest diagnostic value."""
         if self.coordinator_state is None:
-            return self.entity_description.value_fn(None, self.circuit_id)
-        return self.entity_description.value_fn(
-            self.coordinator_state,
-            self.circuit_id,
-        )
+            value = self.entity_description.value_fn(None, self.circuit_id)
+        else:
+            value = self.entity_description.value_fn(
+                self.coordinator_state,
+                self.circuit_id,
+            )
+        if _is_status_sensor_key(self.entity_description.key):
+            attributes_fn = self.entity_description.attributes_fn
+            attributes = (
+                attributes_fn(self.coordinator_state, self.circuit_id)
+                if attributes_fn is not None
+                else None
+            )
+            value = _status_raw_value(
+                self.entity_description,
+                self.coordinator_state,
+                self.circuit_id,
+                attributes,
+            )
+            return _status_label(value)
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional diagnostics for sensors that expose detail."""
         attributes_fn = self.entity_description.attributes_fn
-        if attributes_fn is None:
-            return None
-        return attributes_fn(self.coordinator_state, self.circuit_id)
+        attributes = (
+            attributes_fn(self.coordinator_state, self.circuit_id)
+            if attributes_fn is not None
+            else None
+        )
+        if not _is_status_sensor_key(self.entity_description.key):
+            return attributes
+
+        raw_status = _status_raw_value(
+            self.entity_description,
+            self.coordinator_state,
+            self.circuit_id,
+            attributes,
+        )
+        status_attributes = dict(attributes or {})
+        status_attributes["raw_status"] = str(raw_status)
+        status_attributes["status_label"] = _status_label(raw_status)
+        status_attributes["status_explanation"] = _status_explanation(raw_status)
+        return status_attributes
 
 
 class DemoSourceSensor(SensorEntity):
