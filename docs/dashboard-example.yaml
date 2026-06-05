@@ -87,9 +87,12 @@ sections:
           energy, or when the analyzer is Waiting For Energy Change because it
           has not observed a cumulative kWh increase yet. Energy Summary
           includes the current high-usage, goal, billing, and cost result.
-      - type: history-graph
+      - type: statistics-graph
         title: Daily energy trend
-        hours_to_show: 72
+        days_to_show: 7
+        period: day
+        stat_types:
+          - mean
         entities:
           - entity: sensor.refrigerator_daily_energy_usage
           - entity: sensor.hvac_daily_energy_usage
@@ -170,9 +173,12 @@ sections:
             name: Electrical
           - entity: sensor.mains_nilm_energy_summary
             name: Energy
-      - type: history-graph
+      - type: statistics-graph
         title: Mains daily energy
-        hours_to_show: 72
+        days_to_show: 7
+        period: day
+        stat_types:
+          - mean
         entities:
           - entity: sensor.mains_nilm_daily_energy_usage
       - type: entities

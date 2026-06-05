@@ -364,8 +364,14 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
 
     assert card_types.count("entities") <= 10
     assert "glance" in card_types
-    assert "history-graph" in card_types
+    assert "statistics-graph" in card_types
     assert any(card.get("title") == "At a glance" for card in cards)
+    statistics_cards = [
+        card for card in cards if card.get("type") == "statistics-graph"
+    ]
+    assert statistics_cards
+    assert all(card.get("days_to_show") == 7 for card in statistics_cards)
+    assert all(card.get("period") == "day" for card in statistics_cards)
 
 
 def test_dashboard_example_omits_hidden_default_entities() -> None:
@@ -685,6 +691,7 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         "docs/images/readme/always-on-standby.png",
         "docs/images/readme/experimental-nilm.png",
         "docs/images/readme/alert-philosophy.png",
+        "docs/images/readme/notifications-panel.png",
         "docs/images/readme/notifications-repairs.png",
         "docs/images/readme/demo-dashboard.png",
     }

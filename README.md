@@ -502,6 +502,8 @@ This means a refrigerator alert might say that cycle duration appears unusual co
 
 Persistent notifications are reserved for important evidence about appliance behavior, such as repeated anomaly evidence after the learning period.
 
+![Home Assistant notification drawer showing a CircuitSetup Energy Analyzer possible-issue notification](docs/images/readme/notifications-panel.png)
+
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
 
 ![Observed evidence card used for possible-issue notifications and setup review](docs/images/readme/notifications-repairs.png)
