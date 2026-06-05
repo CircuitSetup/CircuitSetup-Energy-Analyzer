@@ -132,6 +132,197 @@ and standby/always-on behavior.
 
 ![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
 
+## Using The Integration
+
+Start by treating the integration as an appliance and circuit diagnostic layer,
+not as a replacement for Home Assistant's Energy Dashboard. Most users do not
+need to enable every diagnostic entity. Most useful daily behavior comes from a
+small set of visible rollups, then detailed evidence can stay in attributes,
+notifications, Repairs, or temporary troubleshooting views.
+
+### First-time setup checklist
+
+1. Install the integration with HACS, restart Home Assistant, then add
+   CircuitSetup Energy Analyzer from Settings > Devices & services.
+2. In Source Devices, select the meter devices that provide your CT/channel
+   sensors. For a CircuitSetup meter exposed through ESPHome, this is usually
+   the ESPHome device that owns the ATM90E32 power, current, voltage, energy,
+   power-factor, reactive-power, and apparent-power sensors.
+3. Use Extra Source Entities only for sensors that are not already included by
+   a selected source device. This is useful for standalone Opower, utility,
+   solar, or helper sensors.
+4. Leave Mains Source Entities empty unless you have whole-panel or aggregate
+   mains measurements. Add mains sources when you want Mains NILM, mains
+   balance, solar-flow, or utility comparison evidence.
+5. Open Review Circuit Assignments. Confirm each detected group before saving:
+   set Include Circuit only for circuits you want the analyzer to track, choose
+   an appliance type, choose the circuit mode, and verify the selected source
+   entities are really from the same circuit or appliance.
+6. Save, wait for entities to appear, then build dashboards from Health
+   Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy
+   Usage, and the Running binary sensor.
+
+### Classify circuits deliberately
+
+Use Single Phase when one CT/channel tracks one primary 120 V load, such as a
+refrigerator, washer, sump pump, microwave, or water pump. Use Dual Phase when
+two channels are the two legs of one 240 V appliance, such as HVAC, electric
+heat, water heater, dryer, oven, pool pump, or EV charger. Use Mixed when the
+circuit feeds multiple unrelated loads, such as plugs and lights; mixed
+circuits get conservative evidence, not appliance-specific diagnosis. Use Mains
+NILM only for whole-home mains or feed circuits.
+
+Power Flow matters when watts are signed. Use Load for normal consuming
+circuits. Use Generation / Solar Export for inverter or generation circuits
+where negative watts are expected. Use Mains / Net for signed whole-home mains
+measurements where import and export direction both matter. If a normal load
+shows sustained negative watts, check CT orientation before treating the data as
+appliance evidence.
+
+### Use it day to day
+
+Start with these entities for each appliance:
+
+- `Health Summary` shows whether the circuit is ready, learning, missing data, or
+  showing a possible issue.
+- `Activity Summary` shows what the appliance is doing now.
+- `Electrical Health` shows whether power-quality, leg-balance, or metric-consistency
+  evidence needs review.
+- `Energy Summary` shows whether usage, goals, billing, cost, or high-usage evidence
+  needs review.
+- `Daily Energy Usage` shows today's derived kWh when a cumulative energy source is
+  available.
+- `Running` binary sensor is the easiest entity for automations like washer,
+  dryer, pump, or microwave notifications.
+
+During the first week, let the analyzer learn for at least 7 days or enough
+appliance cycles before acting on behavior alerts. If a state looks confusing,
+open the entity details and read `status_explanation`, `observed_evidence`, and
+related attributes before changing settings. For household dashboards, keep the
+summary entities visible and only expose advanced `... Status`, evidence, and
+checklist entities while troubleshooting.
+
+### Configure the optional features you actually need
+
+Most options are set from Home Assistant Developer Tools > Actions. Choose the
+`circuitsetup_energy_analyzer` action, enter the configured `circuit_id`, then
+set only the values you want to change.
+
+Common examples:
+
+```yaml
+action: circuitsetup_energy_analyzer.set_energy_goal_settings
+data:
+  circuit_id: hvac
+  daily_goal_kwh: 12
+  goal_alert_ratio: 1.0
+```
+
+```yaml
+action: circuitsetup_energy_analyzer.set_capacity_settings
+data:
+  circuit_id: car_charger
+  breaker_amps: 50
+  warning_ratio: 0.8
+```
+
+```yaml
+action: circuitsetup_energy_analyzer.set_standby_settings
+data:
+  circuit_id: refrigerator
+  standby_threshold_w: 12
+  always_on_alert_w: 35
+```
+
+Useful action families:
+
+- Usage and goals: `set_energy_usage_settings`,
+  `set_energy_goal_settings`.
+- Billing, cost, and utility sanity checks: `set_billing_cycle_settings`,
+  `set_cost_settings`, `set_utility_comparison_settings`.
+- High-power circuits: `set_demand_settings`, `set_capacity_settings`,
+  `set_leg_imbalance_settings`.
+- Electrical evidence tuning: `set_metric_consistency_settings`,
+  `set_mains_balance_settings`, `set_solar_flow_settings`.
+- Appliance behavior: `set_activity_alert_settings`,
+  `set_standby_settings`.
+- Maintenance and alert handling: `pause_alerts`, `acknowledge_alert`,
+  `relearn_baseline`, `start_maintenance`, `end_maintenance`.
+
+### Practical examples
+
+Washer or dryer running automation: use the Running binary sensor. Trigger when
+it changes from `on` to `off` for a few minutes, then send a mobile
+notification.
+
+```yaml
+alias: Washer finished
+trigger:
+  - platform: state
+    entity_id: binary_sensor.washer_running
+    from: "on"
+    to: "off"
+    for: "00:03:00"
+action:
+  - service: notify.mobile_app_phone
+    data:
+      message: Washer cycle appears finished.
+```
+
+Refrigerator monitoring: keep Health Summary, Activity Summary, Electrical
+Health, Energy Summary, Daily Energy Usage, and Running visible. Let the
+compressor cycle baseline learn before tuning alerts. If Electrical Health
+changes, inspect reactive power, power factor, run-cycle evidence, and
+`status_explanation` before assuming the appliance has failed.
+
+HVAC or 240 V appliance review: classify the appliance as Dual Phase, confirm
+both leg power sensors are included, and use shared mains L1/L2 voltage when
+the meter does not expose per-appliance voltage. Watch Electrical Health and
+Leg Imbalance. A repeated imbalance notice means "check evidence," not "replace
+the equipment."
+
+EV charger or high-current circuit: classify it as Dual Phase when both legs
+are monitored, set breaker capacity with `set_capacity_settings`, and use
+demand tracking if utility demand peaks matter. Capacity alerts report measured
+or estimated amps relative to your configured circuit rating.
+
+Utility or Opower comparison: configure a mains or aggregate circuit, then use
+`set_utility_comparison_settings`. Provide an Opower/utility kWh entity or a
+recorder statistic ID. If measured energy entities are left empty, the analyzer
+sums configured load-circuit energy sensors and excludes mains and generation
+circuits.
+
+### When an alert appears
+
+1. Read the notification text and the related summary entity first.
+2. Open the entity details and review attributes such as `status_explanation`,
+   observed values, thresholds, sample counts, source entities, and timestamps.
+3. Check easy setup causes before appliance causes: CT direction, phase pairing,
+   stale sensors, wrong units, missing voltage, or a circuit assigned as the
+   wrong appliance type.
+4. Use Repairs for setup and data-quality problems. Use persistent
+   notifications for possible appliance or circuit behavior changes.
+5. If work is planned on the appliance or circuit, use `start_maintenance` or
+   `pause_alerts`, then use `end_maintenance` or `relearn_baseline` when the
+   system should start learning again.
+
+### Common setup states
+
+- `Needs data`: required source sensors are missing, stale, unavailable, or not
+  yet producing usable samples.
+- `Learning`: the analyzer has data, but it has not retained enough samples or
+  cycles for the relevant check.
+- `Waiting For Energy Change`: a cumulative kWh sensor exists, but the analyzer
+  has not observed a positive energy increase yet.
+- `Missing Metrics`: optional electrical metrics such as reactive power,
+  apparent power, current, voltage, or power factor are not available for that
+  check.
+- `Possible issue`: repeated evidence crossed a configured or learned
+  threshold. Read the evidence before making a diagnosis.
+- Negative watts on a load: likely export power or a reversed CT. If the
+  circuit is not solar/generation or signed mains, review CT orientation and
+  Power Flow.
+
 ## Alert Blueprint
 
 The repository includes a Home Assistant automation blueprint at

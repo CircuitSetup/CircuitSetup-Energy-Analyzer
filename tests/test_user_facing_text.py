@@ -621,6 +621,39 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
         assert phrase in readme_text
 
 
+def test_readme_includes_practical_usage_guide() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_text = " ".join(readme_text.split())
+
+    assert "## Using The Integration" in readme_text
+    for phrase in (
+        "First-time setup checklist",
+        "Classify circuits deliberately",
+        "Use it day to day",
+        "Configure the optional features you actually need",
+        "Practical examples",
+        "When an alert appears",
+        "Common setup states",
+    ):
+        assert phrase in readme_text
+    for phrase in (
+        "Washer or dryer running automation",
+        "Refrigerator monitoring",
+        "HVAC or 240 V appliance review",
+        "EV charger or high-current circuit",
+        "Utility or Opower comparison",
+    ):
+        assert phrase in readme_text
+    for phrase in (
+        "do not need to enable every diagnostic entity",
+        "let the analyzer learn for at least 7 days",
+        "Review Circuit Assignments",
+        "Running binary sensor",
+        "status_explanation",
+    ):
+        assert phrase in normalized_text
+
+
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
