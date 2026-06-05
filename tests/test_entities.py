@@ -108,6 +108,81 @@ def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) 
     assert fake_registry.updated == [("old-circuit", "entry-1")]
 
 
+def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+
+    class FakeHider:
+        INTEGRATION = "integration"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.fridge_last_event": SimpleNamespace(
+                    entity_id="sensor.fridge_last_event",
+                    unique_id="entry-1_fridge_last_event",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                ),
+                "sensor.fridge_activity_summary": SimpleNamespace(
+                    entity_id="sensor.fridge_activity_summary",
+                    unique_id="entry-1_fridge_activity_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                ),
+                "sensor.fridge_metric_consistency_status": SimpleNamespace(
+                    entity_id="sensor.fridge_metric_consistency_status",
+                    unique_id="entry-1_fridge_metric_consistency_status",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="user",
+                ),
+                "sensor.other_last_event": SimpleNamespace(
+                    entity_id="sensor.other_last_event",
+                    unique_id="entry-2_fridge_last_event",
+                    config_entry_id="entry-2",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                ),
+            }
+            self.updated: list[tuple[str, str]] = []
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs["hidden_by"]))
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryHider = FakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entity.hide_entity_registry_entries(
+        SimpleNamespace(entity_registry=fake_registry),
+        entry_id="entry-1",
+        entity_domain="sensor",
+        hidden_unique_id_suffixes={"last_event", "metric_consistency_status"},
+    )
+
+    assert fake_registry.updated == [
+        ("sensor.fridge_last_event", "integration"),
+    ]
+
+
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         activity_summary_value,
@@ -788,16 +863,10 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         if description.entity_registry_visible_default is True
     }
     assert visible_by_default == {
-        "anomaly_score",
-        "last_event",
         "health_summary",
         "activity_summary",
         "electrical_health",
         "energy_summary",
-        "recent_activity",
-        "sensitivity",
-        "circuit_mode",
-        "power_flow",
         "daily_energy_usage",
     }
 

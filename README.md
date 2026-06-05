@@ -49,6 +49,13 @@ example, Metric Consistency Status, Leg Imbalance Status, Energy Usage Status,
 Billing Cycle Status, and Standby Status explain why a summary changed; they do
 not need to be the first thing a household user sees.
 
+New installs show only the summary-first device surface by default: Health
+Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy
+Usage, and washer/dryer Running binary sensors where applicable. Detailed
+evidence and machine-readable status entities remain enabled for advanced users,
+but are hidden by default and older installs are migrated to the same quieter
+device-level layout.
+
 For power-meter interpretation, think of watts as "what is it doing right now,"
 kWh as "how much did it use," amps as "how hard is the circuit being loaded,"
 and power factor/reactive/apparent power as electrical evidence used by the

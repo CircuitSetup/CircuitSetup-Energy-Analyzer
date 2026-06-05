@@ -11,6 +11,7 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
 )
@@ -1668,16 +1669,10 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
 )
 
 _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
-    "anomaly_score",
-    "last_event",
     "health_summary",
     "activity_summary",
     "electrical_health",
     "energy_summary",
-    "recent_activity",
-    "sensitivity",
-    "circuit_mode",
-    "power_flow",
     "daily_energy_usage",
 }
 SENSOR_DESCRIPTIONS = tuple(
@@ -2495,6 +2490,16 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entry_id=entry_id,
         entity_domain="sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
+    )
+    hide_entity_registry_entries(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        hidden_unique_id_suffixes={
+            description.key
+            for description in SENSOR_DESCRIPTIONS
+            if description.entity_registry_visible_default is False
+        },
     )
     prune_stale_device_registry_entries(
         hass,
