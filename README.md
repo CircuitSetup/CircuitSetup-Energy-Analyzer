@@ -479,6 +479,19 @@ recreating Home Assistant's Energy Dashboard.
 
 ![Appliance-first Energy Analyzer dashboard with health summaries and evidence cards](docs/images/readme/demo-dashboard.png)
 
+## Appliance Drilldown Pattern
+
+For each important appliance, use the same card order so the dashboard is easy to scan:
+
+1. Current state: Health Summary, Readiness, Recent Activity, and Alert Evidence.
+2. Energy tracking: Daily Energy Usage, Energy Usage Status, Daily Goal, Billing Cycle, and Cost.
+3. Power quality evidence: Power Quality Score, Power Quality Evidence, Metric Consistency Status, and any drift sensors relevant to the appliance.
+4. Run behavior: Run Cycle Status, Run Cycle Runtime, Run Cycle Duty Cycle, and Recent Activity Count.
+5. Capacity and phase checks: Capacity Status, Demand Peak Status, and Dual-Phase Leg Imbalance for dual-phase appliances.
+6. Setup and data quality: Data Quality Checklist, Energy Dashboard Status, Circuit Mode, and Power Flow.
+
+This keeps the first card useful for daily use while leaving the detailed evidence nearby when something looks unusual.
+
 ## Status Glossary
 
 Status sensors display readable values in Home Assistant, such as `Missing

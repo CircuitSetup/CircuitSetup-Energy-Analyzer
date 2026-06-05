@@ -528,6 +528,20 @@ def test_readme_includes_status_glossary_for_machine_values() -> None:
     assert "status_explanation" in readme_text
 
 
+def test_readme_describes_appliance_drilldown_pattern() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Appliance Drilldown Pattern" in readme_text
+    for phrase in (
+        "Current state",
+        "Energy tracking",
+        "Power quality evidence",
+        "Recent activity",
+        "Setup and data quality",
+    ):
+        assert phrase in readme_text
+
+
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
