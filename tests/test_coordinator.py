@@ -1621,6 +1621,24 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
                 "sensor.cs_energy_analyzer_demo_water_heater_l2_active_power",
                 "sensor.cs_energy_analyzer_demo_water_heater_l1_current",
                 "sensor.cs_energy_analyzer_demo_water_heater_l2_current",
+                "sensor.cs_energy_analyzer_demo_washer_energy",
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+                "sensor.cs_energy_analyzer_demo_washer_current",
+                "sensor.cs_energy_analyzer_demo_washer_power_factor",
+                "sensor.cs_energy_analyzer_demo_washer_reactive_power",
+                "sensor.cs_energy_analyzer_demo_washer_apparent_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_energy",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_energy",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_current",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_current",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_power_factor",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_power_factor",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_reactive_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l1_apparent_power",
+                "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
                 "sensor.cs_energy_analyzer_demo_pool_pump_energy",
                 "sensor.cs_energy_analyzer_demo_basement_lights_energy",
                 "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
@@ -1641,6 +1659,8 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         "cs_energy_analyzer_demo_refrigerator",
         "cs_energy_analyzer_demo_hvac",
         "cs_energy_analyzer_demo_water_heater",
+        "cs_energy_analyzer_demo_washer",
+        "cs_energy_analyzer_demo_dryer",
         "cs_energy_analyzer_demo_pool_pump",
         "cs_energy_analyzer_demo_basement_lights",
     }
@@ -1720,6 +1740,94 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         sensor.entity_id == "sensor.cs_energy_analyzer_demo_water_heater_voltage"
         for sensor in water_heater.sensors
     )
+
+    washer = by_circuit["cs_energy_analyzer_demo_washer"]
+    assert washer.name == "Cs Energy Analyzer Demo Washer"
+    assert washer.appliance_profile is ApplianceProfile.WASHER
+    assert washer.mode is CircuitMode.SINGLE_PHASE
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in washer.sensors
+    } >= {
+        (
+            "sensor.cs_energy_analyzer_demo_washer_active_power",
+            SensorRole.REAL_POWER,
+            None,
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_washer_current",
+            SensorRole.CURRENT,
+            None,
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_washer_power_factor",
+            SensorRole.POWER_FACTOR,
+            None,
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_washer_reactive_power",
+            SensorRole.REACTIVE_POWER,
+            None,
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_washer_apparent_power",
+            SensorRole.APPARENT_POWER,
+            None,
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+            SensorRole.VOLTAGE,
+            "a",
+        ),
+    }
+
+    dryer = by_circuit["cs_energy_analyzer_demo_dryer"]
+    assert dryer.name == "Cs Energy Analyzer Demo Dryer"
+    assert dryer.appliance_profile is ApplianceProfile.DRYER
+    assert dryer.mode is CircuitMode.DUAL_PHASE
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in dryer.sensors
+    } >= {
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+            SensorRole.REAL_POWER,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+            SensorRole.REAL_POWER,
+            "b",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l1_current",
+            SensorRole.CURRENT,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l2_current",
+            SensorRole.CURRENT,
+            "b",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
+            SensorRole.REACTIVE_POWER,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
+            SensorRole.APPARENT_POWER,
+            "b",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+            SensorRole.VOLTAGE,
+            "a",
+        ),
+        (
+            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+            SensorRole.VOLTAGE,
+            "b",
+        ),
+    }
 
     pool_pump = by_circuit["cs_energy_analyzer_demo_pool_pump"]
     assert pool_pump.appliance_profile is ApplianceProfile.POOL_PUMP

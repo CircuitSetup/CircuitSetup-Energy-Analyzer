@@ -2113,11 +2113,18 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     ) -> config_entries.ConfigFlowResult:
         """Edit source devices and source sensors before reviewing assignments."""
         if user_input is not None:
+            source_input = dict(user_input)
+            if CONF_MAINS_SOURCE_ENTITIES not in source_input:
+                source_input[CONF_MAINS_SOURCE_ENTITIES] = _entry_value(
+                    self._config_entry,
+                    CONF_MAINS_SOURCE_ENTITIES,
+                    [],
+                )
             try:
                 validated = validate_options_input(
                     await _async_source_selection_with_device_entities(
                         getattr(self, "hass", None),
-                        user_input,
+                        source_input,
                     )
                 )
             except SetupValidationError as err:

@@ -542,6 +542,59 @@ async def test_options_flow_preserves_valid_options() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_sources_step_preserves_existing_mains_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+                "sensor.fridge_power",
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+                "sensor.fridge_power",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+                "sensor.fridge_power",
+                "sensor.laundry_washer_active_power",
+            ],
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_SENSITIVITY: "standard",
+            CONF_RETENTION_MODE: "standard",
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert result["description_placeholders"]["assignment_progress"] == "1 of 2"
+    assert result["description_placeholders"]["current_sensors"] == (
+        "sensor.fridge_power"
+    )
+    assert flow._pending_config[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerConfigFlow,

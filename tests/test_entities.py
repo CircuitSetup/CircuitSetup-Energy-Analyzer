@@ -1628,6 +1628,222 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    washer = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_energy",
+                SensorRole.ENERGY,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+                SensorRole.REAL_POWER,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_current",
+                SensorRole.CURRENT,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_power_factor",
+                SensorRole.POWER_FACTOR,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_reactive_power",
+                SensorRole.REACTIVE_POWER,
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_apparent_power",
+                SensorRole.APPARENT_POWER,
+            ),
+        ),
+    )
+    dryer = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_energy",
+                SensorRole.ENERGY,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_energy",
+                SensorRole.ENERGY,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+                SensorRole.REAL_POWER,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+                SensorRole.REAL_POWER,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_current",
+                SensorRole.CURRENT,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_current",
+                SensorRole.CURRENT,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_power_factor",
+                SensorRole.POWER_FACTOR,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_power_factor",
+                SensorRole.POWER_FACTOR,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
+                SensorRole.REACTIVE_POWER,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_reactive_power",
+                SensorRole.REACTIVE_POWER,
+                leg="b",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l1_apparent_power",
+                SensorRole.APPARENT_POWER,
+                leg="a",
+            ),
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
+                SensorRole.APPARENT_POWER,
+                leg="b",
+            ),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(washer, dryer))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    source_entities = [
+        entity
+        for entity in added_entities
+        if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
+    ]
+    by_entity_id = {
+        f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
+    }
+
+    assert set(by_entity_id) == {
+        "sensor.cs_energy_analyzer_demo_washer_energy",
+        "sensor.cs_energy_analyzer_demo_washer_active_power",
+        "sensor.cs_energy_analyzer_demo_washer_current",
+        "sensor.cs_energy_analyzer_demo_washer_power_factor",
+        "sensor.cs_energy_analyzer_demo_washer_reactive_power",
+        "sensor.cs_energy_analyzer_demo_washer_apparent_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_energy",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_energy",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_current",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_current",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_power_factor",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_power_factor",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_reactive_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l1_apparent_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
+    }
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_washer_energy"].native_value
+        == 9.8
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_washer_active_power"
+        ].native_value
+        == 420.0
+    )
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_washer_current"].native_value
+        == 4.2
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_washer_power_factor"
+        ].native_value
+        == 0.83
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_washer_reactive_power"
+        ].native_value
+        == 280.0
+    )
+    assert by_entity_id[
+        "sensor.cs_energy_analyzer_demo_dryer_l1_energy"
+    ].native_value == 42.5
+    assert by_entity_id[
+        "sensor.cs_energy_analyzer_demo_dryer_l2_energy"
+    ].native_value == 42.1
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l1_active_power"
+        ].native_value
+        == 2600.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l2_active_power"
+        ].native_value
+        == 2550.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l1_current"
+        ].native_value
+        == 21.8
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l2_power_factor"
+        ].native_value
+        == 0.99
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l2_reactive_power"
+        ].native_value
+        == 250.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l1_apparent_power"
+        ].native_value
+        == 2626.0
+    )
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power"
+        ].native_value
+        == 2576.0
+    )
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
