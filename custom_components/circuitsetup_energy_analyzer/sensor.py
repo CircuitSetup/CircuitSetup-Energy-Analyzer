@@ -14,6 +14,7 @@ from .entity import (
     hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
+    sync_entity_registry_categories,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 
@@ -2564,6 +2565,15 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             description.key
             for description in SENSOR_DESCRIPTIONS
             if description.entity_registry_visible_default is False
+        },
+    )
+    sync_entity_registry_categories(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        entity_category_by_unique_id_suffix={
+            description.key: description.entity_category
+            for description in SENSOR_DESCRIPTIONS
         },
     )
     prune_stale_device_registry_entries(

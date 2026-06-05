@@ -149,6 +149,44 @@ def hide_entity_registry_entries(
         update_entity(entity_id, hidden_by=hidden_by)
 
 
+def sync_entity_registry_categories(
+    hass: Any,
+    *,
+    entry_id: str,
+    entity_domain: str,
+    entity_category_by_unique_id_suffix: dict[str, Any | None],
+) -> None:
+    """Update existing entity registry rows to current platform categories."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return
+
+    registry = er.async_get(hass)
+    update_entity = getattr(registry, "async_update_entity", None)
+    if not callable(update_entity):
+        return
+
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    prefix = f"{entity_domain}."
+    for entry in values:
+        entity_id = str(getattr(entry, "entity_id", ""))
+        unique_id = str(getattr(entry, "unique_id", ""))
+        if (
+            getattr(entry, "config_entry_id", None) != entry_id
+            or getattr(entry, "platform", None) != DOMAIN
+            or not entity_id.startswith(prefix)
+        ):
+            continue
+        for suffix, entity_category in entity_category_by_unique_id_suffix.items():
+            if not unique_id.endswith(f"_{suffix}"):
+                continue
+            if getattr(entry, "entity_category", None) != entity_category:
+                update_entity(entity_id, entity_category=entity_category)
+            break
+
+
 def stale_device_registry_device_ids(
     entries: Iterable[Any],
     *,

@@ -183,6 +183,72 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
     ]
 
 
+def test_sync_entity_registry_categories_updates_existing_sensor_categories(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.fridge_health_summary": SimpleNamespace(
+                    entity_id="sensor.fridge_health_summary",
+                    unique_id="entry-1_fridge_health_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "sensor.fridge_power_quality_evidence": SimpleNamespace(
+                    entity_id="sensor.fridge_power_quality_evidence",
+                    unique_id="entry-1_fridge_power_quality_evidence",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "sensor.other_health_summary": SimpleNamespace(
+                    entity_id="sensor.other_health_summary",
+                    unique_id="entry-2_fridge_health_summary",
+                    config_entry_id="entry-2",
+                    platform=DOMAIN,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+            }
+            self.updated: list[tuple[str, object]] = []
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs["entity_category"]))
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entity.sync_entity_registry_categories(
+        SimpleNamespace(entity_registry=fake_registry),
+        entry_id="entry-1",
+        entity_domain="sensor",
+        entity_category_by_unique_id_suffix={
+            "health_summary": None,
+            "power_quality_evidence": EntityCategory.DIAGNOSTIC,
+        },
+    )
+
+    assert fake_registry.updated == [("sensor.fridge_health_summary", None)]
+
+
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         activity_summary_value,
