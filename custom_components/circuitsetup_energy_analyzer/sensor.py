@@ -752,8 +752,12 @@ _STATUS_EXPLANATIONS: Mapping[str, str] = {
         "or power factor sensors."
     ),
     "missing_utility": "Utility comparison needs a utility or Opower source.",
-    "mismatch": "The measured value differs from the comparison source beyond tolerance.",
-    "monthly_peak": "The current rolling demand is the highest retained monthly window.",
+    "mismatch": (
+        "The measured value differs from the comparison source beyond tolerance."
+    ),
+    "monthly_peak": (
+        "The current rolling demand is the highest retained monthly window."
+    ),
     "near_goal": "Daily energy usage is near the configured goal threshold.",
     "near_monthly_peak": (
         "The current rolling demand is near the highest retained monthly windows."

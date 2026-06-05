@@ -107,6 +107,7 @@ except ModuleNotFoundError:
     )
     ha_selector = None
 
+from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUIT_ASSIGNMENTS,
@@ -125,7 +126,6 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DOMAIN,
 )
-from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
     async_discover_energy_source_entities,

@@ -1302,9 +1302,8 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert _schema_default(schema, "standby_min_samples") == 24
 
 
-def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls() -> (
-    None
-):
+def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls(
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         _advanced_settings_schema,
     )
