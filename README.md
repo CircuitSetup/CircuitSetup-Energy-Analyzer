@@ -26,6 +26,34 @@ The integration learns conservative per-circuit baselines for single-phase appli
   persistent notifications, Repairs for setup/data-quality problems, a sample
   dashboard, and an alert automation blueprint.
 
+## Summary-First Diagnostics
+
+Most users should start with four rollup entities for each appliance or circuit:
+
+- Health Summary (`sensor.<circuit>_health_summary`) answers whether the
+  analyzer thinks the appliance is ready, learning, missing data, or showing a
+  possible issue.
+- Activity Summary (`sensor.<circuit>_activity_summary`) answers what the
+  appliance is doing now, such as running, idle, standby, on, off, or no recent
+  activity.
+- Electrical Health (`sensor.<circuit>_electrical_health`) combines
+  power-quality evidence, dual-phase leg imbalance, and watts/amps/VA/power
+  factor consistency into one user-facing electrical condition.
+- Energy Summary (`sensor.<circuit>_energy_summary`) combines daily kWh,
+  energy spike, daily goal, billing-cycle, and cost evidence into one usage
+  condition.
+
+The detailed diagnostic entities are still available for advanced detail and
+automations, but most `... Status` entities are intentionally secondary. For
+example, Metric Consistency Status, Leg Imbalance Status, Energy Usage Status,
+Billing Cycle Status, and Standby Status explain why a summary changed; they do
+not need to be the first thing a household user sees.
+
+For power-meter interpretation, think of watts as "what is it doing right now,"
+kWh as "how much did it use," amps as "how hard is the circuit being loaded,"
+and power factor/reactive/apparent power as electrical evidence used by the
+Electrical Health summary.
+
 ## Home Assistant Energy Dashboard Boundary
 
 Use Home Assistant's built-in Energy Dashboard for normal energy history,
@@ -613,6 +641,9 @@ circuits, mains, and solar-related circuits.
 - Anomaly Score (`sensor.<circuit>_anomaly_score`) - Numeric summary of current anomaly evidence for the circuit. Possible outputs: `0.0` when quiet, higher numbers as repeated evidence accumulates.
 - Last Event (`sensor.<circuit>_last_event`) - Latest retained event type. Possible outputs include `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, or `unknown`.
 - Health Summary (`sensor.<circuit>_health_summary`) - Dashboard-friendly circuit state. Possible outputs include `Learning`, `Ready`, `Needs data`, `Paused`, `Possible issue`, `Mixed observation`, or `NILM review`.
+- Activity Summary (`sensor.<circuit>_activity_summary`) - User-facing activity state. Possible outputs include `Running`, `Idle`, `Standby`, `On`, `Off`, or `No Activity`, with attributes for run-cycle and standby detail.
+- Electrical Health (`sensor.<circuit>_electrical_health`) - User-facing electrical condition that combines power quality, dual-phase balance, and power metric consistency. Possible outputs include `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, or `Possible Power Quality Change`.
+- Energy Summary (`sensor.<circuit>_energy_summary`) - User-facing energy condition that combines daily usage, goals, billing, and cost evidence. Possible outputs include `Normal`, `Learning`, `Needs Energy Data`, `Watch`, or `High Usage`.
 - Readiness (`sensor.<circuit>_readiness`) - Machine-readable health/readiness state with readiness attributes. Possible outputs include `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, or `nilm_review`.
 - Learning Progress (`sensor.<circuit>_learning_progress`) - Percentage of learned baseline evidence. Possible outputs: `0` to `100%`, with attributes showing learned and pending feature samples.
 - Data Quality Checklist (`sensor.<circuit>_data_quality_checklist`) - Input quality summary for the circuit. Possible outputs: `ok` or `problem`, with attributes for missing sensors, stale data, and invalid numeric states.

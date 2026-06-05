@@ -7,7 +7,9 @@ sections:
       - type: markdown
         title: What to check first
         content: >
-          Start with health summaries and alert evidence. A possible issue
+          Start with Health, Activity, Electrical Health, and Energy Summary.
+          These rollups answer whether an appliance is okay, what it is doing,
+          and which detail area needs review. A possible issue
           notification describes observed behavior; Repairs point to missing
           sensors, stale data, or setup problems before appliance status should
           be trusted.
@@ -22,13 +24,16 @@ sections:
           - entity: sensor.mains_nilm_health_summary
             name: Mains NILM
       - type: entities
-        title: Alert evidence
+        title: Latest evidence
         entities:
+          - entity: sensor.refrigerator_activity_summary
+          - entity: sensor.refrigerator_electrical_health
+          - entity: sensor.refrigerator_energy_summary
           - entity: sensor.refrigerator_alert_evidence
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.mains_nilm_alert_evidence
           - entity: sensor.refrigerator_recent_activity
+          - entity: sensor.hvac_alert_evidence
           - entity: sensor.hvac_recent_activity
+          - entity: sensor.mains_nilm_alert_evidence
           - entity: sensor.mains_nilm_recent_activity
 
   - type: grid
@@ -50,10 +55,10 @@ sections:
             name: Washer
           - entity: sensor.dryer_health_summary
             name: Dryer
-          - entity: sensor.refrigerator_circuit_mode
-            name: Fridge mode
-          - entity: sensor.hvac_run_cycle_status
-            name: HVAC cycle
+          - entity: sensor.washer_activity_summary
+            name: Washer activity
+          - entity: sensor.dryer_activity_summary
+            name: Dryer activity
       - type: gauge
         title: Refrigerator anomaly
         entity: sensor.refrigerator_anomaly_score
@@ -77,8 +82,10 @@ sections:
         entities:
           - entity: sensor.refrigerator_circuit_mode
           - entity: sensor.refrigerator_power_flow
-          - entity: sensor.refrigerator_standby_status
-          - entity: sensor.hvac_run_cycle_status
+          - entity: sensor.refrigerator_activity_summary
+          - entity: sensor.hvac_activity_summary
+          - entity: sensor.hvac_electrical_health
+          - entity: sensor.hvac_energy_summary
 
   - type: grid
     title: Energy tracking
@@ -99,11 +106,14 @@ sections:
       - type: entities
         title: Daily kWh status
         entities:
+          - entity: sensor.refrigerator_energy_summary
           - entity: sensor.refrigerator_daily_energy_usage
           - entity: sensor.refrigerator_energy_usage_status
           - entity: sensor.refrigerator_energy_goal_status
+          - entity: sensor.hvac_energy_summary
           - entity: sensor.hvac_daily_energy_usage
           - entity: sensor.hvac_energy_usage_status
+          - entity: sensor.water_heater_energy_summary
           - entity: sensor.water_heater_daily_energy_usage
           - entity: sensor.water_heater_energy_usage_status
       - type: entities
@@ -163,6 +173,8 @@ sections:
       - type: entities
         title: Refrigerator power and standby evidence
         entities:
+          - entity: sensor.refrigerator_electrical_health
+          - entity: sensor.refrigerator_activity_summary
           - entity: sensor.refrigerator_power_quality_evidence
           - entity: sensor.refrigerator_reactive_power_drift
           - entity: sensor.refrigerator_apparent_power_drift
@@ -171,6 +183,8 @@ sections:
       - type: entities
         title: HVAC power and demand
         entities:
+          - entity: sensor.hvac_activity_summary
+          - entity: sensor.hvac_electrical_health
           - entity: sensor.hvac_power_quality_evidence
           - entity: sensor.hvac_demand_peak_status
           - entity: sensor.hvac_capacity_status
@@ -189,6 +203,10 @@ sections:
             name: Signatures
           - entity: sensor.mains_nilm_nilm_unmatched_load_percentage
             name: Unmatched
+          - entity: sensor.mains_nilm_electrical_health
+            name: Electrical
+          - entity: sensor.mains_nilm_energy_summary
+            name: Energy
           - entity: sensor.mains_nilm_balance_status
             name: Balance
           - entity: sensor.mains_nilm_solar_flow_status

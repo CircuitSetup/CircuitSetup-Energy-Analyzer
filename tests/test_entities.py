@@ -110,6 +110,7 @@ def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) 
 
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
+        activity_summary_value,
         alert_evidence_value,
         always_on_limit_usage_value,
         always_on_power_value,
@@ -135,9 +136,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         demand_peak_rank_value,
         demand_peak_status_value,
         demand_status_value,
+        electrical_health_value,
         energy_dashboard_status_value,
         energy_goal_status_value,
         energy_goal_usage_value,
+        energy_summary_value,
         energy_usage_share_value,
         energy_usage_status_value,
         health_summary_value,
@@ -399,6 +402,9 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert sensitivity_value(state, "fridge") == "quiet"
     assert circuit_mode_value(state, "fridge") == "Dual Phase"
     assert power_flow_value(state, "fridge") == "Generation / Solar Export"
+    assert activity_summary_value(state, "fridge") == "Idle"
+    assert electrical_health_value(state, "fridge") == "Possible Imbalance"
+    assert energy_summary_value(state, "fridge") == "High Usage"
     assert daily_energy_usage_value(state, "fridge") == 12.9
     assert energy_usage_share_value(state, "fridge") == 25.8
     assert energy_usage_status_value(state, "fridge") == "over_threshold"
@@ -474,6 +480,9 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert recent_activity_value(state, "unknown") == "No recent activity"
     assert recent_activity_count_value(state, "unknown") == 0
     assert sensitivity_value(state, "unknown") == "balanced"
+    assert activity_summary_value(state, "unknown") == "No Activity"
+    assert electrical_health_value(state, "unknown") == "Needs Metrics"
+    assert energy_summary_value(state, "unknown") == "Needs Energy Data"
     assert daily_energy_usage_value(state, "unknown") == 0.0
     assert energy_usage_share_value(state, "unknown") == 0.0
     assert energy_usage_status_value(state, "unknown") == "learning"
@@ -526,6 +535,101 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert standby_threshold_value(state, "unknown") == 0.0
     assert standby_status_value(state, "unknown") == "learning"
     assert always_on_limit_usage_value(state, "unknown") == 0.0
+
+
+def test_summary_sensors_answer_primary_user_questions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        activity_summary_attributes,
+        activity_summary_value,
+        electrical_health_attributes,
+        electrical_health_value,
+        energy_summary_attributes,
+        energy_summary_value,
+    )
+
+    state = AnalyzerState(
+        run_cycle_status_by_circuit={"washer": "running"},
+        run_cycle_count_by_circuit={"washer": 2},
+        run_cycle_runtime_seconds_by_circuit={"washer": 1800.0},
+        standby_status_by_circuit={"washer": "on"},
+        metric_consistency_status_by_circuit={"washer": "metric_mismatch"},
+        metric_consistency_score_by_circuit={"washer": 28.5},
+        metric_consistency_evidence_by_circuit={
+            "washer": {"status": "metric_mismatch", "largest_mismatch": 0.285}
+        },
+        leg_imbalance_status_by_circuit={"washer": "not_dual_phase"},
+        power_quality_evidence_by_circuit={
+            "washer": "Possible issue: apparent power changed"
+        },
+        power_quality_score_by_circuit={"washer": 0.42},
+        daily_energy_usage_by_circuit={"washer": 13.1},
+        energy_usage_evidence_by_circuit={
+            "washer": {"status": "over_threshold", "threshold_kwh": 12.5}
+        },
+        energy_goal_status_by_circuit={"washer": "tracking"},
+        billing_cycle_status_by_circuit={"washer": "projected_over_budget"},
+        billing_cycle_evidence_by_circuit={
+            "washer": {"status": "projected_over_budget", "budget_kwh": 50.0}
+        },
+        cost_status_by_circuit={"washer": "tracking"},
+    )
+
+    assert activity_summary_value(state, "washer") == "Running"
+    assert activity_summary_attributes(state, "washer") == {
+        "run_cycle_status": "running",
+        "standby_status": "on",
+        "run_cycle_count": 2,
+        "run_cycle_runtime_seconds": 1800.0,
+        "summary_explanation": "The appliance is currently active.",
+    }
+
+    assert electrical_health_value(state, "washer") == "Possible Metric Mismatch"
+    electrical_attrs = electrical_health_attributes(state, "washer")
+    assert electrical_attrs["metric_consistency_status"] == "metric_mismatch"
+    assert electrical_attrs["metric_consistency_score"] == 28.5
+    assert electrical_attrs["status_explanation"] == (
+        "Reported electrical measurements do not agree with each other."
+    )
+    assert electrical_attrs["power_quality_evidence"] == (
+        "Possible issue: apparent power changed"
+    )
+
+    assert energy_summary_value(state, "washer") == "High Usage"
+    energy_attrs = energy_summary_attributes(state, "washer")
+    assert energy_attrs["energy_usage_status"] == "over_threshold"
+    assert energy_attrs["billing_cycle_status"] == "projected_over_budget"
+    assert energy_attrs["daily_energy_usage_kwh"] == 13.1
+    assert energy_attrs["summary_explanation"] == (
+        "Energy use is above a configured threshold or budget."
+    )
+
+    power_quality_only_state = AnalyzerState(
+        metric_consistency_status_by_circuit={"pump": "missing_metrics"},
+        power_quality_evidence_by_circuit={
+            "pump": "Possible issue: reactive power changed from baseline"
+        },
+        power_quality_score_by_circuit={"pump": 0.35},
+    )
+
+    assert electrical_health_value(power_quality_only_state, "pump") == (
+        "Possible Power Quality Change"
+    )
+    assert electrical_health_attributes(power_quality_only_state, "pump")[
+        "status_explanation"
+    ] == "Power-quality evidence has changed from the learned baseline."
+
+    score_only_state = AnalyzerState(
+        metric_consistency_status_by_circuit={"mixed": "missing_metrics"},
+        power_quality_score_by_circuit={"mixed": 0.35},
+    )
+
+    assert electrical_health_value(score_only_state, "mixed") == "Needs Metrics"
+
+    power_only_state = AnalyzerState()
+    assert energy_summary_value(power_only_state, "pump") == "Needs Energy Data"
+    assert energy_summary_attributes(power_only_state, "pump")[
+        "summary_explanation"
+    ] == "No cumulative kWh evidence is available for this circuit."
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -678,23 +782,28 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
 
-    assert descriptions["health_summary"].entity_registry_visible_default is True
-    assert descriptions["readiness"].entity_registry_visible_default is True
-    assert descriptions["daily_energy_usage"].entity_registry_visible_default is True
-    assert descriptions["energy_usage_status"].entity_registry_visible_default is True
-    assert (
-        descriptions["power_quality_evidence"].entity_registry_visible_default is True
-    )
+    visible_by_default = {
+        description.key
+        for description in SENSOR_DESCRIPTIONS
+        if description.entity_registry_visible_default is True
+    }
+    assert visible_by_default == {
+        "anomaly_score",
+        "last_event",
+        "health_summary",
+        "activity_summary",
+        "electrical_health",
+        "energy_summary",
+        "recent_activity",
+        "sensitivity",
+        "circuit_mode",
+        "power_flow",
+        "daily_energy_usage",
+    }
 
-    assert descriptions["reactive_power_drift"].entity_category == (
-        EntityCategory.DIAGNOSTIC
-    )
-    assert descriptions["apparent_power_drift"].entity_category == (
-        EntityCategory.DIAGNOSTIC
-    )
-    assert descriptions["power_factor_drift"].entity_category == (
-        EntityCategory.DIAGNOSTIC
-    )
+    for key, description in descriptions.items():
+        assert descriptions[key].entity_category == EntityCategory.DIAGNOSTIC
+        assert description.entity_registry_enabled_default is True
 
 
 def test_sensor_entities_use_purpose_specific_icons() -> None:
@@ -866,6 +975,16 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
         assert missing_attrs == []
         assert description.entity_registry_enabled_default is True
         assert description.unit_of_measurement is None
+
+    descriptions = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    assert descriptions["learning"].entity_registry_visible_default is False
+    assert (
+        descriptions["data_quality_problem"].entity_registry_visible_default is False
+    )
+    assert descriptions["maintenance"].entity_registry_visible_default is False
+    assert descriptions["running"].entity_registry_visible_default is True
 
 
 def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
@@ -1358,6 +1477,9 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_anomaly_score",
         "entry-1_fridge_last_event",
         "entry-1_fridge_health_summary",
+        "entry-1_fridge_activity_summary",
+        "entry-1_fridge_electrical_health",
+        "entry-1_fridge_energy_summary",
         "entry-1_fridge_readiness",
         "entry-1_fridge_learning_progress",
         "entry-1_fridge_data_quality_checklist",

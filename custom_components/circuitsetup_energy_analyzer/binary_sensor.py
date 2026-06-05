@@ -118,16 +118,19 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         key="learning",
         name_suffix="Learning",
         value_fn=is_learning,
+        entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="data_quality_problem",
         name_suffix="Data Quality Problem",
         value_fn=has_data_quality_problem,
+        entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="maintenance",
         name_suffix="Maintenance",
         value_fn=is_maintenance_active,
+        entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="running",

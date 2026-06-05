@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .const import DOMAIN
@@ -680,6 +680,181 @@ def always_on_limit_usage_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def activity_summary_value(state: Any, circuit_id: str) -> str:
+    """Return a user-facing summary of what the circuit is doing."""
+    run_status = run_cycle_status_value(state, circuit_id)
+    standby_status = standby_status_value(state, circuit_id)
+    if run_status == "running":
+        return "Running"
+    if run_status == "idle":
+        return "Idle"
+    if standby_status in {"on", "standby", "off"}:
+        return _status_label(standby_status)
+    return "No Activity"
+
+
+def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return activity detail that would otherwise require several entities."""
+    run_status = run_cycle_status_value(state, circuit_id)
+    standby_status = standby_status_value(state, circuit_id)
+    return {
+        "run_cycle_status": run_status,
+        "standby_status": standby_status,
+        "run_cycle_count": run_cycle_count_value(state, circuit_id),
+        "run_cycle_runtime_seconds": run_cycle_runtime_value(state, circuit_id),
+        "summary_explanation": _activity_summary_explanation(
+            run_status,
+            standby_status,
+        ),
+    }
+
+
+def electrical_health_value(state: Any, circuit_id: str) -> str:
+    """Return a user-facing electrical-health rollup."""
+    return _electrical_health_summary(state, circuit_id)[0]
+
+
+def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return electrical-health detail from metric, phase, and PQ checks."""
+    summary, explanation = _electrical_health_summary(state, circuit_id)
+    metric_status = metric_consistency_status_value(state, circuit_id)
+    leg_status = leg_imbalance_status_value(state, circuit_id)
+    return {
+        "summary": summary,
+        "metric_consistency_status": metric_status,
+        "metric_consistency_score": metric_consistency_score_value(state, circuit_id),
+        "leg_imbalance_status": leg_status,
+        "leg_imbalance_percent": leg_imbalance_value(state, circuit_id),
+        "power_quality_score": power_quality_score_value(state, circuit_id),
+        "power_quality_evidence": power_quality_evidence_value(state, circuit_id),
+        "status_explanation": explanation,
+        "metric_status_explanation": _status_explanation(metric_status),
+        "leg_status_explanation": _status_explanation(leg_status),
+    }
+
+
+def energy_summary_value(state: Any, circuit_id: str) -> str:
+    """Return a user-facing energy-use rollup."""
+    return _energy_summary(state, circuit_id)[0]
+
+
+def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return energy, billing, goal, and cost detail in one place."""
+    summary, explanation = _energy_summary(state, circuit_id)
+    has_energy_evidence = _has_energy_usage_evidence(state, circuit_id)
+    energy_usage_status = (
+        energy_usage_status_value(state, circuit_id)
+        if has_energy_evidence
+        else "missing_energy_data"
+    )
+    goal_status = energy_goal_status_value(state, circuit_id)
+    billing_status = billing_cycle_status_value(state, circuit_id)
+    cost_status = cost_status_value(state, circuit_id)
+    return {
+        "summary": summary,
+        "energy_data_available": has_energy_evidence,
+        "energy_usage_status": energy_usage_status,
+        "energy_goal_status": goal_status,
+        "billing_cycle_status": billing_status,
+        "cost_status": cost_status,
+        "daily_energy_usage_kwh": daily_energy_usage_value(state, circuit_id),
+        "energy_usage_share_percent": energy_usage_share_value(state, circuit_id),
+        "billing_cycle_usage_kwh": billing_cycle_usage_value(state, circuit_id),
+        "billing_cycle_forecast_kwh": billing_cycle_forecast_value(state, circuit_id),
+        "cost_cycle": cost_cycle_value(state, circuit_id),
+        "cost_cycle_forecast": cost_cycle_forecast_value(state, circuit_id),
+        "summary_explanation": explanation,
+        "energy_usage_explanation": _status_explanation(energy_usage_status),
+        "billing_cycle_explanation": _status_explanation(billing_status),
+    }
+
+
+def _activity_summary_explanation(run_status: str, standby_status: str) -> str:
+    if run_status == "running":
+        return "The appliance is currently active."
+    if run_status == "idle":
+        return "The appliance has run-cycle data and is currently idle."
+    if standby_status == "standby":
+        return "The circuit is in the learned standby range."
+    if standby_status == "on":
+        return "The circuit is above the standby range."
+    if standby_status == "off":
+        return "The circuit is below the standby threshold."
+    return "No recent activity has been observed."
+
+
+def _electrical_health_summary(state: Any, circuit_id: str) -> tuple[str, str]:
+    metric_status = metric_consistency_status_value(state, circuit_id)
+    leg_status = leg_imbalance_status_value(state, circuit_id)
+    power_quality_evidence = power_quality_evidence_value(state, circuit_id)
+
+    if leg_status == "imbalanced":
+        return (
+            "Possible Imbalance",
+            "A dual-phase load has a meaningful leg-to-leg imbalance.",
+        )
+    if metric_status in {
+        "apparent_power_mismatch",
+        "power_factor_mismatch",
+        "metric_mismatch",
+    }:
+        return (
+            "Possible Metric Mismatch",
+            "Reported electrical measurements do not agree with each other.",
+        )
+    if power_quality_evidence:
+        return (
+            "Possible Power Quality Change",
+            "Power-quality evidence has changed from the learned baseline.",
+        )
+    if metric_status == "missing_metrics":
+        return (
+            "Needs Metrics",
+            "Electrical-health checks need matching watts, amps, voltage, VA, or PF.",
+        )
+    return "Normal", "No electrical-health issue is currently active."
+
+
+def _energy_summary(state: Any, circuit_id: str) -> tuple[str, str]:
+    if not _has_energy_usage_evidence(state, circuit_id):
+        return (
+            "Needs Energy Data",
+            "No cumulative kWh evidence is available for this circuit.",
+        )
+
+    energy_usage_status = energy_usage_status_value(state, circuit_id)
+    goal_status = energy_goal_status_value(state, circuit_id)
+    billing_status = billing_cycle_status_value(state, circuit_id)
+    cost_status = cost_status_value(state, circuit_id)
+
+    if (
+        energy_usage_status == "over_threshold"
+        or goal_status == "over_goal"
+        or billing_status in {"over_budget", "projected_over_budget"}
+    ):
+        return (
+            "High Usage",
+            "Energy use is above a configured threshold or budget.",
+        )
+    if goal_status == "near_goal" or cost_status == "tou_peak":
+        return "Watch", "Energy or cost is near a configured warning threshold."
+    if energy_usage_status == "waiting_for_delta":
+        return (
+            "Needs Energy Data",
+            "A cumulative kWh source is present but has not increased yet.",
+        )
+    if energy_usage_status == "learning":
+        return "Learning", "The analyzer is still learning normal energy use."
+    return "Normal", "Energy use is within configured thresholds."
+
+
+def _has_energy_usage_evidence(state: Any, circuit_id: str) -> bool:
+    evidence = getattr(state, "energy_usage_evidence_by_circuit", {}).get(circuit_id)
+    if isinstance(evidence, Mapping) and evidence:
+        return True
+    return circuit_id in getattr(state, "daily_energy_usage_by_circuit", {})
+
+
 def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
@@ -743,6 +918,9 @@ _STATUS_EXPLANATIONS: Mapping[str, str] = {
     "missing_current": (
         "This check needs a current sensor, or power and voltage sensors that can "
         "estimate current."
+    ),
+    "missing_energy_data": (
+        "This summary needs a cumulative kWh sensor or retained energy evidence."
     ),
     "missing_generation": "Solar-flow checks need at least one generation circuit.",
     "missing_mains": "This check needs a mains, whole-home, or aggregate source.",
@@ -888,6 +1066,9 @@ SENSOR_ICONS: Mapping[str, str] = {
     "anomaly_score": "mdi:alert-octagon-outline",
     "last_event": "mdi:timeline-clock-outline",
     "health_summary": "mdi:heart-pulse",
+    "activity_summary": "mdi:run-fast",
+    "electrical_health": "mdi:lightning-bolt-circle",
+    "energy_summary": "mdi:home-lightning-bolt-outline",
     "readiness": "mdi:check-decagram-outline",
     "learning_progress": "mdi:school-outline",
     "data_quality_checklist": "mdi:database-alert-outline",
@@ -977,6 +1158,24 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="health_summary",
         name_suffix="Health Summary",
         value_fn=health_summary_value,
+    ),
+    DiagnosticSensorDescription(
+        key="activity_summary",
+        name_suffix="Activity Summary",
+        value_fn=activity_summary_value,
+        attributes_fn=activity_summary_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="electrical_health",
+        name_suffix="Electrical Health",
+        value_fn=electrical_health_value,
+        attributes_fn=electrical_health_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="energy_summary",
+        name_suffix="Energy Summary",
+        value_fn=energy_summary_value,
+        attributes_fn=energy_summary_attributes,
     ),
     DiagnosticSensorDescription(
         key="readiness",
@@ -1468,11 +1667,34 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
 )
 
+_VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
+    "anomaly_score",
+    "last_event",
+    "health_summary",
+    "activity_summary",
+    "electrical_health",
+    "energy_summary",
+    "recent_activity",
+    "sensitivity",
+    "circuit_mode",
+    "power_flow",
+    "daily_energy_usage",
+}
+SENSOR_DESCRIPTIONS = tuple(
+    replace(description, entity_registry_visible_default=False)
+    if description.key not in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
+    else description
+    for description in SENSOR_DESCRIPTIONS
+)
+
 
 _CORE_SENSOR_KEYS = {
     "anomaly_score",
     "last_event",
     "health_summary",
+    "activity_summary",
+    "electrical_health",
+    "energy_summary",
     "readiness",
     "learning_progress",
     "data_quality_checklist",

@@ -388,6 +388,11 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         "Mains, solar, and NILM",
     } <= section_titles
     assert "Waiting For Energy Change" in dashboard_text
+    assert "sensor.hvac_activity_summary" in dashboard_text
+    assert "sensor.hvac_electrical_health" in dashboard_text
+    assert "sensor.hvac_energy_summary" in dashboard_text
+    assert "sensor.washer_activity_summary" in dashboard_text
+    assert "sensor.dryer_activity_summary" in dashboard_text
     assert "sensor.hvac_energy_usage_status" in dashboard_text
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
     assert "sensor.hvac_health_summary" in dashboard_text
@@ -466,6 +471,9 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     refs = set(_dashboard_entity_refs(dashboard_text))
 
     expected_entities = {
+        "sensor.refrigerator_activity_summary",
+        "sensor.refrigerator_electrical_health",
+        "sensor.refrigerator_energy_summary",
         "sensor.refrigerator_circuit_mode",
         "sensor.refrigerator_power_flow",
         "sensor.refrigerator_energy_usage_status",
@@ -487,6 +495,18 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
     assert "Alert philosophy" in dashboard_text
     assert "Notifications and repairs" in dashboard_text
+
+
+def test_readme_describes_summary_first_diagnostic_workflow() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "## Summary-First Diagnostics" in readme
+    assert "Health Summary" in readme
+    assert "Activity Summary" in readme
+    assert "Electrical Health" in readme
+    assert "Energy Summary" in readme
+    assert "advanced detail" in readme.lower()
+    assert "Metric Consistency Status" in readme
 
 
 def test_alert_blueprint_is_user_friendly_and_actionable() -> None:

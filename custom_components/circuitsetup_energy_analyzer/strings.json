@@ -298,6 +298,15 @@
       "health_summary": {
         "name": "Health summary"
       },
+      "activity_summary": {
+        "name": "Activity summary"
+      },
+      "electrical_health": {
+        "name": "Electrical health"
+      },
+      "energy_summary": {
+        "name": "Energy summary"
+      },
       "readiness": {
         "name": "Readiness"
       },
