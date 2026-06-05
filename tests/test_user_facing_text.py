@@ -626,6 +626,33 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "not observed a cumulative kWh increase" in readme_text
 
 
+def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |" in readme_text
+    for row in (
+        "| Health Summary | `sensor.<circuit>_health_summary` |",
+        "| Energy | `sensor.<appliance>_energy` |",
+        "| Active Power | `sensor.<appliance>_active_power` or `sensor.<appliance>_watts` |",
+        "| Running | `binary_sensor.<circuit>_running` |",
+    ):
+        assert row in readme_text
+    assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
+    assert "- Health Summary:" not in readme_text
+
+
+def test_readme_explains_compatible_meter_support_and_links_product() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "CircuitSetup-first, not CircuitSetup-only" in readme_text
+    assert "other compatible meters" in readme_text
+    assert "power, current, voltage, energy, frequency, reactive power, apparent power, or power factor" in readme_text
+    assert (
+        "https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/"
+        in readme_text
+    )
+
+
 def test_readme_screenshot_references_exist_and_are_cropped() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     refs = re.findall(
