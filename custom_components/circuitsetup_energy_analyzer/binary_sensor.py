@@ -11,7 +11,6 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    disable_entity_registry_entries,
     hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
@@ -162,21 +161,18 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         key="learning",
         name_suffix="Learning",
         value_fn=is_learning,
-        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="data_quality_problem",
         name_suffix="Data Quality Problem",
         value_fn=has_data_quality_problem,
-        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="maintenance",
         name_suffix="Maintenance",
         value_fn=is_maintenance_active,
-        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
@@ -263,22 +259,15 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="binary_sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
-    disabled_binary_sensor_suffixes = {
-        description.key
-        for description in BINARY_SENSOR_DESCRIPTIONS
-        if description.entity_registry_enabled_default is False
-    }
-    disable_entity_registry_entries(
-        hass,
-        entry_id=entry_id,
-        entity_domain="binary_sensor",
-        disabled_unique_id_suffixes=disabled_binary_sensor_suffixes,
-    )
     hide_entity_registry_entries(
         hass,
         entry_id=entry_id,
         entity_domain="binary_sensor",
-        hidden_unique_id_suffixes=disabled_binary_sensor_suffixes,
+        hidden_unique_id_suffixes={
+            description.key
+            for description in BINARY_SENSOR_DESCRIPTIONS
+            if description.entity_registry_visible_default is False
+        },
     )
     prune_stale_device_registry_entries(
         hass,

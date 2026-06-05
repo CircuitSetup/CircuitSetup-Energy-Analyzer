@@ -183,81 +183,6 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
     ]
 
 
-def test_disable_entity_registry_entries_marks_existing_detail_entities_disabled(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer import entity
-
-    class FakeDisabler:
-        INTEGRATION = "integration"
-
-    class FakeRegistry:
-        def __init__(self) -> None:
-            self.entities = {
-                "sensor.fridge_power_quality_evidence": SimpleNamespace(
-                    entity_id="sensor.fridge_power_quality_evidence",
-                    unique_id="entry-1_fridge_power_quality_evidence",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                ),
-                "sensor.fridge_activity_summary": SimpleNamespace(
-                    entity_id="sensor.fridge_activity_summary",
-                    unique_id="entry-1_fridge_activity_summary",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                ),
-                "sensor.fridge_last_event": SimpleNamespace(
-                    entity_id="sensor.fridge_last_event",
-                    unique_id="entry-1_fridge_last_event",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="user",
-                ),
-                "sensor.other_power_quality_evidence": SimpleNamespace(
-                    entity_id="sensor.other_power_quality_evidence",
-                    unique_id="entry-2_fridge_power_quality_evidence",
-                    config_entry_id="entry-2",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                ),
-            }
-            self.updated: list[tuple[str, str]] = []
-
-        def async_update_entity(self, entity_id, **kwargs) -> None:
-            self.updated.append((entity_id, kwargs["disabled_by"]))
-
-    fake_registry = FakeRegistry()
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry_module.RegistryEntryDisabler = FakeDisabler
-    entity_registry_module.async_get = lambda hass: hass.entity_registry
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    entity.disable_entity_registry_entries(
-        SimpleNamespace(entity_registry=fake_registry),
-        entry_id="entry-1",
-        entity_domain="sensor",
-        disabled_unique_id_suffixes={"power_quality_evidence", "last_event"},
-    )
-
-    assert fake_registry.updated == [
-        ("sensor.fridge_power_quality_evidence", "integration"),
-    ]
-
-
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
     monkeypatch,
 ) -> None:
@@ -997,9 +922,7 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        assert description.entity_registry_enabled_default is (
-            description.entity_registry_visible_default is True
-        )
+        assert description.entity_registry_enabled_default is True
         assert description.last_reset is None
         assert description.options is None
         assert description.unit_of_measurement is None
@@ -1031,7 +954,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         for description in SENSOR_DESCRIPTIONS
         if description.entity_registry_enabled_default is True
     }
-    assert enabled_by_default == visible_by_default
+    assert enabled_by_default == set(descriptions)
 
     normal_entity_keys = {
         "health_summary",
@@ -1279,24 +1202,22 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        assert description.entity_registry_enabled_default is (
-            description.entity_registry_visible_default is True
-        )
+        assert description.entity_registry_enabled_default is True
         assert description.unit_of_measurement is None
 
     descriptions = {
         description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
     }
     assert descriptions["learning"].entity_registry_visible_default is False
-    assert descriptions["learning"].entity_registry_enabled_default is False
+    assert descriptions["learning"].entity_registry_enabled_default is True
     assert (
         descriptions["data_quality_problem"].entity_registry_visible_default is False
     )
     assert (
-        descriptions["data_quality_problem"].entity_registry_enabled_default is False
+        descriptions["data_quality_problem"].entity_registry_enabled_default is True
     )
     assert descriptions["maintenance"].entity_registry_visible_default is False
-    assert descriptions["maintenance"].entity_registry_enabled_default is False
+    assert descriptions["maintenance"].entity_registry_enabled_default is True
     assert descriptions["running"].entity_registry_visible_default is True
     assert descriptions["running"].entity_registry_enabled_default is True
 
