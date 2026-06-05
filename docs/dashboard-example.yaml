@@ -7,9 +7,10 @@ sections:
       - type: markdown
         title: What to check first
         content: >
-          Start with health summaries and alert evidence. A warning here means
-          the analyzer has observed a possible issue or needs better source data
-          before its appliance status should be trusted.
+          Start with health summaries and alert evidence. A possible issue
+          notification describes observed behavior; Repairs point to missing
+          sensors, stale data, or setup problems before appliance status should
+          be trusted.
       - type: glance
         title: Health summary
         columns: 3
@@ -41,16 +42,16 @@ sections:
             name: Refrigerator
           - entity: sensor.hvac_health_summary
             name: HVAC
-          - entity: sensor.refrigerator_learning_progress
-            name: Fridge learning
-          - entity: sensor.hvac_learning_progress
-            name: HVAC learning
+          - entity: sensor.water_heater_health_summary
+            name: Water heater
+          - entity: sensor.pool_pump_health_summary
+            name: Pool pump
+          - entity: sensor.washer_health_summary
+            name: Washer
+          - entity: sensor.dryer_health_summary
+            name: Dryer
           - entity: sensor.refrigerator_circuit_mode
             name: Fridge mode
-          - entity: sensor.refrigerator_power_flow
-            name: Fridge flow
-          - entity: sensor.refrigerator_energy_usage_status
-            name: Fridge energy
           - entity: sensor.hvac_run_cycle_status
             name: HVAC cycle
       - type: gauge
@@ -104,6 +105,7 @@ sections:
           - entity: sensor.hvac_daily_energy_usage
           - entity: sensor.hvac_energy_usage_status
           - entity: sensor.water_heater_daily_energy_usage
+          - entity: sensor.water_heater_energy_usage_status
       - type: entities
         title: Cost and billing
         entities:
@@ -132,6 +134,15 @@ sections:
           yellow: 0.35
           red: 0.7
       - type: gauge
+        title: HVAC power quality
+        entity: sensor.hvac_power_quality_score
+        min: 0
+        max: 1
+        severity:
+          green: 0
+          yellow: 0.35
+          red: 0.7
+      - type: gauge
         title: HVAC demand limit
         entity: sensor.hvac_demand_limit_usage
         min: 0
@@ -150,12 +161,13 @@ sections:
           yellow: 80
           red: 100
       - type: entities
-        title: Refrigerator power evidence
+        title: Refrigerator power and standby evidence
         entities:
           - entity: sensor.refrigerator_power_quality_evidence
           - entity: sensor.refrigerator_reactive_power_drift
           - entity: sensor.refrigerator_apparent_power_drift
           - entity: sensor.refrigerator_power_factor_drift
+          - entity: sensor.refrigerator_standby_status
       - type: entities
         title: HVAC power and demand
         entities:
@@ -183,6 +195,10 @@ sections:
             name: Solar flow
           - entity: sensor.mains_nilm_monitored_coverage
             name: Coverage
+          - entity: sensor.mains_nilm_learning_progress
+            name: Learning
+          - entity: sensor.mains_nilm_anomaly_score
+            name: Anomaly
           - entity: sensor.mains_nilm_demand_peak_status
             name: Peak
           - entity: sensor.mains_nilm_readiness

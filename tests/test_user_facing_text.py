@@ -391,6 +391,46 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
     assert "sensor.hvac_health_summary" in dashboard_text
     assert "sensor.hvac_alert_evidence" in dashboard_text
+    assert "sensor.water_heater_energy_usage_status" in dashboard_text
+    assert "sensor.mains_nilm_learning_progress" in dashboard_text
+    assert "sensor.mains_nilm_anomaly_score" in dashboard_text
+
+    needs_attention = yaml.safe_dump(
+        next(
+            section
+            for section in dashboard["sections"]
+            if section.get("title") == "Needs attention"
+        )
+    )
+    assert "possible issue" in needs_attention
+    assert "Repairs" in needs_attention
+
+    appliance_overview = yaml.safe_dump(
+        next(
+            section
+            for section in dashboard["sections"]
+            if section.get("title") == "Appliance overview"
+        )
+    )
+    for appliance in (
+        "Refrigerator",
+        "HVAC",
+        "Water heater",
+        "Pool pump",
+        "Washer",
+        "Dryer",
+    ):
+        assert appliance in appliance_overview
+
+    power_quality_detail = yaml.safe_dump(
+        next(
+            section
+            for section in dashboard["sections"]
+            if section.get("title") == "Power quality detail"
+        )
+    )
+    assert "sensor.hvac_power_quality_score" in power_quality_detail
+    assert "sensor.refrigerator_standby_status" in power_quality_detail
 
 
 def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
