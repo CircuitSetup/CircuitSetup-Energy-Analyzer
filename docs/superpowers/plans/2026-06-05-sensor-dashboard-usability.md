@@ -26,6 +26,7 @@
 - Modify `custom_components/circuitsetup_energy_analyzer/sensor.py`: reuse status-help attributes for energy usage sensors, add clear labels/explanations for new energy-tracking states, and keep raw machine values available.
 - Modify `docs/dashboard-example.yaml`: reorganize the sample dashboard around "Needs attention", "Appliance overview", "Energy tracking", "Power quality", and "Mains, solar, and NILM".
 - Modify `README.md`: document how to interpret `0 kWh`, learning states, missing metrics, and the dashboard layout.
+- Add or replace `docs/images/readme/*.png`: refresh README screenshots from the actual Home Assistant UI, cropped to the relevant panel/window and excluding browser URL bars or the Windows taskbar.
 - Modify `tests/test_usage.py`: cover first-sample, true-zero, learning-window, and spike states.
 - Modify `tests/test_entities.py`: cover status attributes and readable entity behavior.
 - Modify `tests/test_coordinator.py`: cover runtime evidence payloads.
@@ -622,7 +623,180 @@ Expected: all dashboard tests pass.
 
 ---
 
-### Task 5: Appliance Drilldown Guidance
+### Task 5: README Screenshot Refresh
+
+**Files:**
+- Modify: `README.md`
+- Add or replace: `docs/images/readme/integration-overview.png`
+- Add or replace: `docs/images/readme/options-menu.png`
+- Add or replace: `docs/images/readme/assignment-editor.png`
+- Add or replace: `docs/images/readme/mains-sensors.png`
+- Add or replace: `docs/images/readme/advanced-settings.png`
+- Add or replace: `docs/images/readme/circuit-modes.png`
+- Add or replace: `docs/images/readme/power-flow.png`
+- Add or replace: `docs/images/readme/energy-usage-spikes.png`
+- Add or replace: `docs/images/readme/daily-energy-goals.png`
+- Add or replace: `docs/images/readme/run-cycle-diagnostics.png`
+- Add or replace: `docs/images/readme/recent-activity-timeline.png`
+- Add or replace: `docs/images/readme/billing-cycle-forecasts.png`
+- Add or replace: `docs/images/readme/cost-time-of-use.png`
+- Add or replace: `docs/images/readme/history-csv-export.png`
+- Add or replace: `docs/images/readme/peak-demand-tracking.png`
+- Add or replace: `docs/images/readme/circuit-capacity-tracking.png`
+- Add or replace: `docs/images/readme/dual-phase-leg-imbalance.png`
+- Add or replace: `docs/images/readme/power-metric-consistency.png`
+- Add or replace: `docs/images/readme/mains-balance.png`
+- Add or replace: `docs/images/readme/solar-flow-diagnostics.png`
+- Add or replace: `docs/images/readme/utility-comparison.png`
+- Add or replace: `docs/images/readme/always-on-standby.png`
+- Add or replace: `docs/images/readme/experimental-nilm.png`
+- Add or replace: `docs/images/readme/alert-philosophy.png`
+- Add or replace: `docs/images/readme/notifications-repairs.png`
+- Add or replace: `docs/images/readme/demo-dashboard.png`
+- Test: `tests/test_user_facing_text.py`
+
+- [ ] **Step 1: Write failing README screenshot reference test**
+
+Add `import struct` near the top of `tests/test_user_facing_text.py`, then add this test:
+
+```python
+def test_readme_screenshot_references_exist_and_are_cropped() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    refs = re.findall(
+        r"!\[[^\]]+\]\((docs/images/readme/[^)]+\.png)\)",
+        readme_text,
+    )
+
+    expected = {
+        "docs/images/readme/integration-overview.png",
+        "docs/images/readme/options-menu.png",
+        "docs/images/readme/assignment-editor.png",
+        "docs/images/readme/mains-sensors.png",
+        "docs/images/readme/advanced-settings.png",
+        "docs/images/readme/circuit-modes.png",
+        "docs/images/readme/power-flow.png",
+        "docs/images/readme/energy-usage-spikes.png",
+        "docs/images/readme/daily-energy-goals.png",
+        "docs/images/readme/run-cycle-diagnostics.png",
+        "docs/images/readme/recent-activity-timeline.png",
+        "docs/images/readme/billing-cycle-forecasts.png",
+        "docs/images/readme/cost-time-of-use.png",
+        "docs/images/readme/history-csv-export.png",
+        "docs/images/readme/peak-demand-tracking.png",
+        "docs/images/readme/circuit-capacity-tracking.png",
+        "docs/images/readme/dual-phase-leg-imbalance.png",
+        "docs/images/readme/power-metric-consistency.png",
+        "docs/images/readme/mains-balance.png",
+        "docs/images/readme/solar-flow-diagnostics.png",
+        "docs/images/readme/utility-comparison.png",
+        "docs/images/readme/always-on-standby.png",
+        "docs/images/readme/experimental-nilm.png",
+        "docs/images/readme/alert-philosophy.png",
+        "docs/images/readme/notifications-repairs.png",
+        "docs/images/readme/demo-dashboard.png",
+    }
+
+    assert expected <= set(refs)
+    for ref in sorted(set(refs)):
+        path = ROOT / ref
+        assert path.exists(), f"{ref} is referenced by README but missing"
+        width, height = _png_dimensions(path)
+        assert width >= 500, f"{ref} is too narrow to show readable UI"
+        assert height >= 250, f"{ref} is too short to show readable UI"
+        assert not (
+            width >= 1800 and height >= 1000
+        ), f"{ref} looks like a full-screen capture rather than a cropped UI panel"
+```
+
+Add this helper near `_dashboard_entity_refs`:
+
+```python
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{path} is not a PNG"
+    return struct.unpack(">II", data[16:24])
+```
+
+- [ ] **Step 2: Run screenshot reference test to verify red if screenshots are stale**
+
+Run:
+
+```powershell
+pytest -q tests/test_user_facing_text.py::test_readme_screenshot_references_exist_and_are_cropped
+```
+
+Expected: FAIL if a referenced screenshot is missing, too small, or still a full-screen capture. PASS is acceptable if all existing screenshots already meet the cropped-image criteria.
+
+- [ ] **Step 3: Capture cropped Home Assistant screenshots**
+
+Use the logged-in Chrome session or Browser plugin against `https://home.degster.com:8123`. Capture the Home Assistant content area or the specific dialog/card element, not the full browser window. Each screenshot must exclude:
+
+- Browser URL bar.
+- Browser tab strip.
+- Windows taskbar or Start menu.
+- Blank desktop margins.
+
+Capture or replace these images with the matching UI target:
+
+```text
+docs/images/readme/integration-overview.png        Integration entry overview
+docs/images/readme/options-menu.png                Integration options menu
+docs/images/readme/assignment-editor.png           Review Circuit Assignments flow
+docs/images/readme/mains-sensors.png               Mains sensor selection controls
+docs/images/readme/advanced-settings.png           Advanced circuit settings panel
+docs/images/readme/circuit-modes.png               Circuit Mode options
+docs/images/readme/power-flow.png                  Power Flow options
+docs/images/readme/energy-usage-spikes.png         Energy Usage Status / spike evidence card
+docs/images/readme/daily-energy-goals.png          Daily Energy Goal card or service UI
+docs/images/readme/run-cycle-diagnostics.png       Run cycle diagnostic entities
+docs/images/readme/recent-activity-timeline.png    Recent Activity card
+docs/images/readme/billing-cycle-forecasts.png     Billing-cycle forecast card
+docs/images/readme/cost-time-of-use.png            Cost and TOU settings/card
+docs/images/readme/history-csv-export.png          CSV export service/action
+docs/images/readme/peak-demand-tracking.png        Peak demand card
+docs/images/readme/circuit-capacity-tracking.png   Circuit capacity card
+docs/images/readme/dual-phase-leg-imbalance.png    Dual-phase leg imbalance card
+docs/images/readme/power-metric-consistency.png    Metric consistency evidence
+docs/images/readme/mains-balance.png               Mains balance evidence
+docs/images/readme/solar-flow-diagnostics.png      Solar flow diagnostics
+docs/images/readme/utility-comparison.png          Utility/Opower comparison options with private text redacted
+docs/images/readme/always-on-standby.png           Always On / standby card
+docs/images/readme/experimental-nilm.png           Experimental NILM review/card
+docs/images/readme/alert-philosophy.png            Alert philosophy dashboard card
+docs/images/readme/notifications-repairs.png       Notifications and Repairs evidence
+docs/images/readme/demo-dashboard.png              Updated appliance-first sample dashboard
+```
+
+When using browser automation, prefer element screenshots or a clipped viewport screenshot. Do not use a screenshot that includes the Chrome address bar and then rely on README cropping to hide it.
+
+- [ ] **Step 4: Update README alt text and image placement**
+
+In `README.md`, keep every screenshot close to the section it demonstrates. Update alt text so it names the actual UI surface, for example:
+
+```markdown
+![Energy usage status showing Waiting For Energy Change and daily kWh evidence](docs/images/readme/energy-usage-spikes.png)
+```
+
+For the sample dashboard screenshot near the dashboard section, use:
+
+```markdown
+![Appliance-first Energy Analyzer dashboard with health summaries and evidence cards](docs/images/readme/demo-dashboard.png)
+```
+
+- [ ] **Step 5: Verify screenshots and README references**
+
+Run:
+
+```powershell
+pytest -q tests/test_user_facing_text.py::test_readme_screenshot_references_exist_and_are_cropped
+git diff --check -- README.md docs/images/readme tests/test_user_facing_text.py
+```
+
+Expected: screenshot reference test passes and whitespace check exits 0.
+
+---
+
+### Task 6: Appliance Drilldown Guidance
 
 **Files:**
 - Modify: `README.md`
@@ -686,7 +860,7 @@ Expected: PASS.
 
 ---
 
-### Task 6: Full Verification And Commit
+### Task 7: Full Verification And Commit
 
 **Files:**
 - All touched files
@@ -728,17 +902,17 @@ Run:
 
 ```powershell
 git diff --stat
-git diff -- custom_components/circuitsetup_energy_analyzer/usage.py custom_components/circuitsetup_energy_analyzer/coordinator.py custom_components/circuitsetup_energy_analyzer/sensor.py docs/dashboard-example.yaml README.md
+git diff -- custom_components/circuitsetup_energy_analyzer/usage.py custom_components/circuitsetup_energy_analyzer/coordinator.py custom_components/circuitsetup_energy_analyzer/sensor.py docs/dashboard-example.yaml README.md docs/images/readme tests/test_user_facing_text.py
 ```
 
-Expected: diff is limited to energy tracking clarity, status copy, dashboard YAML, README docs, and matching tests.
+Expected: diff is limited to energy tracking clarity, status copy, dashboard YAML, README docs/screenshots, and matching tests.
 
 - [ ] **Step 5: Commit and push**
 
 Run:
 
 ```powershell
-git add custom_components/circuitsetup_energy_analyzer/usage.py custom_components/circuitsetup_energy_analyzer/coordinator.py custom_components/circuitsetup_energy_analyzer/sensor.py README.md docs/dashboard-example.yaml tests/test_usage.py tests/test_entities.py tests/test_coordinator.py tests/test_user_facing_text.py
+git add custom_components/circuitsetup_energy_analyzer/usage.py custom_components/circuitsetup_energy_analyzer/coordinator.py custom_components/circuitsetup_energy_analyzer/sensor.py README.md docs/dashboard-example.yaml docs/images/readme tests/test_usage.py tests/test_entities.py tests/test_coordinator.py tests/test_user_facing_text.py
 git commit -m "feat: clarify energy analyzer sensor dashboard states"
 git push origin master
 ```
@@ -749,7 +923,7 @@ Expected: commit succeeds and `master` is pushed.
 
 ## Self-Review
 
-- Spec coverage: The plan addresses clearer sensor meaning, better status wording, the ambiguous `0 kWh` daily usage case, appliance-first dashboard organization, issue/evidence visibility, and README guidance.
+- Spec coverage: The plan addresses clearer sensor meaning, better status wording, the ambiguous `0 kWh` daily usage case, appliance-first dashboard organization, issue/evidence visibility, README screenshot refreshes, and README guidance.
 - Existing work preserved: The plan builds on existing health summary, readiness, status glossary, dashboard coverage, and Home Assistant-native entities rather than replacing them with a custom card.
 - Non-goals: This plan does not recreate Home Assistant's Energy Dashboard, does not add definitive appliance diagnosis wording, and does not remove raw diagnostic evidence for advanced users.
-- Verification coverage: Unit tests cover the new energy-tracking semantics. Entity/coordinator tests cover the user-facing evidence. README/dashboard tests cover the visible wording and layout. Full suite plus Ruff and `git diff --check` cover regression risk.
+- Verification coverage: Unit tests cover the new energy-tracking semantics. Entity/coordinator tests cover the user-facing evidence. README/dashboard tests cover the visible wording, layout, screenshot references, and cropped-image dimensions. Full suite plus Ruff and `git diff --check` cover regression risk.
