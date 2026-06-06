@@ -203,7 +203,6 @@ FIELD_UTILITY_SOURCE_TYPE = "utility_source_type"
 FIELD_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
 FIELD_MEASURED_ENERGY_ENTITIES = "measured_energy_entities"
 FIELD_TOLERANCE_PERCENT = "tolerance_percent"
-FIELD_SELECTED_APPLIANCE = "selected_appliance"
 FIELD_PRESET = "preset"
 FIELD_WINDOW_DAYS = "window_days"
 FIELD_DAILY_SPIKE_RATIO = "daily_spike_ratio"
@@ -629,10 +628,6 @@ def _text_selector() -> Any:
     return _selector({"text": {"multiple": False}}, str)
 
 
-def _read_only_text_selector() -> Any:
-    return _selector({"text": {"multiple": False, "read_only": True}}, str)
-
-
 def sensitivity_options() -> list[dict[str, str]]:
     return [
         {"value": value, "label": _SENSITIVITY_LABELS[value]}
@@ -917,12 +912,7 @@ def _advanced_settings_schema(
 ) -> Any:
     settings = dict(current_settings or {})
     circuit_context = _advanced_circuit_context(context)
-    schema: dict[Any, Any] = {
-        vol.Optional(
-            FIELD_SELECTED_APPLIANCE,
-            default=_advanced_context_display(circuit_context),
-        ): _read_only_text_selector(),
-    }
+    schema: dict[Any, Any] = {}
 
     _add_advanced_section(
         schema,
@@ -3164,8 +3154,6 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
 def _flatten_advanced_settings_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     flattened: dict[str, Any] = {}
     for key, value in user_input.items():
-        if key == FIELD_SELECTED_APPLIANCE:
-            continue
         if key in _ADVANCED_SECTION_KEYS and isinstance(value, Mapping):
             flattened.update(value)
             continue

@@ -187,13 +187,9 @@
       },
       "advanced_settings": {
         "title": "Advanced Circuit Settings",
-        "description": "Editing {circuit_name}. Appliance type: {appliance_profile}. Circuit mode: {circuit_mode}. Power flow: {power_flow}. This form shows only the sections that apply to the selected appliance or circuit, including billing, standby, power-quality, mains, and solar sections when relevant.",
-        "data": {
-          "selected_appliance": "Editing Appliance"
-        },
-        "data_description": {
-          "selected_appliance": "Shows the selected appliance or circuit before you change its advanced settings."
-        },
+        "description": "**{circuit_name}**\n\nAppliance type: {appliance_profile}. Circuit mode: {circuit_mode}. Power flow: {power_flow}. This form shows only the sections that apply to the selected appliance or circuit, including billing, standby, power-quality, mains, and solar sections when relevant.",
+        "data": {},
+        "data_description": {},
         "sections": {
           "analysis_settings": {
             "name": "Sensitivity",

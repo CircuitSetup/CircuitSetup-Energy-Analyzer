@@ -48,7 +48,6 @@ EXPECTED_ADVANCED_CIRCUIT_LABELS = {
 }
 
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
-    "selected_appliance": "Editing Appliance",
     "preset": "Sensitivity",
     "window_days": "Energy Window Days",
     "daily_spike_ratio": "Daily Spike Ratio",
@@ -252,19 +251,17 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert picker_step["data_description"].keys() == (
         EXPECTED_ADVANCED_CIRCUIT_LABELS.keys()
     )
-    assert settings_step["data"] == {"selected_appliance": "Editing Appliance"}
-    assert settings_step["data_description"].keys() == {"selected_appliance"}
+    assert settings_step["data"] == {}
+    assert settings_step["data_description"] == {}
     assert section_labels == EXPECTED_ADVANCED_SECTION_LABELS
-    assert {**settings_step["data"], **section_data} == (
-        EXPECTED_ADVANCED_SETTINGS_LABELS
-    )
-    assert {**settings_step["data_description"], **section_descriptions}.keys() == (
+    assert section_data == EXPECTED_ADVANCED_SETTINGS_LABELS
+    assert section_descriptions.keys() == (
         EXPECTED_ADVANCED_SETTINGS_LABELS.keys()
     )
-    assert all("_" not in label for label in settings_step["data"].values())
     assert all("_" not in label for label in section_data.values())
+    assert "selected_appliance" not in settings_step["description"]
+    assert settings_step["description"].startswith("**{circuit_name}**")
     assert "service" not in settings_step["description"].lower()
-    assert "editing" in settings_step["description"].lower()
     assert "appliance type" in settings_step["description"].lower()
     assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()

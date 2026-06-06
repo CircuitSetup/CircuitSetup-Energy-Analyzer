@@ -1428,9 +1428,7 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
         },
     )
 
-    assert _schema_default(schema, "selected_appliance") == (
-        "Kitchen Refrigerator (refrigerator) - Refrigerator, Single Phase"
-    )
+    assert "selected_appliance" not in _schema_keys(schema)
     assert _schema_default(schema, "daily_goal_kwh") == 0.0
     assert _schema_default(schema, "max_active_minutes") == 0
     assert _schema_default(schema, "max_idle_minutes") == 0
