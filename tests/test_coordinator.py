@@ -421,9 +421,11 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     now_holder = {"value": now}
     notifications: list[AlertEvidence] = []
+    notification_kwargs: list[dict[str, object]] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
+        notification_kwargs.append(kwargs)
 
     monkeypatch.setattr(
         coordinator_module.notifications,
@@ -509,6 +511,7 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     assert coordinator.state.active_alerts_by_circuit["fridge"]
     assert notifications
     assert notifications[0].message.startswith("Possible issue")
+    assert notification_kwargs[0].get("config").circuit_id == "fridge"
 
 
 @pytest.mark.asyncio
@@ -778,7 +781,7 @@ async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -1182,7 +1185,7 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -2558,7 +2561,7 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
     holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -2732,7 +2735,7 @@ async def test_runtime_infers_configured_leg_from_single_phase_entity_hint(
     holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -2821,7 +2824,7 @@ async def test_runtime_alerts_on_repeated_known_load_topology_mismatch(
     holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -2919,7 +2922,7 @@ async def test_runtime_ignores_low_confidence_known_load_topology_mismatch(
     holder = {"l1": 100.0, "l2": 100.0, "fridge": 0.0, "time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -3060,7 +3063,7 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
     async def alert_count_for_sensitivity(sensitivity: str) -> int:
         notifications: list[AlertEvidence] = []
 
-        async def fake_notification(hass, alert) -> None:
+        async def fake_notification(hass, alert, **kwargs) -> None:
             notifications.append(alert)
 
         monkeypatch.setattr(
@@ -3130,7 +3133,7 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -3297,7 +3300,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
     holder = {"time": now, "power": 108.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -3640,7 +3643,7 @@ async def test_expected_alert_feedback_suppresses_repeated_notification(
 
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -3859,7 +3862,7 @@ async def test_runtime_notifies_power_quality_relationship_change_after_maturity
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -3965,7 +3968,7 @@ async def test_runtime_detects_motor_power_quality_shift_from_watts_amps_pf_and_
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4083,7 +4086,7 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4162,7 +4165,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
     holder = {"time": now, "energy": 112.6}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4335,7 +4338,7 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
     holder = {"time": now, "energy": 112.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4461,7 +4464,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4534,7 +4537,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4778,7 +4781,7 @@ async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4867,7 +4870,7 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
     holder = {"time": now, "power": 2600.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -4953,7 +4956,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
     holder = {"time": now, "power": 3700.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -5102,7 +5105,7 @@ async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -
     holder = {"time": now, "current": 34.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -5452,7 +5455,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
     holder = {"time": now, "power": 46.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -5576,7 +5579,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
     holder = {"time": now}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -6268,7 +6271,7 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
     holder = {"time": now, "energy": 200.0}
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
@@ -6512,7 +6515,7 @@ async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     notifications: list[AlertEvidence] = []
 
-    async def fake_notification(hass, alert) -> None:
+    async def fake_notification(hass, alert, **kwargs) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(

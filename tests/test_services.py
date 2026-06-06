@@ -12,8 +12,13 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    ApplianceProfile,
     BaselineStats,
+    CircuitConfig,
+    CircuitMode,
     EventType,
+    SensorRef,
+    SensorRole,
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
@@ -69,6 +74,48 @@ def test_notification_id_for_alert_does_not_collide_on_underscores() -> None:
     )
 
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
+
+
+def test_alert_notification_message_includes_evidence_link_and_graph_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Possible issue: HVAC leg imbalance",
+        feature="leg_imbalance",
+        observed_value=62.0,
+        baseline_value=20.0,
+        change_ratio=2.1,
+        repeated_count=3,
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.hvac_l1_watts", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_l2_watts", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_l1_current", SensorRole.CURRENT, leg="a"),
+            SensorRef("sensor.hvac_l2_current", SensorRole.CURRENT, leg="b"),
+        ),
+    )
+
+    message = alert_notification_message(alert, config=config)
+
+    assert "Possible issue: HVAC leg imbalance" in message
+    assert (
+        "[Open evidence graph](/circuitsetup-energy-analyzer/alert-evidence?"
+        in message
+    )
+    assert "sensor.hvac_l1_watts" in message
+    assert "sensor.hvac_l2_current" in message
+    assert "Observed value: 62.0" in message
+    assert "Baseline value: 20.0" in message
 
 
 def test_repair_issue_id_for_circuit_problem_is_stable() -> None:

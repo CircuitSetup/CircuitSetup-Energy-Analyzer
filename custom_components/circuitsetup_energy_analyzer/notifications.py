@@ -5,8 +5,9 @@ import re
 from hashlib import sha256
 from typing import Any
 
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import DOMAIN
-from .models import AlertEvidence
+from .models import AlertEvidence, CircuitConfig
 
 
 def notification_id_for_alert(alert: AlertEvidence) -> str:
@@ -17,7 +18,44 @@ def notification_id_for_alert(alert: AlertEvidence) -> str:
     return _tuple_id(f"{DOMAIN}_alert", alert.circuit_id, feature)
 
 
-async def async_create_alert_notification(hass: Any, alert: AlertEvidence) -> None:
+def alert_notification_message(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+    dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+) -> str:
+    """Return Markdown body text for an alert persistent notification."""
+    from .alert_links import alert_evidence_path, alert_graph_entities
+
+    lines = [
+        alert.message,
+        "",
+        "[Open evidence graph]"
+        f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+        "",
+        f"- Observed value: {alert.observed_value}",
+        f"- Baseline value: {alert.baseline_value}",
+        f"- Repeated observations: {alert.repeated_count}",
+    ]
+    graph_entities = alert_graph_entities(alert, config)
+    if graph_entities:
+        lines.extend(
+            [
+                "",
+                "Graph entities:",
+                *(f"- `{entity_id}`" for entity_id in graph_entities),
+            ]
+        )
+    return "\n".join(lines)
+
+
+async def async_create_alert_notification(
+    hass: Any,
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+    dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+) -> None:
     """Create a persistent notification for important alert evidence if HA exists."""
     try:
         from homeassistant.components import persistent_notification
@@ -30,7 +68,7 @@ async def async_create_alert_notification(hass: Any, alert: AlertEvidence) -> No
 
     create(
         hass,
-        alert.message,
+        alert_notification_message(alert, config=config, dashboard_path=dashboard_path),
         title="CircuitSetup Energy Analyzer alert",
         notification_id=notification_id_for_alert(alert),
     )

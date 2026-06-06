@@ -4187,7 +4187,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if alert_id in self._notified_alert_ids:
             return
         self._notified_alert_ids.add(alert_id)
-        await notifications.async_create_alert_notification(self.hass, alert)
+        await notifications.async_create_alert_notification(
+            self.hass,
+            alert,
+            config=self._config_for_circuit(alert.circuit_id),
+        )
 
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
