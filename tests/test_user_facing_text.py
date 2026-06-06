@@ -685,6 +685,19 @@ def test_readme_includes_practical_usage_guide() -> None:
         assert phrase in normalized_text
 
 
+def test_readme_explains_notification_evidence_graph_links() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_text = " ".join(readme_text.split())
+
+    assert "Open evidence graph" in readme_text
+    assert "Alert Evidence" in readme_text
+    assert "evidence_path" in readme_text
+    assert "graph_entities" in readme_text
+    assert "Companion App" in readme_text
+    assert "clickAction" in readme_text
+    assert "Persistent notifications include a Markdown link" in normalized_text
+
+
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 

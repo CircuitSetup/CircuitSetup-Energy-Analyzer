@@ -297,12 +297,23 @@ circuits.
 1. Read the notification text and the related summary entity first.
 2. Open the entity details and review attributes such as `status_explanation`,
    observed values, thresholds, sample counts, source entities, and timestamps.
-3. Check easy setup causes before appliance causes: CT direction, phase pairing,
+3. Persistent notifications include a Markdown link named `Open evidence graph`.
+   It opens the Alert Evidence dashboard section with the alert ID, circuit, and
+   feature in the URL.
+4. The related Alert Evidence entity exposes `evidence_path`, `graph_entities`,
+   `source_entities`, `graph_window_start`, and `graph_window_end` attributes.
+   Use them when dashboard cards, blueprints, or notifications need to point to
+   the same context.
+5. For Companion App mobile notifications, use the alert blueprint and set
+   mobile notification `data.url` and Android `data.clickAction` to
+   `{{ evidence_path }}` so tapping the phone notification opens the same Home
+   Assistant evidence view.
+6. Check easy setup causes before appliance causes: CT direction, phase pairing,
    stale sensors, wrong units, missing voltage, or a circuit assigned as the
    wrong appliance type.
-4. Use Repairs for setup and data-quality problems. Use persistent
+7. Use Repairs for setup and data-quality problems. Use persistent
    notifications for possible appliance or circuit behavior changes.
-5. If work is planned on the appliance or circuit, use `start_maintenance` or
+8. If work is planned on the appliance or circuit, use `start_maintenance` or
    `pause_alerts`, then use `end_maintenance` or `relearn_baseline` when the
    system should start learning again.
 
