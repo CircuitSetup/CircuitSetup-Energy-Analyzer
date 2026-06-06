@@ -19,7 +19,7 @@
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
-          "retention_mode": "Controls how long diagnostic evidence and events are kept. Shorter retention uses less storage; Diagnostic keeps more evidence."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "assign": {
@@ -41,7 +41,7 @@
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
           "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
           "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
-          "circuit_retention_mode": "Controls how much diagnostic history is kept for this individual circuit."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "nilm": {
@@ -118,7 +118,7 @@
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
-          "retention_mode": "Controls how long diagnostic evidence and events are kept. Shorter retention uses less storage; Diagnostic keeps more evidence."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "mains": {
@@ -366,7 +366,7 @@
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
           "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
           "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
-          "circuit_retention_mode": "Controls how much diagnostic history is kept for this individual circuit."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
     }

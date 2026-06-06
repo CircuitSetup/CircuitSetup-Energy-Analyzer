@@ -169,6 +169,8 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
+    for days in ("14 days", "45 days", "180 days"):
+        assert days in descriptions["retention_mode"]
     assert "review circuit assignments" in strings["config"]["step"]["user"][
         "description"
     ].lower()
@@ -201,6 +203,8 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
+    for days in ("14 days", "45 days", "180 days"):
+        assert days in descriptions["retention_mode"]
     assert "review circuit assignments" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
@@ -293,6 +297,8 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "mains" in descriptions["circuit_mode"].lower()
         assert "solar" in descriptions["power_flow"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
+        for days in ("14 days", "45 days", "180 days"):
+            assert days in descriptions["circuit_retention_mode"]
 
 
 def test_assignment_picker_text_is_human_readable() -> None:
