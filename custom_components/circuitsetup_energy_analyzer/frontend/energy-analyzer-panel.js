@@ -1,12 +1,39 @@
 const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_evidence";
 const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
 const HISTORY_CALL_API_PREFIX = "history/period";
+const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
+const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
   mark_unhelpful: "mark_alert_unhelpful",
 };
 const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
+
+function installRouteChangeDispatcher() {
+  if (window[ROUTE_CHANGE_INSTALL_KEY]) {
+    return;
+  }
+  window[ROUTE_CHANGE_INSTALL_KEY] = true;
+
+  const dispatchRouteChange = () => {
+    window.dispatchEvent(new Event(ROUTE_CHANGE_EVENT));
+  };
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  history.pushState = function pushState(...args) {
+    const result = originalPushState.apply(this, args);
+    dispatchRouteChange();
+    return result;
+  };
+  history.replaceState = function replaceState(...args) {
+    const result = originalReplaceState.apply(this, args);
+    dispatchRouteChange();
+    return result;
+  };
+  window.addEventListener("popstate", dispatchRouteChange);
+}
 
 class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   constructor() {
@@ -20,12 +47,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._error = "";
     this._historyError = "";
     this._busyAction = "";
+    this._loadedRouteKey = "";
+    this._evidenceRequestId = 0;
+    this._listeningForRouteChanges = false;
+    this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._payload && !this._loading) {
-      this._loadEvidence();
+    if (this.isConnected) {
+      this._loadEvidenceIfRouteChanged();
     }
   }
 
@@ -34,30 +65,74 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   connectedCallback() {
-    this._loadEvidence();
+    installRouteChangeDispatcher();
+    this._addRouteListeners();
+    this._loadEvidenceIfRouteChanged({ force: true });
   }
 
-  async _loadEvidence() {
+  disconnectedCallback() {
+    this._removeRouteListeners();
+  }
+
+  _addRouteListeners() {
+    if (this._listeningForRouteChanges) {
+      return;
+    }
+    window.addEventListener(ROUTE_CHANGE_EVENT, this._handleRouteChange);
+    window.addEventListener("location-changed", this._handleRouteChange);
+    this._listeningForRouteChanges = true;
+  }
+
+  _removeRouteListeners() {
+    if (!this._listeningForRouteChanges) {
+      return;
+    }
+    window.removeEventListener(ROUTE_CHANGE_EVENT, this._handleRouteChange);
+    window.removeEventListener("location-changed", this._handleRouteChange);
+    this._listeningForRouteChanges = false;
+  }
+
+  _loadEvidenceIfRouteChanged(options = {}) {
+    const routeKey = this._routeKey();
+    if (!options.force && routeKey === this._loadedRouteKey) {
+      return;
+    }
+    this._loadEvidence({ routeKey });
+  }
+
+  async _loadEvidence(options = {}) {
+    const routeKey = options.routeKey || this._routeKey();
+    const requestId = this._evidenceRequestId + 1;
+    this._evidenceRequestId = requestId;
+    this._loadedRouteKey = routeKey;
     this._loading = true;
     this._error = "";
     this._historyError = "";
     this._historySeries = [];
     this._render();
 
-    const params = new URLSearchParams(window.location.search);
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const params = routeUrl.searchParams;
     const query = params.toString();
     const apiPath = `${EVIDENCE_CALL_API_PATH}${query ? `?${query}` : ""}`;
     const fetchPath = `${EVIDENCE_API_PATH}${query ? `?${query}` : ""}`;
 
     try {
-      this._payload = await this._requestJson(apiPath, fetchPath);
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._payload = payload;
       this._loading = false;
       this._render();
       const alert = this._payload && this._payload.alert;
       if (alert && alert.graph_entities && alert.graph_entities.length) {
-        await this._loadHistory(alert);
+        await this._loadHistory(alert, requestId, routeKey);
       }
     } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
       this._payload = null;
       this._error = `Could not load alert evidence from ${fetchPath}: ${error.message}`;
       this._loading = false;
@@ -65,7 +140,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
-  async _loadHistory(alert) {
+  async _loadHistory(alert, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     this._historyLoading = true;
     this._historyError = "";
     this._historySeries = [];
@@ -75,12 +150,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const fetchPath = `/api/${apiPath}`;
     try {
       const history = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
       this._historySeries = Array.isArray(history) ? history : [];
     } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
       this._historyError = `Could not load history samples from ${fetchPath}: ${error.message}`;
     } finally {
-      this._historyLoading = false;
-      this._render();
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._historyLoading = false;
+        this._render();
+      }
     }
   }
 
@@ -109,12 +192,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._render();
     try {
       await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
-      await this._loadEvidence();
+      await this._loadEvidence({ routeKey: this._routeKey() });
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
       this._render();
     }
+  }
+
+  _routeKey() {
+    return `${window.location.pathname}${window.location.search}`;
+  }
+
+  _isCurrentRequest(requestId, routeKey) {
+    return requestId === this._evidenceRequestId && routeKey === this._routeKey();
   }
 
   _render() {
@@ -264,7 +355,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       </main>
     `;
 
-    this._listen("#retry", () => this._loadEvidence());
+    this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
     this._listen("#acknowledge", () => this._callAction("acknowledge"));
     this._listen("#mark_expected", () => this._callAction("mark_expected"));
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));

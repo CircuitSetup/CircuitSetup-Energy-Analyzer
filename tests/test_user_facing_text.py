@@ -686,6 +686,28 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "Graph entities" not in asset
 
 
+def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    for expected in (
+        "circuitsetup-energy-analyzer-route-change",
+        "window.addEventListener",
+        "history.pushState",
+        "history.replaceState",
+        "popstate",
+        "_routeKey",
+        "_loadedRouteKey",
+        "_evidenceRequestId",
+    ):
+        assert expected in asset
+
+
 def test_readme_includes_status_glossary_for_machine_values() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
