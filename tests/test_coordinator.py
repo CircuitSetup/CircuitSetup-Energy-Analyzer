@@ -701,6 +701,71 @@ async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
     }
 
 
+def test_refresh_alert_evidence_state_includes_graph_metadata_from_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 30, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="reactive_to_real_ratio",
+        observed_value=0.42,
+        baseline_value=0.24,
+        change_ratio=0.75,
+        first_seen=datetime(2026, 6, 2, 10, 0, tzinfo=UTC),
+        last_seen=now,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.fridge_reactive_power",
+                            "role": "reactive_power",
+                        },
+                        {
+                            "entity_id": "sensor.fridge_power_factor",
+                            "role": "power_factor",
+                        },
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(alerts=[alert]),
+        now_fn=lambda: now,
+    )
+
+    coordinator._refresh_alert_evidence_state("fridge")
+
+    detail = coordinator.state.alert_evidence_by_circuit["fridge"]
+    assert detail["graph_entities"] == [
+        "sensor.fridge_reactive_power",
+        "sensor.fridge_power",
+        "sensor.fridge_power_factor",
+    ]
+    assert detail["source_entities"] == [
+        "sensor.fridge_power",
+        "sensor.fridge_reactive_power",
+        "sensor.fridge_power_factor",
+    ]
+    assert detail["graph_window_start"] == "2026-06-02T08:00:00+00:00"
+    assert detail["graph_window_end"] == "2026-06-02T14:30:00+00:00"
+
+
 @pytest.mark.asyncio
 async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
     monkeypatch,

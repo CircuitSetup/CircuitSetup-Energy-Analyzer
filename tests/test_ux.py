@@ -56,8 +56,59 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         last_seen=datetime(2026, 6, 2, 12, 30, tzinfo=UTC),
         features={"reactive_power": 2.1, "power_factor": 1.2},
     )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_reactive_power", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.fridge_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
 
-    assert alert_evidence_detail(alert) == {
+    detail = alert_evidence_detail(
+        alert,
+        config=config,
+        dashboard_path="/circuitsetup-energy-analyzer/alert-evidence",
+    )
+
+    assert detail["alert_id"] == notification_id_for_alert(alert)
+    assert detail["circuit_id"] == "fridge"
+    assert detail["feature"] == "reactive_to_real_ratio"
+    assert detail["severity"] == "warning"
+    assert detail["message"] == "Possible issue"
+    assert detail["baseline_value"] == 0.24
+    assert detail["observed_value"] == 0.42
+    assert detail["change_ratio"] == 0.75
+    assert detail["percent_change"] == 75.0
+    assert detail["repeated_count"] == 4
+    assert detail["first_seen"] == "2026-06-02T10:00:00+00:00"
+    assert detail["last_seen"] == "2026-06-02T12:30:00+00:00"
+    assert detail["time_window"] == (
+        "2026-06-02T10:00:00+00:00 to 2026-06-02T12:30:00+00:00"
+    )
+    assert detail["contributing_metrics"] == {
+        "power_factor": 1.2,
+        "reactive_power": 2.1,
+    }
+    assert detail["evidence_path"].startswith(
+        "/circuitsetup-energy-analyzer/alert-evidence?"
+    )
+    assert detail["graph_entities"] == [
+        "sensor.fridge_reactive_power",
+        "sensor.fridge_power",
+        "sensor.fridge_power_factor",
+    ]
+    assert detail["source_entities"] == [
+        "sensor.fridge_power",
+        "sensor.fridge_reactive_power",
+        "sensor.fridge_power_factor",
+    ]
+    assert detail["graph_window_start"] == "2026-06-02T08:00:00+00:00"
+    assert detail["graph_window_end"] == "2026-06-02T14:30:00+00:00"
+    assert detail == {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": "fridge",
         "feature": "reactive_to_real_ratio",
@@ -74,6 +125,19 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
             "2026-06-02T10:00:00+00:00 to 2026-06-02T12:30:00+00:00"
         ),
         "contributing_metrics": {"power_factor": 1.2, "reactive_power": 2.1},
+        "evidence_path": detail["evidence_path"],
+        "graph_entities": [
+            "sensor.fridge_reactive_power",
+            "sensor.fridge_power",
+            "sensor.fridge_power_factor",
+        ],
+        "source_entities": [
+            "sensor.fridge_power",
+            "sensor.fridge_reactive_power",
+            "sensor.fridge_power_factor",
+        ],
+        "graph_window_start": "2026-06-02T08:00:00+00:00",
+        "graph_window_end": "2026-06-02T14:30:00+00:00",
     }
 
 

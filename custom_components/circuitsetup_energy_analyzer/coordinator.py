@@ -1867,7 +1867,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if alert is None:
             self.state.alert_evidence_by_circuit.pop(circuit_id, None)
             return
-        self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(alert)
+        self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(
+            alert,
+            config=self._config_for_circuit(circuit_id),
+        )
 
     def _refresh_recent_activity_state(
         self: Self,

@@ -4,6 +4,13 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
+from .alert_links import (
+    DEFAULT_ALERT_EVIDENCE_PATH,
+    alert_evidence_path,
+    alert_graph_entities,
+    alert_graph_window,
+    alert_source_entities,
+)
 from .models import (
     AlertEvidence,
     BaselineStats,
@@ -59,10 +66,16 @@ def alert_policy_name_for_sensitivity(value: Any) -> str:
     return POLICY_SENSITIVITY_ALIASES[normalize_sensitivity(value)]
 
 
-def alert_evidence_detail(alert: AlertEvidence) -> dict[str, Any]:
+def alert_evidence_detail(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+    dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+) -> dict[str, Any]:
     """Return JSON-safe detail suitable for dashboard attributes."""
     first_seen = _isoformat_or_none(alert.first_seen)
     last_seen = _isoformat_or_none(alert.last_seen)
+    graph_window_start, graph_window_end = alert_graph_window(alert)
     return {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": alert.circuit_id,
@@ -82,6 +95,11 @@ def alert_evidence_detail(alert: AlertEvidence) -> dict[str, Any]:
         "contributing_metrics": {
             str(key): value for key, value in sorted(alert.features.items())
         },
+        "evidence_path": alert_evidence_path(alert, dashboard_path=dashboard_path),
+        "graph_entities": list(alert_graph_entities(alert, config)),
+        "source_entities": list(alert_source_entities(config)),
+        "graph_window_start": graph_window_start.isoformat(),
+        "graph_window_end": graph_window_end.isoformat(),
     }
 
 
