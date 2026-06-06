@@ -696,7 +696,9 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     assert "Companion App" in readme_text
     assert "clickAction" in readme_text
     assert "/circuitsetup-energy-analyzer/alert-evidence" in readme_text
-    assert "alert-evidence" in readme_text
+    assert "create a Home Assistant dashboard" in readme_text
+    assert "URL `/circuitsetup-energy-analyzer`" in readme_text
+    assert "view path of `alert-evidence`" in readme_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include a Markdown link" in normalized_text
 
