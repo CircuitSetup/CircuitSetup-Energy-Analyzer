@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -8,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
+    EventType,
     SensorRef,
     SensorRole,
     Severity,
@@ -70,6 +73,42 @@ def test_alert_evidence_path_contains_alert_context() -> None:
     assert params["alert_id"][0].startswith("circuitsetup_energy_analyzer_alert_hvac_")
 
 
+def test_alert_evidence_path_uses_event_type_when_feature_missing() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_evidence_path,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Possible issue: HVAC leg imbalance",
+        event_type=EventType.LEG_IMBALANCE,
+        feature="",
+    )
+
+    params = parse_qs(urlparse(alert_evidence_path(alert)).query)
+
+    assert params["feature"] == ["leg_imbalance"]
+    assert params["alert_id"][0].startswith(
+        "circuitsetup_energy_analyzer_alert_hvac_leg_imbalance_"
+    )
+
+
+def test_alert_links_does_not_import_notifications_at_module_load() -> None:
+    alert_links_module = "custom_components.circuitsetup_energy_analyzer.alert_links"
+    notifications_module = (
+        "custom_components.circuitsetup_energy_analyzer.notifications"
+    )
+
+    sys.modules.pop(alert_links_module, None)
+    sys.modules.pop(notifications_module, None)
+
+    importlib.import_module(alert_links_module)
+
+    assert notifications_module not in sys.modules
+
+
 def test_alert_graph_entities_prefer_feature_related_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_entities,
@@ -88,6 +127,14 @@ def test_alert_graph_entities_prefer_feature_related_sources() -> None:
         "sensor.hvac_l2_watts",
         "sensor.hvac_power_factor",
     )
+
+
+def test_alert_graph_entities_returns_empty_without_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(_alert(), None) == ()
 
 
 def test_alert_source_entities_returns_unique_configured_sources() -> None:
@@ -111,6 +158,14 @@ def test_alert_source_entities_returns_unique_configured_sources() -> None:
         "sensor.hvac_l1_watts",
         "sensor.hvac_l2_watts",
     )
+
+
+def test_alert_source_entities_returns_empty_without_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_source_entities,
+    )
+
+    assert alert_source_entities(None) == ()
 
 
 def test_alert_graph_window_wraps_first_and_last_seen() -> None:

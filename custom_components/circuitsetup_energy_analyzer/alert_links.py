@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from .models import AlertEvidence, CircuitConfig, SensorRole
-from .notifications import notification_id_for_alert
 
 DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer/alert-evidence"
 MAX_GRAPH_ENTITIES = 8
@@ -54,11 +53,14 @@ def alert_evidence_path(
     alert: AlertEvidence, *, dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH
 ) -> str:
     """Return a relative Home Assistant path for an alert evidence view."""
+    from .notifications import notification_id_for_alert
+
+    feature = _feature_for_alert(alert)
     params = urlencode(
         {
             "alert_id": notification_id_for_alert(alert),
             "circuit_id": alert.circuit_id,
-            "feature": alert.feature,
+            "feature": feature,
         }
     )
     return f"{dashboard_path}?{params}"
@@ -66,12 +68,12 @@ def alert_evidence_path(
 
 def alert_graph_entities(
     alert: AlertEvidence,
-    config: CircuitConfig,
+    config: CircuitConfig | None,
     *,
     max_entities: int = MAX_GRAPH_ENTITIES,
 ) -> tuple[str, ...]:
     """Return configured source entities ordered by relevance to the alert feature."""
-    if max_entities <= 0:
+    if config is None or max_entities <= 0:
         return ()
 
     selected: list[str] = []
@@ -88,8 +90,11 @@ def alert_graph_entities(
     return tuple(selected)
 
 
-def alert_source_entities(config: CircuitConfig) -> tuple[str, ...]:
+def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
     """Return all configured source entity ids without duplicates."""
+    if config is None:
+        return ()
+
     entities: list[str] = []
     seen: set[str] = set()
     for sensor in config.sensors:
@@ -115,3 +120,9 @@ def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
         if any(hint in normalized for hint in hints):
             return roles
     return _DEFAULT_ROLES
+
+
+def _feature_for_alert(alert: AlertEvidence) -> str:
+    return alert.feature or (
+        alert.event_type.value if alert.event_type is not None else "alert"
+    )
