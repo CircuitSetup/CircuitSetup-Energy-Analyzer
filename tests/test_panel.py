@@ -147,6 +147,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         EVIDENCE_API_PATH,
         PANEL_ELEMENT_NAME,
+        PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
         STATIC_URL_PATH,
         async_setup_panel,
@@ -197,6 +198,9 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
+    assert panel_custom.panels[0]["module_url"].endswith(
+        f"?v={PANEL_MODULE_VERSION}"
+    )
 
     await async_unload_panel(hass)
 

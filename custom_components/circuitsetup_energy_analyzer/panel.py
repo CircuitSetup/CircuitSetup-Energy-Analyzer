@@ -20,6 +20,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
+PANEL_MODULE_VERSION = "20260606-native-chart"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -285,7 +286,9 @@ async def _async_register_panel(hass: Any) -> bool:
             webcomponent_name=PANEL_ELEMENT_NAME,
             sidebar_title="Energy Analyzer Evidence",
             sidebar_icon="mdi:chart-timeline-variant",
-            module_url=f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}",
+            module_url=(
+                f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
+            ),
             config={
                 "api_path": EVIDENCE_API_PATH,
                 "domain": DOMAIN,
