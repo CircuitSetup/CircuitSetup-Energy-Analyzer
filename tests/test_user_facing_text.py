@@ -611,6 +611,10 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "possible issue" in blueprint_text.lower()
     assert "alert_entities:" in blueprint_text
     assert "alert_actions:" in blueprint_text
+    assert "evidence_path" in blueprint_text
+    assert "Open evidence graph" in blueprint_text
+    assert "clickAction" in blueprint_text
+    assert "url:" in blueprint_text
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:

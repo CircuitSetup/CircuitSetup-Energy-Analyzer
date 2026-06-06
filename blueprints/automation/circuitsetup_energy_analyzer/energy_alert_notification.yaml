@@ -1,6 +1,10 @@
 blueprint:
   name: CircuitSetup Energy Analyzer Alerts
-  description: Create friendly notifications and optional follow-up actions when selected CircuitSetup Energy Analyzer alert entities report a possible issue.
+  description: >-
+    Create friendly notifications and optional follow-up actions when selected
+    CircuitSetup Energy Analyzer alert entities report a possible issue. Companion
+    App mobile notifications can use data.url and data.clickAction with the
+    evidence_path template variable.
   domain: automation
   input:
     alert_entities:
@@ -60,7 +64,11 @@ blueprint:
         boolean:
     alert_actions:
       name: Follow-up Actions
-      description: Optional actions such as mobile notifications, lights, or scripts.
+      description: >-
+        Optional actions such as mobile notifications, lights, or scripts.
+        Mobile app actions can use {{ evidence_path }} as both data.url and
+        data.clickAction, for example url: "{{ evidence_path }}" and
+        clickAction: "{{ evidence_path }}".
       default: []
       selector:
         action:
@@ -89,6 +97,12 @@ variables:
     {% else %}
       Alert entity changed.
     {% endif %}
+  evidence_path: >-
+    {% if trigger.to_state and trigger.to_state.attributes.evidence_path %}
+      {{ trigger.to_state.attributes.evidence_path }}
+    {% else %}
+      /circuitsetup-energy-analyzer/alert-evidence
+    {% endif %}
 
 condition:
   - condition: template
@@ -109,6 +123,8 @@ action:
                 State: {{ alert_state }}
 
                 Evidence: {{ alert_evidence }}
+
+                [Open evidence graph]({{ evidence_path }})
 
                 Entity: {{ alert_entity_id }}
   - choose: []
