@@ -1,233 +1,240 @@
-type: sections
 title: Energy Analyzer
-sections:
-  - type: grid
-    title: Needs attention
-    cards:
-      - type: markdown
-        title: What to check first
-        content: >
-          Start with Health, Activity, Electrical Health, and Energy Summary.
-          These rollups answer whether an appliance is okay, what it is doing,
-          and which area needs review. Detailed evidence stays in attributes,
-          possible issue notifications, Repairs, and advanced entity views
-          instead of being rendered as hidden dashboard entities.
-      - type: glance
-        title: Health summary
-        columns: 3
-        entities:
-          - entity: sensor.refrigerator_health_summary
-            name: Refrigerator
-          - entity: sensor.hvac_health_summary
-            name: HVAC
-          - entity: sensor.mains_nilm_health_summary
-            name: Mains NILM
-      - type: entities
-        title: Appliance state
-        entities:
-          - entity: sensor.refrigerator_activity_summary
-          - entity: sensor.refrigerator_electrical_health
-          - entity: sensor.refrigerator_energy_summary
-          - entity: sensor.hvac_activity_summary
-          - entity: sensor.hvac_electrical_health
-          - entity: sensor.hvac_energy_summary
-          - entity: sensor.mains_nilm_activity_summary
-          - entity: sensor.mains_nilm_electrical_health
-          - entity: sensor.mains_nilm_energy_summary
+views:
+  - type: sections
+    title: Overview
+    path: overview
+    sections:
+      - type: grid
+        title: Needs attention
+        cards:
+          - type: markdown
+            title: What to check first
+            content: >
+              Start with Health, Activity, Electrical Health, and Energy Summary.
+              These rollups answer whether an appliance is okay, what it is doing,
+              and which area needs review. Detailed evidence stays in attributes,
+              possible issue notifications, Repairs, and advanced entity views
+              instead of being rendered as hidden dashboard entities.
+          - type: glance
+            title: Health summary
+            columns: 3
+            entities:
+              - entity: sensor.refrigerator_health_summary
+                name: Refrigerator
+              - entity: sensor.hvac_health_summary
+                name: HVAC
+              - entity: sensor.mains_nilm_health_summary
+                name: Mains NILM
+          - type: entities
+            title: Appliance state
+            entities:
+              - entity: sensor.refrigerator_activity_summary
+              - entity: sensor.refrigerator_electrical_health
+              - entity: sensor.refrigerator_energy_summary
+              - entity: sensor.hvac_activity_summary
+              - entity: sensor.hvac_electrical_health
+              - entity: sensor.hvac_energy_summary
+              - entity: sensor.mains_nilm_activity_summary
+              - entity: sensor.mains_nilm_electrical_health
+              - entity: sensor.mains_nilm_energy_summary
 
-  - type: grid
-    title: Appliance overview
-    cards:
-      - type: glance
-        title: At a glance
-        columns: 4
-        entities:
-          - entity: sensor.refrigerator_health_summary
-            name: Refrigerator
-          - entity: sensor.hvac_health_summary
-            name: HVAC
-          - entity: sensor.water_heater_health_summary
-            name: Water heater
-          - entity: sensor.pool_pump_health_summary
-            name: Pool pump
-          - entity: sensor.washer_health_summary
-            name: Washer
-          - entity: sensor.dryer_health_summary
-            name: Dryer
-          - entity: sensor.washer_activity_summary
-            name: Washer activity
-          - entity: sensor.dryer_activity_summary
-            name: Dryer activity
-      - type: entities
-        title: Running now
-        entities:
-          - entity: binary_sensor.refrigerator_running
-          - entity: binary_sensor.hvac_running
-          - entity: binary_sensor.water_heater_running
-          - entity: binary_sensor.pool_pump_running
-          - entity: binary_sensor.washer_running
-          - entity: binary_sensor.dryer_running
-      - type: entities
-        title: Electrical health
-        entities:
-          - entity: sensor.refrigerator_electrical_health
-          - entity: sensor.hvac_electrical_health
-          - entity: sensor.water_heater_electrical_health
-          - entity: sensor.pool_pump_electrical_health
-          - entity: sensor.washer_electrical_health
-          - entity: sensor.dryer_electrical_health
+      - type: grid
+        title: Appliance overview
+        cards:
+          - type: glance
+            title: At a glance
+            columns: 4
+            entities:
+              - entity: sensor.refrigerator_health_summary
+                name: Refrigerator
+              - entity: sensor.hvac_health_summary
+                name: HVAC
+              - entity: sensor.water_heater_health_summary
+                name: Water heater
+              - entity: sensor.pool_pump_health_summary
+                name: Pool pump
+              - entity: sensor.washer_health_summary
+                name: Washer
+              - entity: sensor.dryer_health_summary
+                name: Dryer
+              - entity: sensor.washer_activity_summary
+                name: Washer activity
+              - entity: sensor.dryer_activity_summary
+                name: Dryer activity
+          - type: entities
+            title: Running now
+            entities:
+              - entity: binary_sensor.refrigerator_running
+              - entity: binary_sensor.hvac_running
+              - entity: binary_sensor.water_heater_running
+              - entity: binary_sensor.pool_pump_running
+              - entity: binary_sensor.washer_running
+              - entity: binary_sensor.dryer_running
+          - type: entities
+            title: Electrical health
+            entities:
+              - entity: sensor.refrigerator_electrical_health
+              - entity: sensor.hvac_electrical_health
+              - entity: sensor.water_heater_electrical_health
+              - entity: sensor.pool_pump_electrical_health
+              - entity: sensor.washer_electrical_health
+              - entity: sensor.dryer_electrical_health
 
-  - type: grid
-    title: Energy tracking
-    cards:
-      - type: markdown
-        title: Reading daily kWh
-        content: >
-          Daily Energy Usage can show 0 kWh when the appliance truly used no
-          energy, or when the analyzer is Waiting For Energy Change because it
-          has not observed a cumulative kWh increase yet. Energy Summary
-          includes the current high-usage, goal, billing, and cost result.
-      - type: statistics-graph
-        title: Daily energy trend
-        days_to_show: 7
-        period: day
-        stat_types:
-          - mean
-        entities:
-          - entity: sensor.refrigerator_daily_energy_usage
-          - entity: sensor.hvac_daily_energy_usage
-          - entity: sensor.water_heater_daily_energy_usage
-          - entity: sensor.washer_daily_energy_usage
-          - entity: sensor.dryer_daily_energy_usage
-      - type: entities
-        title: Daily kWh status
-        entities:
-          - entity: sensor.refrigerator_energy_summary
-          - entity: sensor.refrigerator_daily_energy_usage
-          - entity: sensor.hvac_energy_summary
-          - entity: sensor.hvac_daily_energy_usage
-          - entity: sensor.water_heater_energy_summary
-          - entity: sensor.water_heater_daily_energy_usage
-          - entity: sensor.washer_energy_summary
-          - entity: sensor.washer_daily_energy_usage
-          - entity: sensor.dryer_energy_summary
-          - entity: sensor.dryer_daily_energy_usage
-      - type: button
-        name: Export refrigerator history CSV
-        icon: mdi:file-delimited-outline
-        tap_action:
-          action: call-service
-          service: circuitsetup_energy_analyzer.export_history_csv
-          data:
-            circuit_id: refrigerator
+      - type: grid
+        title: Energy tracking
+        cards:
+          - type: markdown
+            title: Reading daily kWh
+            content: >
+              Daily Energy Usage can show 0 kWh when the appliance truly used no
+              energy, or when the analyzer is Waiting For Energy Change because it
+              has not observed a cumulative kWh increase yet. Energy Summary
+              includes the current high-usage, goal, billing, and cost result.
+          - type: statistics-graph
+            title: Daily energy trend
+            days_to_show: 7
+            period: day
+            stat_types:
+              - mean
+            entities:
+              - entity: sensor.refrigerator_daily_energy_usage
+              - entity: sensor.hvac_daily_energy_usage
+              - entity: sensor.water_heater_daily_energy_usage
+              - entity: sensor.washer_daily_energy_usage
+              - entity: sensor.dryer_daily_energy_usage
+          - type: entities
+            title: Daily kWh status
+            entities:
+              - entity: sensor.refrigerator_energy_summary
+              - entity: sensor.refrigerator_daily_energy_usage
+              - entity: sensor.hvac_energy_summary
+              - entity: sensor.hvac_daily_energy_usage
+              - entity: sensor.water_heater_energy_summary
+              - entity: sensor.water_heater_daily_energy_usage
+              - entity: sensor.washer_energy_summary
+              - entity: sensor.washer_daily_energy_usage
+              - entity: sensor.dryer_energy_summary
+              - entity: sensor.dryer_daily_energy_usage
+          - type: button
+            name: Export refrigerator history CSV
+            icon: mdi:file-delimited-outline
+            tap_action:
+              action: call-service
+              service: circuitsetup_energy_analyzer.export_history_csv
+              data:
+                circuit_id: refrigerator
 
-  - type: grid
-    title: Power quality detail
-    cards:
-      - type: markdown
-        title: What the rollups include
-        content: >
-          Electrical Health combines power-quality changes, power metric
-          consistency, dual-phase leg imbalance, solar flow diagnostics, and
-          mains balance where those checks apply. When a possible issue is
-          detected, use the entity attributes, persistent notification, or
-          repair item for the observed evidence.
-      - type: glance
-        title: Electrical health rollups
-        columns: 3
-        entities:
-          - entity: sensor.refrigerator_electrical_health
-            name: Refrigerator
-          - entity: sensor.hvac_electrical_health
-            name: HVAC
-          - entity: sensor.water_heater_electrical_health
-            name: Water heater
-          - entity: sensor.pool_pump_electrical_health
-            name: Pool pump
-          - entity: sensor.mains_nilm_electrical_health
-            name: Mains
-          - entity: sensor.dryer_electrical_health
-            name: Dryer
-      - type: entities
-        title: Activity context
-        entities:
-          - entity: sensor.refrigerator_activity_summary
-          - entity: sensor.hvac_activity_summary
-          - entity: sensor.water_heater_activity_summary
-          - entity: sensor.pool_pump_activity_summary
-          - entity: sensor.washer_activity_summary
-          - entity: sensor.dryer_activity_summary
+      - type: grid
+        title: Power quality detail
+        cards:
+          - type: markdown
+            title: What the rollups include
+            content: >
+              Electrical Health combines power-quality changes, power metric
+              consistency, dual-phase leg imbalance, solar flow diagnostics, and
+              mains balance where those checks apply. When a possible issue is
+              detected, use the entity attributes, persistent notification, or
+              repair item for the observed evidence.
+          - type: glance
+            title: Electrical health rollups
+            columns: 3
+            entities:
+              - entity: sensor.refrigerator_electrical_health
+                name: Refrigerator
+              - entity: sensor.hvac_electrical_health
+                name: HVAC
+              - entity: sensor.water_heater_electrical_health
+                name: Water heater
+              - entity: sensor.pool_pump_electrical_health
+                name: Pool pump
+              - entity: sensor.mains_nilm_electrical_health
+                name: Mains
+              - entity: sensor.dryer_electrical_health
+                name: Dryer
+          - type: entities
+            title: Activity context
+            entities:
+              - entity: sensor.refrigerator_activity_summary
+              - entity: sensor.hvac_activity_summary
+              - entity: sensor.water_heater_activity_summary
+              - entity: sensor.pool_pump_activity_summary
+              - entity: sensor.washer_activity_summary
+              - entity: sensor.dryer_activity_summary
 
-  - type: grid
-    title: Alert evidence
-    cards:
-      - type: markdown
-        title: Open from notifications
-        content: >
-          Possible-issue notifications include an Open evidence graph link.
-          Review the latest alert evidence, source entities, and graph context
-          here before changing CT orientation, circuit assignments, thresholds,
-          or appliance settings. In V1, standard Home Assistant cards are static
-          and do not change based on the URL query. Duplicate or adapt these HVAC cards
-          for other appliances or circuits you want to review.
-      - type: entities
-        title: Latest HVAC alert evidence
-        entities:
-          - entity: sensor.hvac_alert_evidence
-          - entity: sensor.hvac_electrical_health
-          - entity: sensor.hvac_power_quality_evidence
-          - entity: sensor.hvac_leg_imbalance_status
-          - entity: sensor.hvac_metric_consistency_status
-      - type: history-graph
-        title: HVAC evidence graph
-        hours_to_show: 72
-        entities:
-          - entity: sensor.hvac_leg_imbalance
-          - entity: sensor.hvac_power_quality_score
-          - entity: sensor.hvac_reactive_power_drift
-          - entity: sensor.hvac_apparent_power_drift
-          - entity: sensor.hvac_power_factor_drift
+      - type: grid
+        title: Mains, solar, and NILM
+        cards:
+          - type: glance
+            title: Mains overview
+            columns: 3
+            entities:
+              - entity: sensor.mains_nilm_health_summary
+                name: Health
+              - entity: sensor.mains_nilm_activity_summary
+                name: Activity
+              - entity: sensor.mains_nilm_electrical_health
+                name: Electrical
+              - entity: sensor.mains_nilm_energy_summary
+                name: Energy
+          - type: statistics-graph
+            title: Mains daily energy
+            days_to_show: 7
+            period: day
+            stat_types:
+              - mean
+            entities:
+              - entity: sensor.mains_nilm_daily_energy_usage
+          - type: entities
+            title: Mains rollups
+            entities:
+              - entity: sensor.mains_nilm_health_summary
+              - entity: sensor.mains_nilm_activity_summary
+              - entity: sensor.mains_nilm_electrical_health
+              - entity: sensor.mains_nilm_energy_summary
+              - entity: sensor.mains_nilm_daily_energy_usage
+          - type: markdown
+            title: Alert philosophy
+            content: >
+              Alert philosophy: diagnostic entities are always available, important
+              possible-issue events use persistent notifications, and Repairs are
+              reserved for setup, configuration, or data-quality problems.
+          - type: markdown
+            title: Notifications and repairs
+            content: >
+              Notifications and repairs: appliance alerts describe observed evidence
+              and avoid diagnosis; Repairs should point to missing sensors, bad
+              mappings, stale data, or setup problems.
+  - type: sections
+    title: Alert Evidence
+    path: alert-evidence
+    sections:
+      - type: grid
+        title: Alert evidence
+        cards:
+          - type: markdown
+            title: Open from notifications
+            content: >
+              Possible-issue notifications include an Open evidence graph link.
+              Review the latest alert evidence, source entities, and graph context
+              here before changing CT orientation, circuit assignments, thresholds,
+              or appliance settings. In V1, standard Home Assistant cards are static
+              and do not change based on the URL query. Duplicate or adapt these HVAC cards
+              for other appliances or circuits you want to review.
+          - type: entities
+            title: Latest HVAC alert evidence
+            entities:
+              - entity: sensor.hvac_alert_evidence
+              - entity: sensor.hvac_electrical_health
+              - entity: sensor.hvac_power_quality_evidence
+              - entity: sensor.hvac_leg_imbalance_status
+              - entity: sensor.hvac_metric_consistency_status
+          - type: history-graph
+            title: HVAC evidence graph
+            hours_to_show: 72
+            entities:
+              - entity: sensor.hvac_leg_imbalance
+              - entity: sensor.hvac_power_quality_score
+              - entity: sensor.hvac_reactive_power_drift
+              - entity: sensor.hvac_apparent_power_drift
+              - entity: sensor.hvac_power_factor_drift
 
-  - type: grid
-    title: Mains, solar, and NILM
-    cards:
-      - type: glance
-        title: Mains overview
-        columns: 3
-        entities:
-          - entity: sensor.mains_nilm_health_summary
-            name: Health
-          - entity: sensor.mains_nilm_activity_summary
-            name: Activity
-          - entity: sensor.mains_nilm_electrical_health
-            name: Electrical
-          - entity: sensor.mains_nilm_energy_summary
-            name: Energy
-      - type: statistics-graph
-        title: Mains daily energy
-        days_to_show: 7
-        period: day
-        stat_types:
-          - mean
-        entities:
-          - entity: sensor.mains_nilm_daily_energy_usage
-      - type: entities
-        title: Mains rollups
-        entities:
-          - entity: sensor.mains_nilm_health_summary
-          - entity: sensor.mains_nilm_activity_summary
-          - entity: sensor.mains_nilm_electrical_health
-          - entity: sensor.mains_nilm_energy_summary
-          - entity: sensor.mains_nilm_daily_energy_usage
-      - type: markdown
-        title: Alert philosophy
-        content: >
-          Alert philosophy: diagnostic entities are always available, important
-          possible-issue events use persistent notifications, and Repairs are
-          reserved for setup, configuration, or data-quality problems.
-      - type: markdown
-        title: Notifications and repairs
-        content: >
-          Notifications and repairs: appliance alerts describe observed evidence
-          and avoid diagnosis; Repairs should point to missing sensors, bad
-          mappings, stale data, or setup problems.

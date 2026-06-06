@@ -430,8 +430,7 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     dashboard = yaml.safe_load(dashboard_text)
     section_titles = {
         section.get("title")
-        for section in dashboard.get("sections", [])
-        if isinstance(section, dict)
+        for section in _dashboard_sections(dashboard)
     }
 
     assert {
@@ -455,21 +454,13 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     assert "binary_sensor.dryer_running" in dashboard_text
 
     needs_attention = yaml.safe_dump(
-        next(
-            section
-            for section in dashboard["sections"]
-            if section.get("title") == "Needs attention"
-        )
+        _dashboard_section(dashboard, "Needs attention")
     )
     assert "possible issue" in needs_attention
     assert "Repairs" in needs_attention
 
     appliance_overview = yaml.safe_dump(
-        next(
-            section
-            for section in dashboard["sections"]
-            if section.get("title") == "Appliance overview"
-        )
+        _dashboard_section(dashboard, "Appliance overview")
     )
     for appliance in (
         "Refrigerator",
@@ -482,11 +473,7 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         assert appliance in appliance_overview
 
     power_quality_detail = yaml.safe_dump(
-        next(
-            section
-            for section in dashboard["sections"]
-            if section.get("title") == "Power quality detail"
-        )
+        _dashboard_section(dashboard, "Power quality detail")
     )
     assert "sensor.hvac_electrical_health" in power_quality_detail
     assert "sensor.refrigerator_activity_summary" in power_quality_detail
@@ -494,12 +481,23 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
 
 def test_dashboard_example_includes_alert_evidence_graph_section() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    dashboard = yaml.safe_load(dashboard_text)
+    views = _dashboard_views(dashboard)
+    alert_view = next(
+        (view for view in views if view.get("path") == "alert-evidence"),
+        None,
+    )
     refs = set(_dashboard_entity_refs(dashboard_text))
 
+    assert alert_view is not None
+    assert alert_view.get("type") == "sections"
+    assert alert_view.get("title") == "Alert Evidence"
+    assert alert_view.get("sections")[0].get("title") == "Alert evidence"
     assert "Alert evidence" in dashboard_text
     assert "Open from notifications" in dashboard_text
     assert "standard Home Assistant cards are static" in dashboard_text
     assert "Duplicate or adapt these HVAC cards" in dashboard_text
+    assert "HVAC evidence graph" in yaml.safe_dump(alert_view)
     assert {
         "sensor.hvac_alert_evidence",
         "sensor.hvac_leg_imbalance",
@@ -854,6 +852,34 @@ def _dashboard_cards(node: object) -> list[dict[str, object]]:
         for item in node:
             cards.extend(_dashboard_cards(item))
     return cards
+
+
+def _dashboard_views(dashboard: object) -> list[dict[str, object]]:
+    if not isinstance(dashboard, dict):
+        return []
+    views = dashboard.get("views")
+    if isinstance(views, list):
+        return [view for view in views if isinstance(view, dict)]
+    return [dashboard]
+
+
+def _dashboard_sections(dashboard: object) -> list[dict[str, object]]:
+    sections: list[dict[str, object]] = []
+    for view in _dashboard_views(dashboard):
+        view_sections = view.get("sections", [])
+        if isinstance(view_sections, list):
+            sections.extend(
+                section for section in view_sections if isinstance(section, dict)
+            )
+    return sections
+
+
+def _dashboard_section(dashboard: object, title: str) -> dict[str, object]:
+    return next(
+        section
+        for section in _dashboard_sections(dashboard)
+        if section.get("title") == title
+    )
 
 
 def _dashboard_entity_refs(dashboard_text: str) -> list[str]:
