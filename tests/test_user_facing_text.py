@@ -384,6 +384,17 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
 
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
+    intentional_alert_evidence_refs = {
+        "sensor.hvac_alert_evidence",
+        "sensor.hvac_power_quality_evidence",
+        "sensor.hvac_leg_imbalance_status",
+        "sensor.hvac_metric_consistency_status",
+        "sensor.hvac_leg_imbalance",
+        "sensor.hvac_power_quality_score",
+        "sensor.hvac_reactive_power_drift",
+        "sensor.hvac_apparent_power_drift",
+        "sensor.hvac_power_factor_drift",
+    }
     hidden_sensor_keys = {
         description.key
         for description in SENSOR_DESCRIPTIONS
@@ -398,6 +409,7 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     hidden_refs = sorted(
         ref
         for ref in refs
+        if ref not in intentional_alert_evidence_refs
         if (
             ref.startswith("sensor.")
             and any(ref.endswith(f"_{key}") for key in hidden_sensor_keys)
@@ -478,6 +490,21 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     )
     assert "sensor.hvac_electrical_health" in power_quality_detail
     assert "sensor.refrigerator_activity_summary" in power_quality_detail
+
+
+def test_dashboard_example_includes_alert_evidence_graph_section() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    refs = set(_dashboard_entity_refs(dashboard_text))
+
+    assert "Alert evidence" in dashboard_text
+    assert "Open from notifications" in dashboard_text
+    assert {
+        "sensor.hvac_alert_evidence",
+        "sensor.hvac_leg_imbalance",
+        "sensor.hvac_power_quality_score",
+        "sensor.hvac_reactive_power_drift",
+        "sensor.hvac_power_factor_drift",
+    } <= refs
 
 
 def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:

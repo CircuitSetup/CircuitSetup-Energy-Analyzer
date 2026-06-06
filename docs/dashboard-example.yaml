@@ -159,6 +159,34 @@ sections:
           - entity: sensor.dryer_activity_summary
 
   - type: grid
+    title: Alert evidence
+    cards:
+      - type: markdown
+        title: Open from notifications
+        content: >
+          Possible-issue notifications include an Open evidence graph link.
+          Review the latest alert evidence, source entities, and graph context
+          here before changing CT orientation, circuit assignments, thresholds,
+          or appliance settings.
+      - type: entities
+        title: Latest HVAC alert evidence
+        entities:
+          - entity: sensor.hvac_alert_evidence
+          - entity: sensor.hvac_electrical_health
+          - entity: sensor.hvac_power_quality_evidence
+          - entity: sensor.hvac_leg_imbalance_status
+          - entity: sensor.hvac_metric_consistency_status
+      - type: history-graph
+        title: HVAC evidence graph
+        hours_to_show: 72
+        entities:
+          - entity: sensor.hvac_leg_imbalance
+          - entity: sensor.hvac_power_quality_score
+          - entity: sensor.hvac_reactive_power_drift
+          - entity: sensor.hvac_apparent_power_drift
+          - entity: sensor.hvac_power_factor_drift
+
+  - type: grid
     title: Mains, solar, and NILM
     cards:
       - type: glance
