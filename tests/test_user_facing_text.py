@@ -677,7 +677,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Matched alert",
         "Latest evidence for circuit",
         "Historical alert not found",
-        "Graphed Sources",
         "Observed",
         "Baseline",
         "feature_name",
@@ -687,6 +686,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert '${this._metric("Feature", alert.feature)}' not in asset
     assert "iframe" not in asset
     assert "Graph entities" not in asset
+    assert "Graphed Sources" not in asset
+    assert "Source Entities" not in asset
+    assert "_entityList" not in asset
 
 
 def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() -> None:

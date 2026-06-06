@@ -362,8 +362,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderAlert(alert, circuit) {
-    const graphEntities = alert.graph_entities || [];
-    const sourceEntities = alert.source_entities || [];
     return `
       <section class="panel summary">
         ${this._metric("Circuit", (circuit && circuit.name) || alert.circuit_id)}
@@ -380,14 +378,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <section class="panel">
         <h2>Graph</h2>
         ${this._renderChart()}
-      </section>
-      <section class="panel">
-        <h2>Graphed Sources</h2>
-        ${this._entityList(graphEntities)}
-      </section>
-      <section class="panel">
-        <h2>Source Entities</h2>
-        ${this._entityList(sourceEntities)}
       </section>
       <section class="panel">
         <h2>Actions</h2>
@@ -532,13 +522,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(value === null || value === undefined ? "Unknown" : value)}</strong></div>`;
-  }
-
-  _entityList(entities) {
-    if (!entities || !entities.length) {
-      return `<p class="muted">No entities were available for this evidence item.</p>`;
-    }
-    return `<ul>${entities.map((entityId) => `<li><code>${this._escape(entityId)}</code></li>`).join("")}</ul>`;
   }
 
   _disabled(actionKey) {
