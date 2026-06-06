@@ -201,6 +201,8 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
+    assert panel_custom.panels[0].get("sidebar_title") is None
+    assert panel_custom.panels[0].get("sidebar_icon") is None
     assert panel_custom.panels[0]["module_url"].endswith(
         f"?v={PANEL_MODULE_VERSION}"
     )

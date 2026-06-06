@@ -280,8 +280,8 @@ async def _async_register_panel(hass: Any) -> bool:
             hass,
             frontend_url_path=PANEL_URL_PATH,
             webcomponent_name=PANEL_ELEMENT_NAME,
-            sidebar_title="Energy Analyzer Evidence",
-            sidebar_icon="mdi:chart-timeline-variant",
+            # Keep the evidence page available for notification links without
+            # adding a standalone entry to the Home Assistant sidebar.
             module_url=(
                 f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
             ),
