@@ -100,7 +100,7 @@ variables:
   evidence_path: >-
     {{- trigger.to_state.attributes.evidence_path
         if trigger.to_state and trigger.to_state.attributes.evidence_path
-        else '/circuitsetup-energy-analyzer/alert-evidence' -}}
+        else '/circuitsetup-energy-analyzer-evidence' -}}
 
 condition:
   - condition: template

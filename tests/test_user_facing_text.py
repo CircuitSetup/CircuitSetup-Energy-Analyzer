@@ -649,7 +649,36 @@ def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
     fallback_path = evidence_template.render(trigger={"to_state": None})
 
     assert configured_path == "/custom-dashboard/alert-evidence?alert_id=1"
-    assert fallback_path == "/circuitsetup-energy-analyzer/alert-evidence"
+    assert fallback_path == "/circuitsetup-energy-analyzer-evidence"
+
+
+def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    assert asset_path.exists()
+    asset = asset_path.read_text(encoding="utf-8")
+
+    for expected in (
+        'customElements.define("circuitsetup-energy-analyzer-panel"',
+        "URLSearchParams",
+        "/api/circuitsetup_energy_analyzer/alert_evidence",
+        'callService("circuitsetup_energy_analyzer"',
+        "acknowledge_alert",
+        "mark_alert_expected",
+        "mark_alert_unhelpful",
+        "/history?entity_id=",
+        "Matched alert",
+        "Latest evidence for circuit",
+        "Historical alert not found",
+        "Graph entities",
+        "Observed",
+        "Baseline",
+    ):
+        assert expected in asset
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:
@@ -728,12 +757,12 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     assert "Alert Evidence" in readme_text
     assert "evidence_path" in readme_text
     assert "graph_entities" in readme_text
+    assert "dynamic Alert Evidence panel" in readme_text
     assert "Companion App" in readme_text
     assert "clickAction" in readme_text
-    assert "/circuitsetup-energy-analyzer/alert-evidence" in readme_text
-    assert "create a Home Assistant dashboard" in readme_text
-    assert "URL `/circuitsetup-energy-analyzer`" in readme_text
-    assert "view path of `alert-evidence`" in readme_text
+    assert "/circuitsetup-energy-analyzer-evidence" in readme_text
+    assert "standard dashboard is a fallback" in normalized_text
+    assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include a Markdown link" in normalized_text
 

@@ -1,98 +1,121 @@
-# Alert Evidence Routing Design
+# Alert Evidence Dynamic Panel Design
 
 ## Goal
 
-Make notification evidence links land on the graph context for the appliance or
-circuit that produced the alert. The V1 implementation should work with standard
-Home Assistant dashboard YAML, preserve the current alert evidence attributes,
-and avoid claiming that Lovelace cards can dynamically swap content from URL
-query parameters when they cannot.
+Make notification evidence links open a dynamic Home Assistant page that shows
+the specific graph and evidence for the alert that the user clicked.
 
 ## Problem
 
-The integration now adds `alert_id`, `circuit_id`, and `feature` query
-parameters to notification links. Home Assistant preserves those parameters in
-the browser URL, but standard Lovelace cards do not use them to choose entities.
-That means a notification for a water heater, refrigerator, washer, dryer, or
-other circuit can open the Alert Evidence view while still showing a graph that
-was manually written for HVAC.
+The integration can already attach `alert_id`, `circuit_id`, and `feature`
+parameters to notification links, and it can expose graph metadata on
+`sensor.<circuit>_alert_evidence`. Standard Lovelace dashboard cards do not use
+URL query parameters to change the entities shown in a history graph. A static
+dashboard therefore cannot reliably show the graph for the notification that was
+clicked.
 
-## Recommended V1 Design
+## Recommended Design
 
-Use per-circuit Alert Evidence dashboard views.
+Build an integration-owned custom Home Assistant panel as the primary evidence
+surface.
 
-Notification links should prefer a circuit-specific path:
+The notification link should point to:
 
-- `/circuitsetup-energy-analyzer/alert-evidence-hvac`
-- `/circuitsetup-energy-analyzer/alert-evidence-water-heater`
-- `/circuitsetup-energy-analyzer/alert-evidence-refrigerator`
-- `/circuitsetup-energy-analyzer/alert-evidence-washer`
-- `/circuitsetup-energy-analyzer/alert-evidence-dryer`
+`/circuitsetup-energy-analyzer-evidence?alert_id=<id>&circuit_id=<id>&feature=<feature>`
 
-Each path still includes the existing query parameters:
+This path intentionally does not reuse `/circuitsetup-energy-analyzer` because
+users may already have a Lovelace dashboard at that URL.
 
-- `alert_id`
-- `circuit_id`
-- `feature`
+The panel should:
 
-The general `/circuitsetup-energy-analyzer/alert-evidence` view remains a
-fallback and index for users who have not added per-circuit sections.
+- Read the URL query parameters.
+- Fetch a JSON evidence payload from the integration backend.
+- Show the alert message, severity, circuit, feature, observed value, baseline
+  value, percent change, repeated count, first seen, last seen, and source
+  entities.
+- Render a graph using the returned `graph_entities` and graph window.
+- Explain whether the displayed alert is an exact alert ID match, a fallback to
+  the latest evidence for the requested circuit, or unavailable.
+- Offer alert feedback actions: Acknowledge, Mark Expected, and Mark Unhelpful.
 
-## Data Flow
+The existing Lovelace dashboard example remains useful as a fallback and as a
+general overview, but it is no longer the primary notification destination.
 
-1. Analyzer creates or refreshes an `AlertEvidence` object.
-2. Alert evidence details continue to populate `sensor.<circuit>_alert_evidence`
-   attributes, including `alert_id`, `feature`, `graph_entities`,
-   `source_entities`, `graph_window_start`, and `graph_window_end`.
-3. The evidence path helper slugifies the circuit ID and builds a route like
-   `/circuitsetup-energy-analyzer/alert-evidence-<circuit-slug>?alert_id=...`.
-4. Persistent notifications and the alert blueprint use that path.
-5. The dashboard sample contains matching per-circuit views with the relevant
-   Alert Evidence entity and graph cards.
+## Backend Design
 
-## Dashboard Behavior
+Add a focused frontend/panel module for the integration.
 
-The dashboard sample should include:
+Responsibilities:
 
-- A general `Alert Evidence` view at `path: alert-evidence`.
-- One appliance-focused view per demo circuit.
-- A small index/list on the general view that explains the per-circuit evidence
-  views and links to them.
-- Per-circuit graph cards for the entities that are most useful for that
-  appliance type.
+- Register static frontend assets served by the integration.
+- Register the custom panel route.
+- Register an authenticated HTTP endpoint that returns alert evidence JSON.
+- Resolve alert evidence by `alert_id` first, then by `circuit_id`, then return
+  an unavailable payload when nothing matches.
 
-Because standard dashboard YAML cannot read URL query parameters, the graph card
-entities are static within each per-circuit view. The query parameters remain
-valuable for evidence attributes, blueprint actions, browser context, and future
-custom frontend work.
+The payload should be JSON-safe and should include:
+
+- `status`: `matched_alert`, `latest_for_circuit`, or `not_found`.
+- `alert`: the alert evidence detail returned by existing UX helpers, when
+  available.
+- `circuit`: display metadata for the circuit config, when available.
+- `actions`: service names and data needed by the frontend buttons.
+
+## Frontend Design
+
+Create a dependency-free JavaScript module under the integration directory. It
+should define a custom panel element that Home Assistant can load as a module.
+
+The panel should use normal browser APIs and the Home Assistant `hass` object
+available to custom panels. It should:
+
+- Parse `window.location.search`.
+- Call the integration evidence endpoint.
+- Render a clear diagnostic page with sections for Summary, Evidence, Graph,
+  Source Entities, and Actions.
+- Render the graph by embedding the built-in Home Assistant history panel URL or
+  by using Home Assistant frontend history components when available. For V1,
+  the embedded history URL is acceptable because it is dynamic, authenticated,
+  and can be built from the selected entity IDs.
+- Use accessible buttons and plain text labels.
+- Call integration services through `hass.callService`.
 
 ## Link Rules
 
-- Slug circuit IDs with lowercase letters, digits, and hyphens.
-- Convert underscores, spaces, and punctuation to hyphens so route segments
-  contain only lowercase letters, digits, and hyphens.
-- Keep the existing query parameters intact.
-- Fall back to `/circuitsetup-energy-analyzer/alert-evidence` if a caller
-  explicitly disables per-circuit routing or a blank circuit ID is encountered.
+- Keep existing query parameters: `alert_id`, `circuit_id`, and `feature`.
+- Default notification links to `/circuitsetup-energy-analyzer-evidence`.
+- Preserve a dashboard fallback path constant for README/dashboard examples.
+- Do not generate per-circuit static routes as the primary behavior.
+
+## Error Handling
+
+- If `alert_id` is missing but `circuit_id` is present, show latest evidence for
+  that circuit.
+- If an old notification references an alert that is no longer retained, show a
+  clear "historical alert not found" message and any latest evidence available
+  for the circuit.
+- If graph entities are missing, show the evidence text and source entities
+  instead of an empty graph.
+- If the backend endpoint is unavailable, show a retry button and the request
+  path that failed.
 
 ## Testing
 
 Tests should cover:
 
-- Alert evidence paths route to `alert-evidence-<circuit-slug>`.
-- Query parameters still include alert ID, circuit ID, and feature.
-- Circuit IDs with spaces, underscores, and punctuation create safe paths.
-- The dashboard example contains a general Alert Evidence view and matching
-  per-circuit views for the demo circuits.
-- The dashboard example no longer hard-codes only HVAC as the evidence graph
-  destination.
-- Existing alert evidence attributes and notification message tests continue to
-  pass.
+- Notification links point to the dynamic evidence panel path.
+- Alert evidence paths preserve `alert_id`, `circuit_id`, and `feature`.
+- Backend payload resolution returns exact alert ID matches.
+- Backend payload resolution falls back to latest circuit evidence.
+- Backend payload resolution returns `not_found` for unknown alerts/circuits.
+- Panel/static asset registration is idempotent and unload-safe.
+- The JavaScript asset contains the custom element, URL parsing, endpoint fetch,
+  graph rendering, and alert feedback service calls.
+- Existing dashboard tests continue to pass as fallback documentation.
 
 ## Rollout
 
-This is a backwards-compatible dashboard and notification-link improvement.
-Existing notifications that point at `/alert-evidence` still open the general
-view. New notifications should route to per-circuit views. Users with customized
-dashboards can either import the updated sample or create matching view paths for
-their configured circuits.
+This change is backwards compatible for entity data and services. New
+notifications should open the dynamic panel. Existing dashboard links still work,
+but README and blueprint examples should guide users toward the dynamic evidence
+panel as the better default.

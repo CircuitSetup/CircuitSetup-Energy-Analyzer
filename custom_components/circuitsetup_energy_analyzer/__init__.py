@@ -4,6 +4,7 @@ from typing import Any
 
 from .const import CONF_SOURCE_ENTITIES, DOMAIN, PLATFORMS
 from .coordinator import EnergyAnalyzerCoordinator
+from .panel import async_setup_panel, async_unload_panel
 from .services import async_setup_services, async_unload_services
 from .storage import FeatureStore, FeatureStoreData
 
@@ -13,7 +14,7 @@ _SERVICES_SETUP_KEY = "_services_setup"
 
 
 def _has_config_entries(domain_data: dict[str, Any]) -> bool:
-    return any(key != _SERVICES_SETUP_KEY for key in domain_data)
+    return any(not str(key).startswith("_") for key in domain_data)
 
 
 async def async_setup_entry(
@@ -36,6 +37,7 @@ async def async_setup_entry(
     try:
         if first_entry:
             await async_setup_services(hass)
+            await async_setup_panel(hass)
         await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -43,6 +45,7 @@ async def async_setup_entry(
         hass.data.get(DOMAIN, {}).pop(entry_id, None)
         await coordinator.async_stop()
         if first_entry and not _has_config_entries(hass.data.get(DOMAIN, {})):
+            await async_unload_panel(hass)
             await async_unload_services(hass)
         raise
     return True
@@ -61,6 +64,7 @@ async def async_unload_entry(
         if coordinator is not None:
             await coordinator.async_stop()
         if not _has_config_entries(hass.data.get(DOMAIN, {})):
+            await async_unload_panel(hass)
             await async_unload_services(hass)
     return unload_ok
 

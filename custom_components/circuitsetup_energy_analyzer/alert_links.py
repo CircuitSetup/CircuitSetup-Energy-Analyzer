@@ -5,7 +5,10 @@ from urllib.parse import urlencode
 
 from .models import AlertEvidence, CircuitConfig, SensorRole
 
-DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer/alert-evidence"
+DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer-evidence"
+DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
+    "/circuitsetup-energy-analyzer/alert-evidence"
+)
 MAX_GRAPH_ENTITIES = 8
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (

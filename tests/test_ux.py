@@ -68,11 +68,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         ),
     )
 
-    detail = alert_evidence_detail(
-        alert,
-        config=config,
-        dashboard_path="/circuitsetup-energy-analyzer/alert-evidence",
-    )
+    detail = alert_evidence_detail(alert, config=config)
 
     assert detail["alert_id"] == notification_id_for_alert(alert)
     assert detail["circuit_id"] == "fridge"
@@ -94,7 +90,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "reactive_power": 2.1,
     }
     assert detail["evidence_path"].startswith(
-        "/circuitsetup-energy-analyzer/alert-evidence?"
+        "/circuitsetup-energy-analyzer-evidence?"
     )
     assert detail["graph_entities"] == [
         "sensor.fridge_reactive_power",

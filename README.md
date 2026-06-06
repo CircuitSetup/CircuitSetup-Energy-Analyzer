@@ -298,12 +298,12 @@ circuits.
 2. Open the entity details and review attributes such as `status_explanation`,
    observed values, thresholds, sample counts, source entities, and timestamps.
 3. Persistent notifications include a Markdown link named `Open evidence graph`.
-   It opens `/circuitsetup-energy-analyzer/alert-evidence`, the Alert Evidence
-   dashboard section with the alert ID, circuit, and feature in the URL.
-4. Before relying on that default link, create a Home Assistant dashboard with
-   URL `/circuitsetup-energy-analyzer` and a view path of `alert-evidence`.
-   Import or adapt `docs/dashboard-example.yaml` into that dashboard/view, or
-   plan to customize the notification path later.
+   It opens `/circuitsetup-energy-analyzer-evidence`, the dynamic Alert Evidence panel
+   with the alert ID, circuit, and feature in the URL. The panel dynamically
+   selects graph entities and the graph window from the alert evidence payload.
+4. The standard dashboard is a fallback. Import or adapt
+   `docs/dashboard-example.yaml` when you want overview cards or a static
+   dashboard view alongside the dynamic panel.
 5. The related Alert Evidence entity exposes `evidence_path`, `graph_entities`,
    `source_entities`, `graph_window_start`, and `graph_window_end` attributes.
    Use them when dashboard cards, blueprints, or notifications need to point to

@@ -67,10 +67,24 @@ def test_alert_evidence_path_contains_alert_context() -> None:
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
 
-    assert parsed.path == "/circuitsetup-energy-analyzer/alert-evidence"
+    assert parsed.path == "/circuitsetup-energy-analyzer-evidence"
     assert params["circuit_id"] == ["hvac"]
     assert params["feature"] == ["leg_imbalance"]
     assert params["alert_id"][0].startswith("circuitsetup_energy_analyzer_alert_hvac_")
+
+
+def test_alert_evidence_path_can_target_dashboard_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH,
+        alert_evidence_path,
+    )
+
+    path = alert_evidence_path(
+        _alert(),
+        dashboard_path=DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH,
+    )
+
+    assert urlparse(path).path == "/circuitsetup-energy-analyzer/alert-evidence"
 
 
 def test_alert_evidence_path_uses_event_type_when_feature_missing() -> None:
