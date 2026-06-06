@@ -78,7 +78,7 @@ def alert_graph_entities(
 
     selected: list[str] = []
     seen: set[str] = set()
-    for role in _roles_for_feature(alert.feature):
+    for role in _roles_for_feature(_feature_for_alert(alert)):
         for sensor in config.sensors:
             if sensor.role != role or sensor.entity_id in seen:
                 continue

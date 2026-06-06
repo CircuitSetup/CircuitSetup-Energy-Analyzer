@@ -137,6 +137,39 @@ def test_alert_graph_entities_returns_empty_without_config() -> None:
     assert alert_graph_entities(_alert(), None) == ()
 
 
+def test_alert_graph_entities_uses_event_type_when_feature_missing() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="panel",
+        severity=Severity.WARNING,
+        message="Voltage sag detected",
+        event_type=EventType.VOLTAGE_SAG,
+        feature="",
+    )
+    config = CircuitConfig(
+        circuit_id="panel",
+        name="Panel",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef("sensor.panel_reactive", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.panel_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.panel_watts", SensorRole.REAL_POWER),
+            SensorRef("sensor.panel_current", SensorRole.CURRENT),
+        ),
+    )
+
+    assert alert_graph_entities(alert, config) == (
+        "sensor.panel_voltage",
+        "sensor.panel_watts",
+        "sensor.panel_current",
+    )
+
+
 def test_alert_source_entities_returns_unique_configured_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_source_entities,
