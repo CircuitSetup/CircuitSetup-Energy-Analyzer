@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .models import AlertEvidence, CircuitEvent
+from .ux import friendly_feature_name
 
 DEFAULT_TIMELINE_WINDOW_HOURS = 24
 DEFAULT_TIMELINE_MAX_ITEMS = 8
@@ -116,13 +117,15 @@ def _alert_item(alert: AlertEvidence) -> dict[str, Any]:
     feature = alert.feature or (
         alert.event_type.value if alert.event_type is not None else "alert"
     )
+    feature_name = friendly_feature_name(feature)
     return {
         "timestamp": alert.timestamp.isoformat(),
         "kind": "alert",
-        "title": f"Possible issue: {feature.replace('_', ' ')}",
+        "title": f"Possible issue: {feature_name}",
         "detail": alert.message,
         "severity": alert.severity.value,
         "feature": alert.feature or None,
+        "feature_name": feature_name,
         "event_type": alert.event_type.value if alert.event_type else None,
         "observed_value": alert.observed_value,
         "baseline_value": alert.baseline_value,

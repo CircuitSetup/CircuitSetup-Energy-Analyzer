@@ -81,6 +81,8 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["status"] == "matched_alert"
     assert payload["alert"]["alert_id"] == notification_id_for_alert(alert)
     assert payload["alert"]["circuit_id"] == "hvac"
+    assert payload["alert"]["feature"] == "leg_imbalance"
+    assert payload["alert"]["feature_name"] == "Leg Imbalance"
     assert payload["alert"]["graph_entities"] == [
         "sensor.hvac_l1_watts",
         "sensor.hvac_l2_watts",
@@ -119,6 +121,7 @@ def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None
     assert payload["requested_alert_id"] == "old-notification-id"
     assert payload["alert"]["alert_id"] == notification_id_for_alert(latest)
     assert payload["alert"]["feature"] == "demand_monthly_peak"
+    assert payload["alert"]["feature_name"] == "Demand Monthly Peak"
 
 
 def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:

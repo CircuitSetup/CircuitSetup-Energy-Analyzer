@@ -662,7 +662,7 @@ async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
 
     assert (
         coordinator.state.recent_activity_by_circuit["fridge"]
-        == "Possible issue: cycle duration"
+        == "Possible issue: Cycle Duration"
     )
     assert coordinator.state.recent_activity_count_by_circuit["fridge"] == 2
     assert coordinator.state.recent_activity_timeline_by_circuit["fridge"] == {
@@ -671,16 +671,17 @@ async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
         "total_count": 2,
         "event_count": 1,
         "alert_count": 1,
-        "latest_title": "Possible issue: cycle duration",
+        "latest_title": "Possible issue: Cycle Duration",
         "latest_timestamp": alert.timestamp.isoformat(),
         "items": [
             {
                 "timestamp": alert.timestamp.isoformat(),
                 "kind": "alert",
-                "title": "Possible issue: cycle duration",
+                "title": "Possible issue: Cycle Duration",
                 "detail": "Possible issue: Fridge cycle duration changed.",
                 "severity": "warning",
                 "feature": "cycle_duration",
+                "feature_name": "Cycle Duration",
                 "event_type": None,
                 "observed_value": 45.0,
                 "baseline_value": 30.0,

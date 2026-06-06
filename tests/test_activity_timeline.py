@@ -50,7 +50,7 @@ def test_recent_activity_timeline_merges_events_and_alerts_newest_first() -> Non
     )
 
     assert summary.status == "activity"
-    assert summary.latest_title == "Possible issue: cycle duration"
+    assert summary.latest_title == "Possible issue: Cycle Duration"
     assert summary.latest_timestamp == alert.timestamp.isoformat()
     assert summary.event_count == 1
     assert summary.alert_count == 1
@@ -59,10 +59,11 @@ def test_recent_activity_timeline_merges_events_and_alerts_newest_first() -> Non
         {
             "timestamp": alert.timestamp.isoformat(),
             "kind": "alert",
-            "title": "Possible issue: cycle duration",
+            "title": "Possible issue: Cycle Duration",
             "detail": "Possible issue: Fridge run duration changed.",
             "severity": "warning",
             "feature": "cycle_duration",
+            "feature_name": "Cycle Duration",
             "event_type": None,
             "observed_value": 45.0,
             "baseline_value": 30.0,

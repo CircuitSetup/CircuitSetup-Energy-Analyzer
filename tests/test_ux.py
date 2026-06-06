@@ -33,6 +33,16 @@ def test_normalize_sensitivity_accepts_friendly_and_legacy_names() -> None:
     assert alert_policy_name_for_sensitivity("sensitive") == "high"
 
 
+def test_friendly_feature_name_formats_machine_keys_for_display() -> None:
+    from custom_components.circuitsetup_energy_analyzer.ux import friendly_feature_name
+
+    assert friendly_feature_name("demand_monthly_peak") == "Demand Monthly Peak"
+    assert friendly_feature_name("reactive_to_real_ratio") == "Reactive To Real Ratio"
+    assert friendly_feature_name("nilm_leg_mismatch") == "NILM Leg Mismatch"
+    assert friendly_feature_name("") == "Alert"
+    assert friendly_feature_name(None) == "Alert"
+
+
 def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         notification_id_for_alert,
@@ -73,6 +83,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     assert detail["alert_id"] == notification_id_for_alert(alert)
     assert detail["circuit_id"] == "fridge"
     assert detail["feature"] == "reactive_to_real_ratio"
+    assert detail["feature_name"] == "Reactive To Real Ratio"
     assert detail["severity"] == "warning"
     assert detail["message"] == "Possible issue"
     assert detail["baseline_value"] == 0.24
@@ -108,6 +119,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": "fridge",
         "feature": "reactive_to_real_ratio",
+        "feature_name": "Reactive To Real Ratio",
         "severity": "warning",
         "message": "Possible issue",
         "baseline_value": 0.24,

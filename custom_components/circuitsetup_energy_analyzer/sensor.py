@@ -17,6 +17,7 @@ from .entity import (
     sync_entity_registry_categories,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .ux import friendly_feature_name
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -146,11 +147,16 @@ def alert_evidence_value(state: Any, circuit_id: str) -> str:
     """Return the feature named in the latest alert evidence."""
     evidence = getattr(state, "alert_evidence_by_circuit", {}).get(circuit_id, {})
     if isinstance(evidence, Mapping):
-        return str(evidence.get("feature") or "")
+        if evidence.get("feature_name"):
+            return str(evidence["feature_name"])
+        if evidence.get("feature"):
+            return friendly_feature_name(evidence.get("feature"))
+        return ""
 
     alerts = getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, [])
     if alerts:
-        return str(getattr(alerts[-1], "feature", "") or "")
+        feature = getattr(alerts[-1], "feature", "")
+        return friendly_feature_name(feature) if feature else ""
     return ""
 
 

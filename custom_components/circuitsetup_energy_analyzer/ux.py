@@ -54,6 +54,15 @@ ROLE_SAMPLE_FIELDS = {
     SensorRole.FREQUENCY: "frequency",
     SensorRole.ENERGY: "energy",
 }
+FEATURE_TOKEN_LABELS = {
+    "hvac": "HVAC",
+    "kwh": "kWh",
+    "nilm": "NILM",
+    "pf": "PF",
+    "s": "Seconds",
+    "va": "VA",
+    "var": "VAR",
+}
 
 
 def normalize_sensitivity(value: Any) -> str:
@@ -66,6 +75,20 @@ def alert_policy_name_for_sensitivity(value: Any) -> str:
     return POLICY_SENSITIVITY_ALIASES[normalize_sensitivity(value)]
 
 
+def friendly_feature_name(value: Any) -> str:
+    """Return a human-readable label for an internal alert feature key."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "Alert"
+    words = []
+    for token in raw.replace("-", "_").split("_"):
+        token = token.strip()
+        if not token:
+            continue
+        words.append(FEATURE_TOKEN_LABELS.get(token.lower(), token.title()))
+    return " ".join(words) or "Alert"
+
+
 def alert_evidence_detail(
     alert: AlertEvidence,
     *,
@@ -76,10 +99,12 @@ def alert_evidence_detail(
     first_seen = _isoformat_or_none(alert.first_seen)
     last_seen = _isoformat_or_none(alert.last_seen)
     graph_window_start, graph_window_end = alert_graph_window(alert)
+    feature = _alert_feature(alert)
     return {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": alert.circuit_id,
-        "feature": _alert_feature(alert),
+        "feature": feature,
+        "feature_name": friendly_feature_name(feature),
         "severity": alert.severity.value,
         "message": alert.message,
         "baseline_value": alert.baseline_value,

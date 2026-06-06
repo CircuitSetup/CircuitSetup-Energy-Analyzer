@@ -367,7 +367,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <section class="panel summary">
         ${this._metric("Circuit", (circuit && circuit.name) || alert.circuit_id)}
-        ${this._metric("Feature", alert.feature)}
+        ${this._metric("Feature", alert.feature_name || this._friendlyFeature(alert.feature))}
         ${this._metric("Observed", alert.observed_value)}
         ${this._metric("Baseline", alert.baseline_value)}
         ${this._metric("Change", `${alert.percent_change}%`)}
@@ -547,6 +547,26 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatNumber(value) {
     return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  _friendlyFeature(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return "Alert";
+    }
+    const labels = {
+      hvac: "HVAC",
+      kwh: "kWh",
+      nilm: "NILM",
+      pf: "PF",
+      s: "Seconds",
+      va: "VA",
+      var: "VAR",
+    };
+    return raw.split(/[_-]+/)
+      .filter((token) => token)
+      .map((token) => labels[token.toLowerCase()] || token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
+      .join(" ") || "Alert";
   }
 
   _escape(value) {

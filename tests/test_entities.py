@@ -390,12 +390,17 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
             "fridge": {"status": "ready", "ready_energy_entities": []}
         },
         alert_evidence_by_circuit={"fridge": {"feature": "reactive_power"}},
-        recent_activity_by_circuit={"fridge": "Possible issue: cycle duration"},
+        recent_activity_by_circuit={"fridge": "Possible issue: Cycle Duration"},
         recent_activity_count_by_circuit={"fridge": 2},
         recent_activity_timeline_by_circuit={
             "fridge": {
                 "status": "activity",
-                "items": [{"title": "Possible issue: cycle duration"}],
+                "items": [
+                    {
+                        "title": "Possible issue: Cycle Duration",
+                        "feature_name": "Cycle Duration",
+                    }
+                ],
             }
         },
         sensitivity_by_circuit={"fridge": "quiet"},
@@ -537,8 +542,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert data_quality_checklist_value(state, "fridge") == "ok"
     assert data_quality_checklist_value(state, "well_pump") == "problem"
     assert energy_dashboard_status_value(state, "fridge") == "ready"
-    assert alert_evidence_value(state, "fridge") == "reactive_power"
-    assert recent_activity_value(state, "fridge") == "Possible issue: cycle duration"
+    assert alert_evidence_value(state, "fridge") == "Reactive Power"
+    assert recent_activity_value(state, "fridge") == "Possible issue: Cycle Duration"
     assert recent_activity_count_value(state, "fridge") == 2
     assert sensitivity_value(state, "fridge") == "quiet"
     assert circuit_mode_value(state, "fridge") == "Dual Phase"
@@ -1275,7 +1280,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
     recent_activity = {
         "status": "activity",
         "total_count": 2,
-        "items": [{"title": "Possible issue: cycle duration"}],
+        "items": [{"title": "Possible issue: Cycle Duration"}],
     }
     energy_evidence = {
         "status": "tracking",

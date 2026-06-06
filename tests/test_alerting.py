@@ -34,6 +34,8 @@ def test_policy_waits_for_repeated_observations() -> None:
     assert alert is not None
     assert alert.repeated_count == 3
     assert "Possible issue" in alert.message
+    assert "Cycle Duration shows evidence" in alert.message
+    assert "cycle_duration" not in alert.message
     assert "evidence of a learned-baseline change" in alert.message
 
 

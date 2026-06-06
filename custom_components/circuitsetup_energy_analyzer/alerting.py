@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Self
 
 from .models import AlertEvidence, Severity
+from .ux import friendly_feature_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +70,7 @@ class ConservativeAlertPolicy:
         first = observations[0]
         last = observations[-1]
         change_ratio = self._change_ratio(last.observed_value, last.baseline_value)
-        feature_words = observation.feature.replace("_", " ")
+        feature_words = friendly_feature_name(observation.feature)
         message = last.message or (
             f"Possible issue: {feature_words} shows evidence of a "
             f"learned-baseline change across {len(observations)} recent "
