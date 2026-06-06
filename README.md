@@ -204,7 +204,20 @@ checklist entities while troubleshooting.
 
 ### Configure the optional features you actually need
 
-Most options are set from Home Assistant Developer Tools > Actions. Choose the
+Most appliance and circuit settings are changed from the integration options:
+go to Home Assistant **Settings > Devices & services > CircuitSetup Energy
+Analyzer > Configure**, then choose **Advanced Circuit Settings**. Pick the
+appliance or circuit first. The form shows the appliance at the top and only
+shows settings that apply to that appliance or circuit, such as energy goals,
+activity limits, billing and cost, demand and capacity, standby, dual-phase
+imbalance, power metric consistency, mains balance, or solar flow.
+
+Use **Review Circuit Assignments** in the same Configure panel when you need to
+change which sensors belong to an appliance, change Single Phase versus Dual
+Phase, mark a circuit as Mixed, or correct the appliance type.
+
+Developer Tools actions are still available for advanced users, scripts, and
+automations that need to set the same values programmatically. Choose the
 `circuitsetup_energy_analyzer` action, enter the configured `circuit_id`, then
 set only the values you want to change.
 

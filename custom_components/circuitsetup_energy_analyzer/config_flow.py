@@ -107,6 +107,16 @@ except ModuleNotFoundError:
     )
     ha_selector = None
 
+try:
+    from homeassistant.data_entry_flow import section
+except (ImportError, ModuleNotFoundError):
+
+    def section(
+        schema: Any,
+        options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        return schema
+
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -193,6 +203,7 @@ FIELD_UTILITY_SOURCE_TYPE = "utility_source_type"
 FIELD_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
 FIELD_MEASURED_ENERGY_ENTITIES = "measured_energy_entities"
 FIELD_TOLERANCE_PERCENT = "tolerance_percent"
+FIELD_SELECTED_APPLIANCE = "selected_appliance"
 FIELD_PRESET = "preset"
 FIELD_WINDOW_DAYS = "window_days"
 FIELD_DAILY_SPIKE_RATIO = "daily_spike_ratio"
@@ -228,6 +239,28 @@ FIELD_SOLAR_EXPORT_TOLERANCE_W = "solar_export_tolerance_w"
 FIELD_SOLAR_SURPLUS_THRESHOLD_W = "solar_surplus_threshold_w"
 FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W = "high_solar_surplus_threshold_w"
 FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
+SECTION_ANALYSIS_SETTINGS = "analysis_settings"
+SECTION_ENERGY_SETTINGS = "energy_settings"
+SECTION_ACTIVITY_SETTINGS = "activity_settings"
+SECTION_BILLING_COST_SETTINGS = "billing_cost_settings"
+SECTION_DEMAND_CAPACITY_SETTINGS = "demand_capacity_settings"
+SECTION_STANDBY_SETTINGS = "standby_settings"
+SECTION_DUAL_PHASE_SETTINGS = "dual_phase_settings"
+SECTION_POWER_QUALITY_SETTINGS = "power_quality_settings"
+SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
+SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
+_ADVANCED_SECTION_KEYS = {
+    SECTION_ANALYSIS_SETTINGS,
+    SECTION_ENERGY_SETTINGS,
+    SECTION_ACTIVITY_SETTINGS,
+    SECTION_BILLING_COST_SETTINGS,
+    SECTION_DEMAND_CAPACITY_SETTINGS,
+    SECTION_STANDBY_SETTINGS,
+    SECTION_DUAL_PHASE_SETTINGS,
+    SECTION_POWER_QUALITY_SETTINGS,
+    SECTION_MAINS_BALANCE_SETTINGS,
+    SECTION_SOLAR_FLOW_SETTINGS,
+}
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
     ApplianceProfile.REFRIGERATOR.value,
@@ -596,6 +629,10 @@ def _text_selector() -> Any:
     return _selector({"text": {"multiple": False}}, str)
 
 
+def _read_only_text_selector() -> Any:
+    return _selector({"text": {"multiple": False, "read_only": True}}, str)
+
+
 def sensitivity_options() -> list[dict[str, str]]:
     return [
         {"value": value, "label": _SENSITIVITY_LABELS[value]}
@@ -874,202 +911,447 @@ def _nilm_schema(
     )
 
 
-def _advanced_settings_schema(current_settings: Mapping[str, Any] | None = None) -> Any:
+def _advanced_settings_schema(
+    current_settings: Mapping[str, Any] | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> Any:
     settings = dict(current_settings or {})
-    return vol.Schema(
+    circuit_context = _advanced_circuit_context(context)
+    schema: dict[Any, Any] = {
+        vol.Optional(
+            FIELD_SELECTED_APPLIANCE,
+            default=_advanced_context_display(circuit_context),
+        ): _read_only_text_selector(),
+    }
+
+    _add_advanced_section(
+        schema,
+        SECTION_ANALYSIS_SETTINGS,
         {
             vol.Optional(
                 FIELD_PRESET,
                 default=str(settings.get(FIELD_PRESET, DEFAULT_SENSITIVITY)),
             ): _select_selector(sensitivity_options()),
-            vol.Optional(
-                FIELD_WINDOW_DAYS,
-                default=int(settings.get(FIELD_WINDOW_DAYS, 7)),
-            ): _number_selector(minimum=1, maximum=90, step=1),
-            vol.Optional(
-                FIELD_DAILY_SPIKE_RATIO,
-                default=float(settings.get(FIELD_DAILY_SPIKE_RATIO, 0.25)),
-            ): _number_selector(minimum=0.01, maximum=5.0, step=0.01),
-            vol.Optional(
-                FIELD_DAILY_GOAL_KWH,
-                default=float(settings.get(FIELD_DAILY_GOAL_KWH, 0.0)),
-            ): _number_selector(minimum=0.0, step=0.1),
-            vol.Optional(
-                FIELD_GOAL_ALERT_RATIO,
-                default=float(settings.get(FIELD_GOAL_ALERT_RATIO, 1.0)),
-            ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
-            vol.Optional(
-                FIELD_MAX_ACTIVE_MINUTES,
-                default=int(settings.get(FIELD_MAX_ACTIVE_MINUTES, 0)),
-            ): _number_selector(minimum=0, step=1),
-            vol.Optional(
-                FIELD_MAX_IDLE_MINUTES,
-                default=int(settings.get(FIELD_MAX_IDLE_MINUTES, 0)),
-            ): _number_selector(minimum=0, step=1),
-            vol.Optional(
-                FIELD_CYCLE_START_DAY,
-                default=int(settings.get(FIELD_CYCLE_START_DAY, 1)),
-            ): _number_selector(minimum=1, maximum=31, step=1),
-            vol.Optional(
-                FIELD_BUDGET_KWH,
-                default=float(settings.get(FIELD_BUDGET_KWH, 0.0)),
-            ): _number_selector(minimum=0.0, step=0.1),
-            vol.Optional(
-                FIELD_BUDGET_ALERT_RATIO,
-                default=float(settings.get(FIELD_BUDGET_ALERT_RATIO, 1.0)),
-            ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
-            vol.Optional(
-                FIELD_BILLING_MIN_ELAPSED_DAYS,
-                default=int(settings.get("min_elapsed_days", 3)),
-            ): _number_selector(minimum=1, maximum=31, step=1),
-            vol.Optional(
-                FIELD_DEFAULT_RATE_PER_KWH,
-                default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
-            ): _number_selector(minimum=0.0, step="any"),
-            vol.Optional(
-                FIELD_TOU_RATE_PER_KWH,
-                default=float(settings.get(FIELD_TOU_RATE_PER_KWH, 0.0)),
-            ): _number_selector(minimum=0.0, step="any"),
-            vol.Optional(
-                FIELD_TOU_START,
-                default=str(settings.get(FIELD_TOU_START) or ""),
-            ): _text_selector(),
-            vol.Optional(
-                FIELD_TOU_END,
-                default=str(settings.get(FIELD_TOU_END) or ""),
-            ): _text_selector(),
-            vol.Optional(
-                FIELD_TOU_WEEKDAYS,
-                default=str(settings.get(FIELD_TOU_WEEKDAYS) or ""),
-            ): _text_selector(),
-            vol.Optional(
-                FIELD_TOU_NAME,
-                default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
-            ): _text_selector(),
-            vol.Optional(
-                FIELD_WINDOW_MINUTES,
-                default=int(settings.get(FIELD_WINDOW_MINUTES, 15)),
-            ): _number_selector(minimum=1, maximum=240, step=1),
-            vol.Optional(
-                FIELD_DEMAND_LIMIT_W,
-                default=float(settings.get(FIELD_DEMAND_LIMIT_W, 0.0)),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_BREAKER_AMPS,
-                default=float(settings.get(FIELD_BREAKER_AMPS, 0.0)),
-            ): _number_selector(minimum=0.0, step=0.1),
-            vol.Optional(
-                FIELD_WARNING_RATIO,
-                default=float(settings.get(FIELD_WARNING_RATIO, 0.8)),
-            ): _number_selector(minimum=0.0, maximum=1.0, step=0.01),
-            vol.Optional(
-                FIELD_WINDOW_HOURS,
-                default=int(settings.get(FIELD_WINDOW_HOURS, 48)),
-            ): _number_selector(minimum=1, maximum=720, step=1),
-            vol.Optional(
-                FIELD_STANDBY_THRESHOLD_W,
-                default=float(settings.get(FIELD_STANDBY_THRESHOLD_W, 8.0)),
-            ): _number_selector(minimum=0.0, step=0.1),
-            vol.Optional(
-                FIELD_ALWAYS_ON_ALERT_W,
-                default=float(settings.get(FIELD_ALWAYS_ON_ALERT_W, 0.0)),
-            ): _number_selector(minimum=0.0, step=0.1),
-            vol.Optional(
-                FIELD_STANDBY_MIN_SAMPLES,
-                default=int(settings.get("min_samples", 24)),
-            ): _number_selector(minimum=1, maximum=720, step=1),
-            vol.Optional(
-                FIELD_LEG_IMBALANCE_WARNING_RATIO,
-                default=float(
-                    settings.get(
-                        FIELD_LEG_IMBALANCE_WARNING_RATIO,
-                        DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
-                    )
-                ),
-            ): _number_selector(minimum=0.01, maximum=2.0, step=0.01),
-            vol.Optional(
-                FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-                default=float(
-                    settings.get(
-                        FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-                        DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
-                default=float(
-                    settings.get(
-                        FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
-                        DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
-                    )
-                ),
-            ): _number_selector(minimum=0.1, maximum=100.0, step=0.1),
-            vol.Optional(
-                FIELD_POWER_FACTOR_TOLERANCE,
-                default=float(
-                    settings.get(
-                        FIELD_POWER_FACTOR_TOLERANCE,
-                        DEFAULT_POWER_FACTOR_TOLERANCE,
-                    )
-                ),
-            ): _number_selector(minimum=0.001, maximum=1.0, step=0.001),
-            vol.Optional(
-                FIELD_MINIMUM_APPARENT_POWER_VA,
-                default=float(
-                    settings.get(
-                        FIELD_MINIMUM_APPARENT_POWER_VA,
-                        DEFAULT_MIN_APPARENT_POWER_VA,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
-                default=float(
-                    settings.get(
-                        FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
-                        DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_SOLAR_EXPORT_TOLERANCE_W,
-                default=float(
-                    settings.get(
-                        FIELD_SOLAR_EXPORT_TOLERANCE_W,
-                        EXPORT_TOLERANCE_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_SOLAR_SURPLUS_THRESHOLD_W,
-                default=float(
-                    settings.get(
-                        FIELD_SOLAR_SURPLUS_THRESHOLD_W,
-                        SOLAR_SURPLUS_THRESHOLD_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-                default=float(
-                    settings.get(
-                        FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-                        HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-            vol.Optional(
-                FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-                default=float(
-                    settings.get(
-                        FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-                        FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-                    )
-                ),
-            ): _number_selector(minimum=0.0, step=1),
-        }
+        },
+        collapsed=False,
     )
+    if _advanced_show_energy_settings(circuit_context):
+        _add_advanced_section(schema, SECTION_ENERGY_SETTINGS, _energy_fields(settings))
+    if _advanced_show_activity_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_ACTIVITY_SETTINGS,
+            _activity_fields(settings),
+        )
+    if _advanced_show_billing_cost_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_BILLING_COST_SETTINGS,
+            _billing_cost_fields(settings),
+        )
+    if _advanced_show_demand_capacity_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_DEMAND_CAPACITY_SETTINGS,
+            _demand_capacity_fields(settings),
+        )
+    if _advanced_show_standby_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_STANDBY_SETTINGS,
+            _standby_fields(settings),
+        )
+    if _advanced_show_dual_phase_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_DUAL_PHASE_SETTINGS,
+            _dual_phase_fields(settings),
+        )
+    _add_advanced_section(
+        schema,
+        SECTION_POWER_QUALITY_SETTINGS,
+        _power_quality_fields(settings),
+    )
+    if _advanced_show_mains_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_MAINS_BALANCE_SETTINGS,
+            _mains_balance_fields(settings),
+        )
+        _add_advanced_section(
+            schema,
+            SECTION_SOLAR_FLOW_SETTINGS,
+            _solar_flow_fields(settings),
+        )
+
+    return vol.Schema(schema)
+
+
+def _add_advanced_section(
+    schema: dict[Any, Any],
+    key: str,
+    fields: Mapping[Any, Any],
+    *,
+    collapsed: bool = True,
+) -> None:
+    if not fields:
+        return
+    schema[vol.Optional(key)] = section(
+        vol.Schema(dict(fields)),
+        {"collapsed": collapsed},
+    )
+
+
+def _energy_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_WINDOW_DAYS,
+            default=int(settings.get(FIELD_WINDOW_DAYS, 7)),
+        ): _number_selector(minimum=1, maximum=90, step=1),
+        vol.Optional(
+            FIELD_DAILY_SPIKE_RATIO,
+            default=float(settings.get(FIELD_DAILY_SPIKE_RATIO, 0.25)),
+        ): _number_selector(minimum=0.01, maximum=5.0, step=0.01),
+        vol.Optional(
+            FIELD_DAILY_GOAL_KWH,
+            default=float(settings.get(FIELD_DAILY_GOAL_KWH, 0.0)),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            FIELD_GOAL_ALERT_RATIO,
+            default=float(settings.get(FIELD_GOAL_ALERT_RATIO, 1.0)),
+        ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
+    }
+
+
+def _activity_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_MAX_ACTIVE_MINUTES,
+            default=int(settings.get(FIELD_MAX_ACTIVE_MINUTES, 0)),
+        ): _number_selector(minimum=0, step=1),
+        vol.Optional(
+            FIELD_MAX_IDLE_MINUTES,
+            default=int(settings.get(FIELD_MAX_IDLE_MINUTES, 0)),
+        ): _number_selector(minimum=0, step=1),
+    }
+
+
+def _billing_cost_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_CYCLE_START_DAY,
+            default=int(settings.get(FIELD_CYCLE_START_DAY, 1)),
+        ): _number_selector(minimum=1, maximum=31, step=1),
+        vol.Optional(
+            FIELD_BUDGET_KWH,
+            default=float(settings.get(FIELD_BUDGET_KWH, 0.0)),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            FIELD_BUDGET_ALERT_RATIO,
+            default=float(settings.get(FIELD_BUDGET_ALERT_RATIO, 1.0)),
+        ): _number_selector(minimum=0.0, maximum=5.0, step=0.01),
+        vol.Optional(
+            FIELD_BILLING_MIN_ELAPSED_DAYS,
+            default=int(settings.get("min_elapsed_days", 3)),
+        ): _number_selector(minimum=1, maximum=31, step=1),
+        vol.Optional(
+            FIELD_DEFAULT_RATE_PER_KWH,
+            default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
+        ): _number_selector(minimum=0.0, step="any"),
+        vol.Optional(
+            FIELD_TOU_RATE_PER_KWH,
+            default=float(settings.get(FIELD_TOU_RATE_PER_KWH, 0.0)),
+        ): _number_selector(minimum=0.0, step="any"),
+        vol.Optional(
+            FIELD_TOU_START,
+            default=str(settings.get(FIELD_TOU_START) or ""),
+        ): _text_selector(),
+        vol.Optional(
+            FIELD_TOU_END,
+            default=str(settings.get(FIELD_TOU_END) or ""),
+        ): _text_selector(),
+        vol.Optional(
+            FIELD_TOU_WEEKDAYS,
+            default=str(settings.get(FIELD_TOU_WEEKDAYS) or ""),
+        ): _text_selector(),
+        vol.Optional(
+            FIELD_TOU_NAME,
+            default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
+        ): _text_selector(),
+    }
+
+
+def _demand_capacity_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_WINDOW_MINUTES,
+            default=int(settings.get(FIELD_WINDOW_MINUTES, 15)),
+        ): _number_selector(minimum=1, maximum=240, step=1),
+        vol.Optional(
+            FIELD_DEMAND_LIMIT_W,
+            default=float(settings.get(FIELD_DEMAND_LIMIT_W, 0.0)),
+        ): _number_selector(minimum=0.0, step=1),
+        vol.Optional(
+            FIELD_BREAKER_AMPS,
+            default=float(settings.get(FIELD_BREAKER_AMPS, 0.0)),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            FIELD_WARNING_RATIO,
+            default=float(settings.get(FIELD_WARNING_RATIO, 0.8)),
+        ): _number_selector(minimum=0.0, maximum=1.0, step=0.01),
+    }
+
+
+def _standby_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_WINDOW_HOURS,
+            default=int(settings.get(FIELD_WINDOW_HOURS, 48)),
+        ): _number_selector(minimum=1, maximum=720, step=1),
+        vol.Optional(
+            FIELD_STANDBY_THRESHOLD_W,
+            default=float(settings.get(FIELD_STANDBY_THRESHOLD_W, 8.0)),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            FIELD_ALWAYS_ON_ALERT_W,
+            default=float(settings.get(FIELD_ALWAYS_ON_ALERT_W, 0.0)),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            FIELD_STANDBY_MIN_SAMPLES,
+            default=int(settings.get("min_samples", 24)),
+        ): _number_selector(minimum=1, maximum=720, step=1),
+    }
+
+
+def _dual_phase_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_LEG_IMBALANCE_WARNING_RATIO,
+            default=float(
+                settings.get(
+                    FIELD_LEG_IMBALANCE_WARNING_RATIO,
+                    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+                )
+            ),
+        ): _number_selector(minimum=0.01, maximum=2.0, step=0.01),
+        vol.Optional(
+            FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+            default=float(
+                settings.get(
+                    FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+    }
+
+
+def _power_quality_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+            default=float(
+                settings.get(
+                    FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+                    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+                )
+            ),
+        ): _number_selector(minimum=0.1, maximum=100.0, step=0.1),
+        vol.Optional(
+            FIELD_POWER_FACTOR_TOLERANCE,
+            default=float(
+                settings.get(
+                    FIELD_POWER_FACTOR_TOLERANCE,
+                    DEFAULT_POWER_FACTOR_TOLERANCE,
+                )
+            ),
+        ): _number_selector(minimum=0.001, maximum=1.0, step=0.001),
+        vol.Optional(
+            FIELD_MINIMUM_APPARENT_POWER_VA,
+            default=float(
+                settings.get(
+                    FIELD_MINIMUM_APPARENT_POWER_VA,
+                    DEFAULT_MIN_APPARENT_POWER_VA,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+    }
+
+
+def _mains_balance_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
+            default=float(
+                settings.get(
+                    FIELD_BALANCE_NEGATIVE_TOLERANCE_W,
+                    DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+    }
+
+
+def _solar_flow_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Optional(
+            FIELD_SOLAR_EXPORT_TOLERANCE_W,
+            default=float(
+                settings.get(
+                    FIELD_SOLAR_EXPORT_TOLERANCE_W,
+                    EXPORT_TOLERANCE_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+        vol.Optional(
+            FIELD_SOLAR_SURPLUS_THRESHOLD_W,
+            default=float(
+                settings.get(
+                    FIELD_SOLAR_SURPLUS_THRESHOLD_W,
+                    SOLAR_SURPLUS_THRESHOLD_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+        vol.Optional(
+            FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+            default=float(
+                settings.get(
+                    FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+        vol.Optional(
+            FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+            default=float(
+                settings.get(
+                    FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                    FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                )
+            ),
+        ): _number_selector(minimum=0.0, step=1),
+    }
+
+
+def _advanced_circuit_context(
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    raw_context = dict(context or {})
+    circuit_id = str(raw_context.get("circuit_id") or "selected").strip()
+    if not circuit_id:
+        circuit_id = "selected"
+    profile = _safe_appliance_profile(
+        raw_context.get("appliance_profile"),
+        ApplianceProfile.MOTOR_LOAD.value,
+    )
+    mode = _safe_circuit_mode(
+        raw_context.get("mode"),
+        CircuitMode.SINGLE_PHASE.value,
+    )
+    if circuit_id == "mains":
+        profile = ApplianceProfile.MAINS_NILM.value
+        mode = CircuitMode.MAINS_NILM.value
+    power_flow = _normalize_power_flow(str(raw_context.get("power_flow") or ""))
+    if _is_advanced_mains_context(
+        {"circuit_id": circuit_id, "profile": profile, "mode": mode}
+    ):
+        power_flow = PowerFlowMode.MAINS_NET.value
+    name = str(raw_context.get("name") or circuit_id).strip() or circuit_id
+    return {
+        "circuit_id": circuit_id,
+        "name": name,
+        "profile": profile,
+        "mode": mode,
+        "power_flow": power_flow,
+    }
+
+
+def _advanced_context_display(context: Mapping[str, str]) -> str:
+    circuit_id = context.get("circuit_id", "selected")
+    name = context.get("name") or circuit_id
+    profile = _profile_label(context.get("profile", ""))
+    mode = _CIRCUIT_MODE_LABELS.get(context.get("mode", ""), "Single Phase")
+    return f"{name} ({circuit_id}) - {profile}, {mode}"
+
+
+def _advanced_show_energy_settings(context: Mapping[str, str]) -> bool:
+    return not _is_advanced_solar_only_context(context)
+
+
+def _advanced_show_activity_settings(context: Mapping[str, str]) -> bool:
+    return _is_advanced_load_appliance_context(context)
+
+
+def _advanced_show_billing_cost_settings(context: Mapping[str, str]) -> bool:
+    return not _is_advanced_solar_only_context(context)
+
+
+def _advanced_show_demand_capacity_settings(context: Mapping[str, str]) -> bool:
+    return not _is_advanced_solar_only_context(context)
+
+
+def _advanced_show_standby_settings(context: Mapping[str, str]) -> bool:
+    return _is_advanced_load_appliance_context(context)
+
+
+def _advanced_show_dual_phase_settings(context: Mapping[str, str]) -> bool:
+    return context.get("mode") == CircuitMode.DUAL_PHASE.value
+
+
+def _advanced_show_mains_settings(context: Mapping[str, str]) -> bool:
+    return _is_advanced_mains_context(context)
+
+
+def _is_advanced_load_appliance_context(context: Mapping[str, str]) -> bool:
+    return not (
+        _is_advanced_mains_context(context)
+        or _is_advanced_mixed_context(context)
+        or _is_advanced_solar_only_context(context)
+    )
+
+
+def _is_advanced_mains_context(context: Mapping[str, str]) -> bool:
+    return (
+        context.get("circuit_id") == "mains"
+        or context.get("profile") == ApplianceProfile.MAINS_NILM.value
+        or context.get("mode") == CircuitMode.MAINS_NILM.value
+    )
+
+
+def _is_advanced_mixed_context(context: Mapping[str, str]) -> bool:
+    return (
+        context.get("profile") == ApplianceProfile.MIXED.value
+        or context.get("mode") == CircuitMode.MIXED.value
+    )
+
+
+def _is_advanced_solar_only_context(context: Mapping[str, str]) -> bool:
+    return (
+        context.get("profile") == ApplianceProfile.SOLAR_INVERTER.value
+        and not _is_advanced_mains_context(context)
+    )
+
+
+def _safe_appliance_profile(value: Any, default: str) -> str:
+    normalized = _normalize_assignment_profile(str(value or "")).strip()
+    try:
+        return ApplianceProfile(normalized).value
+    except ValueError:
+        return default
+
+
+def _safe_circuit_mode(value: Any, default: str) -> str:
+    try:
+        return _normalize_assignment_mode(str(value or ""))
+    except SetupValidationError:
+        return default
+
+
+def _profile_label(value: Any) -> str:
+    normalized = _normalize_assignment_profile(str(value or "")).strip()
+    if normalized in _APPLIANCE_PROFILE_LABELS:
+        return _APPLIANCE_PROFILE_LABELS[normalized]
+    return normalized.replace("_", " ").title() if normalized else "Appliance"
 
 
 def circuit_mode_options() -> list[dict[str, str]]:
@@ -2418,17 +2700,25 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         circuit_id: str,
         errors: dict[str, str] | None = None,
     ) -> config_entries.ConfigFlowResult:
+        config = _entry_config(self._config_entry)
+        context = _advanced_circuit_context_from_config(config, circuit_id)
         settings = _settings_map_for_entry(self._config_entry, CONF_ADVANCED_SETTINGS)
         return self.async_show_form(
             step_id="advanced_settings",
-            data_schema=_advanced_settings_schema(settings.get(circuit_id, {})),
+            data_schema=_advanced_settings_schema(
+                settings.get(circuit_id, {}),
+                context,
+            ),
             errors=errors or {},
             description_placeholders={
                 "circuit_id": circuit_id,
-                "circuit_name": _circuit_label_from_config(
-                    _entry_config(self._config_entry),
-                    circuit_id,
+                "circuit_name": _advanced_context_display(context),
+                "appliance_profile": _profile_label(context.get("profile")),
+                "circuit_mode": _CIRCUIT_MODE_LABELS.get(
+                    context.get("mode", ""),
+                    "Single Phase",
                 ),
+                "power_flow": _power_flow_label(context.get("power_flow")),
             },
         )
 
@@ -2678,6 +2968,59 @@ def _circuit_label_from_config(config: Mapping[str, Any], circuit_id: str) -> st
     return circuit_id
 
 
+def _advanced_circuit_context_from_config(
+    config: Mapping[str, Any],
+    circuit_id: str,
+) -> dict[str, str]:
+    for circuit in config.get(CONF_CIRCUITS, []) or []:
+        if not isinstance(circuit, Mapping):
+            continue
+        current_id = str(circuit.get("circuit_id") or circuit.get("id") or "").strip()
+        if current_id != circuit_id:
+            continue
+        return _advanced_circuit_context(
+            {
+                "circuit_id": current_id,
+                "name": str(circuit.get("name") or current_id),
+                "appliance_profile": str(
+                    circuit.get("appliance_profile")
+                    or ApplianceProfile.MOTOR_LOAD.value
+                ),
+                "mode": str(circuit.get("mode") or CircuitMode.SINGLE_PHASE.value),
+                "power_flow": str(
+                    circuit.get("power_flow") or PowerFlowMode.LOAD.value
+                ),
+            }
+        )
+    if circuit_id == "mains":
+        return _advanced_circuit_context(
+            {
+                "circuit_id": "mains",
+                "name": "Mains NILM",
+                "appliance_profile": ApplianceProfile.MAINS_NILM.value,
+                "mode": CircuitMode.MAINS_NILM.value,
+                "power_flow": PowerFlowMode.MAINS_NET.value,
+            }
+        )
+    return _advanced_circuit_context(
+        {
+            "circuit_id": circuit_id,
+            "name": circuit_id,
+            "appliance_profile": ApplianceProfile.MOTOR_LOAD.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": PowerFlowMode.LOAD.value,
+        }
+    )
+
+
+def _power_flow_label(value: Any) -> str:
+    normalized = _normalize_power_flow(str(value or ""))
+    for option in power_flow_options():
+        if option.get("value") == normalized:
+            return str(option.get("label") or normalized)
+    return normalized.replace("_", " ").title()
+
+
 def _first_or_empty(values: Iterable[Any]) -> str:
     for value in values:
         if value:
@@ -2764,6 +3107,7 @@ def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
 
 
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    user_input = _flatten_advanced_settings_input(user_input)
     settings: dict[str, Any] = {}
     preset = str(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY).strip()
     if preset not in _SENSITIVITY_OPTIONS:
@@ -2815,6 +3159,18 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     _set_optional_float(settings, user_input, FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W)
     _set_optional_float(settings, user_input, FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W)
     return settings
+
+
+def _flatten_advanced_settings_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for key, value in user_input.items():
+        if key == FIELD_SELECTED_APPLIANCE:
+            continue
+        if key in _ADVANCED_SECTION_KEYS and isinstance(value, Mapping):
+            flattened.update(value)
+            continue
+        flattened[str(key)] = value
+    return flattened
 
 
 def _set_optional_string(

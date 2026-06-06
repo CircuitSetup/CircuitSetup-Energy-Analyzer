@@ -78,19 +78,27 @@ def test_format_mapping_suggestions_requires_manual_definition_when_empty() -> N
 
 def _schema_keys(schema) -> set[str]:
     keys = set()
-    for marker in schema.schema:
+    for marker, validator in schema.schema.items():
         key = getattr(marker, "schema", getattr(marker, "key", marker))
         keys.add(key)
+        section_schema = _section_schema(validator)
+        if section_schema is not None:
+            keys.update(_schema_keys(section_schema))
     return keys
 
 
 def _schema_default(schema, field_name: str):
-    for marker in schema.schema:
+    for marker, validator in schema.schema.items():
         key = getattr(marker, "schema", getattr(marker, "key", marker))
-        if key != field_name:
-            continue
-        default = getattr(marker, "default", None)
-        return default() if callable(default) else default
+        if key == field_name:
+            default = getattr(marker, "default", None)
+            return default() if callable(default) else default
+        section_schema = _section_schema(validator)
+        if section_schema is not None:
+            try:
+                return _schema_default(section_schema, field_name)
+            except AssertionError:
+                pass
     raise AssertionError(f"{field_name} missing from schema")
 
 
@@ -99,7 +107,28 @@ def _schema_validator(schema, field_name: str):
         key = getattr(marker, "schema", getattr(marker, "key", marker))
         if key == field_name:
             return validator
+        section_schema = _section_schema(validator)
+        if section_schema is not None:
+            try:
+                return _schema_validator(section_schema, field_name)
+            except AssertionError:
+                pass
     raise AssertionError(f"{field_name} missing from schema")
+
+
+def _section_schema(validator):
+    if hasattr(validator, "schema") and isinstance(validator.schema, dict):
+        return validator
+    nested = getattr(validator, "schema", None)
+    return nested if hasattr(nested, "schema") else None
+
+
+def _schema_section_keys(schema) -> set[str]:
+    keys = set()
+    for marker, validator in schema.schema.items():
+        if _section_schema(validator) is not None:
+            keys.add(getattr(marker, "schema", getattr(marker, "key", marker)))
+    return keys
 
 
 def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -> None:
@@ -1383,11 +1412,25 @@ async def test_assignment_step_uses_clean_demo_circuit_names() -> None:
 
 def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
         _advanced_settings_schema,
     )
 
-    schema = _advanced_settings_schema({})
+    schema = _advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "refrigerator",
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
 
+    assert _schema_default(schema, "selected_appliance") == (
+        "Kitchen Refrigerator (refrigerator) - Refrigerator, Single Phase"
+    )
     assert _schema_default(schema, "daily_goal_kwh") == 0.0
     assert _schema_default(schema, "max_active_minutes") == 0
     assert _schema_default(schema, "max_idle_minutes") == 0
@@ -1399,11 +1442,25 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert _schema_default(schema, "always_on_alert_w") == 0.0
     assert _schema_default(schema, "billing_min_elapsed_days") == 3
     assert _schema_default(schema, "standby_min_samples") == 24
+    assert _schema_section_keys(schema) == {
+        "analysis_settings",
+        "energy_settings",
+        "activity_settings",
+        "billing_cost_settings",
+        "demand_capacity_settings",
+        "standby_settings",
+        "power_quality_settings",
+    }
+    assert "leg_imbalance_warning_ratio" not in _schema_keys(schema)
+    assert "balance_negative_tolerance_w" not in _schema_keys(schema)
+    assert "solar_export_tolerance_w" not in _schema_keys(schema)
 
 
 def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
         _advanced_settings_schema,
     )
 
@@ -1419,11 +1476,17 @@ def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_contro
             "solar_surplus_threshold_w": 750.0,
             "high_solar_surplus_threshold_w": 2000.0,
             "flexible_load_running_threshold_w": 175.0,
-        }
+        },
+        {
+            "circuit_id": "mains",
+            "name": "Mains NILM",
+            "appliance_profile": ApplianceProfile.MAINS_NILM.value,
+            "mode": CircuitMode.MAINS_NILM.value,
+            "power_flow": "mains_net",
+        },
     )
 
-    assert _schema_default(schema, "leg_imbalance_warning_ratio") == 0.4
-    assert _schema_default(schema, "leg_imbalance_min_total_power_w") == 800.0
+    assert "dual_phase_settings" not in _schema_section_keys(schema)
     assert _schema_default(schema, "apparent_power_tolerance_percent") == 12.0
     assert _schema_default(schema, "power_factor_tolerance") == 0.08
     assert _schema_default(schema, "minimum_apparent_power_va") == 120.0
@@ -1432,6 +1495,139 @@ def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_contro
     assert _schema_default(schema, "solar_surplus_threshold_w") == 750.0
     assert _schema_default(schema, "high_solar_surplus_threshold_w") == 2000.0
     assert _schema_default(schema, "flexible_load_running_threshold_w") == 175.0
+
+
+def test_advanced_settings_schema_shows_dual_phase_controls_only_for_dual_phase(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema(
+        {
+            "leg_imbalance_warning_ratio": 0.4,
+            "leg_imbalance_min_total_power_w": 800.0,
+        },
+        {
+            "circuit_id": "hvac",
+            "name": "Downstairs HVAC",
+            "appliance_profile": ApplianceProfile.HVAC.value,
+            "mode": CircuitMode.DUAL_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert "dual_phase_settings" in _schema_section_keys(schema)
+    assert _schema_default(schema, "leg_imbalance_warning_ratio") == 0.4
+    assert _schema_default(schema, "leg_imbalance_min_total_power_w") == 800.0
+    assert "mains_balance_settings" not in _schema_section_keys(schema)
+    assert "solar_flow_settings" not in _schema_section_keys(schema)
+
+
+def test_advanced_settings_schema_hides_appliance_controls_for_mixed_circuits(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "kitchen_plugs",
+            "name": "Kitchen Plugs",
+            "appliance_profile": ApplianceProfile.MIXED.value,
+            "mode": CircuitMode.MIXED.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert _schema_section_keys(schema) == {
+        "analysis_settings",
+        "energy_settings",
+        "billing_cost_settings",
+        "demand_capacity_settings",
+        "power_quality_settings",
+    }
+    assert "max_active_minutes" not in _schema_keys(schema)
+    assert "standby_threshold_w" not in _schema_keys(schema)
+
+
+def test_advanced_settings_from_sectioned_input_saves_flat_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "analysis_settings": {"preset": "high"},
+            "energy_settings": {
+                "window_days": 14,
+                "daily_spike_ratio": 0.35,
+                "daily_goal_kwh": 2.5,
+                "goal_alert_ratio": 0.9,
+            },
+            "activity_settings": {
+                "max_active_minutes": 120,
+                "max_idle_minutes": 480,
+            },
+            "billing_cost_settings": {
+                "cycle_start_day": 15,
+                "budget_kwh": 90.0,
+                "budget_alert_ratio": 0.85,
+                "billing_min_elapsed_days": 5,
+                "default_rate_per_kwh": 0.18,
+                "tou_rate_per_kwh": 0.42,
+                "tou_start": "16:00",
+                "tou_end": "21:00",
+                "tou_weekdays": "0,1,2,3,4",
+                "tou_name": "Peak",
+            },
+            "demand_capacity_settings": {
+                "window_minutes": 30,
+                "demand_limit_w": 1200.0,
+                "breaker_amps": 20.0,
+                "warning_ratio": 0.8,
+            },
+            "standby_settings": {
+                "window_hours": 72,
+                "standby_threshold_w": 6.0,
+                "always_on_alert_w": 12.0,
+                "standby_min_samples": 36,
+            },
+        }
+    )
+
+    assert settings == {
+        "preset": "high",
+        "window_days": 14,
+        "daily_spike_ratio": 0.35,
+        "daily_goal_kwh": 2.5,
+        "goal_alert_ratio": 0.9,
+        "max_active_minutes": 120,
+        "max_idle_minutes": 480,
+        "cycle_start_day": 15,
+        "budget_kwh": 90.0,
+        "budget_alert_ratio": 0.85,
+        "min_elapsed_days": 5,
+        "default_rate_per_kwh": 0.18,
+        "tou_rate_per_kwh": 0.42,
+        "tou_start": "16:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+        "window_minutes": 30,
+        "demand_limit_w": 1200.0,
+        "breaker_amps": 20.0,
+        "warning_ratio": 0.8,
+        "window_hours": 72,
+        "standby_threshold_w": 6.0,
+        "always_on_alert_w": 12.0,
+        "min_samples": 36,
+    }
 
 
 @pytest.mark.asyncio

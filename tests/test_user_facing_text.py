@@ -48,6 +48,7 @@ EXPECTED_ADVANCED_CIRCUIT_LABELS = {
 }
 
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
+    "selected_appliance": "Editing Appliance",
     "preset": "Sensitivity",
     "window_days": "Energy Window Days",
     "daily_spike_ratio": "Daily Spike Ratio",
@@ -83,6 +84,19 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "solar_surplus_threshold_w": "Solar Surplus Threshold W",
     "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
     "flexible_load_running_threshold_w": "Flexible Load Running Threshold W",
+}
+
+EXPECTED_ADVANCED_SECTION_LABELS = {
+    "analysis_settings": "Sensitivity",
+    "energy_settings": "Energy Usage And Goals",
+    "activity_settings": "Run And Activity Alerts",
+    "billing_cost_settings": "Billing And Cost",
+    "demand_capacity_settings": "Demand And Capacity",
+    "standby_settings": "Always On And Standby",
+    "dual_phase_settings": "Dual-Phase Leg Imbalance",
+    "power_quality_settings": "Power Metric Consistency",
+    "mains_balance_settings": "Mains Balance",
+    "solar_flow_settings": "Solar Flow",
 }
 
 EXPECTED_SERVICE_FIELD_NAMES = {
@@ -222,17 +236,33 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
     picker_step = strings["options"]["step"]["select_advanced_circuit"]
     settings_step = strings["options"]["step"]["advanced_settings"]
+    section_data = {}
+    section_descriptions = {}
+    section_labels = {}
+    for key, value in settings_step["sections"].items():
+        section_labels[key] = value["name"]
+        section_data.update(value["data"])
+        section_descriptions.update(value["data_description"])
 
     assert picker_step["data"] == EXPECTED_ADVANCED_CIRCUIT_LABELS
     assert picker_step["data_description"].keys() == (
         EXPECTED_ADVANCED_CIRCUIT_LABELS.keys()
     )
-    assert settings_step["data"] == EXPECTED_ADVANCED_SETTINGS_LABELS
-    assert settings_step["data_description"].keys() == (
+    assert settings_step["data"] == {"selected_appliance": "Editing Appliance"}
+    assert settings_step["data_description"].keys() == {"selected_appliance"}
+    assert section_labels == EXPECTED_ADVANCED_SECTION_LABELS
+    assert {**settings_step["data"], **section_data} == (
+        EXPECTED_ADVANCED_SETTINGS_LABELS
+    )
+    assert {**settings_step["data_description"], **section_descriptions}.keys() == (
         EXPECTED_ADVANCED_SETTINGS_LABELS.keys()
     )
     assert all("_" not in label for label in settings_step["data"].values())
+    assert all("_" not in label for label in section_data.values())
     assert "service" not in settings_step["description"].lower()
+    assert "editing" in settings_step["description"].lower()
+    assert "appliance type" in settings_step["description"].lower()
+    assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
 
@@ -308,6 +338,8 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
         assert translated_step["data_description"] == strings_step["data_description"]
         assert translated_step["title"] == strings_step["title"]
         assert translated_step["description"] == strings_step["description"]
+        if "sections" in strings_step:
+            assert translated_step["sections"] == strings_step["sections"]
 
     strings_init = strings["options"]["step"]["init"]
     translated_init = translations["options"]["step"]["init"]
@@ -775,10 +807,16 @@ def test_readme_includes_practical_usage_guide() -> None:
         "do not need to enable every diagnostic entity",
         "let the analyzer learn for at least 7 days",
         "Review Circuit Assignments",
+        "Advanced Circuit Settings",
+        "Settings > Devices & services",
+        "only shows settings that apply",
         "Running binary sensor",
         "status_explanation",
     ):
         assert phrase in normalized_text
+    assert "Most options are set from Home Assistant Developer Tools > Actions" not in (
+        readme_text
+    )
 
 
 def test_readme_explains_notification_evidence_graph_links() -> None:
