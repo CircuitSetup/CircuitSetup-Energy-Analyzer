@@ -298,22 +298,26 @@ circuits.
 2. Open the entity details and review attributes such as `status_explanation`,
    observed values, thresholds, sample counts, source entities, and timestamps.
 3. Persistent notifications include a Markdown link named `Open evidence graph`.
-   It opens the Alert Evidence dashboard section with the alert ID, circuit, and
-   feature in the URL.
-4. The related Alert Evidence entity exposes `evidence_path`, `graph_entities`,
+   It opens `/circuitsetup-energy-analyzer/alert-evidence`, the Alert Evidence
+   dashboard section with the alert ID, circuit, and feature in the URL.
+4. Before relying on that default link, create a Home Assistant dashboard with
+   URL `/circuitsetup-energy-analyzer` and a view path of `alert-evidence`.
+   Import or adapt `docs/dashboard-example.yaml` into that dashboard/view, or
+   plan to customize the notification path later.
+5. The related Alert Evidence entity exposes `evidence_path`, `graph_entities`,
    `source_entities`, `graph_window_start`, and `graph_window_end` attributes.
    Use them when dashboard cards, blueprints, or notifications need to point to
    the same context.
-5. For Companion App mobile notifications, use the alert blueprint and set
+6. For Companion App mobile notifications, use the alert blueprint and set
    mobile notification `data.url` and Android `data.clickAction` to
    `{{ evidence_path }}` so tapping the phone notification opens the same Home
    Assistant evidence view.
-6. Check easy setup causes before appliance causes: CT direction, phase pairing,
+7. Check easy setup causes before appliance causes: CT direction, phase pairing,
    stale sensors, wrong units, missing voltage, or a circuit assigned as the
    wrong appliance type.
-7. Use Repairs for setup and data-quality problems. Use persistent
+8. Use Repairs for setup and data-quality problems. Use persistent
    notifications for possible appliance or circuit behavior changes.
-8. If work is planned on the appliance or circuit, use `start_maintenance` or
+9. If work is planned on the appliance or circuit, use `start_maintenance` or
    `pause_alerts`, then use `end_maintenance` or `relearn_baseline` when the
    system should start learning again.
 

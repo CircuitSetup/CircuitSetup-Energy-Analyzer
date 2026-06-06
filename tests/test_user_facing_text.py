@@ -695,6 +695,9 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     assert "graph_entities" in readme_text
     assert "Companion App" in readme_text
     assert "clickAction" in readme_text
+    assert "/circuitsetup-energy-analyzer/alert-evidence" in readme_text
+    assert "alert-evidence" in readme_text
+    assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include a Markdown link" in normalized_text
 
 
