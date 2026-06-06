@@ -129,6 +129,25 @@ def test_alert_graph_entities_prefer_feature_related_sources() -> None:
     )
 
 
+def test_alert_graph_entities_prefers_relationship_metrics_for_split_phase_change() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(
+        _alert("split_phase_relationship_changed"),
+        _config(),
+    ) == (
+        "sensor.hvac_l1_reactive_power",
+        "sensor.hvac_l2_reactive_power",
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+        "sensor.hvac_power_factor",
+    )
+
+
 def test_alert_graph_entities_returns_empty_without_config() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_entities,

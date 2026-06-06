@@ -10,6 +10,15 @@ MAX_GRAPH_ENTITIES = 8
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
+        ("relationship",),
+        (
+            SensorRole.REACTIVE_POWER,
+            SensorRole.REAL_POWER,
+            SensorRole.POWER_FACTOR,
+            SensorRole.APPARENT_POWER,
+        ),
+    ),
+    (
         ("leg_imbalance", "phase", "capacity"),
         (SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),

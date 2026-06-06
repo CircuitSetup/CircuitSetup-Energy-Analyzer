@@ -498,6 +498,8 @@ def test_dashboard_example_includes_alert_evidence_graph_section() -> None:
 
     assert "Alert evidence" in dashboard_text
     assert "Open from notifications" in dashboard_text
+    assert "standard Home Assistant cards are static" in dashboard_text
+    assert "Duplicate or adapt these HVAC cards" in dashboard_text
     assert {
         "sensor.hvac_alert_evidence",
         "sensor.hvac_leg_imbalance",
@@ -615,6 +617,41 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "Open evidence graph" in blueprint_text
     assert "clickAction" in blueprint_text
     assert "url:" in blueprint_text
+
+
+def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
+    from jinja2 import Template
+
+    class BlueprintLoader(yaml.SafeLoader):
+        pass
+
+    BlueprintLoader.add_constructor(
+        "!input",
+        lambda loader, node: loader.construct_scalar(node),
+    )
+    blueprint_path = (
+        ROOT
+        / "blueprints"
+        / "automation"
+        / "circuitsetup_energy_analyzer"
+        / "energy_alert_notification.yaml"
+    )
+    blueprint = yaml.load(blueprint_path.read_text(encoding="utf-8"), BlueprintLoader)
+    evidence_template = Template(blueprint["variables"]["evidence_path"])
+
+    configured_path = evidence_template.render(
+        trigger={
+            "to_state": {
+                "attributes": {
+                    "evidence_path": "/custom-dashboard/alert-evidence?alert_id=1"
+                }
+            }
+        }
+    )
+    fallback_path = evidence_template.render(trigger={"to_state": None})
+
+    assert configured_path == "/custom-dashboard/alert-evidence?alert_id=1"
+    assert fallback_path == "/circuitsetup-energy-analyzer/alert-evidence"
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:

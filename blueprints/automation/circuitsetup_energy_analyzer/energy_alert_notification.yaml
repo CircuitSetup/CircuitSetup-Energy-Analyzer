@@ -98,11 +98,9 @@ variables:
       Alert entity changed.
     {% endif %}
   evidence_path: >-
-    {% if trigger.to_state and trigger.to_state.attributes.evidence_path %}
-      {{ trigger.to_state.attributes.evidence_path }}
-    {% else %}
-      /circuitsetup-energy-analyzer/alert-evidence
-    {% endif %}
+    {{- trigger.to_state.attributes.evidence_path
+        if trigger.to_state and trigger.to_state.attributes.evidence_path
+        else '/circuitsetup-energy-analyzer/alert-evidence' -}}
 
 condition:
   - condition: template

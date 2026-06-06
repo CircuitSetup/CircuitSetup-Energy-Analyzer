@@ -167,7 +167,9 @@ sections:
           Possible-issue notifications include an Open evidence graph link.
           Review the latest alert evidence, source entities, and graph context
           here before changing CT orientation, circuit assignments, thresholds,
-          or appliance settings.
+          or appliance settings. In V1, standard Home Assistant cards are static
+          and do not change based on the URL query. Duplicate or adapt these HVAC cards
+          for other appliances or circuits you want to review.
       - type: entities
         title: Latest HVAC alert evidence
         entities:
