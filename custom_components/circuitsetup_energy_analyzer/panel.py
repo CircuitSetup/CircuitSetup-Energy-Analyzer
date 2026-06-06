@@ -74,6 +74,7 @@ async def async_setup_panel(hass: Any) -> bool:
 
     await _async_register_static_paths(hass)
     _register_view(hass)
+    await _async_remove_existing_panel(hass)
     registered = await _async_register_panel(hass)
     domain_data[_PANEL_SETUP_KEY] = (
         _PANEL_REGISTERED_VALUE if registered else _PANEL_SKIPPED_VALUE
@@ -90,7 +91,9 @@ async def async_unload_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if remove_panel is not None:
-        remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False)
+        await _maybe_await(
+            remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False)
+        )
 
 
 def alert_evidence_payload(
@@ -268,13 +271,6 @@ def _register_view(hass: Any) -> None:
 
 
 async def _async_register_panel(hass: Any) -> bool:
-    frontend = _frontend_component(hass)
-    panel_exists = getattr(frontend, "async_panel_exists", None)
-    if panel_exists is not None and await _maybe_await(
-        panel_exists(hass, PANEL_URL_PATH)
-    ):
-        return False
-
     panel_custom = _panel_custom_component(hass)
     register_panel = getattr(panel_custom, "async_register_panel", None)
     if register_panel is None:
@@ -299,6 +295,17 @@ async def _async_register_panel(hass: Any) -> bool:
     except ValueError:
         return False
     return True
+
+
+async def _async_remove_existing_panel(hass: Any) -> None:
+    frontend = _frontend_component(hass)
+    panel_exists = getattr(frontend, "async_panel_exists", None)
+    remove_panel = getattr(frontend, "async_remove_panel", None)
+    if panel_exists is None or remove_panel is None:
+        return
+    if not await _maybe_await(panel_exists(hass, PANEL_URL_PATH)):
+        return
+    await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
 
 
 async def _maybe_await(value: Any) -> Any:

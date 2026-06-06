@@ -332,8 +332,9 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
 
 
 @pytest.mark.asyncio
-async def test_panel_setup_does_not_overwrite_existing_panel_path() -> None:
+async def test_panel_setup_refreshes_existing_panel_path() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
         async_setup_panel,
         async_unload_panel,
@@ -355,13 +356,15 @@ async def test_panel_setup_does_not_overwrite_existing_panel_path() -> None:
 
     class FakeFrontend:
         def __init__(self) -> None:
+            self.panel_present = True
             self.removed = []
 
         def async_panel_exists(self, hass, frontend_url_path) -> bool:
-            return frontend_url_path == PANEL_URL_PATH
+            return self.panel_present and frontend_url_path == PANEL_URL_PATH
 
         def async_remove_panel(self, hass, frontend_url_path, **kwargs) -> None:
             self.removed.append(frontend_url_path)
+            self.panel_present = False
 
     panel_custom = FakePanelCustom()
     frontend = FakeFrontend()
@@ -372,7 +375,12 @@ async def test_panel_setup_does_not_overwrite_existing_panel_path() -> None:
     )
 
     assert await async_setup_panel(hass) is True
+    assert len(panel_custom.panels) == 1
+    assert panel_custom.panels[0]["module_url"].endswith(
+        f"?v={PANEL_MODULE_VERSION}"
+    )
+    assert frontend.removed == [PANEL_URL_PATH]
+
     await async_unload_panel(hass)
 
-    assert panel_custom.panels == []
-    assert frontend.removed == []
+    assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
