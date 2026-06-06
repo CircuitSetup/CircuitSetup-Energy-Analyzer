@@ -666,19 +666,24 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'customElements.define("circuitsetup-energy-analyzer-panel"',
         "URLSearchParams",
         "/api/circuitsetup_energy_analyzer/alert_evidence",
+        "history/period",
         'callService("circuitsetup_energy_analyzer"',
         "acknowledge_alert",
         "mark_alert_expected",
         "mark_alert_unhelpful",
-        "/history?entity_id=",
+        "Alert evidence chart",
+        "<svg",
+        "No history samples",
         "Matched alert",
         "Latest evidence for circuit",
         "Historical alert not found",
-        "Graph entities",
+        "Graphed Sources",
         "Observed",
         "Baseline",
     ):
         assert expected in asset
+    assert "iframe" not in asset
+    assert "Graph entities" not in asset
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:

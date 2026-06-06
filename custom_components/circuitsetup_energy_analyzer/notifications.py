@@ -25,7 +25,7 @@ def alert_notification_message(
     dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
 ) -> str:
     """Return Markdown body text for an alert persistent notification."""
-    from .alert_links import alert_evidence_path, alert_graph_entities
+    from .alert_links import alert_evidence_path
 
     lines = [
         alert.message,
@@ -37,15 +37,6 @@ def alert_notification_message(
         f"- Baseline value: {alert.baseline_value}",
         f"- Repeated observations: {alert.repeated_count}",
     ]
-    graph_entities = alert_graph_entities(alert, config)
-    if graph_entities:
-        lines.extend(
-            [
-                "",
-                "Graph entities:",
-                *(f"- `{entity_id}`" for entity_id in graph_entities),
-            ]
-        )
     return "\n".join(lines)
 
 

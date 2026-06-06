@@ -112,10 +112,11 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
         "[Open evidence graph](/circuitsetup-energy-analyzer-evidence?"
         in message
     )
-    assert "sensor.hvac_l1_watts" in message
-    assert "sensor.hvac_l2_current" in message
     assert "Observed value: 62.0" in message
     assert "Baseline value: 20.0" in message
+    assert "Graph entities" not in message
+    assert "sensor.hvac_l1_watts" not in message
+    assert "sensor.hvac_l2_current" not in message
 
 
 def test_repair_issue_id_for_circuit_problem_is_stable() -> None:

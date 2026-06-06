@@ -1,10 +1,12 @@
 const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_evidence";
 const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
+const HISTORY_CALL_API_PREFIX = "history/period";
 const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
   mark_unhelpful: "mark_alert_unhelpful",
 };
+const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
 
 class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   constructor() {
@@ -12,8 +14,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._payload = null;
+    this._historySeries = [];
     this._loading = true;
+    this._historyLoading = false;
     this._error = "";
+    this._historyError = "";
+    this._busyAction = "";
   }
 
   set hass(hass) {
@@ -34,29 +40,59 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   async _loadEvidence() {
     this._loading = true;
     this._error = "";
+    this._historyError = "";
+    this._historySeries = [];
     this._render();
+
     const params = new URLSearchParams(window.location.search);
     const query = params.toString();
     const apiPath = `${EVIDENCE_CALL_API_PATH}${query ? `?${query}` : ""}`;
     const fetchPath = `${EVIDENCE_API_PATH}${query ? `?${query}` : ""}`;
 
     try {
-      if (this._hass && this._hass.callApi) {
-        this._payload = await this._hass.callApi("GET", apiPath);
-      } else {
-        const response = await fetch(fetchPath);
-        if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
-        }
-        this._payload = await response.json();
+      this._payload = await this._requestJson(apiPath, fetchPath);
+      this._loading = false;
+      this._render();
+      const alert = this._payload && this._payload.alert;
+      if (alert && alert.graph_entities && alert.graph_entities.length) {
+        await this._loadHistory(alert);
       }
     } catch (error) {
       this._payload = null;
       this._error = `Could not load alert evidence from ${fetchPath}: ${error.message}`;
-    } finally {
       this._loading = false;
       this._render();
     }
+  }
+
+  async _loadHistory(alert) {
+    this._historyLoading = true;
+    this._historyError = "";
+    this._historySeries = [];
+    this._render();
+
+    const apiPath = this._historyApiPath(alert);
+    const fetchPath = `/api/${apiPath}`;
+    try {
+      const history = await this._requestJson(apiPath, fetchPath);
+      this._historySeries = Array.isArray(history) ? history : [];
+    } catch (error) {
+      this._historyError = `Could not load history samples from ${fetchPath}: ${error.message}`;
+    } finally {
+      this._historyLoading = false;
+      this._render();
+    }
+  }
+
+  async _requestJson(apiPath, fetchPath) {
+    if (this._hass && this._hass.callApi) {
+      return this._hass.callApi("GET", apiPath);
+    }
+    const response = await fetch(fetchPath);
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return response.json();
   }
 
   async _callAction(actionKey) {
@@ -86,7 +122,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const alert = payload && payload.alert;
     const circuit = payload && payload.circuit;
     const statusText = this._statusText(payload && payload.status);
-    const graphUrl = this._historyUrl(alert);
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -155,16 +190,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font-weight: 700;
           font-size: 13px;
         }
+        .chart {
+          width: 100%;
+          min-height: 340px;
+        }
+        .chart text {
+          fill: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .axis, .grid {
+          stroke: var(--divider-color, #d8dde6);
+        }
+        .legend {
+          display: grid;
+          gap: 6px;
+          margin-top: 12px;
+        }
+        .legend-item {
+          align-items: center;
+          display: flex;
+          gap: 8px;
+          min-width: 0;
+        }
+        .swatch {
+          border-radius: 999px;
+          display: inline-block;
+          height: 10px;
+          width: 10px;
+        }
         ul {
           margin: 10px 0 0;
           padding-left: 20px;
-        }
-        iframe {
-          width: 100%;
-          min-height: 420px;
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 6px;
-          background: var(--primary-background-color, #f7f8fa);
         }
         .actions {
           display: flex;
@@ -183,7 +239,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           padding: 10px 14px;
           text-decoration: none;
         }
-        button.secondary, a.button.secondary {
+        button.secondary {
           background: transparent;
           color: var(--primary-color, #0b6bcb);
         }
@@ -204,7 +260,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </section>
         ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
         ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
-        ${alert ? this._renderAlert(alert, circuit, graphUrl) : this._renderNotFound()}
+        ${alert ? this._renderAlert(alert, circuit) : this._renderNotFound()}
       </main>
     `;
 
@@ -214,7 +270,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
   }
 
-  _renderAlert(alert, circuit, graphUrl) {
+  _renderAlert(alert, circuit) {
     const graphEntities = alert.graph_entities || [];
     const sourceEntities = alert.source_entities || [];
     return `
@@ -232,11 +288,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       </section>
       <section class="panel">
         <h2>Graph</h2>
-        ${graphEntities.length ? `<iframe title="Alert evidence history graph" src="${this._escape(graphUrl)}"></iframe>` : `<p class="muted">Graph entities are not available for this alert.</p>`}
-        ${graphEntities.length ? `<p><a class="button secondary" href="${this._escape(graphUrl)}">Open history graph</a></p>` : ""}
+        ${this._renderChart()}
       </section>
       <section class="panel">
-        <h2>Graph entities</h2>
+        <h2>Graphed Sources</h2>
         ${this._entityList(graphEntities)}
       </section>
       <section class="panel">
@@ -252,6 +307,107 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </section>
     `;
+  }
+
+  _renderChart() {
+    if (this._historyLoading) {
+      return `<p class="muted">Loading history samples...</p>`;
+    }
+    if (this._historyError) {
+      return `<p class="muted">${this._escape(this._historyError)}</p>`;
+    }
+    const series = this._chartSeries();
+    if (!series.length) {
+      return `<p class="muted">No history samples were available for this graph window.</p>`;
+    }
+    return this._chartSvg(series);
+  }
+
+  _chartSvg(series) {
+    const width = 900;
+    const height = 320;
+    const padLeft = 54;
+    const padRight = 24;
+    const padTop = 18;
+    const padBottom = 42;
+    const allPoints = [];
+    for (const item of series) {
+      for (const point of item.points) {
+        allPoints.push(point);
+      }
+    }
+    const minTime = Math.min(...allPoints.map((point) => point.time));
+    const maxTime = Math.max(...allPoints.map((point) => point.time));
+    const minValue = Math.min(...allPoints.map((point) => point.value));
+    const maxValue = Math.max(...allPoints.map((point) => point.value));
+    const timeRange = Math.max(maxTime - minTime, 1);
+    const valueRange = Math.max(maxValue - minValue, 1);
+    const x = (time) => padLeft + ((time - minTime) / timeRange) * (width - padLeft - padRight);
+    const y = (value) => padTop + (1 - ((value - minValue) / valueRange)) * (height - padTop - padBottom);
+
+    const lines = series.map((item, index) => {
+      const color = CHART_COLORS[index % CHART_COLORS.length];
+      const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
+      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"></circle>`).join("");
+      return `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${points}"></polyline>${circles}`;
+    }).join("");
+    const legend = series.map((item, index) => {
+      const color = CHART_COLORS[index % CHART_COLORS.length];
+      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><code>${this._escape(item.entity_id)}</code></div>`;
+    }).join("");
+    const minLabel = this._formatNumber(minValue);
+    const maxLabel = this._formatNumber(maxValue);
+    const startLabel = new Date(minTime).toLocaleString();
+    const endLabel = new Date(maxTime).toLocaleString();
+
+    return `
+      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Alert evidence chart">
+        <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
+        <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
+        <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
+        <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
+        <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
+        <text x="${padLeft}" y="${height - 12}">${this._escape(startLabel)}</text>
+        <text x="${width - padRight}" y="${height - 12}" text-anchor="end">${this._escape(endLabel)}</text>
+        ${lines}
+      </svg>
+      <div class="legend">${legend}</div>
+    `;
+  }
+
+  _chartSeries() {
+    const parsed = [];
+    for (const series of this._historySeries || []) {
+      if (!Array.isArray(series) || !series.length) {
+        continue;
+      }
+      const entityId = series[0].entity_id || "unknown";
+      const points = [];
+      for (const state of series) {
+        const value = Number.parseFloat(state.state);
+        const timestamp = Date.parse(state.last_changed || state.last_updated || "");
+        if (Number.isFinite(value) && Number.isFinite(timestamp)) {
+          points.push({ time: timestamp, value });
+        }
+      }
+      if (points.length) {
+        parsed.push({ entity_id: entityId, points });
+      }
+    }
+    return parsed;
+  }
+
+  _historyApiPath(alert) {
+    const entities = alert.graph_entities || [];
+    const start = alert.graph_window_start || new Date(Date.now() - 86400000).toISOString();
+    const params = new URLSearchParams();
+    params.set("filter_entity_id", entities.join(","));
+    if (alert.graph_window_end) {
+      params.set("end_time", alert.graph_window_end);
+    }
+    params.set("minimal_response", "1");
+    params.set("no_attributes", "1");
+    return `${HISTORY_CALL_API_PREFIX}/${encodeURIComponent(start)}?${params.toString()}`;
   }
 
   _renderNotFound() {
@@ -283,22 +439,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return "Historical alert not found";
   }
 
-  _historyUrl(alert) {
-    const entities = (alert && alert.graph_entities) || [];
-    const query = new URLSearchParams();
-    if (entities.length) {
-      query.set("entity_id", entities.join(","));
-    }
-    if (alert && alert.graph_window_start) {
-      query.set("start_date", alert.graph_window_start);
-    }
-    if (alert && alert.graph_window_end) {
-      query.set("end_date", alert.graph_window_end);
-    }
-    const historyQuery = query.toString();
-    return historyQuery ? `/history?${historyQuery}` : "/history?entity_id=";
-  }
-
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(value === null || value === undefined ? "Unknown" : value)}</strong></div>`;
   }
@@ -314,13 +454,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return this._busyAction === actionKey ? "disabled" : "";
   }
 
+  _formatNumber(value) {
+    return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
   _escape(value) {
     return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 }
 
