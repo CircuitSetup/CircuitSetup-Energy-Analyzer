@@ -326,12 +326,12 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
     assert result["type"] == "form"
     assert result["step_id"] == "recommendations"
     assert {
-        "recommendation_id",
+        "setting_suggestion_ids",
         "recommendation_action",
     } <= _schema_keys(result["data_schema"])
     recommendation_options = _schema_validator(
         result["data_schema"],
-        "recommendation_id",
+        "setting_suggestion_ids",
     )["select"]["options"]
     assert recommendation_options == [
         {
@@ -342,6 +342,12 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
             ),
         }
     ]
+    assert _schema_validator(result["data_schema"], "setting_suggestion_ids")[
+        "select"
+    ]["multiple"]
+    assert _schema_validator(result["data_schema"], "setting_suggestion_ids")[
+        "select"
+    ]["mode"] == "list"
     action_options = _schema_validator(
         result["data_schema"],
         "recommendation_action",
@@ -352,6 +358,7 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
         {"value": "dismiss", "label": "Dismiss For Now"},
     ]
     summary = result["description_placeholders"]["recommendations"]
+    assert summary.startswith("Settings Suggestions:")
     assert "Downstairs HVAC" in summary
     assert "Daily Spike Ratio" in summary
     assert "0.5 -> 0.3" in summary
@@ -370,7 +377,7 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
         ("dismiss", "async_dismiss_setting_recommendation"),
     ],
 )
-async def test_options_recommendations_step_dispatches_actions(
+async def test_options_recommendations_step_dispatches_batch_actions(
     action: str,
     method_name: str,
 ) -> None:
@@ -387,9 +394,19 @@ async def test_options_recommendations_step_dispatches_actions(
         "current_value": 0.5,
         "suggested_value": 0.3,
     }
+    second_recommendation = {
+        "recommendation_id": "hvac:warning_ratio:v1",
+        "circuit_id": "hvac",
+        "circuit_name": "Downstairs HVAC",
+        "setting_label": "Warning Ratio",
+        "current_value": 0.9,
+        "suggested_value": 0.75,
+    }
     coordinator = SimpleNamespace(
         state=SimpleNamespace(
-            settings_recommendations_by_circuit={"hvac": [recommendation]}
+            settings_recommendations_by_circuit={
+                "hvac": [recommendation, second_recommendation]
+            }
         ),
         options={
             CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
@@ -410,7 +427,10 @@ async def test_options_recommendations_step_dispatches_actions(
 
     result = await flow.async_step_recommendations(
         {
-            "recommendation_id": "hvac:daily_spike_ratio:v1",
+            "setting_suggestion_ids": [
+                "hvac:daily_spike_ratio:v1",
+                "hvac:warning_ratio:v1",
+            ],
             "recommendation_action": action,
         }
     )
@@ -420,7 +440,10 @@ async def test_options_recommendations_step_dispatches_actions(
         "title": "",
         "data": coordinator.options if action == "apply" else entry.options,
     }
-    assert getattr(coordinator, method_name).calls == [("hvac:daily_spike_ratio:v1",)]
+    assert getattr(coordinator, method_name).calls == [
+        ("hvac:daily_spike_ratio:v1",),
+        ("hvac:warning_ratio:v1",),
+    ]
 
 
 @pytest.mark.asyncio
@@ -490,7 +513,7 @@ async def test_options_recommendations_step_rejects_unknown_selection() -> None:
     flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
 
     result = await flow.async_step_recommendations(
-        {"recommendation_id": "unknown", "recommendation_action": "apply"}
+        {"setting_suggestion_ids": ["unknown"], "recommendation_action": "apply"}
     )
 
     assert result["type"] == "form"

@@ -139,7 +139,9 @@ After at least 7 days or enough feature-specific cycles and samples, the
 analyzer can suggest advanced circuit settings from observed evidence. Suggested
 settings appear in **Configure > Review Suggested Settings** and in each
 circuit's Settings Suggestions sensor. These are conservative tuning
-recommendations for thresholds and windows, not appliance diagnoses.
+recommendations for thresholds and windows, not appliance diagnoses. In the
+review panel, check one or more settings suggestions and apply, deny, or dismiss
+the checked items together.
 
 ![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
 
@@ -294,9 +296,10 @@ Useful action families:
 
 Suggested settings workflow: review the summary entities first, then let the
 analyzer learn for at least a week or enough cycles. Open **Configure > Review
-Suggested Settings**, read the observed evidence, then apply, deny, or dismiss
-each suggestion. After a decision, keep watching the summary entities and the
-Settings Suggestions sensor for future evidence changes.
+Suggested Settings**, read the observed evidence, then check the suggestions you
+want to handle and apply, deny, or dismiss them together. After a decision, keep
+watching the summary entities and the Settings Suggestions sensor for future
+evidence changes.
 
 Washer or dryer running automation: use the Running binary sensor. Trigger when
 it changes from `on` to `off` for a few minutes, then send a mobile

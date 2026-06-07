@@ -238,6 +238,7 @@ FIELD_SOLAR_EXPORT_TOLERANCE_W = "solar_export_tolerance_w"
 FIELD_SOLAR_SURPLUS_THRESHOLD_W = "solar_surplus_threshold_w"
 FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W = "high_solar_surplus_threshold_w"
 FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
+FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 RECOMMENDATION_ACTION_APPLY = "apply"
@@ -622,6 +623,19 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     )
 
 
+def _checklist_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
+    return _selector(
+        {
+            "select": {
+                "multiple": True,
+                "mode": "list",
+                "options": list(options),
+            }
+        },
+        list,
+    )
+
+
 def _number_selector(
     *,
     minimum: float | None = None,
@@ -927,9 +941,9 @@ def _recommendations_schema(
     return vol.Schema(
         {
             vol.Required(
-                FIELD_RECOMMENDATION_ID,
-                default=recommendation_options[0]["value"],
-            ): _select_selector(recommendation_options),
+                FIELD_SETTING_SUGGESTION_IDS,
+                default=[],
+            ): _checklist_select_selector(recommendation_options),
             vol.Required(
                 FIELD_RECOMMENDATION_ACTION,
                 default=RECOMMENDATION_ACTION_APPLY,
@@ -2676,12 +2690,15 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         await _async_refresh_setting_recommendations(coordinator)
         recommendations = _pending_setting_recommendations(coordinator)
         if user_input is not None:
-            recommendation_id = str(user_input.get(FIELD_RECOMMENDATION_ID) or "")
             recommendation_ids = {
                 str(_recommendation_value(recommendation, FIELD_RECOMMENDATION_ID))
                 for recommendation in recommendations
             }
-            if recommendation_id not in recommendation_ids:
+            selected_recommendation_ids = _selected_setting_suggestion_ids(user_input)
+            if (
+                not selected_recommendation_ids
+                or not set(selected_recommendation_ids) <= recommendation_ids
+            ):
                 return _recommendations_form(
                     self,
                     recommendations,
@@ -2690,13 +2707,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
 
             action = str(user_input.get(FIELD_RECOMMENDATION_ACTION) or "")
             if action == RECOMMENDATION_ACTION_APPLY:
-                await coordinator.async_apply_setting_recommendation(recommendation_id)
+                for recommendation_id in selected_recommendation_ids:
+                    await coordinator.async_apply_setting_recommendation(
+                        recommendation_id
+                    )
             elif action == RECOMMENDATION_ACTION_DENY:
-                await coordinator.async_deny_setting_recommendation(recommendation_id)
+                for recommendation_id in selected_recommendation_ids:
+                    await coordinator.async_deny_setting_recommendation(
+                        recommendation_id
+                    )
             elif action == RECOMMENDATION_ACTION_DISMISS:
-                await coordinator.async_dismiss_setting_recommendation(
-                    recommendation_id
-                )
+                for recommendation_id in selected_recommendation_ids:
+                    await coordinator.async_dismiss_setting_recommendation(
+                        recommendation_id
+                    )
             else:
                 return _recommendations_form(
                     self,
@@ -2868,6 +2892,25 @@ def _recommendation_action_options() -> list[dict[str, str]]:
     return [dict(option) for option in _RECOMMENDATION_ACTION_OPTIONS]
 
 
+def _selected_setting_suggestion_ids(user_input: Mapping[str, Any]) -> list[str]:
+    raw_value = user_input.get(FIELD_SETTING_SUGGESTION_IDS)
+    if raw_value is None:
+        raw_value = user_input.get(FIELD_RECOMMENDATION_ID)
+    if isinstance(raw_value, str):
+        raw_items: Iterable[Any] = (raw_value,)
+    elif isinstance(raw_value, Iterable):
+        raw_items = raw_value
+    else:
+        raw_items = ()
+
+    selected: list[str] = []
+    for item in raw_items:
+        suggestion_id = str(item or "").strip()
+        if suggestion_id and suggestion_id not in selected:
+            selected.append(suggestion_id)
+    return selected
+
+
 def _recommendations_form(
     flow: Any,
     recommendations: Iterable[Any],
@@ -2894,7 +2937,7 @@ def _recommendation_summary(recommendations: Iterable[Any]) -> str:
         )
 
     lines = [
-        "Pending suggested settings:",
+        "Settings Suggestions:",
     ]
     for recommendation in recommendation_list:
         lines.append(f"- {_recommendation_label(recommendation)}")
