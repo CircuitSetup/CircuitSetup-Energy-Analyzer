@@ -10,6 +10,7 @@
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
+          "outdoor_temperature_entity": "Outdoor Temperature Entity",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -18,6 +19,7 @@
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -111,6 +113,7 @@
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
+          "outdoor_temperature_entity": "Outdoor Temperature Entity",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -118,6 +121,7 @@
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }

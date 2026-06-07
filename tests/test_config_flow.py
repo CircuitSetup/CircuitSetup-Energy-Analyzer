@@ -14,6 +14,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
@@ -184,6 +185,24 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
     ]
 
 
+def test_validate_setup_input_preserves_outdoor_temperature_entity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_setup_input,
+    )
+
+    validated = validate_setup_input(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: " sensor.outdoor_temperature ",
+        }
+    )
+
+    assert (
+        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY]
+        == "sensor.outdoor_temperature"
+    )
+
+
 def test_validate_options_input_parses_source_entity_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_options_input,
@@ -208,6 +227,24 @@ def test_validate_options_input_parses_source_entity_values() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
+
+
+def test_validate_options_input_preserves_outdoor_temperature_entity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+    )
+
+    validated = validate_options_input(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.weather_station_temperature",
+        }
+    )
+
+    assert (
+        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY]
+        == "sensor.weather_station_temperature"
+    )
 
 
 def test_validate_setup_input_requires_source_entities() -> None:
@@ -547,6 +584,13 @@ async def test_options_sources_step_shows_source_selection_form() -> None:
     assert result["step_id"] == "sources"
     assert CONF_SOURCE_DEVICES in _schema_keys(result["data_schema"])
     assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(result["data_schema"])
+    assert CONF_OUTDOOR_TEMPERATURE_ENTITY in _schema_keys(result["data_schema"])
+
+
+def test_setup_schema_exposes_outdoor_temperature_entity() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    assert CONF_OUTDOOR_TEMPERATURE_ENTITY in _schema_keys(config_flow.DATA_SCHEMA)
 
 
 @pytest.mark.asyncio
@@ -868,6 +912,30 @@ async def test_options_sources_step_preserves_existing_mains_sources() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_review_preserves_outdoor_temperature_entity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+
+    assert result["type"] == "form"
+    assert flow._pending_config[CONF_OUTDOOR_TEMPERATURE_ENTITY] == (
+        "sensor.outdoor_temperature"
+    )
 
 
 @pytest.mark.asyncio

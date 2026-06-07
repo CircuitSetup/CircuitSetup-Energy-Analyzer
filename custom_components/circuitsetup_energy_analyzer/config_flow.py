@@ -126,6 +126,7 @@ from .const import (
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
@@ -423,7 +424,11 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
     retention_mode = _validate_retention_mode(user_input)
 
-    return {
+    outdoor_temperature_entity = str(
+        user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
+    ).strip()
+
+    validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
         CONF_SOURCE_ENTITIES: source_entities,
@@ -440,6 +445,9 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: retention_mode,
     }
+    if outdoor_temperature_entity:
+        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
+    return validated
 
 
 def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
@@ -452,6 +460,9 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    outdoor_temperature_entity = str(
+        user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
+    ).strip()
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
@@ -468,6 +479,8 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
+    if outdoor_temperature_entity:
+        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
     merged_source_entities = list(extra_source_entities)
     if CONF_SOURCE_ENTITIES in user_input:
         source_entities = _strict_string_list(
@@ -623,6 +636,18 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     )
 
 
+def _temperature_entity_selector() -> Any:
+    return _selector(
+        {
+            "entity": {
+                "multiple": False,
+                "filter": [{"domain": "sensor", "device_class": "temperature"}],
+            }
+        },
+        str,
+    )
+
+
 def _checklist_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     return _selector(
         {
@@ -709,6 +734,10 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             ): _energy_entity_list_selector(
                 _selectable_source_entity_ids(source_entity_ids)
             ),
+            vol.Optional(
+                CONF_OUTDOOR_TEMPERATURE_ENTITY,
+                default="",
+            ): _temperature_entity_selector(),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,
@@ -3077,6 +3106,10 @@ def _options_schema(
         CONF_SOURCE_DEVICES,
         data.get(CONF_SOURCE_DEVICES, []),
     )
+    outdoor_temperature_entity = options.get(
+        CONF_OUTDOOR_TEMPERATURE_ENTITY,
+        data.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, ""),
+    )
     extra_source_entities = options.get(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
@@ -3109,6 +3142,10 @@ def _options_schema(
                 CONF_EXTRA_SOURCE_ENTITIES,
                 default=extra_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
+            vol.Optional(
+                CONF_OUTDOOR_TEMPERATURE_ENTITY,
+                default=str(outdoor_temperature_entity or ""),
+            ): _temperature_entity_selector(),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=options.get(
@@ -3177,6 +3214,13 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
             ),
             invalid_error_key="invalid_known_load_circuits",
         ),
+        CONF_OUTDOOR_TEMPERATURE_ENTITY: str(
+            options.get(
+                CONF_OUTDOOR_TEMPERATURE_ENTITY,
+                data.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, ""),
+            )
+            or ""
+        ).strip(),
         CONF_SENSITIVITY: str(
             options.get(
                 CONF_SENSITIVITY,

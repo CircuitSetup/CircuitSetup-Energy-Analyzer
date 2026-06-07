@@ -16,6 +16,7 @@ EXPECTED_FLOW_LABELS = {
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
+    "outdoor_temperature_entity": "Outdoor Temperature Entity",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -24,6 +25,7 @@ EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
+    "outdoor_temperature_entity": "Outdoor Temperature Entity",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
