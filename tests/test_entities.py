@@ -297,6 +297,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         metric_consistency_status_value,
         monitored_coverage_value,
         monitored_power_value,
+        nilm_unknown_loads_attributes,
+        nilm_unknown_loads_value,
         nilm_signature_count_value,
         nilm_topology_status_value,
         nilm_unmatched_load_percentage_value,
@@ -355,6 +357,18 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         nilm_signature_count_by_circuit={"fridge": 3},
         nilm_unmatched_load_percentage_by_circuit={"fridge": 17.5},
         nilm_topology_status_by_circuit={"fridge": "topology_mismatch"},
+        nilm_unknown_loads_by_circuit={
+            "fridge": {
+                "unknown_load_count": 2,
+                "active_unknown_load_count": 1,
+                "unknown_loads": [
+                    {
+                        "signature_id": "sig-motor",
+                        "likely_type": "motor",
+                    }
+                ],
+            }
+        },
         nilm_topology_evidence_by_circuit={
             "fridge": {
                 "status": "topology_mismatch",
@@ -556,6 +570,17 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert nilm_signature_count_value(state, "fridge") == 3
     assert nilm_unmatched_load_percentage_value(state, "fridge") == 17.5
     assert nilm_topology_status_value(state, "fridge") == "topology_mismatch"
+    assert nilm_unknown_loads_value(state, "fridge") == 2
+    assert nilm_unknown_loads_attributes(state, "fridge") == {
+        "unknown_load_count": 2,
+        "active_unknown_load_count": 1,
+        "unknown_loads": [
+            {
+                "signature_id": "sig-motor",
+                "likely_type": "motor",
+            }
+        ],
+    }
     assert health_summary_value(state, "fridge") == "Possible issue"
     assert readiness_value(state, "fridge") == "possible_issue"
     assert learning_progress_value(state, "fridge") == 62.5
@@ -654,6 +679,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert nilm_signature_count_value(state, "unknown") == 0
     assert nilm_unmatched_load_percentage_value(state, "unknown") == 0.0
     assert nilm_topology_status_value(state, "unknown") == "no_match"
+    assert nilm_unknown_loads_value(state, "unknown") == 0
+    assert nilm_unknown_loads_attributes(state, "unknown") == {}
     assert health_summary_value(state, "unknown") == "Ready"
     assert readiness_value(state, "unknown") == "ready"
     assert learning_progress_value(state, "unknown") == 0.0
@@ -2507,6 +2534,7 @@ async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
         "entry-1_mains_nilm_signature_count",
+        "entry-1_mains_nilm_unknown_loads",
         "entry-1_mains_nilm_unmatched_load_percentage",
         "entry-1_mains_nilm_topology_status",
         "entry-1_mains_balance_power",

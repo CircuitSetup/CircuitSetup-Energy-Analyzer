@@ -45,6 +45,9 @@ class FeatureStoreData:
     baselines: dict[str, BaselineStats] = field(default_factory=dict)
     alerts: list[AlertEvidence] = field(default_factory=list)
     nilm_signatures: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     alert_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -204,6 +207,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             str(circuit_id): [dict(signature) for signature in signatures]
             for circuit_id, signatures in data.nilm_signatures.items()
         },
+        "nilm_unknown_loads_by_circuit": _dict_of_dicts(
+            data.nilm_unknown_loads_by_circuit
+        ),
         "sensitivity_by_circuit": {
             str(circuit_id): str(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
@@ -285,6 +291,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             str(circuit_id): [dict(signature) for signature in signatures]
             for circuit_id, signatures in raw.get("nilm_signatures", {}).items()
         },
+        nilm_unknown_loads_by_circuit=_dict_of_dicts(
+            raw.get("nilm_unknown_loads_by_circuit", {})
+        ),
         sensitivity_by_circuit={
             str(circuit_id): str(sensitivity)
             for circuit_id, sensitivity in raw.get(
@@ -378,6 +387,7 @@ def prune_events(
         baselines=data.baselines,
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
+        nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,

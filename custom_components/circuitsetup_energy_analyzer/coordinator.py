@@ -149,6 +149,7 @@ from .utility_comparison import (
     select_latest_statistics_energy,
     select_statistics_energy_for_period,
 )
+from .unknown_loads import build_unknown_load_inventory
 from .ux import (
     alert_evidence_detail,
     alert_policy_name_for_sensitivity,
@@ -250,6 +251,9 @@ class AnalyzerState:
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -2646,6 +2650,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if payloads != self.store_data.nilm_signatures.get(config.circuit_id, []):
                 self.store_data.nilm_signatures[config.circuit_id] = payloads
                 self._mark_store_dirty()
+            inventory = build_unknown_load_inventory(
+                circuit_id=config.circuit_id,
+                signatures=signatures,
+                edges=self._nilm_unmatched_edges[config.circuit_id],
+                now=sample.timestamp,
+                existing_state=(
+                    self.store_data.nilm_unknown_loads_by_circuit.get(
+                        config.circuit_id,
+                        {},
+                    )
+                ),
+            )
+            if inventory != self.store_data.nilm_unknown_loads_by_circuit.get(
+                config.circuit_id
+            ):
+                self.store_data.nilm_unknown_loads_by_circuit[
+                    config.circuit_id
+                ] = inventory
+                self._mark_store_dirty()
 
         self._refresh_nilm_state(config.circuit_id)
         return alerts
@@ -2806,6 +2829,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.nilm_review_by_circuit[circuit_id] = [
             _nilm_review_payload(signature) for signature in signatures
         ]
+        self.state.nilm_unknown_loads_by_circuit[circuit_id] = dict(
+            self.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
+        )
 
     def _refresh_balance_state(
         self: Self,

@@ -283,6 +283,26 @@ def nilm_topology_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def nilm_unknown_loads_value(state: Any, circuit_id: str) -> int:
+    """Return the count of reviewable unknown NILM loads for a circuit."""
+    inventory = getattr(state, "nilm_unknown_loads_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    if isinstance(inventory, Mapping):
+        return int(inventory.get("unknown_load_count", 0))
+    return 0
+
+
+def nilm_unknown_loads_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return consolidated unknown NILM load inventory attributes."""
+    inventory = getattr(state, "nilm_unknown_loads_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    return dict(inventory) if isinstance(inventory, Mapping) else {}
+
+
 def daily_energy_usage_value(state: Any, circuit_id: str) -> float:
     """Return today's cumulative usage derived from the circuit energy sensor."""
     return float(
@@ -1117,6 +1137,7 @@ SENSOR_ICONS: Mapping[str, str] = {
     "apparent_power_drift": "mdi:alpha-v-circle-outline",
     "power_factor_drift": "mdi:cosine-wave",
     "nilm_signature_count": "mdi:graph-outline",
+    "nilm_unknown_loads": "mdi:home-search-outline",
     "nilm_unmatched_load_percentage": "mdi:chart-scatter-plot",
     "nilm_topology_status": "mdi:source-branch",
     "daily_energy_usage": "mdi:counter",
@@ -1310,6 +1331,13 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="NILM Discovered Signatures",
         value_fn=nilm_signature_count_value,
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="nilm_unknown_loads",
+        name_suffix="NILM Unknown Loads",
+        value_fn=nilm_unknown_loads_value,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=nilm_unknown_loads_attributes,
     ),
     DiagnosticSensorDescription(
         key="nilm_unmatched_load_percentage",
@@ -1832,6 +1860,7 @@ _METRIC_CONSISTENCY_SENSOR_KEYS = {
 }
 _MAINS_NILM_SENSOR_KEYS = {
     "nilm_signature_count",
+    "nilm_unknown_loads",
     "nilm_unmatched_load_percentage",
     "nilm_topology_status",
 }

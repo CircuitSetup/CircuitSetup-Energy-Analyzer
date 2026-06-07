@@ -164,6 +164,27 @@ def test_standard_retention_keeps_at_least_month_of_events() -> None:
     assert pruned.events == [event]
 
 
+def test_feature_store_round_trips_unknown_load_inventory() -> None:
+    data = FeatureStoreData(
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "unknown_load_count": 1,
+                "unknown_loads": [
+                    {
+                        "signature_id": "on-1",
+                        "likely_type": "motor",
+                        "estimated_energy_today_kwh": 0.42,
+                    }
+                ],
+            }
+        }
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.nilm_unknown_loads_by_circuit == data.nilm_unknown_loads_by_circuit
+
+
 def test_event_round_trip_serialization_uses_current_shape() -> None:
     event = CircuitEvent(
         timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),

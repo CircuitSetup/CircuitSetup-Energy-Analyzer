@@ -438,6 +438,9 @@
       "nilm_signature_count": {
         "name": "NILM discovered signatures"
       },
+      "nilm_unknown_loads": {
+        "name": "NILM unknown loads"
+      },
       "nilm_discovered_signatures": {
         "name": "NILM discovered signatures"
       },

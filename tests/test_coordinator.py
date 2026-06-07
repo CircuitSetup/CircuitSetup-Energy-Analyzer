@@ -1509,6 +1509,12 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None
         "classification"
     ]
     assert classification.startswith("possible")
+    inventory = coordinator.state.nilm_unknown_loads_by_circuit["mains"]
+    assert inventory["unknown_load_count"] == 1
+    assert inventory["unknown_loads"][0]["signature_id"] == (
+        coordinator.store_data.nilm_signatures["mains"][0]["signature_id"]
+    )
+    assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
 @pytest.mark.asyncio
