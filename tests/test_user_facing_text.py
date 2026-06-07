@@ -433,6 +433,7 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
         "sensor.hvac_run_cycle_runtime",
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
+        "sensor.mains_nilm_monitored_power",
         "sensor.mains_nilm_nilm_discovered_signatures",
         "sensor.mains_nilm_nilm_unknown_loads",
         "sensor.mains_nilm_nilm_unmatched_load_percentage",
@@ -597,6 +598,38 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
 
 
+def test_dashboard_example_explains_mains_load_match_without_coverage_gauge() -> None:
+    dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    cards = _dashboard_cards(dashboard)
+    mains_section = yaml.safe_dump(
+        _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    )
+    coverage_gauges = [
+        card
+        for card in cards
+        if card.get("type") == "gauge"
+        and card.get("entity") == "sensor.mains_nilm_monitored_coverage"
+    ]
+    load_match_cards = [
+        card for card in cards if card.get("title") == "Mains Load Match"
+    ]
+
+    assert coverage_gauges == []
+    assert len(load_match_cards) == 1
+    assert load_match_cards[0]["type"] == "entities"
+    assert {
+        row["entity"]: row["name"]
+        for row in load_match_cards[0]["entities"]
+    } == {
+        "sensor.mains_nilm_monitored_power": "Known Appliance Load",
+        "sensor.mains_nilm_balance_power": "Unassigned Mains Load",
+        "sensor.mains_nilm_monitored_coverage": "Known Load Share",
+    }
+    assert "Mains Load Match" in mains_section
+    assert "Known Load Share" in mains_section
+    assert "how much of current mains power is explained" in mains_section
+
+
 def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
@@ -639,6 +672,7 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.mains_nilm_daily_energy_usage",
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
+        "sensor.mains_nilm_monitored_power",
         "sensor.mains_nilm_nilm_unknown_loads",
         "sensor.mains_nilm_nilm_discovered_signatures",
         "sensor.mains_nilm_nilm_unmatched_load_percentage",
@@ -924,6 +958,8 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
         assert row in readme_text
     assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
     assert "- Health Summary:" not in readme_text
+    assert "Known Load Share" in readme_text
+    assert "how much of current mains power is explained" in readme_text
 
 
 def test_readme_explains_compatible_meter_support_and_links_product() -> None:

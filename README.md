@@ -1093,7 +1093,7 @@ and homes with solar inverter or generation circuits.
 | NILM Topology Status | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, hidden by default | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
 | Balance Power | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. | Normal entity for mains circuits | Watts; positive is unmonitored load; strongly negative can suggest mapping or sign issues |
 | Monitored Power | `sensor.<circuit>_monitored_power` | Sum of directly monitored non-generation load circuits. | Normal entity for mains circuits | Watts |
-| Monitored Coverage | `sensor.<circuit>_monitored_coverage` | Percent of mains power covered by monitored circuits. | Normal entity for mains circuits | Percentage values |
+| Monitored Coverage | `sensor.<circuit>_monitored_coverage` | Dashboard label: Known Load Share. Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads, not a problem by itself. | Normal entity for mains circuits | Percentage values |
 | Balance Status | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, hidden by default | `missing_mains`, `tracking`, `negative_balance` |
 | Solar Generation Power | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Normal entity for solar/generation circuits | Watts |
 | Solar Site Consumption Power | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Normal entity for solar/generation circuits | Watts |

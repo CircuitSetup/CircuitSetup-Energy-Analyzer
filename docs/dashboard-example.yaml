@@ -105,15 +105,6 @@ views:
               - entity: sensor.mains_nilm_energy_summary
                 name: Energy
           - type: gauge
-            entity: sensor.mains_nilm_monitored_coverage
-            name: Monitored Coverage
-            min: 0
-            max: 100
-            severity:
-              green: 80
-              yellow: 60
-              red: 0
-          - type: gauge
             entity: sensor.mains_nilm_nilm_unmatched_load_percentage
             name: Unmatched NILM Load
             min: 0
@@ -123,10 +114,20 @@ views:
               yellow: 15
               red: 35
           - type: entities
-            title: Power flow
+            title: Mains Load Match
             entities:
+              - entity: sensor.mains_nilm_monitored_power
+                name: Known Appliance Load
               - entity: sensor.mains_nilm_balance_power
-                name: Mains Balance
+                name: Unassigned Mains Load
+              - entity: sensor.mains_nilm_monitored_coverage
+                name: Known Load Share
+          - type: markdown
+            title: What Known Load Share Means
+            content: >
+              Known Load Share is how much of current mains power is explained
+              by the circuits you selected. Low values usually mean normal
+              unmonitored loads, not necessarily a problem.
           - type: conditional
             conditions:
               - entity: sensor.mains_nilm_solar_flow_status
