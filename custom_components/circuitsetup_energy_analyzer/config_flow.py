@@ -238,6 +238,13 @@ FIELD_SOLAR_EXPORT_TOLERANCE_W = "solar_export_tolerance_w"
 FIELD_SOLAR_SURPLUS_THRESHOLD_W = "solar_surplus_threshold_w"
 FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W = "high_solar_surplus_threshold_w"
 FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
+FIELD_RECOMMENDATION_ID = "recommendation_id"
+FIELD_RECOMMENDATION_ACTION = "recommendation_action"
+RECOMMENDATION_ACTION_APPLY = "apply"
+RECOMMENDATION_ACTION_DENY = "deny"
+RECOMMENDATION_ACTION_DISMISS = "dismiss"
+ERROR_INVALID_RECOMMENDATION = "invalid_recommendation"
+ERROR_RECOMMENDATIONS_NOT_LOADED = "recommendations_not_loaded"
 SECTION_ANALYSIS_SETTINGS = "analysis_settings"
 SECTION_ENERGY_SETTINGS = "energy_settings"
 SECTION_ACTIVITY_SETTINGS = "activity_settings"
@@ -318,6 +325,11 @@ _UTILITY_STATISTIC_PERIOD_OPTIONS = (
     {"value": "hour", "label": "Hour"},
     {"value": "day", "label": "Day"},
     {"value": "month", "label": "Month"},
+)
+_RECOMMENDATION_ACTION_OPTIONS = (
+    {"value": RECOMMENDATION_ACTION_APPLY, "label": "Apply Suggestion"},
+    {"value": RECOMMENDATION_ACTION_DENY, "label": "Deny Suggestion"},
+    {"value": RECOMMENDATION_ACTION_DISMISS, "label": "Dismiss For Now"},
 )
 _CIRCUIT_MODE_LABELS = {
     CircuitMode.SINGLE_PHASE.value: "Single Phase",
@@ -902,6 +914,26 @@ def _nilm_schema(
                 CONF_KNOWN_LOAD_CIRCUITS,
                 default=list(known_load_circuits),
             ): _multi_select_selector(_known_load_circuit_options_from_config(config)),
+        }
+    )
+
+
+def _recommendations_schema(
+    recommendations: Iterable[Any],
+) -> Any:
+    recommendation_options = _recommendation_select_options(recommendations)
+    if not recommendation_options:
+        return vol.Schema({})
+    return vol.Schema(
+        {
+            vol.Required(
+                FIELD_RECOMMENDATION_ID,
+                default=recommendation_options[0]["value"],
+            ): _select_selector(recommendation_options),
+            vol.Required(
+                FIELD_RECOMMENDATION_ACTION,
+                default=RECOMMENDATION_ACTION_APPLY,
+            ): _select_selector(_recommendation_action_options()),
         }
     )
 
@@ -2388,6 +2420,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "nilm",
                     "utility",
                     "advanced",
+                    "recommendations",
                 ],
             )
 
@@ -2621,6 +2654,67 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
 
         return await self._async_show_advanced_settings_form(circuit_id)
 
+    async def async_step_recommendations(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Review pending advanced-setting recommendations."""
+        coordinator = _options_flow_coordinator(self)
+        if coordinator is None:
+            return self.async_show_form(
+                step_id="recommendations",
+                data_schema=_recommendations_schema(()),
+                errors={"base": ERROR_RECOMMENDATIONS_NOT_LOADED},
+                description_placeholders={
+                    "recommendations": (
+                        "The analyzer is not loaded yet. Start the integration, "
+                        "then come back here to review suggested settings."
+                    )
+                },
+            )
+
+        await _async_refresh_setting_recommendations(coordinator)
+        recommendations = _pending_setting_recommendations(coordinator)
+        if user_input is not None:
+            recommendation_id = str(user_input.get(FIELD_RECOMMENDATION_ID) or "")
+            recommendation_ids = {
+                str(_recommendation_value(recommendation, FIELD_RECOMMENDATION_ID))
+                for recommendation in recommendations
+            }
+            if recommendation_id not in recommendation_ids:
+                return _recommendations_form(
+                    self,
+                    recommendations,
+                    errors={"base": ERROR_INVALID_RECOMMENDATION},
+                )
+
+            action = str(user_input.get(FIELD_RECOMMENDATION_ACTION) or "")
+            if action == RECOMMENDATION_ACTION_APPLY:
+                await coordinator.async_apply_setting_recommendation(recommendation_id)
+            elif action == RECOMMENDATION_ACTION_DENY:
+                await coordinator.async_deny_setting_recommendation(recommendation_id)
+            elif action == RECOMMENDATION_ACTION_DISMISS:
+                await coordinator.async_dismiss_setting_recommendation(
+                    recommendation_id
+                )
+            else:
+                return _recommendations_form(
+                    self,
+                    recommendations,
+                    errors={"base": ERROR_INVALID_RECOMMENDATION},
+                )
+
+            return self.async_create_entry(
+                title="",
+                data=_options_after_recommendation_action(
+                    self._config_entry,
+                    coordinator,
+                    action,
+                ),
+            )
+
+        return _recommendations_form(self, recommendations)
+
     async def _async_show_options_form(
         self,
         errors: dict[str, str] | None = None,
@@ -2711,6 +2805,219 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 "power_flow": _power_flow_label(context.get("power_flow")),
             },
         )
+
+
+def _options_flow_coordinator(flow: Any) -> Any | None:
+    hass = getattr(flow, "hass", None)
+    data = getattr(hass, "data", {}) or {}
+    domain_data = data.get(DOMAIN, {}) if isinstance(data, Mapping) else {}
+    if not isinstance(domain_data, Mapping):
+        return None
+    entry_id = getattr(getattr(flow, "_config_entry", None), "entry_id", None)
+    return domain_data.get(entry_id)
+
+
+async def _async_refresh_setting_recommendations(coordinator: Any) -> None:
+    recalculate = getattr(
+        coordinator,
+        "async_recalculate_setting_recommendations",
+        None,
+    )
+    if not callable(recalculate):
+        return
+    result = recalculate(None)
+    if hasattr(result, "__await__"):
+        await result
+
+
+def _pending_setting_recommendations(coordinator: Any) -> list[Any]:
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "settings_recommendations_by_circuit", {}) or {}
+    if not isinstance(by_circuit, Mapping):
+        return []
+
+    recommendations: list[Any] = []
+    for circuit_recommendations in by_circuit.values():
+        if not isinstance(circuit_recommendations, Iterable) or isinstance(
+            circuit_recommendations,
+            (str, bytes),
+        ):
+            continue
+        for recommendation in circuit_recommendations:
+            if _recommendation_status(recommendation) == "pending":
+                recommendations.append(recommendation)
+    return recommendations
+
+
+def _recommendation_select_options(
+    recommendations: Iterable[Any],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "value": str(
+                _recommendation_value(recommendation, FIELD_RECOMMENDATION_ID)
+            ),
+            "label": _recommendation_label(recommendation),
+        }
+        for recommendation in recommendations
+        if _recommendation_value(recommendation, FIELD_RECOMMENDATION_ID)
+    ]
+
+
+def _recommendation_action_options() -> list[dict[str, str]]:
+    return [dict(option) for option in _RECOMMENDATION_ACTION_OPTIONS]
+
+
+def _recommendations_form(
+    flow: Any,
+    recommendations: Iterable[Any],
+    *,
+    errors: dict[str, str] | None = None,
+) -> config_entries.ConfigFlowResult:
+    recommendation_list = list(recommendations)
+    return flow.async_show_form(
+        step_id="recommendations",
+        data_schema=_recommendations_schema(recommendation_list),
+        errors=errors or {},
+        description_placeholders={
+            "recommendations": _recommendation_summary(recommendation_list),
+        },
+    )
+
+
+def _recommendation_summary(recommendations: Iterable[Any]) -> str:
+    recommendation_list = list(recommendations)
+    if not recommendation_list:
+        return (
+            "There are no pending suggestions yet. The analyzer will show "
+            "evidence-based setting ideas here after it has enough history."
+        )
+
+    lines = [
+        "Pending suggested settings:",
+    ]
+    for recommendation in recommendation_list:
+        lines.append(f"- {_recommendation_label(recommendation)}")
+        reason = str(_recommendation_value(recommendation, "reason") or "").strip()
+        if reason:
+            lines.append(f"  Reason: {reason}")
+        evidence = _recommendation_evidence_text(recommendation)
+        if evidence:
+            lines.append(f"  Evidence: {evidence}")
+    return "\n".join(lines)
+
+
+def _recommendation_label(recommendation: Any) -> str:
+    circuit = _recommendation_circuit_label(recommendation)
+    setting = _recommendation_setting_label(recommendation)
+    current = _format_recommendation_value(
+        _recommendation_value(recommendation, "current_value"),
+        _recommendation_value(recommendation, "unit"),
+    )
+    suggested = _format_recommendation_value(
+        _recommendation_value(recommendation, "suggested_value"),
+        _recommendation_value(recommendation, "unit"),
+    )
+    label = f"{circuit} - {setting}: {current} -> {suggested}"
+    confidence = _recommendation_value(recommendation, "confidence")
+    if confidence is not None:
+        label = f"{label} ({_format_confidence(confidence)} confidence)"
+    return label
+
+
+def _recommendation_circuit_label(recommendation: Any) -> str:
+    name = str(_recommendation_value(recommendation, "circuit_name") or "").strip()
+    if name:
+        return name
+    circuit_id = str(_recommendation_value(recommendation, "circuit_id") or "").strip()
+    return _friendly_name_from_id(circuit_id) if circuit_id else "Selected circuit"
+
+
+def _recommendation_setting_label(recommendation: Any) -> str:
+    label = str(_recommendation_value(recommendation, "setting_label") or "").strip()
+    if label:
+        return label
+    setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
+    return _friendly_name_from_id(setting_key) if setting_key else "Setting"
+
+
+def _recommendation_evidence_text(recommendation: Any) -> str:
+    evidence = _recommendation_value(recommendation, "evidence")
+    if not isinstance(evidence, Mapping):
+        return ""
+
+    parts: list[str] = []
+    for key, value in evidence.items():
+        key_text = str(key)
+        if _is_hidden_recommendation_evidence_key(key_text):
+            continue
+        if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+            continue
+        parts.append(
+            f"{_friendly_name_from_id(key_text)}: "
+            f"{_format_recommendation_value(value, None)}"
+        )
+        if len(parts) >= 4:
+            break
+    return "; ".join(parts)
+
+
+def _is_hidden_recommendation_evidence_key(key: str) -> bool:
+    normalized = key.lower()
+    return (
+        "entity" in normalized
+        or normalized in {"source_entities", "entity_ids", "entities"}
+    )
+
+
+def _format_recommendation_value(value: Any, unit: Any) -> str:
+    if value is None:
+        return "not set"
+    if isinstance(value, bool):
+        text = "on" if value else "off"
+    elif isinstance(value, float):
+        text = f"{value:g}"
+    else:
+        text = str(value)
+
+    unit_text = str(unit or "").strip()
+    return f"{text} {unit_text}" if unit_text else text
+
+
+def _format_confidence(value: Any) -> str:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if 0.0 <= confidence <= 1.0:
+        confidence *= 100.0
+    return f"{confidence:.0f}%"
+
+
+def _recommendation_status(recommendation: Any) -> str:
+    status = _recommendation_value(recommendation, "status")
+    if status is None:
+        return "pending"
+    status_value = getattr(status, "value", status)
+    return str(status_value).lower().split(".")[-1]
+
+
+def _recommendation_value(recommendation: Any, key: str) -> Any:
+    if isinstance(recommendation, Mapping):
+        return recommendation.get(key)
+    return getattr(recommendation, key, None)
+
+
+def _options_after_recommendation_action(
+    config_entry: config_entries.ConfigEntry,
+    coordinator: Any,
+    action: str,
+) -> dict[str, Any]:
+    if action == RECOMMENDATION_ACTION_APPLY:
+        options = getattr(coordinator, "options", None)
+        if isinstance(options, Mapping):
+            return dict(options)
+    return dict(getattr(config_entry, "options", {}) or {})
 
 
 def _options_schema(

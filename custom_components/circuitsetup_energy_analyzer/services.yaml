@@ -781,3 +781,68 @@ merge_nilm_signatures:
       example: signature_1
       selector:
         text:
+recalculate_setting_recommendations:
+  name: Recalculate setting recommendations
+  description: Recalculate advanced setting recommendations. Most users should review suggestions in the options flow; this service is useful for automation and script workflows.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured circuit identifier to recalculate; leave empty to recalculate all loaded circuits.
+      required: false
+      example: fridge
+      selector:
+        text:
+apply_setting_recommendation:
+  name: Apply setting recommendation
+  description: Apply an advanced setting recommendation by ID. Most users should review suggestions in the options flow before applying them; this service is useful for automation and script workflows.
+  fields:
+    recommendation_id:
+      name: Recommendation ID
+      description: Recommendation identifier shown with the advanced setting suggestion.
+      required: true
+      example: fridge:daily_spike_ratio:v1
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
+      required: false
+      example: 01JZEXAMPLEENTRYID
+      selector:
+        text:
+deny_setting_recommendation:
+  name: Deny setting recommendation
+  description: Deny an advanced setting recommendation by ID. Most users should review suggestions in the options flow; this service is useful for automation and script workflows that record a decision.
+  fields:
+    recommendation_id:
+      name: Recommendation ID
+      description: Recommendation identifier shown with the advanced setting suggestion.
+      required: true
+      example: fridge:daily_spike_ratio:v1
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
+      required: false
+      example: 01JZEXAMPLEENTRYID
+      selector:
+        text:
+dismiss_setting_recommendation:
+  name: Dismiss setting recommendation
+  description: Dismiss an advanced setting recommendation by ID without applying it. Most users should review suggestions in the options flow; this service is useful for automation and script workflows.
+  fields:
+    recommendation_id:
+      name: Recommendation ID
+      description: Recommendation identifier shown with the advanced setting suggestion.
+      required: true
+      example: fridge:daily_spike_ratio:v1
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
+      required: false
+      example: 01JZEXAMPLEENTRYID
+      selector:
+        text:

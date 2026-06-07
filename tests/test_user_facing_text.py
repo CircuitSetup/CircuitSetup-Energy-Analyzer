@@ -111,6 +111,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "default_rate_per_kwh": "Default Rate Per kWh",
     "demand_limit_w": "Demand Limit W",
     "duration": "Duration",
+    "entry_id": "Entry ID",
     "goal_alert_ratio": "Goal Alert Ratio",
     "label": "Label",
     "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
@@ -126,6 +127,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "note": "Note",
     "power_factor_tolerance": "Power Factor Tolerance",
     "preset": "Preset",
+    "recommendation_id": "Recommendation ID",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
@@ -188,6 +190,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "nilm": "Experimental NILM Settings",
         "utility": "Utility / Opower Comparison",
         "advanced": "Advanced Circuit Settings",
+        "recommendations": "Review Suggested Settings",
     }
     assert all("_" not in label for label in init_step["menu_options"].values())
     assert "choose" in init_step["description"].lower()

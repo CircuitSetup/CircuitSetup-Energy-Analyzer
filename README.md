@@ -15,6 +15,8 @@ The integration learns conservative per-circuit baselines for single-phase appli
   experimental mains NILM disaggregation.
 - Learns conservative per-circuit baselines before alerting, then requires
   repeated anomalies and reports them as possible issues with observed evidence.
+- Suggests evidence-based advanced settings after enough history, with user
+  review before applying, denying, or dismissing each suggested change.
 - Tracks active power, current, voltage, frequency, power factor, reactive
   power, apparent power, metric consistency, usage patterns, and kWh changes.
 - Provides appliance-aware analysis for refrigerators, washers, dryers, HVAC
@@ -29,7 +31,8 @@ The integration learns conservative per-circuit baselines for single-phase appli
 
 ## Summary-First Diagnostics
 
-Most users should start with four rollup entities for each appliance or circuit:
+Most users should start with four rollup entities for each appliance or circuit,
+plus the optional Settings Suggestions action entry point:
 
 - Health Summary (`sensor.<circuit>_health_summary`) answers whether the
   analyzer thinks the appliance is ready, learning, missing data, or showing a
@@ -43,6 +46,8 @@ Most users should start with four rollup entities for each appliance or circuit:
 - Energy Summary (`sensor.<circuit>_energy_summary`) combines daily kWh,
   energy spike, daily goal, billing-cycle, and cost evidence into one usage
   condition.
+- Settings Suggestions (`sensor.<circuit>_settings_suggestions`) shows whether
+  the analyzer has pending advanced-setting recommendations to review.
 
 The detailed diagnostic entities are still available for advanced detail and
 automations, but internal `... Status` entities are intentionally secondary. For
@@ -130,6 +135,12 @@ Advanced settings expose per-circuit tuning for sensitivity, usage spike
 thresholds, daily goals, billing/cost settings, demand and capacity settings,
 and standby/always-on behavior.
 
+After at least 7 days or enough feature-specific cycles and samples, the
+analyzer can suggest advanced circuit settings from observed evidence. Suggested
+settings appear in **Configure > Review Suggested Settings** and in each
+circuit's Settings Suggestions sensor. These are conservative tuning
+recommendations for thresholds and windows, not appliance diagnoses.
+
 ![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
 
 ## Using The Integration
@@ -160,7 +171,8 @@ notifications, Repairs, or temporary troubleshooting views.
    entities are really from the same circuit or appliance.
 6. Save, wait for entities to appear, then build dashboards from Health
    Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy
-   Usage, and the Running binary sensor.
+   Usage, and the Running binary sensor. Add Settings Suggestions when you want
+   a dashboard-visible count of pending tuning recommendations.
 
 ### Classify circuits deliberately
 
@@ -190,6 +202,9 @@ Start with these entities for each appliance:
   evidence needs review.
 - `Energy Summary` shows whether usage, goals, billing, cost, or high-usage evidence
   needs review.
+- `Settings Suggestions` shows the count of pending advanced-setting
+  recommendations. Its attributes include `pending_count` and `recommendations`
+  with the evidence and recommendation IDs.
 - `Daily Energy Usage` shows today's derived kWh when a cumulative energy source is
   available.
 - `Running` binary sensor is the easiest entity for automations like washer,
@@ -215,6 +230,15 @@ imbalance, power metric consistency, mains balance, or solar flow.
 Use **Review Circuit Assignments** in the same Configure panel when you need to
 change which sensors belong to an appliance, change Single Phase versus Dual
 Phase, mark a circuit as Mixed, or correct the appliance type.
+
+Use **Review Suggested Settings** after the analyzer has learned enough history.
+Depending on the feature, suggestions need at least 7 days, enough run cycles,
+or enough retained samples. Read the evidence for each recommendation before
+choosing an action. **Apply Suggestion** updates that circuit's advanced
+settings. **Deny Suggestion** suppresses the same suggestion for the same
+evidence. **Dismiss For Now** hides it until the evidence changes or the
+recommendation expires. Treat these as conservative tuning suggestions for the
+analyzer, not proof that an appliance or circuit is faulty.
 
 Developer Tools actions are still available for advanced users, scripts, and
 automations that need to set the same values programmatically. Choose the
@@ -261,8 +285,18 @@ Useful action families:
   `set_standby_settings`.
 - Maintenance and alert handling: `pause_alerts`, `acknowledge_alert`,
   `relearn_baseline`, `start_maintenance`, `end_maintenance`.
+- Settings recommendations: `recalculate_setting_recommendations`,
+  `apply_setting_recommendation`, `deny_setting_recommendation`,
+  `dismiss_setting_recommendation`. These are mainly for automations and
+  scripts; normal users should review suggestions in the Options panel.
 
 ### Practical examples
+
+Suggested settings workflow: review the summary entities first, then let the
+analyzer learn for at least a week or enough cycles. Open **Configure > Review
+Suggested Settings**, read the observed evidence, then apply, deny, or dismiss
+each suggestion. After a decision, keep watching the summary entities and the
+Settings Suggestions sensor for future evidence changes.
 
 Washer or dryer running automation: use the Running binary sensor. Trigger when
 it changes from `on` to `off` for a few minutes, then send a mobile
@@ -844,6 +878,7 @@ temporary troubleshooting view instead of the default dashboard:
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | Readiness | `sensor.<circuit>_readiness` | Machine-readable readiness state with attributes explaining learning progress and blocked checks. | Advanced diagnostic, hidden by default | `learning`, `ready`, `needs_data`, `paused`, `possible_issue` |
+| Settings Suggestions | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations, with `pending_count` and `recommendations` attributes for review. | Normal entity, hidden by default | `0`, `1`, or higher counts |
 | Alert Evidence | `sensor.<circuit>_alert_evidence` | Strongest current evidence, written as observed behavior rather than diagnosis. | Advanced diagnostic, hidden by default | Feature names such as `reactive_power`, `cycle_duration`, `demand`, blank when quiet |
 | Recent Activity | `sensor.<circuit>_recent_activity` | Most recent retained start, stop, or possible-issue event. | Advanced diagnostic, hidden by default | `No recent activity`, `start`, `stop`, issue summary text |
 | Energy Usage Status | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. | Advanced diagnostic when energy usage tracking exists | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |
@@ -901,6 +936,7 @@ readbacks remain diagnostic entities.
 | Activity Summary | `sensor.<circuit>_activity_summary` | User-facing activity state with run-cycle and standby detail in attributes. | Default visible | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | User-facing electrical condition combining power quality, dual-phase balance, and power metric consistency. | Default visible | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | User-facing energy condition combining daily usage, goals, billing, and cost evidence. | Default visible | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
+| Settings Suggestions | `sensor.<circuit>_settings_suggestions` | Pending advanced-setting recommendation count. Attributes include `pending_count` and `recommendations` with recommendation IDs, suggested values, and evidence. | Normal entity, hidden by default | `0`, `1`, or higher counts |
 | Readiness | `sensor.<circuit>_readiness` | Machine-readable health/readiness state with readiness attributes. | Advanced diagnostic, hidden by default | `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, `nilm_review` |
 | Learning Progress | `sensor.<circuit>_learning_progress` | Percentage of learned baseline evidence. | Advanced diagnostic, hidden by default | `0` to `100%`, with learned and pending feature samples in attributes |
 | Data Quality Checklist | `sensor.<circuit>_data_quality_checklist` | Input quality summary for missing, stale, or invalid source data. | Advanced diagnostic, hidden by default | `ok`, `problem` |

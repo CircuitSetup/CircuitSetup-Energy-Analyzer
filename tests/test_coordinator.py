@@ -1,5 +1,7 @@
+import sys
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from types import MappingProxyType, ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -25,6 +27,31 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+def _settings_recommendation(advisor: Any, **overrides: Any) -> Any:
+    values = {
+        "recommendation_id": "hvac:daily_spike_ratio:v1",
+        "unique_key": "hvac:daily_spike_ratio",
+        "circuit_id": "hvac",
+        "circuit_name": "HVAC",
+        "setting_key": "daily_spike_ratio",
+        "setting_label": "Daily Spike Ratio",
+        "current_value": 0.25,
+        "suggested_value": 0.3,
+        "unit": "ratio",
+        "feature": "energy_usage_spikes",
+        "group": "Energy Usage",
+        "confidence": 0.78,
+        "reason": "Observed 7 complete days of energy usage.",
+        "evidence": {"observed_days": 7, "p95_daily_kwh": 9.8},
+        "apply_payload": {"daily_spike_ratio": 0.3},
+        "status": advisor.RecommendationStatus.PENDING,
+        "created_at": datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        "expires_at": datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+    }
+    values.update(overrides)
+    return advisor.SettingRecommendation(**values)
 
 
 def test_process_events_into_state_tracks_latest_event_per_circuit() -> None:
@@ -4327,6 +4354,631 @@ async def test_runtime_persists_energy_usage_settings() -> None:
         "window_days": 14,
         "daily_spike_ratio": 0.2,
     }
+
+
+@pytest.mark.asyncio
+async def test_coordinator_builds_settings_recommendation_after_maturity() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "hvac": {
+                    "days": [
+                        {"usage_kwh": 5.8},
+                        {"usage_kwh": 6.1},
+                        {"usage_kwh": 7.4},
+                        {"usage_kwh": 6.7},
+                        {"usage_kwh": 8.9},
+                        {"usage_kwh": 9.8},
+                        {"usage_kwh": 7.9},
+                    ],
+                }
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_recalculate_setting_recommendations()
+
+    recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
+    assert recommendation["setting_key"] == "daily_spike_ratio"
+    assert recommendation["setting_label"] == "Daily Spike Ratio"
+    assert recommendation["suggested_value"] == 0.3
+    assert coordinator.state.settings_recommendation_count_by_circuit["hvac"] == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(settings_advisor)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store_data=FeatureStoreData(
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_apply_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.3
+    )
+    assert (
+        coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.3
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.APPLIED
+    )
+    assert (
+        coordinator.state.settings_recommendation_count_by_circuit.get("hvac", 0)
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_deny_setting_recommendation_records_decision() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(settings_advisor)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 3, 9, 30, tzinfo=UTC),
+    )
+
+    await coordinator.async_deny_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    decision = coordinator.store_data.settings_recommendation_decisions[
+        recommendation.unique_key
+    ]
+    assert decision.status is settings_advisor.RecommendationStatus.DENIED
+    assert decision.denied_value == recommendation.suggested_value
+    assert decision.evidence_fingerprint == (
+        settings_advisor.recommendation_evidence_fingerprint(recommendation)
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.DENIED
+    )
+
+
+@pytest.mark.asyncio
+async def test_dismiss_setting_recommendation_records_decision() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(settings_advisor)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 3, 9, 30, tzinfo=UTC),
+    )
+
+    await coordinator.async_dismiss_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    decision = coordinator.store_data.settings_recommendation_decisions[
+        recommendation.unique_key
+    ]
+    assert decision.status is settings_advisor.RecommendationStatus.DISMISSED
+    assert decision.denied_value == recommendation.suggested_value
+    assert decision.evidence_fingerprint == (
+        settings_advisor.recommendation_evidence_fingerprint(recommendation)
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.DISMISSED
+    )
+
+
+def test_settings_recommendation_notification_id_is_entry_scoped() -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    assert notifications.settings_recommendation_notification_id("entry-1") == (
+        f"{DOMAIN}_settings_recommendations_entry_1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_update_builds_settings_recommendation_after_maturity() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "hvac": {
+                    "days": [
+                        {"usage_kwh": 5.8},
+                        {"usage_kwh": 6.1},
+                        {"usage_kwh": 7.4},
+                        {"usage_kwh": 6.7},
+                        {"usage_kwh": 8.9},
+                        {"usage_kwh": 9.8},
+                        {"usage_kwh": 7.9},
+                    ],
+                }
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
+    assert recommendation["setting_key"] == "daily_spike_ratio"
+    assert recommendation["suggested_value"] == 0.3
+    assert coordinator.state.settings_recommendation_count_by_circuit["hvac"] == 1
+
+
+@pytest.mark.asyncio
+async def test_process_update_preserves_recommendation_episode_on_repeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    saved: list[FeatureStoreData] = []
+    notifications: list[dict[str, Any]] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(self.data)
+
+    async def fake_notification(hass, entry_id, *, total_pending):
+        notifications.append(
+            {
+                "entry_id": entry_id,
+                "total_pending": total_pending,
+            }
+        )
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_settings_recommendation_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    now_holder = {"value": now}
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "days": [
+                    {"date": "2026-05-26", "usage_kwh": 5.8},
+                    {"date": "2026-05-27", "usage_kwh": 6.1},
+                    {"date": "2026-05-28", "usage_kwh": 7.4},
+                    {"date": "2026-05-29", "usage_kwh": 6.7},
+                    {"date": "2026-05-30", "usage_kwh": 8.9},
+                    {"date": "2026-05-31", "usage_kwh": 9.8},
+                    {"date": "2026-06-01", "usage_kwh": 7.9},
+                ],
+            }
+        },
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_id="entry-1",
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store=FakeStore(),
+        store_data=store_data,
+        now_fn=lambda: now_holder["value"],
+    )
+
+    await coordinator.async_process_update()
+    first = store_data.settings_recommendations["hvac:daily_spike_ratio:v1"]
+    first_created_at = first.created_at
+    first_expires_at = first.expires_at
+    assert store_data.settings_recommendation_notification_episode_key
+
+    now_holder["value"] = now + timedelta(minutes=5)
+    await coordinator.async_process_update()
+
+    repeated = store_data.settings_recommendations["hvac:daily_spike_ratio:v1"]
+    assert repeated.created_at == first_created_at
+    assert repeated.expires_at == first_expires_at
+    saved_after_repeat = len(saved)
+    assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
+
+    reloaded = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_id="entry-1",
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store=FakeStore(),
+        store_data=store_data,
+        now_fn=lambda: now_holder["value"],
+    )
+    now_holder["value"] = now + timedelta(minutes=10)
+    await reloaded.async_process_update()
+
+    assert len(saved) == saved_after_repeat
+    assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
+
+
+@pytest.mark.asyncio
+async def test_apply_setting_recommendation_persists_config_entry_options() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.updated_options: list[dict[str, Any]] = []
+
+        def async_update_entry(self, entry, *, options):
+            self.updated_options.append(options)
+            entry.options = MappingProxyType(options)
+            return True
+
+    recommendation = _settings_recommendation(settings_advisor)
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options=MappingProxyType(
+            {
+                CONF_ADVANCED_SETTINGS: MappingProxyType(
+                    {
+                        "hvac": MappingProxyType(
+                            {"daily_spike_ratio": 0.25},
+                        )
+                    },
+                )
+            },
+        ),
+    )
+    store_data = FeatureStoreData(
+        settings_recommendations={
+            recommendation.recommendation_id: recommendation,
+        },
+    )
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=lambda entity_id: None),
+        data={},
+        config_entries=FakeConfigEntries(),
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry.entry_id,
+        entry_data=entry.data,
+        options=entry.options,
+        store_data=store_data,
+        config_entry=entry,
+    )
+
+    await coordinator.async_apply_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        hass.config_entries.updated_options[-1][CONF_ADVANCED_SETTINGS]["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.3
+    )
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.3
+    )
+
+    reloaded = coordinator_module.EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry.entry_id,
+        entry_data=entry.data,
+        options=entry.options,
+        store_data=store_data,
+        config_entry=entry,
+    )
+
+    assert (
+        reloaded.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.3
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_update_recommends_capacity_from_current_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    notifications: list[dict[str, Any]] = []
+
+    async def fake_notification(hass, entry_id, *, total_pending):
+        notifications.append(
+            {
+                "entry_id": entry_id,
+                "total_pending": total_pending,
+            }
+        )
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_settings_recommendation_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    now_holder = {"value": now}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.ev_current"
+            return SimpleNamespace(
+                state="31",
+                attributes={"unit_of_measurement": "A"},
+                last_updated=now_holder["value"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_id="entry-1",
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ev",
+                    "name": "EV Charger",
+                    "mode": "single_phase",
+                    "appliance_profile": "ev_charger",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.ev_current",
+                            "role": "current",
+                            "unit": "A",
+                        }
+                    ],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "ev": {"warning_ratio": 0.9},
+            },
+        },
+        now_fn=lambda: now_holder["value"],
+    )
+
+    for index in range(6):
+        now_holder["value"] = now + timedelta(minutes=index)
+        await coordinator.async_process_update()
+
+    assert "ev" not in coordinator.state.settings_recommendations_by_circuit
+    assert notifications == []
+
+    now_holder["value"] = now + timedelta(minutes=6)
+    await coordinator.async_process_update()
+
+    recommendation = coordinator.state.settings_recommendations_by_circuit["ev"][0]
+    assert recommendation["setting_key"] == "warning_ratio"
+    assert recommendation["suggested_value"] == 0.75
+    assert coordinator.state.settings_recommendation_count_by_circuit["ev"] == 1
+    stored = coordinator.store_data.settings_recommendations["ev:warning_ratio:v1"]
+    first_created_at = stored.created_at
+    first_expires_at = stored.expires_at
+    assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
+
+    now_holder["value"] = now + timedelta(minutes=7)
+    await coordinator.async_process_update()
+
+    repeated = coordinator.store_data.settings_recommendations["ev:warning_ratio:v1"]
+    assert repeated.created_at == first_created_at
+    assert repeated.expires_at == first_expires_at
+    assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
+
+
+@pytest.mark.asyncio
+async def test_settings_recommendation_notification_creates_persistent_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_create(hass, message, *, title, notification_id):
+        calls.append(
+            {
+                "hass": hass,
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            }
+        )
+
+    homeassistant = ModuleType("homeassistant")
+    components = ModuleType("homeassistant.components")
+    persistent_notification = ModuleType(
+        "homeassistant.components.persistent_notification",
+    )
+    persistent_notification.async_create = fake_create
+    components.persistent_notification = persistent_notification
+    homeassistant.components = components
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.persistent_notification",
+        persistent_notification,
+    )
+
+    await notifications.async_create_settings_recommendation_notification(
+        SimpleNamespace(),
+        "entry-1",
+        total_pending=2,
+    )
+
+    assert calls == [
+        {
+            "hass": SimpleNamespace(),
+            "message": (
+                "There are 2 suggested Advanced Circuit Settings to review via "
+                "CircuitSetup Energy Analyzer > Configure > Review Suggested "
+                "Settings."
+            ),
+            "title": "CircuitSetup Energy Analyzer suggested settings",
+            "notification_id": f"{DOMAIN}_settings_recommendations_entry_1",
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -277,8 +277,232 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "nilm",
         "utility",
         "advanced",
+        "recommendations",
     ]
     assert result["description_placeholders"] == {}
+
+
+@pytest.mark.asyncio
+async def test_options_recommendations_step_shows_friendly_pending_suggestions(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "hvac": [
+                    {
+                        "recommendation_id": "hvac:daily_spike_ratio:v1",
+                        "circuit_id": "hvac",
+                        "circuit_name": "Downstairs HVAC",
+                        "setting_key": "daily_spike_ratio",
+                        "setting_label": "Daily Spike Ratio",
+                        "current_value": 0.5,
+                        "suggested_value": 0.3,
+                        "confidence": 0.82,
+                        "reason": "Recent daily usage has been stable.",
+                        "evidence": {
+                            "observed_daily_spike_ratio": 0.28,
+                            "source_entities": ["sensor.hvac_power"],
+                        },
+                    }
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "recommendations"
+    assert {
+        "recommendation_id",
+        "recommendation_action",
+    } <= _schema_keys(result["data_schema"])
+    recommendation_options = _schema_validator(
+        result["data_schema"],
+        "recommendation_id",
+    )["select"]["options"]
+    assert recommendation_options == [
+        {
+            "value": "hvac:daily_spike_ratio:v1",
+            "label": (
+                "Downstairs HVAC - Daily Spike Ratio: "
+                "0.5 -> 0.3 (82% confidence)"
+            ),
+        }
+    ]
+    action_options = _schema_validator(
+        result["data_schema"],
+        "recommendation_action",
+    )["select"]["options"]
+    assert action_options == [
+        {"value": "apply", "label": "Apply Suggestion"},
+        {"value": "deny", "label": "Deny Suggestion"},
+        {"value": "dismiss", "label": "Dismiss For Now"},
+    ]
+    summary = result["description_placeholders"]["recommendations"]
+    assert "Downstairs HVAC" in summary
+    assert "Daily Spike Ratio" in summary
+    assert "0.5 -> 0.3" in summary
+    assert "Recent daily usage has been stable." in summary
+    assert "Observed Daily Spike Ratio: 0.28" in summary
+    assert "source_entities" not in summary
+    assert coordinator.async_recalculate_setting_recommendations.calls == [(None,)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "method_name"),
+    [
+        ("apply", "async_apply_setting_recommendation"),
+        ("deny", "async_deny_setting_recommendation"),
+        ("dismiss", "async_dismiss_setting_recommendation"),
+    ],
+)
+async def test_options_recommendations_step_dispatches_actions(
+    action: str,
+    method_name: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    recommendation = {
+        "recommendation_id": "hvac:daily_spike_ratio:v1",
+        "circuit_id": "hvac",
+        "circuit_name": "Downstairs HVAC",
+        "setting_label": "Daily Spike Ratio",
+        "current_value": 0.5,
+        "suggested_value": 0.3,
+    }
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={"hvac": [recommendation]}
+        ),
+        options={
+            CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_ADVANCED_SETTINGS: {"hvac": {"daily_spike_ratio": 0.3}},
+        },
+        async_recalculate_setting_recommendations=_async_recorder(),
+        async_apply_setting_recommendation=_async_recorder(),
+        async_deny_setting_recommendation=_async_recorder(),
+        async_dismiss_setting_recommendation=_async_recorder(),
+    )
+    entry = SimpleNamespace(
+        data={},
+        options={CONF_SOURCE_ENTITIES: ["sensor.old_power"]},
+        entry_id="entry-1",
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations(
+        {
+            "recommendation_id": "hvac:daily_spike_ratio:v1",
+            "recommendation_action": action,
+        }
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "",
+        "data": coordinator.options if action == "apply" else entry.options,
+    }
+    assert getattr(coordinator, method_name).calls == [("hvac:daily_spike_ratio:v1",)]
+
+
+@pytest.mark.asyncio
+async def test_options_recommendations_step_handles_missing_or_empty_suggestions(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {}})
+
+    missing = await flow.async_step_recommendations()
+
+    assert missing["type"] == "form"
+    assert missing["step_id"] == "recommendations"
+    assert _schema_keys(missing["data_schema"]) == set()
+    assert missing["errors"]["base"] == "recommendations_not_loaded"
+    assert "not loaded yet" in missing["description_placeholders"]["recommendations"]
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(settings_recommendations_by_circuit={}),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    empty = await flow.async_step_recommendations()
+
+    assert empty["type"] == "form"
+    assert empty["step_id"] == "recommendations"
+    assert _schema_keys(empty["data_schema"]) == set()
+    assert empty["errors"] == {}
+    assert "no pending suggestions" in empty["description_placeholders"][
+        "recommendations"
+    ].lower()
+
+
+@pytest.mark.asyncio
+async def test_options_recommendations_step_rejects_unknown_selection() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "hvac": [
+                    {
+                        "recommendation_id": "hvac:daily_spike_ratio:v1",
+                        "circuit_name": "Downstairs HVAC",
+                        "setting_label": "Daily Spike Ratio",
+                        "current_value": 0.5,
+                        "suggested_value": 0.3,
+                    }
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(
+        SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    )
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations(
+        {"recommendation_id": "unknown", "recommendation_action": "apply"}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "invalid_recommendation"
+
+
+def _async_recorder():
+    async def record(*args):
+        record.calls.append(args)
+
+    record.calls = []
+    return record
 
 
 @pytest.mark.asyncio

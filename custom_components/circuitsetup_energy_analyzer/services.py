@@ -34,6 +34,10 @@ SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
 SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
 SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
+SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendations"
+SERVICE_APPLY_SETTING_RECOMMENDATION = "apply_setting_recommendation"
+SERVICE_DENY_SETTING_RECOMMENDATION = "deny_setting_recommendation"
+SERVICE_DISMISS_SETTING_RECOMMENDATION = "dismiss_setting_recommendation"
 
 ATTR_CIRCUIT_ID = "circuit_id"
 ATTR_DURATION = "duration"
@@ -83,6 +87,8 @@ ATTR_RELEARN = "relearn"
 ATTR_RELEARN_ON_END = "relearn_on_end"
 ATTR_SOURCE_SIGNATURE_ID = "source_signature_id"
 ATTR_TARGET_SIGNATURE_ID = "target_signature_id"
+ATTR_RECOMMENDATION_ID = "recommendation_id"
+ATTR_ENTRY_ID = "entry_id"
 
 _SERVICES_KEY = "_services_setup"
 
@@ -216,6 +222,11 @@ NILM_MERGE_SERVICE_SCHEMA = _schema(
         ATTR_TARGET_SIGNATURE_ID,
     )
 )
+RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA = _schema(optional=(ATTR_CIRCUIT_ID,))
+RECOMMENDATION_ACTION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_RECOMMENDATION_ID,),
+    optional=(ATTR_ENTRY_ID,),
+)
 
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
@@ -253,6 +264,12 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
+    SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS: (
+        RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA
+    ),
+    SERVICE_APPLY_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
+    SERVICE_DENY_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
+    SERVICE_DISMISS_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
 }
 
 
@@ -325,6 +342,62 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         alert_id = data.get(ATTR_ALERT_ID)
         for coordinator in _loaded_coordinators(hass):
             await _call_if_present(coordinator, "async_mark_alert_unhelpful", alert_id)
+        return
+
+    if service == SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS:
+        coordinators = (
+            _target_coordinators(hass, circuit_id)
+            if circuit_id is not None
+            else _loaded_coordinators(hass)
+        )
+        for coordinator in coordinators:
+            await _call_if_present(
+                coordinator,
+                "async_recalculate_setting_recommendations",
+                circuit_id,
+            )
+        return
+
+    if service == SERVICE_APPLY_SETTING_RECOMMENDATION:
+        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        for coordinator in _target_recommendation_coordinators(
+            hass,
+            recommendation_id,
+            data.get(ATTR_ENTRY_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_apply_setting_recommendation",
+                recommendation_id,
+            )
+        return
+
+    if service == SERVICE_DENY_SETTING_RECOMMENDATION:
+        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        for coordinator in _target_recommendation_coordinators(
+            hass,
+            recommendation_id,
+            data.get(ATTR_ENTRY_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_deny_setting_recommendation",
+                recommendation_id,
+            )
+        return
+
+    if service == SERVICE_DISMISS_SETTING_RECOMMENDATION:
+        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        for coordinator in _target_recommendation_coordinators(
+            hass,
+            recommendation_id,
+            data.get(ATTR_ENTRY_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_dismiss_setting_recommendation",
+                recommendation_id,
+            )
         return
 
     for coordinator in _target_coordinators(hass, circuit_id):
@@ -536,6 +609,56 @@ def _loaded_coordinators(hass: Any) -> list[Any]:
         for key, value in domain_data.items()
         if key != _SERVICES_KEY and hasattr(value, "async_set_updated_data")
     ]
+
+
+def _target_recommendation_coordinators(
+    hass: Any,
+    recommendation_id: Any,
+    entry_id: Any = None,
+) -> list[Any]:
+    domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
+    if not isinstance(domain_data, dict) or not isinstance(recommendation_id, str):
+        return []
+
+    if isinstance(entry_id, str) and entry_id:
+        coordinator = domain_data.get(entry_id)
+        if coordinator is not None and hasattr(coordinator, "async_set_updated_data"):
+            return [coordinator]
+        return []
+
+    matches = [
+        coordinator
+        for coordinator in _loaded_coordinators(hass)
+        if _coordinator_has_recommendation(coordinator, recommendation_id)
+    ]
+    return matches if len(matches) == 1 else []
+
+
+def _coordinator_has_recommendation(coordinator: Any, recommendation_id: str) -> bool:
+    store_data = getattr(coordinator, "store_data", None)
+    recommendations = getattr(store_data, "settings_recommendations", {})
+    if isinstance(recommendations, Mapping) and recommendation_id in recommendations:
+        return True
+
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
+    if not isinstance(by_circuit, Mapping):
+        return False
+    for circuit_recommendations in by_circuit.values():
+        if isinstance(circuit_recommendations, (str, bytes)):
+            continue
+        try:
+            iterator = iter(circuit_recommendations)
+        except TypeError:
+            continue
+        for recommendation in iterator:
+            if isinstance(recommendation, Mapping):
+                current_id = recommendation.get(ATTR_RECOMMENDATION_ID)
+            else:
+                current_id = getattr(recommendation, ATTR_RECOMMENDATION_ID, None)
+            if current_id == recommendation_id:
+                return True
+    return False
 
 
 async def _call_if_present(target: Any, method_name: str, *args: Any) -> None:

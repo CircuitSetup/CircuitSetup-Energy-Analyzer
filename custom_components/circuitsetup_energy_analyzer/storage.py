@@ -13,6 +13,14 @@ from .models import (
     RetentionMode,
     Severity,
 )
+from .settings_advisor import (
+    RecommendationDecision,
+    SettingRecommendation,
+    decision_from_dict,
+    decision_to_dict,
+    recommendation_from_dict,
+    recommendation_to_dict,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -82,6 +90,16 @@ class FeatureStoreData:
         default_factory=dict
     )
     standby_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    settings_recommendations: dict[str, SettingRecommendation] = field(
+        default_factory=dict
+    )
+    settings_recommendation_decisions: dict[str, RecommendationDecision] = field(
+        default_factory=dict
+    )
+    settings_recommendation_notification_episode_key: tuple[
+        tuple[str, ...],
+        ...,
+    ] = field(default_factory=tuple)
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -232,6 +250,22 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             data.standby_settings_by_circuit
         ),
         "standby_by_circuit": _dict_of_dicts(data.standby_by_circuit),
+        "settings_recommendations": {
+            str(recommendation_id): recommendation_to_dict(recommendation)
+            for recommendation_id, recommendation in (
+                data.settings_recommendations.items()
+            )
+        },
+        "settings_recommendation_decisions": {
+            str(unique_key): decision_to_dict(decision)
+            for unique_key, decision in (
+                data.settings_recommendation_decisions.items()
+            )
+        },
+        "settings_recommendation_notification_episode_key": [
+            list(part)
+            for part in data.settings_recommendation_notification_episode_key
+        ],
     }
 
 
@@ -308,6 +342,27 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("standby_settings_by_circuit", {}),
         ),
         standby_by_circuit=_dict_of_dicts(raw.get("standby_by_circuit", {})),
+        settings_recommendations={
+            str(recommendation_id): recommendation_from_dict(recommendation)
+            for recommendation_id, recommendation in raw.get(
+                "settings_recommendations",
+                {},
+            ).items()
+        },
+        settings_recommendation_decisions={
+            str(unique_key): decision_from_dict(decision)
+            for unique_key, decision in raw.get(
+                "settings_recommendation_decisions",
+                {},
+            ).items()
+        },
+        settings_recommendation_notification_episode_key=tuple(
+            tuple(str(item) for item in part)
+            for part in raw.get(
+                "settings_recommendation_notification_episode_key",
+                [],
+            )
+        ),
     )
 
 
@@ -350,6 +405,11 @@ def prune_events(
         ),
         standby_settings_by_circuit=data.standby_settings_by_circuit,
         standby_by_circuit=data.standby_by_circuit,
+        settings_recommendations=data.settings_recommendations,
+        settings_recommendation_decisions=data.settings_recommendation_decisions,
+        settings_recommendation_notification_episode_key=(
+            data.settings_recommendation_notification_episode_key
+        ),
     )
 
 

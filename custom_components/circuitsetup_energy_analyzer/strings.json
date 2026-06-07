@@ -100,7 +100,8 @@
           "mains": "Edit Mains Sensors",
           "nilm": "Experimental NILM Settings",
           "utility": "Utility / Opower Comparison",
-          "advanced": "Advanced Circuit Settings"
+          "advanced": "Advanced Circuit Settings",
+          "recommendations": "Review Suggested Settings"
         }
       },
       "sources": {
@@ -343,6 +344,18 @@
           }
         }
       },
+      "recommendations": {
+        "title": "Review Suggested Settings",
+        "description": "{recommendations}",
+        "data": {
+          "recommendation_id": "Suggested Setting",
+          "recommendation_action": "Action"
+        },
+        "data_description": {
+          "recommendation_id": "Choose one pending setting suggestion to review.",
+          "recommendation_action": "Apply the suggested setting, deny it so it is not suggested again for the same evidence, or dismiss it for now."
+        }
+      },
       "assign": {
         "title": "Assign Circuit Appliances",
         "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
@@ -365,6 +378,10 @@
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
+    },
+    "error": {
+      "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
+      "invalid_recommendation": "Choose one of the pending suggested settings."
     }
   },
   "entity": {
@@ -410,6 +427,9 @@
       },
       "sensitivity": {
         "name": "Sensitivity"
+      },
+      "settings_suggestions": {
+        "name": "Settings suggestions"
       },
       "nilm_signature_count": {
         "name": "NILM discovered signatures"

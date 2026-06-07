@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from inspect import isawaitable
 from typing import Any, Self
 
 from . import notifications, repairs
@@ -48,6 +49,7 @@ from .const import (
 from .cost import CostSettings, record_cost_sample
 from .cycles import (
     MIN_CYCLE_BASELINE_CONFIDENCE,
+    RUN_CYCLE_DURATION_FEATURE,
     cycle_baseline_feature_values,
     cycle_summary_payload,
     select_cycle_anomaly_evidence,
@@ -119,6 +121,16 @@ from .power_quality import (
     select_power_quality_evidence,
 )
 from .profiles import get_profile_definition
+from .settings_advisor import (
+    AdvisorCircuitContext,
+    AdvisorInputs,
+    RecommendationDecision,
+    RecommendationStatus,
+    SettingRecommendation,
+    build_settings_recommendations,
+    recommendation_evidence_fingerprint,
+    recommendation_to_dict,
+)
 from .solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
@@ -351,6 +363,12 @@ class AnalyzerState:
     standby_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    settings_recommendations_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    settings_recommendation_count_by_circuit: dict[str, int] = field(
+        default_factory=dict
+    )
 
 
 def process_events_into_state(
@@ -405,6 +423,64 @@ def _merged_entry_settings_map(
     return settings
 
 
+def _mutable_copy(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _mutable_copy(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_mutable_copy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mutable_copy(item) for item in value)
+    return value
+
+
+def _recommendation_materially_matches(
+    existing: SettingRecommendation,
+    candidate: SettingRecommendation,
+) -> bool:
+    return _recommendation_material_key(existing) == _recommendation_material_key(
+        candidate,
+    )
+
+
+def _recommendation_material_key(
+    recommendation: SettingRecommendation,
+) -> tuple[Any, ...]:
+    return (
+        recommendation.recommendation_id,
+        recommendation.unique_key,
+        recommendation.circuit_id,
+        recommendation.circuit_name,
+        recommendation.setting_key,
+        recommendation.setting_label,
+        recommendation.current_value,
+        recommendation.suggested_value,
+        recommendation.unit,
+        recommendation.feature,
+        recommendation.group,
+        round(recommendation.confidence, 3),
+        recommendation.reason,
+        tuple(sorted(dict(recommendation.apply_payload).items())),
+        _material_evidence_key(recommendation.feature, recommendation.evidence),
+        recommendation.advisor_version,
+    )
+
+
+def _material_evidence_key(
+    feature: str,
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, Any], ...]:
+    ignored_keys: set[str] = set()
+    if feature == "capacity_warning_ratio":
+        ignored_keys.add("observed_samples")
+    return tuple(
+        sorted(
+            (key, value)
+            for key, value in dict(evidence).items()
+            if key not in ignored_keys
+        )
+    )
+
+
 def _replace_if_present(
     target: dict[str, dict[str, Any]],
     circuit_id: str,
@@ -443,12 +519,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         options: dict[str, Any] | None = None,
         store: Any | None = None,
         store_data: FeatureStoreData | None = None,
+        config_entry: Any | None = None,
         now_fn: Any | None = None,
     ) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN)
         self.entry_id = entry_id
-        self.entry_data = entry_data or {}
-        self.options = options or {}
+        self.entry_data = _mutable_copy(entry_data or {})
+        self.options = _mutable_copy(options or {})
+        self._config_entry = config_entry
         self._store = store
         self.store_data = store_data or FeatureStoreData()
         self.circuit_configs = _circuit_configs_from_entry_data(
@@ -514,6 +592,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ] = {}
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._notified_alert_ids: set[str] = set()
+        self._settings_recommendation_notification_episode_key = tuple(
+            tuple(str(item) for item in part)
+            for part in self.store_data.settings_recommendation_notification_episode_key
+        )
         self._active_repair_issues: set[tuple[str, str]] = set()
         self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
         self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
@@ -820,8 +902,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
             self._refresh_ux_state(config, sample, now)
+        if self._rebuild_setting_recommendations(now):
+            self._mark_store_dirty()
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
+        await self._notify_settings_recommendations_if_needed()
         return self.state
 
     def _refresh_config_metadata_state(self: Self, config: CircuitConfig) -> None:
@@ -953,6 +1038,459 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
+
+    async def async_recalculate_setting_recommendations(
+        self: Self,
+        circuit_id: str | None = None,
+    ) -> None:
+        """Rebuild pending advanced-setting recommendations from retained data."""
+        now = self._now_fn()
+        if self._rebuild_setting_recommendations(now, circuit_id=circuit_id):
+            self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+        await self._notify_settings_recommendations_if_needed()
+
+    def _rebuild_setting_recommendations(
+        self: Self,
+        now: datetime,
+        *,
+        circuit_id: str | None = None,
+    ) -> bool:
+        """Rebuild pending recommendations without saving or notifying."""
+        target_configs = [
+            config
+            for config in self.circuit_configs
+            if circuit_id is None or config.circuit_id == circuit_id
+        ]
+        changed = False
+
+        for config in target_configs:
+            recommendations = build_settings_recommendations(
+                self._advisor_inputs_for_config(config, now),
+            )
+            recommendation_ids = {
+                recommendation.recommendation_id
+                for recommendation in recommendations
+            }
+            for stored_id, stored in list(
+                self.store_data.settings_recommendations.items(),
+            ):
+                if (
+                    stored.circuit_id == config.circuit_id
+                    and stored.status is RecommendationStatus.PENDING
+                    and stored_id not in recommendation_ids
+                ):
+                    self.store_data.settings_recommendations[stored_id] = replace(
+                        stored,
+                        status=RecommendationStatus.STALE,
+                    )
+                    changed = True
+
+            for recommendation in recommendations:
+                stored = self.store_data.settings_recommendations.get(
+                    recommendation.recommendation_id,
+                )
+                if (
+                    stored is not None
+                    and stored.status is RecommendationStatus.PENDING
+                    and stored.expires_at > now
+                    and _recommendation_materially_matches(stored, recommendation)
+                ):
+                    continue
+                if stored != recommendation:
+                    self.store_data.settings_recommendations[
+                        recommendation.recommendation_id
+                    ] = recommendation
+                    changed = True
+
+        self._refresh_settings_recommendation_state(now)
+        return changed
+
+    async def async_apply_setting_recommendation(
+        self: Self,
+        recommendation_id: str,
+    ) -> None:
+        """Apply one pending setting recommendation to advanced settings."""
+        recommendation = self.store_data.settings_recommendations.get(
+            recommendation_id,
+        )
+        if (
+            recommendation is None
+            or recommendation.status is not RecommendationStatus.PENDING
+        ):
+            return
+
+        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
+        if not isinstance(advanced_by_circuit, dict):
+            advanced_by_circuit = dict(advanced_by_circuit)
+            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
+        current_settings = advanced_by_circuit.get(recommendation.circuit_id, {})
+        updated_settings = (
+            dict(current_settings) if isinstance(current_settings, Mapping) else {}
+        )
+        updated_settings.update(dict(recommendation.apply_payload))
+        advanced_by_circuit[recommendation.circuit_id] = updated_settings
+        self._apply_advanced_settings(recommendation.circuit_id, updated_settings)
+        await self._async_persist_config_entry_options()
+
+        self.store_data.settings_recommendations[recommendation_id] = replace(
+            recommendation,
+            status=RecommendationStatus.APPLIED,
+        )
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_settings_recommendation_state(now)
+        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    async def async_deny_setting_recommendation(
+        self: Self,
+        recommendation_id: str,
+    ) -> None:
+        """Record a denial for one pending setting recommendation."""
+        await self._async_record_setting_recommendation_decision(
+            recommendation_id,
+            RecommendationStatus.DENIED,
+        )
+
+    async def async_dismiss_setting_recommendation(
+        self: Self,
+        recommendation_id: str,
+    ) -> None:
+        """Record a dismissal for one pending setting recommendation."""
+        await self._async_record_setting_recommendation_decision(
+            recommendation_id,
+            RecommendationStatus.DISMISSED,
+        )
+
+    async def _async_persist_config_entry_options(self: Self) -> None:
+        if self._config_entry is None:
+            return
+        config_entries = getattr(self.hass, "config_entries", None)
+        update_entry = getattr(config_entries, "async_update_entry", None)
+        if update_entry is None:
+            return
+
+        options = _mutable_copy(self.options)
+        result = update_entry(self._config_entry, options=options)
+        if isawaitable(result):
+            await result
+        self.options = _mutable_copy(options)
+
+    async def _async_record_setting_recommendation_decision(
+        self: Self,
+        recommendation_id: str,
+        status: RecommendationStatus,
+    ) -> None:
+        recommendation = self.store_data.settings_recommendations.get(
+            recommendation_id,
+        )
+        if (
+            recommendation is None
+            or recommendation.status is not RecommendationStatus.PENDING
+        ):
+            return
+
+        now = self._now_fn()
+        self.store_data.settings_recommendations[recommendation_id] = replace(
+            recommendation,
+            status=status,
+        )
+        self.store_data.settings_recommendation_decisions[
+            recommendation.unique_key
+        ] = RecommendationDecision(
+            unique_key=recommendation.unique_key,
+            status=status,
+            decided_at=now,
+            denied_value=recommendation.suggested_value,
+            evidence_fingerprint=recommendation_evidence_fingerprint(
+                recommendation,
+            ),
+        )
+        self._mark_store_dirty()
+        self._refresh_settings_recommendation_state(now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+
+    def _advisor_inputs_for_config(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AdvisorInputs:
+        return AdvisorInputs(
+            now=now,
+            context=AdvisorCircuitContext(
+                circuit_id=config.circuit_id,
+                circuit_name=config.name,
+                appliance_profile=config.appliance_profile.value,
+                circuit_mode=config.mode.value,
+                power_flow=config.power_flow.value,
+                advanced_settings=self._advanced_settings_for_circuit(
+                    config.circuit_id,
+                ),
+            ),
+            feature_history=self._advisor_feature_history_for_circuit(config, now),
+            decisions=self.store_data.settings_recommendation_decisions,
+        )
+
+    def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
+        settings: dict[str, Any] = {}
+        for source in (
+            self.entry_data.get(CONF_ADVANCED_SETTINGS, {}),
+            self.options.get(CONF_ADVANCED_SETTINGS, {}),
+        ):
+            if not isinstance(source, Mapping):
+                continue
+            raw_settings = source.get(circuit_id, {})
+            if isinstance(raw_settings, Mapping):
+                settings.update(dict(raw_settings))
+
+        settings.update(
+            self.store_data.energy_usage_settings_by_circuit.get(circuit_id, {}),
+        )
+        settings.update(
+            self.store_data.activity_alert_settings_by_circuit.get(circuit_id, {}),
+        )
+        settings.update(self.store_data.demand_settings_by_circuit.get(circuit_id, {}))
+        settings.update(
+            self.store_data.capacity_settings_by_circuit.get(circuit_id, {}),
+        )
+        settings.update(self.store_data.standby_settings_by_circuit.get(circuit_id, {}))
+        settings.update(
+            self.store_data.metric_consistency_settings_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+        )
+
+        leg_imbalance = self.store_data.leg_imbalance_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if "warning_ratio" in leg_imbalance:
+            settings["leg_imbalance_warning_ratio"] = leg_imbalance["warning_ratio"]
+        if "minimum_total_power_w" in leg_imbalance:
+            settings["leg_imbalance_min_total_power_w"] = leg_imbalance[
+                "minimum_total_power_w"
+            ]
+
+        balance = self.store_data.balance_settings_by_circuit.get(circuit_id, {})
+        if "negative_tolerance_w" in balance:
+            settings["balance_negative_tolerance_w"] = balance[
+                "negative_tolerance_w"
+            ]
+
+        solar_flow = self.store_data.solar_flow_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if "export_tolerance_w" in solar_flow:
+            settings["solar_export_tolerance_w"] = solar_flow["export_tolerance_w"]
+        for key in (
+            "solar_surplus_threshold_w",
+            "high_solar_surplus_threshold_w",
+            "flexible_load_running_threshold_w",
+        ):
+            if key in solar_flow:
+                settings[key] = solar_flow[key]
+
+        return settings
+
+    def _advisor_feature_history_for_circuit(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> dict[str, Any]:
+        circuit_id = config.circuit_id
+        feature_history: dict[str, Any] = {
+            "energy_usage_days": [],
+            "cycles": [],
+            "standby_samples_w": [],
+            "current_samples": [],
+            "leg_imbalance_ratios": [],
+            "dual_phase_total_power_w": [],
+            "apparent_power_residual_percent": [],
+            "power_factor_residual": [],
+            "apparent_power_samples_va": [],
+            "negative_balance_w": [],
+            "solar_export_w": [],
+        }
+
+        usage_history = self.store_data.energy_usage_by_circuit.get(circuit_id, {})
+        usage_days = usage_history.get("days")
+        if isinstance(usage_days, list):
+            feature_history["energy_usage_days"] = list(usage_days)
+
+        cycle_values = cycle_baseline_feature_values(
+            self.store_data.events,
+            circuit_id=circuit_id,
+            now=now,
+        )
+        feature_history["cycles"] = [
+            {"duration_minutes": duration_seconds / 60.0}
+            for duration_seconds in _numeric_items(
+                cycle_values.get(RUN_CYCLE_DURATION_FEATURE, []),
+            )
+        ]
+
+        standby_history = self.store_data.standby_by_circuit.get(circuit_id, {})
+        feature_history["standby_samples_w"] = _numeric_items(
+            standby_history.get("samples"),
+            keys=("real_power_w",),
+        )
+
+        demand_history = self.store_data.demand_by_circuit.get(circuit_id, {})
+        feature_history["current_samples"] = _numeric_items(
+            demand_history.get("capacity_current_samples"),
+            keys=("current_amps", "current_a", "amps"),
+        )
+        feature_history["current_samples"].extend(
+            _numeric_items(
+                demand_history.get("samples"),
+                keys=("current_a", "current_amps", "amps"),
+            )
+        )
+
+        leg_evidence = self.state.leg_imbalance_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["leg_imbalance_ratios"] = _numeric_items(
+            [leg_evidence],
+            keys=("leg_imbalance_ratio",),
+        )
+        total_power = _sum_optional_values(
+            leg_evidence.get("left_real_power_w"),
+            leg_evidence.get("right_real_power_w"),
+        )
+        if total_power is not None:
+            feature_history["dual_phase_total_power_w"] = [total_power]
+
+        metric_evidence = self.state.metric_consistency_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["apparent_power_residual_percent"] = _numeric_items(
+            [metric_evidence],
+            keys=("apparent_power_difference_percent",),
+        )
+        feature_history["power_factor_residual"] = _numeric_items(
+            [metric_evidence],
+            keys=("power_factor_difference",),
+        )
+        feature_history["apparent_power_samples_va"] = _numeric_items(
+            [metric_evidence],
+            keys=("reported_apparent_power_va",),
+        )
+
+        balance_evidence = self.state.balance_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["negative_balance_w"] = _numeric_items(
+            [balance_evidence],
+            keys=("balance_power_w",),
+        )
+
+        solar_evidence = self.state.solar_flow_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["solar_export_w"] = _numeric_items(
+            [solar_evidence],
+            keys=("grid_export_w", "solar_grid_export_w"),
+        )
+
+        return feature_history
+
+    def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
+        by_circuit: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        for recommendation in sorted(
+            self._pending_settings_recommendations(now),
+            key=lambda item: (
+                item.circuit_name,
+                item.group,
+                item.setting_label,
+                item.recommendation_id,
+            ),
+        ):
+            by_circuit[recommendation.circuit_id].append(
+                recommendation_to_dict(recommendation),
+            )
+        self.state.settings_recommendations_by_circuit = dict(by_circuit)
+        self.state.settings_recommendation_count_by_circuit = {
+            circuit_id: len(recommendations)
+            for circuit_id, recommendations in by_circuit.items()
+        }
+        if not by_circuit:
+            self._set_settings_recommendation_notification_episode_key(())
+
+    def _pending_settings_recommendations(
+        self: Self,
+        now: datetime,
+    ) -> list[SettingRecommendation]:
+        return [
+            recommendation
+            for recommendation in self.store_data.settings_recommendations.values()
+            if recommendation.status is RecommendationStatus.PENDING
+            and recommendation.expires_at > now
+        ]
+
+    async def _notify_settings_recommendations_if_needed(self: Self) -> None:
+        total_pending = sum(
+            self.state.settings_recommendation_count_by_circuit.values(),
+        )
+        if total_pending <= 0:
+            self._set_settings_recommendation_notification_episode_key(())
+            return
+        episode_key = self._settings_recommendation_episode_key()
+        if episode_key == self._settings_recommendation_notification_episode_key:
+            return
+        self._set_settings_recommendation_notification_episode_key(episode_key)
+        await notifications.async_create_settings_recommendation_notification(
+            self.hass,
+            self.entry_id,
+            total_pending=total_pending,
+        )
+        self._mark_store_dirty()
+        await self._async_save_store(self._now_fn())
+
+    def _settings_recommendation_episode_key(
+        self: Self,
+    ) -> tuple[tuple[str, ...], ...]:
+        parts: list[tuple[str, ...]] = []
+        for recommendation in self._pending_settings_recommendations(self._now_fn()):
+            evidence_key = repr(
+                _material_evidence_key(
+                    recommendation.feature,
+                    recommendation.evidence,
+                ),
+            )
+            parts.append(
+                (
+                    str(recommendation.recommendation_id),
+                    str(recommendation.circuit_id),
+                    str(recommendation.setting_key),
+                    repr(recommendation.current_value),
+                    repr(recommendation.suggested_value),
+                    repr(sorted(dict(recommendation.apply_payload).items())),
+                    str(recommendation.reason),
+                    evidence_key,
+                )
+            )
+        return tuple(sorted(parts))
+
+    def _set_settings_recommendation_notification_episode_key(
+        self: Self,
+        episode_key: tuple[tuple[str, ...], ...],
+    ) -> None:
+        if episode_key == self._settings_recommendation_notification_episode_key:
+            return
+        self._settings_recommendation_notification_episode_key = episode_key
+        self.store_data.settings_recommendation_notification_episode_key = episode_key
+        self._mark_store_dirty()
 
     async def async_set_energy_goal_settings(
         self: Self,
@@ -1745,6 +2283,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     )
             self._refresh_nilm_state(circuit_id)
         self._refresh_all_ux_state(self._now_fn())
+        self._refresh_settings_recommendation_state(self._now_fn())
 
     def _refresh_all_ux_state(self: Self, now: datetime) -> None:
         for config in self.circuit_configs:
@@ -3090,7 +3629,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _prune_demand(self: Self, now: datetime) -> None:
         for circuit_id, history in self.store_data.demand_by_circuit.items():
             retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = (now.date() - RETENTION_WINDOWS[retention_mode]).isoformat()
+            cutoff_datetime = now - RETENTION_WINDOWS[retention_mode]
+            cutoff = cutoff_datetime.date().isoformat()
+            capacity_samples = history.get("capacity_current_samples")
+            if isinstance(capacity_samples, list):
+                history["capacity_current_samples"] = [
+                    sample
+                    for sample in capacity_samples
+                    if _sample_timestamp_is_at_or_after(sample, cutoff_datetime)
+                ]
             daily_peaks = history.get("daily_peaks", [])
             if isinstance(daily_peaks, list):
                 history["daily_peaks"] = [
@@ -3644,19 +4191,59 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         return None
 
+    def _record_capacity_current_sample(
+        self: Self,
+        circuit_id: str,
+        now: datetime,
+        current_amps: float | None,
+    ) -> bool:
+        if current_amps is None:
+            return False
+        try:
+            parsed = abs(float(current_amps))
+        except (TypeError, ValueError):
+            return False
+
+        history = self.store_data.demand_by_circuit.setdefault(circuit_id, {})
+        samples = [
+            sample
+            for sample in _coerce_timestamped_dicts(
+                history.get("capacity_current_samples"),
+            )
+            if _sample_timestamp_is_at_or_after(
+                sample,
+                now - RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)],
+            )
+        ]
+        samples.append(
+            {
+                "timestamp": now.isoformat(),
+                "current_amps": round(parsed, 2),
+            }
+        )
+        history["capacity_current_samples"] = samples
+        return True
+
     def _observe_capacity(
         self: Self,
         config: CircuitConfig,
         sample: Any,
         now: datetime,
     ) -> AlertEvidence | None:
+        current_amps = self._capacity_current_a(config, sample, now)
         result = evaluate_circuit_capacity(
             circuit_id=config.circuit_id,
-            current_amps=self._capacity_current_a(config, sample, now),
+            current_amps=current_amps,
             real_power_w=_capacity_power_w(sample),
             voltage_v=_capacity_voltage_v(config, sample),
             settings=self._capacity_settings_for_config(config.circuit_id),
         )
+        if self._record_capacity_current_sample(
+            config.circuit_id,
+            now,
+            current_amps,
+        ):
+            self._mark_store_dirty()
         self.state.capacity_usage_by_circuit[config.circuit_id] = (
             result.capacity_usage_percent
         )
@@ -4192,6 +4779,56 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert,
             config=self._config_for_circuit(alert.circuit_id),
         )
+
+
+def _numeric_items(
+    raw_items: Any,
+    *,
+    keys: tuple[str, ...] = (),
+) -> list[float]:
+    if raw_items is None:
+        return []
+    try:
+        items = list(raw_items)
+    except TypeError:
+        items = [raw_items]
+
+    values: list[float] = []
+    for item in items:
+        if keys and isinstance(item, Mapping):
+            for key in keys:
+                if key in item:
+                    _append_float(values, item.get(key))
+                    break
+            continue
+        _append_float(values, item)
+    return values
+
+
+def _coerce_timestamped_dicts(raw_items: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_items, list):
+        return []
+    return [
+        dict(item)
+        for item in raw_items
+        if isinstance(item, Mapping)
+        and _datetime_or_none(item.get("timestamp")) is not None
+    ]
+
+
+def _append_float(values: list[float], raw_value: Any) -> None:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return
+    values.append(value)
+
+
+def _sum_optional_values(*raw_values: Any) -> float | None:
+    values = _numeric_items(raw_values)
+    if not values:
+        return None
+    return sum(abs(value) for value in values)
 
 
 def _baseline_key(circuit_id: str, feature: str) -> str:

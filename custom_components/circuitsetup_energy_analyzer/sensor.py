@@ -184,6 +184,29 @@ def sensitivity_value(state: Any, circuit_id: str) -> str:
     )
 
 
+def settings_suggestions_value(state: Any, circuit_id: str) -> int:
+    """Return the pending settings recommendation count for a circuit."""
+    return int(
+        getattr(state, "settings_recommendation_count_by_circuit", {}).get(
+            circuit_id,
+            0,
+        )
+    )
+
+
+def settings_suggestions_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return pending settings recommendations for dashboard and automation use."""
+    recommendations = getattr(
+        state,
+        "settings_recommendations_by_circuit",
+        {},
+    ).get(circuit_id, [])
+    return {
+        "pending_count": settings_suggestions_value(state, circuit_id),
+        "recommendations": list(recommendations),
+    }
+
+
 def circuit_mode_value(state: Any, circuit_id: str) -> str:
     """Return the configured circuit mode label for a circuit."""
     return str(
@@ -1085,6 +1108,7 @@ SENSOR_ICONS: Mapping[str, str] = {
     "recent_activity": "mdi:timeline-text-outline",
     "recent_activity_count": "mdi:counter",
     "sensitivity": "mdi:tune-variant",
+    "settings_suggestions": "mdi:tune-variant",
     "circuit_mode": "mdi:transmission-tower",
     "power_flow": "mdi:swap-horizontal",
     "power_quality_score": "mdi:sine-wave",
@@ -1235,6 +1259,12 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Sensitivity",
         value_fn=sensitivity_value,
         attributes_fn=_sensitivity_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="settings_suggestions",
+        name_suffix="Settings Suggestions",
+        value_fn=settings_suggestions_value,
+        attributes_fn=settings_suggestions_attributes,
     ),
     DiagnosticSensorDescription(
         key="circuit_mode",
@@ -1687,6 +1717,7 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "activity_summary",
     "electrical_health",
     "energy_summary",
+    "settings_suggestions",
     "daily_energy_usage",
     "energy_usage_share",
     "energy_usage_status",
@@ -1765,6 +1796,7 @@ _CORE_SENSOR_KEYS = {
     "recent_activity",
     "recent_activity_count",
     "sensitivity",
+    "settings_suggestions",
     "circuit_mode",
     "power_flow",
 }

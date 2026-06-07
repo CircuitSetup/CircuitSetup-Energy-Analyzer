@@ -398,3 +398,65 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [
         {"date": "2026-06-02", "usage_kwh": 8.5}
     ]
+
+
+def test_feature_store_preserves_settings_recommendations() -> None:
+    raw = {
+        "settings_recommendations": {
+            "rec-hvac-daily-spike": {
+                "recommendation_id": "rec-hvac-daily-spike",
+                "unique_key": "hvac:daily_spike_ratio",
+                "circuit_id": "hvac",
+                "circuit_name": "HVAC",
+                "setting_key": "daily_spike_ratio",
+                "setting_label": "Daily spike ratio",
+                "current_value": 0.25,
+                "suggested_value": 0.35,
+                "unit": "ratio",
+                "feature": "daily_energy_spike_ratio",
+                "group": "energy_usage",
+                "confidence": 0.82,
+                "reason": "Recent usage is above the configured threshold.",
+                "evidence": {"observed_ratio": 0.43, "sample_days": 14},
+                "apply_payload": {"daily_spike_ratio": 0.35},
+                "status": "pending",
+                "created_at": "2026-06-02T12:00:00+00:00",
+                "expires_at": "2026-07-02T12:00:00+00:00",
+                "advisor_version": 1,
+            }
+        },
+        "settings_recommendation_decisions": {
+            "hvac:daily_spike_ratio": {
+                "unique_key": "hvac:daily_spike_ratio",
+                "status": "denied",
+                "decided_at": "2026-06-03T12:00:00+00:00",
+                "denied_value": 0.35,
+                "evidence_fingerprint": "observed-ratio-043",
+            }
+        },
+        "settings_recommendation_notification_episode_key": [
+            [
+                "rec-hvac-daily-spike",
+                "hvac",
+                "daily_spike_ratio",
+                "0.25",
+                "0.35",
+                "[('daily_spike_ratio', 0.35)]",
+                "Recent usage is above the configured threshold.",
+                "(('observed_ratio', 0.43), ('sample_days', 14))",
+            ]
+        ],
+    }
+
+    restored = feature_store_data_from_dict(raw)
+    serialized = feature_store_data_to_dict(restored)
+
+    assert serialized["settings_recommendations"] == raw["settings_recommendations"]
+    assert (
+        serialized["settings_recommendation_decisions"]
+        == raw["settings_recommendation_decisions"]
+    )
+    assert (
+        serialized["settings_recommendation_notification_episode_key"]
+        == raw["settings_recommendation_notification_episode_key"]
+    )

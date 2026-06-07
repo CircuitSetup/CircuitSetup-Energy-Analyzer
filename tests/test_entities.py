@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +23,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+DOMAIN_PATH = Path(__file__).parents[1] / "custom_components" / DOMAIN
 
 
 def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> None:
@@ -310,6 +314,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         run_cycle_runtime_value,
         run_cycle_status_value,
         sensitivity_value,
+        settings_suggestions_attributes,
+        settings_suggestions_value,
         solar_flexible_load_coverage_value,
         solar_flexible_load_power_value,
         solar_flow_status_value,
@@ -520,6 +526,21 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         standby_evidence_by_circuit={
             "fridge": {"status": "standby", "always_on_power_w": 45.0}
         },
+        settings_recommendation_count_by_circuit={"fridge": 2},
+        settings_recommendations_by_circuit={
+            "fridge": [
+                {
+                    "recommendation_id": "fridge:daily_spike_ratio:v1",
+                    "setting_key": "daily_spike_ratio",
+                    "suggested_value": 1.8,
+                },
+                {
+                    "recommendation_id": "fridge:standby_threshold:v1",
+                    "setting_key": "standby_threshold_w",
+                    "suggested_value": 9.0,
+                },
+            ]
+        },
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
@@ -606,6 +627,22 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert standby_threshold_value(state, "fridge") == 8.0
     assert standby_status_value(state, "fridge") == "standby"
     assert always_on_limit_usage_value(state, "fridge") == 180.0
+    assert settings_suggestions_value(state, "fridge") == 2
+    assert settings_suggestions_attributes(state, "fridge") == {
+        "pending_count": 2,
+        "recommendations": [
+            {
+                "recommendation_id": "fridge:daily_spike_ratio:v1",
+                "setting_key": "daily_spike_ratio",
+                "suggested_value": 1.8,
+            },
+            {
+                "recommendation_id": "fridge:standby_threshold:v1",
+                "setting_key": "standby_threshold_w",
+                "suggested_value": 9.0,
+            },
+        ],
+    }
 
     assert anomaly_score_value(state, "unknown") == 0.0
     assert last_event_value(state, "unknown") is None
@@ -681,6 +718,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert standby_threshold_value(state, "unknown") == 0.0
     assert standby_status_value(state, "unknown") == "learning"
     assert always_on_limit_usage_value(state, "unknown") == 0.0
+    assert settings_suggestions_value(state, "unknown") == 0
+    assert settings_suggestions_attributes(state, "unknown") == {
+        "pending_count": 0,
+        "recommendations": [],
+    }
 
 
 def test_summary_sensors_answer_primary_user_questions() -> None:
@@ -966,6 +1008,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "activity_summary",
         "electrical_health",
         "energy_summary",
+        "settings_suggestions",
         "daily_energy_usage",
         "energy_usage_share",
         "energy_usage_status",
@@ -1015,6 +1058,9 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     }
 
     assert normal_entity_keys <= set(descriptions)
+    assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
+    assert descriptions["settings_suggestions"].entity_registry_enabled_default is True
+    assert descriptions["settings_suggestions"].entity_registry_visible_default is False
 
     for key in descriptions:
         expected_category = (
@@ -1055,6 +1101,7 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
         "learning_progress": "mdi:school-outline",
         "circuit_mode": "mdi:transmission-tower",
         "power_flow": "mdi:swap-horizontal",
+        "settings_suggestions": "mdi:tune-variant",
         "power_quality_score": "mdi:sine-wave",
         "reactive_power_drift": "mdi:flash-triangle-outline",
         "power_factor_drift": "mdi:cosine-wave",
@@ -1073,6 +1120,45 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
         )
         assert entity.icon == icon
         assert entity.icon != "mdi:eye"
+
+
+def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit_without_sources = SimpleNamespace(circuit_id="spare", name="Spare")
+    mixed_circuit = SimpleNamespace(
+        circuit_id="mixed",
+        name="Mixed",
+        sensors=[SensorRef(entity_id="sensor.mixed_power", role=SensorRole.REAL_POWER)],
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+
+    assert sensor_description_applies(
+        descriptions["settings_suggestions"],
+        circuit_without_sources,
+        coordinator,
+    )
+    assert sensor_description_applies(
+        descriptions["settings_suggestions"],
+        mixed_circuit,
+        coordinator,
+    )
+
+
+def test_settings_suggestions_sensor_has_translation_entry() -> None:
+    strings = json.loads(
+        (DOMAIN_PATH / "strings.json").read_text(encoding="utf-8"),
+    )
+
+    assert strings["entity"]["sensor"]["settings_suggestions"] == {
+        "name": "Settings suggestions"
+    }
 
 
 def test_status_sensor_entities_explain_machine_status_values() -> None:
@@ -1728,6 +1814,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_recent_activity",
         "entry-1_fridge_recent_activity_count",
         "entry-1_fridge_sensitivity",
+        "entry-1_fridge_settings_suggestions",
         "entry-1_fridge_circuit_mode",
         "entry-1_fridge_power_flow",
         "entry-1_fridge_daily_energy_usage",

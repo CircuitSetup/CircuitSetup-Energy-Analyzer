@@ -18,6 +18,11 @@ def notification_id_for_alert(alert: AlertEvidence) -> str:
     return _tuple_id(f"{DOMAIN}_alert", alert.circuit_id, feature)
 
 
+def settings_recommendation_notification_id(entry_id: str) -> str:
+    """Return the persistent-notification id for suggested settings."""
+    return f"{DOMAIN}_settings_recommendations_{_readable_component(entry_id)}"
+
+
 def alert_notification_message(
     alert: AlertEvidence,
     *,
@@ -62,6 +67,45 @@ async def async_create_alert_notification(
         alert_notification_message(alert, config=config, dashboard_path=dashboard_path),
         title="CircuitSetup Energy Analyzer alert",
         notification_id=notification_id_for_alert(alert),
+    )
+
+
+async def async_create_settings_recommendation_notification(
+    hass: Any,
+    entry_id: str,
+    *,
+    total_pending: int,
+) -> None:
+    """Create one persistent notification for pending suggested settings."""
+    if total_pending <= 0:
+        return
+    try:
+        from homeassistant.components import persistent_notification
+    except ModuleNotFoundError:
+        return
+
+    create = getattr(persistent_notification, "async_create", None)
+    if create is None:
+        return
+
+    create(
+        hass,
+        _settings_recommendation_message(total_pending),
+        title="CircuitSetup Energy Analyzer suggested settings",
+        notification_id=settings_recommendation_notification_id(entry_id),
+    )
+
+
+def _settings_recommendation_message(total_pending: int) -> str:
+    if total_pending == 1:
+        return (
+            "There is 1 suggested Advanced Circuit Setting to review via "
+            "CircuitSetup Energy Analyzer > Configure > Review Suggested Settings."
+        )
+    return (
+        f"There are {total_pending} suggested Advanced Circuit Settings "
+        "to review via CircuitSetup Energy Analyzer > "
+        "Configure > Review Suggested Settings."
     )
 
 

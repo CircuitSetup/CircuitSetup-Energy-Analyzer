@@ -32,6 +32,7 @@ async def async_setup_entry(
         options=getattr(entry, "options", {}),
         store=store,
         store_data=store_data,
+        config_entry=entry,
     )
     first_entry = not _has_config_entries(hass.data[DOMAIN])
     try:
