@@ -2494,7 +2494,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._clear_weather_context_state(circuit_id)
             return
 
-        outdoor_temperature = self._temperature_f_for_entity(outdoor_entity)
+        outdoor_temperature_reading = self._temperature_reading_for_entity(
+            outdoor_entity,
+        )
+        outdoor_temperature = (
+            outdoor_temperature_reading["temperature_f"]
+            if outdoor_temperature_reading is not None
+            else None
+        )
         runtime_minutes = (
             self.state.run_cycle_runtime_seconds_by_circuit.get(circuit_id, 0.0)
             / 60.0
@@ -2515,7 +2522,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             current_duty_cycle_percent=duty_cycle_percent,
             history=history,
             mode=_weather_context_mode(config),
+            display_temperature=(
+                outdoor_temperature_reading["display_temperature"]
+                if outdoor_temperature_reading is not None
+                else None
+            ),
+            display_temperature_unit=(
+                outdoor_temperature_reading["display_unit"]
+                if outdoor_temperature_reading is not None
+                else "°F"
+            ),
         )
+        if outdoor_temperature_reading is not None:
+            evidence["temperature_source_entity"] = outdoor_entity
+            evidence["temperature_source_unit"] = outdoor_temperature_reading[
+                "source_unit"
+            ]
         if self.store_data.weather_context_by_circuit.get(circuit_id) != evidence:
             self.store_data.weather_context_by_circuit[circuit_id] = evidence
             self._mark_store_dirty()
@@ -2553,6 +2575,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return ""
 
     def _temperature_f_for_entity(self: Self, entity_id: str) -> float | None:
+        reading = self._temperature_reading_for_entity(entity_id)
+        return None if reading is None else reading["temperature_f"]
+
+    def _temperature_reading_for_entity(
+        self: Self,
+        entity_id: str,
+    ) -> dict[str, float | str] | None:
         raw_state = self._raw_state_for_entity(entity_id)
         if raw_state is None:
             return None
@@ -2563,12 +2592,39 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if value is None:
             return None
         attributes = getattr(raw_state, "attributes", {}) or {}
-        unit = str(attributes.get("unit_of_measurement") or "").strip().lower()
-        if unit in {"°c", "c", "celsius"}:
-            return round((value * 9.0 / 5.0) + 32.0, 3)
-        if unit in {"k", "kelvin"}:
-            return round(((value - 273.15) * 9.0 / 5.0) + 32.0, 3)
-        return round(value, 3)
+        source_unit = self._temperature_source_unit(
+            str(attributes.get("unit_of_measurement") or "").strip(),
+        )
+        temperature_f = _temperature_to_fahrenheit(value, source_unit)
+        display_unit = self._temperature_display_unit(source_unit)
+        display_temperature = _temperature_from_fahrenheit(
+            temperature_f,
+            display_unit,
+        )
+        return {
+            "temperature_f": round(temperature_f, 3),
+            "display_temperature": round(display_temperature, 3),
+            "display_unit": display_unit,
+            "source_unit": source_unit,
+        }
+
+    def _temperature_source_unit(self: Self, raw_unit: str) -> str:
+        unit = _normalized_temperature_unit(raw_unit)
+        if unit:
+            return unit
+        return self._ha_temperature_unit()
+
+    def _temperature_display_unit(self: Self, source_unit: str) -> str:
+        if source_unit in {"°F", "°C"}:
+            return source_unit
+        return self._ha_temperature_unit()
+
+    def _ha_temperature_unit(self: Self) -> str:
+        config = getattr(self.hass, "config", None)
+        units = getattr(config, "units", None)
+        raw_unit = getattr(units, "temperature_unit", None)
+        unit = _normalized_temperature_unit(str(raw_unit or ""))
+        return unit or "°F"
 
     def _raw_state_for_entity(self: Self, entity_id: str) -> Any | None:
         hass_states = getattr(self.hass, "states", None)
@@ -6100,6 +6156,31 @@ def _nilm_topology_mismatch_message(
 
 def _circuit_mode_phrase(mode: CircuitMode) -> str:
     return str(mode.value).replace("_", " ")
+
+
+def _normalized_temperature_unit(unit: str) -> str:
+    normalized = str(unit or "").strip().lower()
+    if normalized in {"°f", "f", "fahrenheit"}:
+        return "°F"
+    if normalized in {"°c", "c", "celsius"}:
+        return "°C"
+    if normalized in {"k", "kelvin"}:
+        return "K"
+    return ""
+
+
+def _temperature_to_fahrenheit(value: float, unit: str) -> float:
+    if unit == "°C":
+        return (value * 9.0 / 5.0) + 32.0
+    if unit == "K":
+        return ((value - 273.15) * 9.0 / 5.0) + 32.0
+    return value
+
+
+def _temperature_from_fahrenheit(value: float, unit: str) -> float:
+    if unit == "°C":
+        return (value - 32.0) * 5.0 / 9.0
+    return value
 
 
 def _nilm_signature_metadata_compatible(

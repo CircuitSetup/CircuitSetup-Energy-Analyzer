@@ -23,6 +23,8 @@ def evaluate_weather_context(
     current_duty_cycle_percent: float,
     history: Iterable[WeatherContextSample],
     mode: str = "cooling",
+    display_temperature: float | None = None,
+    display_temperature_unit: str = "°F",
 ) -> dict[str, Any]:
     """Return weather context for current HVAC activity."""
 
@@ -33,13 +35,21 @@ def evaluate_weather_context(
         }
 
     temperature = float(outdoor_temperature)
+    user_temperature = (
+        round(float(display_temperature), 3)
+        if display_temperature is not None
+        else round(temperature, 3)
+    )
+    user_unit = _temperature_unit(display_temperature_unit)
     comparable = [
         sample for sample in history if abs(sample.temperature - temperature) <= 3.0
     ]
     if len(comparable) < 3:
         return {
             "status": "learning",
-            "current_outdoor_temperature": temperature,
+            "current_outdoor_temperature": user_temperature,
+            "temperature_unit": user_unit,
+            "temperature_f": round(temperature, 3),
             "temperature_bin": temperature_bin(temperature),
             "mode": _weather_mode(mode),
             "explanation": (
@@ -60,14 +70,21 @@ def evaluate_weather_context(
 
     return {
         "status": status,
-        "current_outdoor_temperature": temperature,
+        "current_outdoor_temperature": user_temperature,
+        "temperature_unit": user_unit,
+        "temperature_f": round(temperature, 3),
         "temperature_bin": temperature_bin(temperature),
         "mode": _weather_mode(mode),
         "observed_runtime_minutes": observed_runtime,
         "expected_runtime_range_minutes": runtime_range,
         "observed_duty_cycle_percent": observed_duty,
         "expected_duty_cycle_range_percent": duty_range,
-        "explanation": _explanation(status, temperature, runtime_range),
+        "explanation": _explanation(
+            status,
+            user_temperature,
+            user_unit,
+            runtime_range,
+        ),
     }
 
 
@@ -91,15 +108,35 @@ def _weather_mode(mode: str) -> str:
 def _explanation(
     status: str,
     temperature: float,
+    unit: str,
     runtime_range: list[float],
 ) -> str:
+    formatted_temperature = _format_temperature(temperature, unit)
     if status == "weather_correlated":
         return (
             "HVAC activity is consistent with learned activity for about "
-            f"{temperature:.0f} F outdoor conditions."
+            f"{formatted_temperature} outdoor conditions."
         )
     return (
-        f"HVAC activity is above the learned range for about {temperature:.0f} F. "
+        "HVAC activity is above the learned range for about "
+        f"{formatted_temperature}. "
         f"Similar-temperature runtime is usually {runtime_range[0]:.1f} to "
         f"{runtime_range[1]:.1f} minutes."
     )
+
+
+def _temperature_unit(unit: str) -> str:
+    normalized = str(unit or "°F").strip()
+    lowered = normalized.lower()
+    if lowered in {"c", "celsius", "°c"}:
+        return "°C"
+    if lowered in {"f", "fahrenheit", "°f"}:
+        return "°F"
+    return normalized or "°F"
+
+
+def _format_temperature(temperature: float, unit: str) -> str:
+    rounded = round(float(temperature), 1)
+    if rounded.is_integer():
+        return f"{rounded:.0f} {unit}"
+    return f"{rounded:.1f} {unit}"

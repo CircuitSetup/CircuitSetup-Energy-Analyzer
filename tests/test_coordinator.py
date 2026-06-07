@@ -1633,6 +1633,93 @@ async def test_runtime_hvac_weather_context_uses_outdoor_temperature() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_hvac_weather_context_preserves_celsius_display_unit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 18, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            state = "25" if entity_id == "sensor.outdoor_temperature" else "3200"
+            unit = "°C" if entity_id == "sensor.outdoor_temperature" else "W"
+            return SimpleNamespace(
+                state=state,
+                attributes={"unit_of_measurement": unit},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.hvac_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        }
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=4),
+                    circuit_id="hvac",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=now - timedelta(hours=1),
+                    circuit_id="hvac",
+                    event_type=EventType.STOP,
+                ),
+            ],
+            weather_context_history_by_circuit={
+                "hvac": [
+                    {
+                        "timestamp": (now - timedelta(days=3)).isoformat(),
+                        "temperature": 76.0,
+                        "runtime_minutes": 170.0,
+                        "duty_cycle_percent": 44.0,
+                    },
+                    {
+                        "timestamp": (now - timedelta(days=2)).isoformat(),
+                        "temperature": 78.0,
+                        "runtime_minutes": 190.0,
+                        "duty_cycle_percent": 48.0,
+                    },
+                    {
+                        "timestamp": (now - timedelta(days=1)).isoformat(),
+                        "temperature": 77.0,
+                        "runtime_minutes": 160.0,
+                        "duty_cycle_percent": 42.0,
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    evidence = coordinator.state.weather_context_by_circuit["hvac"]
+    assert evidence["status"] == "weather_correlated"
+    assert evidence["temperature_f"] == 77.0
+    assert evidence["current_outdoor_temperature"] == 25.0
+    assert evidence["temperature_unit"] == "°C"
+    assert "25 °C" in evidence["explanation"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_hvac_weather_context_does_not_learn_from_same_day_updates() -> (
     None
 ):

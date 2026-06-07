@@ -1044,6 +1044,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "energy_summary",
         "daily_energy_usage",
         "weather_context",
+        "outdoor_temperature",
     }
     enabled_by_default = {
         description.key
@@ -1060,6 +1061,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "settings_suggestions",
         "daily_energy_usage",
         "weather_context",
+        "outdoor_temperature",
         "energy_usage_share",
         "energy_usage_status",
         "energy_goal_usage",
@@ -1207,6 +1209,45 @@ def test_weather_context_sensor_exposes_readable_status_and_evidence() -> None:
     assert weather_context_attributes(state, "missing") == {}
 
 
+def test_outdoor_temperature_sensor_exposes_graphable_display_temperature() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        CircuitAnalyzerSensor,
+        SENSOR_DESCRIPTIONS,
+        outdoor_temperature_attributes,
+        outdoor_temperature_value,
+    )
+
+    state = SimpleNamespace(
+        weather_context_by_circuit={
+            "hvac": {
+                "status": "weather_correlated",
+                "temperature_f": 77.0,
+                "current_outdoor_temperature": 25.0,
+                "temperature_unit": "°C",
+            }
+        }
+    )
+
+    assert outdoor_temperature_value(state, "hvac") == 25.0
+    assert outdoor_temperature_attributes(state, "hvac") == {
+        "temperature_f": 77.0,
+        "temperature_unit": "°C",
+    }
+
+    description = {
+        description.key: description for description in SENSOR_DESCRIPTIONS
+    }["outdoor_temperature"]
+    entity = CircuitAnalyzerSensor(
+        SimpleNamespace(data=state),
+        entry_id="entry-1",
+        circuit=SimpleNamespace(circuit_id="hvac", name="HVAC"),
+        description=description,
+    )
+
+    assert entity.native_value == 25.0
+    assert entity.native_unit_of_measurement == "°C"
+
+
 def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1232,6 +1273,31 @@ def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     assert entity._attr_entity_category is None
 
 
+def test_outdoor_temperature_sensor_metadata_is_graphable_and_visible() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    description = descriptions["outdoor_temperature"]
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC")
+
+    entity = CircuitAnalyzerSensor(
+        coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=description,
+    )
+
+    assert description.name_suffix == "Outdoor Temperature"
+    assert description.entity_category is None
+    assert description.entity_registry_visible_default is True
+    assert entity.icon == "mdi:thermometer"
+    assert entity._attr_entity_category is None
+
+
 def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1239,7 +1305,8 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
     )
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
-    description = descriptions["weather_context"]
+    weather_description = descriptions["weather_context"]
+    outdoor_temperature_description = descriptions["outdoor_temperature"]
     coordinator_with_options = SimpleNamespace(
         options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature"},
         entry_data={},
@@ -1262,23 +1329,47 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
             appliance_profile=profile,
         )
         assert sensor_description_applies(
-            description,
+            weather_description,
             circuit,
             coordinator_with_options,
         )
         assert sensor_description_applies(
-            description,
+            outdoor_temperature_description,
+            circuit,
+            coordinator_with_options,
+        )
+        assert sensor_description_applies(
+            weather_description,
+            circuit,
+            coordinator_with_entry_data,
+        )
+        assert sensor_description_applies(
+            outdoor_temperature_description,
             circuit,
             coordinator_with_entry_data,
         )
         assert not sensor_description_applies(
-            description,
+            weather_description,
+            circuit,
+            coordinator_without_temperature,
+        )
+        assert not sensor_description_applies(
+            outdoor_temperature_description,
             circuit,
             coordinator_without_temperature,
         )
 
     assert not sensor_description_applies(
-        description,
+        weather_description,
+        SimpleNamespace(
+            circuit_id="fridge",
+            name="Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+        ),
+        coordinator_with_options,
+    )
+    assert not sensor_description_applies(
+        outdoor_temperature_description,
         SimpleNamespace(
             circuit_id="fridge",
             name="Fridge",

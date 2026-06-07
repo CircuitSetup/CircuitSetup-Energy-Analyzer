@@ -21,7 +21,12 @@ from .ux import friendly_feature_name
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
-    from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfPower
+    from homeassistant.const import (
+        PERCENTAGE,
+        UnitOfEnergy,
+        UnitOfPower,
+        UnitOfTemperature,
+    )
 except ModuleNotFoundError:
     PERCENTAGE = "%"
 
@@ -34,6 +39,12 @@ except ModuleNotFoundError:
         """Fallback power unit constants."""
 
         WATT = "W"
+
+    class UnitOfTemperature:
+        """Fallback temperature unit constants."""
+
+        FAHRENHEIT = "°F"
+        CELSIUS = "°C"
 
     class SensorEntity:
         """Fallback sensor base for tests without Home Assistant."""
@@ -328,6 +339,49 @@ def weather_context_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     return {}
 
 
+def outdoor_temperature_value(state: Any, circuit_id: str) -> float | None:
+    """Return the graphable outdoor temperature for an HVAC circuit."""
+    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
+    if not isinstance(evidence, Mapping):
+        return None
+    value = _numeric_value(evidence.get("current_outdoor_temperature"))
+    return None if value is None else round(value, 3)
+
+
+def outdoor_temperature_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return outdoor temperature conversion evidence."""
+    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
+    if not isinstance(evidence, Mapping):
+        return {}
+    attributes: dict[str, Any] = {
+        "temperature_unit": _outdoor_temperature_unit_from_evidence(evidence),
+    }
+    temperature_f = _numeric_value(evidence.get("temperature_f"))
+    if temperature_f is not None:
+        attributes["temperature_f"] = round(temperature_f, 3)
+    if evidence.get("temperature_source_entity"):
+        attributes["temperature_source_entity"] = str(
+            evidence["temperature_source_entity"],
+        )
+    if evidence.get("temperature_source_unit"):
+        attributes["temperature_source_unit"] = str(evidence["temperature_source_unit"])
+    return attributes
+
+
+def _outdoor_temperature_unit_from_evidence(evidence: Mapping[str, Any]) -> str:
+    unit = str(
+        evidence.get("temperature_unit")
+        or evidence.get("current_outdoor_temperature_unit")
+        or "",
+    ).strip()
+    lowered = unit.lower()
+    if lowered in {"°c", "c", "celsius"}:
+        return UnitOfTemperature.CELSIUS
+    if lowered in {"°f", "f", "fahrenheit"}:
+        return UnitOfTemperature.FAHRENHEIT
+    return unit or UnitOfTemperature.FAHRENHEIT
+
+
 def _weather_context_status(evidence: Any) -> str:
     if isinstance(evidence, Mapping):
         return str(evidence.get("status") or "no_temperature_source")
@@ -337,6 +391,13 @@ def _weather_context_status(evidence: Any) -> str:
     if isinstance(evidence, str):
         return evidence
     return "no_temperature_source"
+
+
+def _numeric_value(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def daily_energy_usage_value(state: Any, circuit_id: str) -> float:
@@ -1177,6 +1238,7 @@ SENSOR_ICONS: Mapping[str, str] = {
     "nilm_unmatched_load_percentage": "mdi:chart-scatter-plot",
     "nilm_topology_status": "mdi:source-branch",
     "weather_context": "mdi:thermometer-lines",
+    "outdoor_temperature": "mdi:thermometer",
     "daily_energy_usage": "mdi:counter",
     "energy_usage_share": "mdi:chart-pie",
     "energy_usage_status": "mdi:lightning-bolt-outline",
@@ -1394,6 +1456,14 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Weather Context",
         value_fn=weather_context_value,
         attributes_fn=weather_context_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="outdoor_temperature",
+        name_suffix="Outdoor Temperature",
+        value_fn=outdoor_temperature_value,
+        native_unit_of_measurement=None,
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=outdoor_temperature_attributes,
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
@@ -1783,6 +1853,7 @@ _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     "energy_summary",
     "daily_energy_usage",
     "weather_context",
+    "outdoor_temperature",
 }
 _NORMAL_ENTITY_SENSOR_KEYS = {
     "health_summary",
@@ -1792,6 +1863,7 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "settings_suggestions",
     "daily_energy_usage",
     "weather_context",
+    "outdoor_temperature",
     "energy_usage_share",
     "energy_usage_status",
     "energy_goal_usage",
@@ -1952,7 +2024,7 @@ _STANDBY_SENSOR_KEYS = {
     "standby_status",
     "always_on_limit_usage",
 }
-_WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context"}
+_WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context", "outdoor_temperature"}
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
@@ -2460,6 +2532,20 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     def icon(self) -> str | None:
         """Return the purpose-specific icon for fallback tests."""
         return self._attr_icon
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the native unit, allowing temperature display units to vary."""
+        if self.entity_description.key == "outdoor_temperature":
+            attributes = outdoor_temperature_attributes(
+                self.coordinator_state,
+                self.circuit_id,
+            )
+            return str(
+                attributes.get("temperature_unit")
+                or UnitOfTemperature.FAHRENHEIT,
+            )
+        return self._attr_native_unit_of_measurement
 
     @property
     def native_value(self) -> Any:

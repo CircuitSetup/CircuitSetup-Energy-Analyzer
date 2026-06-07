@@ -431,12 +431,12 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     intentional_feature_panel_refs = {
         "sensor.hvac_run_cycle_duty_cycle",
         "sensor.hvac_run_cycle_runtime",
+        "sensor.hvac_outdoor_temperature",
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
         "sensor.mains_nilm_monitored_power",
         "sensor.mains_nilm_nilm_discovered_signatures",
         "sensor.mains_nilm_nilm_unknown_loads",
-        "sensor.mains_nilm_nilm_unmatched_load_percentage",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",
@@ -485,10 +485,6 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         "Mains, Solar, and NILM",
         "Energy Tracking",
         "HVAC Weather Context",
-        "NILM Unknown Loads",
-        "Settings And Exports",
-        "Power Quality Detail",
-        "Alert Philosophy",
     } <= section_titles
     assert section_titles.isdisjoint(
         {
@@ -497,6 +493,10 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
             "Energy tracking",
             "Power quality detail",
             "Alert evidence",
+            "NILM Unknown Loads",
+            "Settings And Exports",
+            "Power Quality Detail",
+            "Alert Philosophy",
         }
     )
     assert [section.get("title") for section in _dashboard_sections(dashboard)][:2] == [
@@ -541,11 +541,10 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         assert f"sensor.{circuit}_daily_energy_usage" in appliance_overview
         assert f"sensor.{circuit}_health_summary" not in appliance_overview
 
-    power_quality_detail = yaml.safe_dump(
-        _dashboard_section(dashboard, "Power Quality Detail")
-    )
-    assert "sensor.hvac_electrical_health" in power_quality_detail
-    assert "sensor.mains_nilm_electrical_health" in power_quality_detail
+    energy_tracking = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
+    assert "Electrical health rollups" in energy_tracking
+    assert "sensor.hvac_electrical_health" in energy_tracking
+    assert "sensor.mains_nilm_electrical_health" in energy_tracking
 
 
 def test_dashboard_example_removes_static_alert_evidence_view() -> None:
@@ -598,7 +597,7 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
 
 
-def test_dashboard_example_explains_mains_load_match_without_coverage_gauge() -> None:
+def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     cards = _dashboard_cards(dashboard)
     mains_section = yaml.safe_dump(
@@ -614,7 +613,8 @@ def test_dashboard_example_explains_mains_load_match_without_coverage_gauge() ->
         card for card in cards if card.get("title") == "Mains Load Match"
     ]
 
-    assert coverage_gauges == []
+    assert len(coverage_gauges) == 1
+    assert coverage_gauges[0]["name"] == "Known Load Share"
     assert len(load_match_cards) == 1
     assert load_match_cards[0]["type"] == "entities"
     assert {
@@ -628,6 +628,51 @@ def test_dashboard_example_explains_mains_load_match_without_coverage_gauge() ->
     assert "Mains Load Match" in mains_section
     assert "Known Load Share" in mains_section
     assert "how much of current mains power is explained" in mains_section
+    assert "sensor.mains_nilm_nilm_unmatched_load_percentage" not in mains_section
+
+
+def test_dashboard_example_places_detail_panels_under_related_sections() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    dashboard = yaml.safe_load(dashboard_text)
+
+    section_titles = [section.get("title") for section in _dashboard_sections(dashboard)]
+    assert section_titles == [
+        "Appliance Status",
+        "Mains, Solar, and NILM",
+        "Energy Tracking",
+        "HVAC Weather Context",
+    ]
+
+    mains_section = yaml.safe_dump(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+    energy_section = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
+    weather_section = yaml.safe_dump(_dashboard_section(dashboard, "HVAC Weather Context"))
+
+    assert "Unknown Load Inventory" in mains_section
+    assert "Unknown load signals" in mains_section
+    assert "Settings and exports" in energy_section
+    assert "Electrical health rollups" in energy_section
+    assert "Notifications and repairs" in weather_section
+    assert "title: NILM Unknown Loads" not in dashboard_text
+    assert "title: Settings And Exports" not in dashboard_text
+    assert "title: Power Quality Detail" not in dashboard_text
+
+
+def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None:
+    dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
+    hvac_cards = _dashboard_cards(hvac_section)
+    graph_cards = [
+        card
+        for card in hvac_cards
+        if card.get("type") == "statistics-graph"
+        and card.get("title") == "HVAC daily energy and outdoor temperature"
+    ]
+
+    assert graph_cards
+    assert graph_cards[0]["entities"] == [
+        {"entity": "sensor.hvac_daily_energy_usage", "name": "Daily Energy Usage"},
+        {"entity": "sensor.hvac_outdoor_temperature", "name": "Outdoor Temperature"},
+    ]
 
 
 def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
@@ -644,6 +689,7 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.hvac_energy_summary",
         "sensor.hvac_daily_energy_usage",
         "sensor.hvac_weather_context",
+        "sensor.hvac_outdoor_temperature",
         "sensor.hvac_run_cycle_runtime",
         "sensor.hvac_run_cycle_duty_cycle",
         "sensor.water_heater_activity_summary",
@@ -675,7 +721,6 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.mains_nilm_monitored_power",
         "sensor.mains_nilm_nilm_unknown_loads",
         "sensor.mains_nilm_nilm_discovered_signatures",
-        "sensor.mains_nilm_nilm_unmatched_load_percentage",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",
@@ -694,6 +739,7 @@ def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
     refs = _dashboard_entity_refs_with_conditional_context(dashboard)
     optional_entities = {
         "sensor.hvac_weather_context",
+        "sensor.hvac_outdoor_temperature",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",

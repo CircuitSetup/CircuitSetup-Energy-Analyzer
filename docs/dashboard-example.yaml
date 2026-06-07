@@ -105,14 +105,14 @@ views:
               - entity: sensor.mains_nilm_energy_summary
                 name: Energy
           - type: gauge
-            entity: sensor.mains_nilm_nilm_unmatched_load_percentage
-            name: Unmatched NILM Load
+            entity: sensor.mains_nilm_monitored_coverage
+            name: Known Load Share
             min: 0
             max: 100
             severity:
-              green: 0
-              yellow: 15
-              red: 35
+              red: 0
+              yellow: 40
+              green: 70
           - type: entities
             title: Mains Load Match
             entities:
@@ -128,6 +128,20 @@ views:
               Known Load Share is how much of current mains power is explained
               by the circuits you selected. Low values usually mean normal
               unmonitored loads, not necessarily a problem.
+          - type: tile
+            entity: sensor.mains_nilm_nilm_unknown_loads
+            name: Unknown Load Inventory
+            vertical: false
+          - type: glance
+            title: Unknown load signals
+            columns: 3
+            entities:
+              - entity: sensor.mains_nilm_nilm_unknown_loads
+                name: Inventory
+              - entity: sensor.mains_nilm_nilm_discovered_signatures
+                name: Signatures
+              - entity: sensor.mains_nilm_monitored_coverage
+                name: Known Load Share
           - type: conditional
             conditions:
               - entity: sensor.mains_nilm_solar_flow_status
@@ -193,10 +207,66 @@ views:
               - entity: sensor.washer_activity_summary
               - entity: sensor.dryer_activity_summary
               - entity: sensor.car_charger_activity_summary
+          - type: glance
+            title: Electrical health rollups
+            columns: 4
+            entities:
+              - entity: sensor.refrigerator_electrical_health
+                name: Refrigerator
+              - entity: sensor.hvac_electrical_health
+                name: HVAC
+              - entity: sensor.water_heater_electrical_health
+                name: Water heater
+              - entity: sensor.pool_pump_electrical_health
+                name: Pool pump
+              - entity: sensor.washer_electrical_health
+                name: Washer
+              - entity: sensor.dryer_electrical_health
+                name: Dryer
+              - entity: sensor.car_charger_electrical_health
+                name: Car charger
+              - entity: sensor.mains_nilm_electrical_health
+                name: Mains
+          - type: horizontal-stack
+            title: Settings and exports
+            cards:
+              - type: button
+                name: Recalculate suggested settings
+                icon: mdi:tune-variant
+                tap_action:
+                  action: call-service
+                  service: circuitsetup_energy_analyzer.recalculate_setting_recommendations
+                  data: {}
+              - type: button
+                name: Export refrigerator history CSV
+                icon: mdi:file-delimited-outline
+                tap_action:
+                  action: call-service
+                  service: circuitsetup_energy_analyzer.export_history_csv
+                  data:
+                    circuit_id: refrigerator
 
       - type: grid
         title: HVAC Weather Context
         cards:
+          - type: conditional
+            conditions:
+              - entity: sensor.hvac_outdoor_temperature
+                state_not: unavailable
+              - entity: sensor.hvac_outdoor_temperature
+                state_not: unknown
+            card:
+              type: statistics-graph
+              title: HVAC daily energy and outdoor temperature
+              days_to_show: 7
+              period: day
+              stat_types:
+                - mean
+              entities:
+                - entity: sensor.hvac_daily_energy_usage
+                  name: Daily Energy Usage
+                - entity: sensor.hvac_outdoor_temperature
+                  name: Outdoor Temperature
           - type: conditional
             conditions:
               - entity: sensor.hvac_weather_context
@@ -221,75 +291,10 @@ views:
               entities:
                 - entity: sensor.hvac_run_cycle_runtime
                 - entity: sensor.hvac_run_cycle_duty_cycle
-                - entity: sensor.hvac_daily_energy_usage
-
-      - type: grid
-        title: NILM Unknown Loads
-        cards:
-          - type: tile
-            entity: sensor.mains_nilm_nilm_unknown_loads
-            name: Unknown Load Inventory
-            vertical: false
-          - type: glance
-            title: Unknown load signals
-            columns: 3
-            entities:
-              - entity: sensor.mains_nilm_nilm_unknown_loads
-                name: Inventory
-              - entity: sensor.mains_nilm_nilm_discovered_signatures
-                name: Signatures
-              - entity: sensor.mains_nilm_nilm_unmatched_load_percentage
-                name: Unmatched
-
-      - type: grid
-        title: Settings And Exports
-        cards:
-          - type: button
-            name: Recalculate suggested settings
-            icon: mdi:tune-variant
-            tap_action:
-              action: call-service
-              service: circuitsetup_energy_analyzer.recalculate_setting_recommendations
-              data: {}
-          - type: button
-            name: Export refrigerator history CSV
-            icon: mdi:file-delimited-outline
-            tap_action:
-              action: call-service
-              service: circuitsetup_energy_analyzer.export_history_csv
-              data:
-                circuit_id: refrigerator
-
-      - type: grid
-        title: Power Quality Detail
-        cards:
-          - type: glance
-            title: Electrical health rollups
-            columns: 4
-            entities:
-              - entity: sensor.refrigerator_electrical_health
-                name: Refrigerator
-              - entity: sensor.hvac_electrical_health
-                name: HVAC
-              - entity: sensor.water_heater_electrical_health
-                name: Water heater
-              - entity: sensor.pool_pump_electrical_health
-                name: Pool pump
-              - entity: sensor.washer_electrical_health
-                name: Washer
-              - entity: sensor.dryer_electrical_health
-                name: Dryer
-              - entity: sensor.car_charger_electrical_health
-                name: Car charger
-              - entity: sensor.mains_nilm_electrical_health
-                name: Mains
-
-      - type: grid
-        title: Alert Philosophy
-        cards:
           - type: markdown
-            title: Notifications and repairs
+            title: Alert Philosophy
             content: >
-              Appliance alerts use persistent notifications with observed
-              evidence. Repairs are reserved for setup, configuration, missing
-              sensors, stale data, or other data-quality problems.
+              Notifications and repairs: appliance alerts use persistent
+              notifications with observed evidence. Repairs are reserved for
+              setup, configuration, missing sensors, stale data, or other
+              data-quality problems.

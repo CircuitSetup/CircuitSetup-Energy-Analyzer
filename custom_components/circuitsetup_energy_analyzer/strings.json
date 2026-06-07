@@ -453,6 +453,9 @@
       "weather_context": {
         "name": "Weather Context"
       },
+      "outdoor_temperature": {
+        "name": "Outdoor Temperature"
+      },
       "daily_energy_usage": {
         "name": "Daily energy usage"
       },
