@@ -112,7 +112,7 @@ def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) 
     assert fake_registry.updated == [("old-circuit", "entry-1")]
 
 
-def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
+def test_unhide_integration_hidden_entity_registry_entries_preserves_user_hidden(
     monkeypatch,
 ) -> None:
     import sys
@@ -131,18 +131,11 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
                     unique_id="entry-1_fridge_last_event",
                     config_entry_id="entry-1",
                     platform=DOMAIN,
-                    hidden_by=None,
+                    hidden_by="integration",
                 ),
-                "sensor.fridge_activity_summary": SimpleNamespace(
-                    entity_id="sensor.fridge_activity_summary",
-                    unique_id="entry-1_fridge_activity_summary",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    hidden_by=None,
-                ),
-                "sensor.fridge_metric_consistency_status": SimpleNamespace(
-                    entity_id="sensor.fridge_metric_consistency_status",
-                    unique_id="entry-1_fridge_metric_consistency_status",
+                "sensor.fridge_alert_evidence": SimpleNamespace(
+                    entity_id="sensor.fridge_alert_evidence",
+                    unique_id="entry-1_fridge_alert_evidence",
                     config_entry_id="entry-1",
                     platform=DOMAIN,
                     hidden_by="user",
@@ -152,10 +145,10 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
                     unique_id="entry-2_fridge_last_event",
                     config_entry_id="entry-2",
                     platform=DOMAIN,
-                    hidden_by=None,
+                    hidden_by="integration",
                 ),
             }
-            self.updated: list[tuple[str, str]] = []
+            self.updated: list[tuple[str, object]] = []
 
         def async_update_entity(self, entity_id, **kwargs) -> None:
             self.updated.append((entity_id, kwargs["hidden_by"]))
@@ -175,16 +168,13 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
         entity_registry_module,
     )
 
-    entity.hide_entity_registry_entries(
+    entity.unhide_integration_hidden_entity_registry_entries(
         SimpleNamespace(entity_registry=fake_registry),
         entry_id="entry-1",
         entity_domain="sensor",
-        hidden_unique_id_suffixes={"last_event", "metric_consistency_status"},
     )
 
-    assert fake_registry.updated == [
-        ("sensor.fridge_last_event", "integration"),
-    ]
+    assert fake_registry.updated == [("sensor.fridge_last_event", None)]
 
 
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
@@ -989,13 +979,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         for description in SENSOR_DESCRIPTIONS
         if description.entity_registry_visible_default is True
     }
-    assert visible_by_default == {
-        "health_summary",
-        "activity_summary",
-        "electrical_health",
-        "energy_summary",
-        "daily_energy_usage",
-    }
+    assert visible_by_default == set(descriptions)
     enabled_by_default = {
         description.key
         for description in SENSOR_DESCRIPTIONS
@@ -1060,7 +1044,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert normal_entity_keys <= set(descriptions)
     assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
     assert descriptions["settings_suggestions"].entity_registry_enabled_default is True
-    assert descriptions["settings_suggestions"].entity_registry_visible_default is False
+    assert descriptions["settings_suggestions"].entity_registry_visible_default is True
 
     for key in descriptions:
         expected_category = (
@@ -1299,15 +1283,15 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
     descriptions = {
         description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
     }
-    assert descriptions["learning"].entity_registry_visible_default is False
+    assert descriptions["learning"].entity_registry_visible_default is True
     assert descriptions["learning"].entity_registry_enabled_default is True
     assert (
-        descriptions["data_quality_problem"].entity_registry_visible_default is False
+        descriptions["data_quality_problem"].entity_registry_visible_default is True
     )
     assert (
         descriptions["data_quality_problem"].entity_registry_enabled_default is True
     )
-    assert descriptions["maintenance"].entity_registry_visible_default is False
+    assert descriptions["maintenance"].entity_registry_visible_default is True
     assert descriptions["maintenance"].entity_registry_enabled_default is True
     assert descriptions["running"].entity_registry_visible_default is True
     assert descriptions["running"].entity_registry_enabled_default is True
@@ -2193,7 +2177,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         if getattr(entity, "unique_id", "").startswith("entry-1_demo_source_")
     ]
     assert all(
-        entity._attr_entity_registry_visible_default is False
+        entity._attr_entity_registry_visible_default is True
         for entity in source_entities
     )
     by_entity_id = {
@@ -2297,7 +2281,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_hides_existing_demo_source_entities(
+async def test_sensor_setup_entry_unhides_existing_demo_source_entities(
     monkeypatch,
 ) -> None:
     import sys
@@ -2319,7 +2303,7 @@ async def test_sensor_setup_entry_hides_existing_demo_source_entities(
                     ),
                     config_entry_id="entry-1",
                     platform=DOMAIN,
-                    hidden_by=None,
+                    hidden_by="integration",
                     entity_category=None,
                 ),
                 "sensor.washer_health_summary": SimpleNamespace(
@@ -2379,7 +2363,7 @@ async def test_sensor_setup_entry_hides_existing_demo_source_entities(
 
     assert (
         "sensor.cs_energy_analyzer_demo_washer_active_power",
-        {"hidden_by": "integration"},
+        {"hidden_by": None},
     ) in fake_registry.updated
     assert fake_registry.removed == []
 

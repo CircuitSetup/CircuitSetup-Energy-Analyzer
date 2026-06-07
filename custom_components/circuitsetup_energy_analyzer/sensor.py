@@ -11,10 +11,10 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     sync_entity_registry_categories,
+    unhide_integration_hidden_entity_registry_entries,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .ux import friendly_feature_name
@@ -1705,13 +1705,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
 )
 
-_VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
-    "health_summary",
-    "activity_summary",
-    "electrical_health",
-    "energy_summary",
-    "daily_energy_usage",
-}
 _NORMAL_ENTITY_SENSOR_KEYS = {
     "health_summary",
     "activity_summary",
@@ -1773,9 +1766,7 @@ SENSOR_DESCRIPTIONS = tuple(
             if description.key in _NORMAL_ENTITY_SENSOR_KEYS
             else description.entity_category
         ),
-        entity_registry_visible_default=(
-            description.key in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
-        ),
+        entity_registry_visible_default=True,
     )
     for description in SENSOR_DESCRIPTIONS
 )
@@ -2418,7 +2409,7 @@ class DemoSourceSensor(SensorEntity):
     """Synthetic source sensor used by the installed demo dashboard."""
 
     _attr_has_entity_name = False
-    _attr_entity_registry_visible_default = False
+    _attr_entity_registry_visible_default = True
 
     def __init__(self, *, entry_id: str, sensor: SensorRef) -> None:
         object_id = sensor.entity_id.removeprefix("sensor.")
@@ -2596,24 +2587,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
-    hide_entity_registry_entries(
+    unhide_integration_hidden_entity_registry_entries(
         hass,
         entry_id=entry_id,
         entity_domain="sensor",
-        hidden_unique_id_suffixes={
-            description.key
-            for description in SENSOR_DESCRIPTIONS
-            if description.entity_registry_visible_default is False
-        }
-        | {
-            unique_id.removeprefix(f"{entry_id}_")
-            for unique_id in {
-                str(getattr(entity, "unique_id", ""))
-                for entity in entities
-                if isinstance(entity, DemoSourceSensor)
-            }
-            if unique_id.startswith(f"{entry_id}_demo_source_")
-        },
     )
     sync_entity_registry_categories(
         hass,
