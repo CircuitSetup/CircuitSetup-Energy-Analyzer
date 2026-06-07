@@ -38,6 +38,7 @@ from .const import (
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
@@ -158,6 +159,7 @@ from .ux import (
     learning_progress,
     normalize_sensitivity,
 )
+from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -171,6 +173,15 @@ FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
     }
 )
 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE = 0.5
+WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
+HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
+    {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.ELECTRIC_HEAT,
+    }
+)
 
 try:
     from homeassistant.components.recorder.statistics import (
@@ -254,6 +265,9 @@ class AnalyzerState:
         default_factory=dict
     )
     nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    weather_context_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -2286,6 +2300,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                         (circuit_id, str(signature.get("signature_id", "")))
                     )
             self._refresh_nilm_state(circuit_id)
+        self.state.weather_context_by_circuit = {
+            circuit_id: dict(evidence)
+            for circuit_id, evidence in (
+                self.store_data.weather_context_by_circuit.items()
+            )
+        }
         self._refresh_all_ux_state(self._now_fn())
         self._refresh_settings_recommendation_state(self._now_fn())
 
@@ -2359,6 +2379,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.run_cycle_evidence_by_circuit[circuit_id] = cycle_summary_payload(
             cycle_summary
         )
+        self._refresh_weather_context_state(config, now)
 
         maintenance = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
         maintenance.setdefault("active", circuit_id in self.paused_circuits)
@@ -2433,6 +2454,149 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.recent_activity_timeline_by_circuit[circuit_id] = (
             timeline_payload(timeline)
         )
+
+    def _refresh_weather_context_state(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> None:
+        circuit_id = config.circuit_id
+        if config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES:
+            self.state.weather_context_by_circuit.pop(circuit_id, None)
+            return
+
+        outdoor_entity = self._outdoor_temperature_entity()
+        if not outdoor_entity:
+            self.state.weather_context_by_circuit.pop(circuit_id, None)
+            return
+
+        outdoor_temperature = self._temperature_f_for_entity(outdoor_entity)
+        runtime_minutes = (
+            self.state.run_cycle_runtime_seconds_by_circuit.get(circuit_id, 0.0)
+            / 60.0
+        )
+        duty_cycle_percent = self.state.run_cycle_duty_cycle_by_circuit.get(
+            circuit_id,
+            0.0,
+        )
+        history = self._weather_context_history_samples(circuit_id)
+        evidence = evaluate_weather_context(
+            outdoor_temperature=outdoor_temperature,
+            current_runtime_minutes=runtime_minutes,
+            current_duty_cycle_percent=duty_cycle_percent,
+            history=history,
+            mode=_weather_context_mode(config),
+        )
+        if self.store_data.weather_context_by_circuit.get(circuit_id) != evidence:
+            self.store_data.weather_context_by_circuit[circuit_id] = evidence
+            self._mark_store_dirty()
+        self.state.weather_context_by_circuit[circuit_id] = dict(evidence)
+        if outdoor_temperature is not None:
+            changed = self._append_weather_context_history(
+                circuit_id,
+                now,
+                temperature=outdoor_temperature,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
+            )
+            if changed:
+                self._mark_store_dirty()
+
+    def _outdoor_temperature_entity(self: Self) -> str:
+        for source in (self.options, self.entry_data):
+            entity_id = str(source.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, "")).strip()
+            if entity_id:
+                return entity_id
+        return ""
+
+    def _temperature_f_for_entity(self: Self, entity_id: str) -> float | None:
+        raw_state = self._raw_state_for_entity(entity_id)
+        if raw_state is None:
+            return None
+        state = str(getattr(raw_state, "state", "")).strip()
+        if state.lower() in {"unknown", "unavailable", ""}:
+            return None
+        value = _float_or_none(state)
+        if value is None:
+            return None
+        attributes = getattr(raw_state, "attributes", {}) or {}
+        unit = str(attributes.get("unit_of_measurement") or "").strip().lower()
+        if unit in {"°c", "c", "celsius"}:
+            return round((value * 9.0 / 5.0) + 32.0, 3)
+        if unit in {"k", "kelvin"}:
+            return round(((value - 273.15) * 9.0 / 5.0) + 32.0, 3)
+        return round(value, 3)
+
+    def _raw_state_for_entity(self: Self, entity_id: str) -> Any | None:
+        hass_states = getattr(self.hass, "states", None)
+        get_state = getattr(hass_states, "get", None)
+        if get_state is None:
+            return None
+        return get_state(entity_id)
+
+    def _weather_context_history_samples(
+        self: Self,
+        circuit_id: str,
+    ) -> list[WeatherContextSample]:
+        samples: list[WeatherContextSample] = []
+        raw_samples = self.store_data.weather_context_history_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        for raw_sample in raw_samples:
+            if not isinstance(raw_sample, Mapping):
+                continue
+            temperature = _float_or_none(raw_sample.get("temperature"))
+            runtime = _float_or_none(raw_sample.get("runtime_minutes"))
+            duty = _float_or_none(raw_sample.get("duty_cycle_percent"))
+            if temperature is None or runtime is None or duty is None:
+                continue
+            samples.append(
+                WeatherContextSample(
+                    temperature=temperature,
+                    runtime_minutes=runtime,
+                    duty_cycle_percent=duty,
+                    energy_kwh=_float_or_none(raw_sample.get("energy_kwh")),
+                    start_count=(
+                        int(start_count)
+                        if (start_count := _float_or_none(
+                            raw_sample.get("start_count"),
+                        ))
+                        is not None
+                        else None
+                    ),
+                )
+            )
+        return samples
+
+    def _append_weather_context_history(
+        self: Self,
+        circuit_id: str,
+        now: datetime,
+        *,
+        temperature: float,
+        runtime_minutes: float,
+        duty_cycle_percent: float,
+    ) -> bool:
+        sample = {
+            "timestamp": now.isoformat(),
+            "temperature": round(float(temperature), 3),
+            "runtime_minutes": round(float(runtime_minutes), 3),
+            "duty_cycle_percent": round(float(duty_cycle_percent), 3),
+            "start_count": self.state.run_cycle_count_by_circuit.get(circuit_id, 0),
+        }
+        history = self.store_data.weather_context_history_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        if history and history[-1].get("timestamp") == sample["timestamp"]:
+            if history[-1] == sample:
+                return False
+            history[-1] = sample
+        else:
+            history.append(sample)
+            del history[:-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES]
+        return True
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         alerts = list(self.state.active_alerts_by_circuit.get(circuit_id, []))
@@ -3634,6 +3798,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_energy_usage(now)
         self._prune_demand(now)
         self._prune_standby(now)
+        self._prune_weather_context(now)
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -3684,6 +3849,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     for sample in samples
                     if _sample_timestamp_is_at_or_after(sample, cutoff)
                 ]
+
+    def _prune_weather_context(self: Self, now: datetime) -> None:
+        for circuit_id, history in (
+            self.store_data.weather_context_history_by_circuit.items()
+        ):
+            retention_mode = self._retention_mode_for_circuit(circuit_id)
+            cutoff = now - RETENTION_WINDOWS[retention_mode]
+            self.store_data.weather_context_history_by_circuit[circuit_id] = [
+                sample
+                for sample in history
+                if _sample_timestamp_is_at_or_after(sample, cutoff)
+            ][-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES:]
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
@@ -5466,6 +5643,12 @@ def _nilm_split_phase_metadata_compatible(
     if current_type in uncertain or signature_type in uncertain:
         return current_type in uncertain and signature_type in uncertain
     return current_type == signature_type
+
+
+def _weather_context_mode(config: CircuitConfig) -> str:
+    if config.appliance_profile is ApplianceProfile.ELECTRIC_HEAT:
+        return "heating"
+    return "cooling"
 
 
 def _float_or_none(value: Any) -> float | None:

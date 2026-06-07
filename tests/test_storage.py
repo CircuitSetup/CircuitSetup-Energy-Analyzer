@@ -185,6 +185,35 @@ def test_feature_store_round_trips_unknown_load_inventory() -> None:
     assert restored.nilm_unknown_loads_by_circuit == data.nilm_unknown_loads_by_circuit
 
 
+def test_feature_store_round_trips_weather_context() -> None:
+    data = FeatureStoreData(
+        weather_context_by_circuit={
+            "hvac": {
+                "status": "weather_correlated",
+                "current_outdoor_temperature": 91.0,
+            }
+        },
+        weather_context_history_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": "2026-06-02T12:00:00+00:00",
+                    "temperature": 91.0,
+                    "runtime_minutes": 180.0,
+                    "duty_cycle_percent": 45.0,
+                }
+            ]
+        },
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.weather_context_by_circuit == data.weather_context_by_circuit
+    assert (
+        restored.weather_context_history_by_circuit
+        == data.weather_context_history_by_circuit
+    )
+
+
 def test_event_round_trip_serialization_uses_current_shape() -> None:
     event = CircuitEvent(
         timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),

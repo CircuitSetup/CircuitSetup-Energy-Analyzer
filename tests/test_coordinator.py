@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
@@ -1515,6 +1516,91 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None
         coordinator.store_data.nilm_signatures["mains"][0]["signature_id"]
     )
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
+
+
+@pytest.mark.asyncio
+async def test_runtime_hvac_weather_context_uses_outdoor_temperature() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 18, 0, tzinfo=UTC)
+    start = CircuitEvent(
+        timestamp=now - timedelta(hours=4),
+        circuit_id="hvac",
+        event_type=EventType.START,
+    )
+    stop = CircuitEvent(
+        timestamp=now - timedelta(hours=1),
+        circuit_id="hvac",
+        event_type=EventType.STOP,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            state = "91" if entity_id == "sensor.outdoor_temperature" else "3200"
+            unit = "°F" if entity_id == "sensor.outdoor_temperature" else "W"
+            return SimpleNamespace(
+                state=state,
+                attributes={"unit_of_measurement": unit},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.hvac_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        }
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[start, stop],
+            weather_context_history_by_circuit={
+                "hvac": [
+                    {
+                        "timestamp": (now - timedelta(days=3)).isoformat(),
+                        "temperature": 90.0,
+                        "runtime_minutes": 170.0,
+                        "duty_cycle_percent": 44.0,
+                    },
+                    {
+                        "timestamp": (now - timedelta(days=2)).isoformat(),
+                        "temperature": 92.0,
+                        "runtime_minutes": 190.0,
+                        "duty_cycle_percent": 48.0,
+                    },
+                    {
+                        "timestamp": (now - timedelta(days=1)).isoformat(),
+                        "temperature": 89.0,
+                        "runtime_minutes": 160.0,
+                        "duty_cycle_percent": 42.0,
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    evidence = coordinator.state.weather_context_by_circuit["hvac"]
+    assert evidence["status"] == "weather_correlated"
+    assert evidence["current_outdoor_temperature"] == 91.0
+    assert evidence["observed_runtime_minutes"] == 180.0
+    assert coordinator.store_data.weather_context_by_circuit["hvac"] == evidence
 
 
 @pytest.mark.asyncio

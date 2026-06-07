@@ -48,6 +48,12 @@ class FeatureStoreData:
     nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    weather_context_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    weather_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     alert_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -210,6 +216,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_unknown_loads_by_circuit": _dict_of_dicts(
             data.nilm_unknown_loads_by_circuit
         ),
+        "weather_context_by_circuit": _dict_of_dicts(
+            data.weather_context_by_circuit
+        ),
+        "weather_context_history_by_circuit": _dict_of_list_dicts(
+            data.weather_context_history_by_circuit
+        ),
         "sensitivity_by_circuit": {
             str(circuit_id): str(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
@@ -293,6 +305,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         },
         nilm_unknown_loads_by_circuit=_dict_of_dicts(
             raw.get("nilm_unknown_loads_by_circuit", {})
+        ),
+        weather_context_by_circuit=_dict_of_dicts(
+            raw.get("weather_context_by_circuit", {})
+        ),
+        weather_context_history_by_circuit=_dict_of_list_dicts(
+            raw.get("weather_context_history_by_circuit", {})
         ),
         sensitivity_by_circuit={
             str(circuit_id): str(sensitivity)
@@ -388,6 +406,8 @@ def prune_events(
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
         nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,
+        weather_context_by_circuit=data.weather_context_by_circuit,
+        weather_context_history_by_circuit=data.weather_context_history_by_circuit,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
@@ -471,3 +491,10 @@ def _json_safe_feature_value(value: Any) -> Any:
 
 def _dict_of_dicts(values: Any) -> dict[str, dict[str, Any]]:
     return {str(key): dict(value) for key, value in dict(values).items()}
+
+
+def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
+    return {
+        str(key): [dict(item) for item in list(value)]
+        for key, value in dict(values).items()
+    }
