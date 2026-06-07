@@ -1930,6 +1930,391 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
     assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
 
 
+@pytest.mark.asyncio
+async def test_demo_source_entities_are_treated_as_current_for_data_quality() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
+    old_timestamp = now - timedelta(hours=2)
+    circuit_id = "cs_energy_analyzer_demo_refrigerator"
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == (
+                "sensor.cs_energy_analyzer_demo_refrigerator_active_power"
+            )
+            return SimpleNamespace(
+                state="285",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=old_timestamp,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": circuit_id,
+                    "name": "Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_refrigerator_active_power"
+                            ),
+                            "role": "real_power",
+                        },
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert circuit_id not in coordinator.state.data_quality_by_circuit
+    checklist = coordinator.state.data_quality_checklist_by_circuit[circuit_id]
+    assert checklist["source_data_fresh"] is True
+    assert not any("stale" in issue for issue in checklist["quality_issues"])
+
+
+@pytest.mark.asyncio
+async def test_demo_appliance_history_is_seeded_after_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
+    circuit_id = "cs_energy_analyzer_demo_hvac"
+    states = {
+        "sensor.cs_energy_analyzer_demo_hvac_l1_energy": ("188.4", "kWh"),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_energy": ("171.9", "kWh"),
+        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power": ("3300", "W"),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_active_power": ("900", "W"),
+        "sensor.cs_energy_analyzer_demo_hvac_l1_current": ("28.0", "A"),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_current": ("7.4", "A"),
+        "sensor.cs_energy_analyzer_demo_hvac_l1_power_factor": ("0.72", ""),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_power_factor": ("0.95", ""),
+        "sensor.cs_energy_analyzer_demo_hvac_l1_reactive_power": ("3100", "var"),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_reactive_power": ("300", "var"),
+        "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power": ("4580", "VA"),
+        "sensor.cs_energy_analyzer_demo_hvac_l2_apparent_power": ("947", "VA"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage": ("119.6", "V"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_voltage": ("120.3", "V"),
+        "sensor.demo_outdoor_temperature": ("86", "°F"),
+    }
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            value, unit = states[entity_id]
+            return SimpleNamespace(
+                state=value,
+                attributes={"unit_of_measurement": unit},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
+        entry_data={
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.demo_outdoor_temperature",
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": circuit_id,
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_energy"
+                            ),
+                            "role": "energy",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_energy"
+                            ),
+                            "role": "energy",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power"
+                            ),
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power"
+                            ),
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_current"
+                            ),
+                            "role": "current",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_current"
+                            ),
+                            "role": "current",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_power_factor"
+                            ),
+                            "role": "power_factor",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_power_factor"
+                            ),
+                            "role": "power_factor",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_reactive_power"
+                            ),
+                            "role": "reactive_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_reactive_power"
+                            ),
+                            "role": "reactive_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power"
+                            ),
+                            "role": "apparent_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_hvac_l2_apparent_power"
+                            ),
+                            "role": "apparent_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
+                            ),
+                            "role": "voltage",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_voltage"
+                            ),
+                            "role": "voltage",
+                            "leg": "b",
+                        },
+                    ],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
+    assert usage["baseline_day_count"] >= 7
+    assert usage["status"] != "learning"
+    assert usage["status"] != "waiting_for_delta"
+    assert coordinator.state.learning_by_circuit[circuit_id] is False
+    assert coordinator.state.learning_progress_by_circuit[circuit_id][
+        "learning"
+    ] is False
+    weather = coordinator.state.weather_context_by_circuit[circuit_id]
+    assert weather["status"] != "learning"
+    assert weather["status"] in {
+        "weather_correlated",
+        "above_weather_adjusted_range",
+    }
+    assert coordinator.state.standby_status_by_circuit[circuit_id] != "learning"
+
+
+@pytest.mark.asyncio
+async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
+    circuit_id = "mains_nilm"
+    states = {
+        "sensor.cs_energy_analyzer_demo_mains_l1_energy": ("868.4", "kWh"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_energy": ("852.7", "kWh"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_active_power": ("1850", "W"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_active_power": ("1680", "W"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_current": ("15.4", "A"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_current": ("14.1", "A"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_power_factor": ("0.96", ""),
+        "sensor.cs_energy_analyzer_demo_mains_l2_power_factor": ("0.95", ""),
+        "sensor.cs_energy_analyzer_demo_mains_l1_reactive_power": ("520", "var"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_reactive_power": ("470", "var"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_apparent_power": ("1927", "VA"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_apparent_power": ("1768", "VA"),
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage": ("119.6", "V"),
+        "sensor.cs_energy_analyzer_demo_mains_l2_voltage": ("120.3", "V"),
+    }
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            value, unit = states[entity_id]
+            return SimpleNamespace(
+                state=value,
+                attributes={"unit_of_measurement": unit},
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": circuit_id,
+                    "name": "Mains NILM",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_energy"
+                            ),
+                            "role": "energy",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_energy"
+                            ),
+                            "role": "energy",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_active_power"
+                            ),
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_active_power"
+                            ),
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_current"
+                            ),
+                            "role": "current",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_current"
+                            ),
+                            "role": "current",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_power_factor"
+                            ),
+                            "role": "power_factor",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_power_factor"
+                            ),
+                            "role": "power_factor",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_reactive_power"
+                            ),
+                            "role": "reactive_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_reactive_power"
+                            ),
+                            "role": "reactive_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_apparent_power"
+                            ),
+                            "role": "apparent_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_apparent_power"
+                            ),
+                            "role": "apparent_power",
+                            "leg": "b",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
+                            ),
+                            "role": "voltage",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_mains_l2_voltage"
+                            ),
+                            "role": "voltage",
+                            "leg": "b",
+                        },
+                    ],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
+    assert usage["baseline_day_count"] >= 7
+    assert usage["status"] != "learning"
+    assert coordinator.state.learning_by_circuit[circuit_id] is False
+    assert coordinator.state.nilm_signature_count_by_circuit[circuit_id] > 0
+    unknown_loads = coordinator.state.nilm_unknown_loads_by_circuit[circuit_id]
+    assert unknown_loads["unknown_load_count"] > 0
+    assert unknown_loads["active_unknown_load_count"] > 0
+
+
 def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

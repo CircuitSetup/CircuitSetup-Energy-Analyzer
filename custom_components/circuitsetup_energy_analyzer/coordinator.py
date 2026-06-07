@@ -182,6 +182,30 @@ HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
         ApplianceProfile.ELECTRIC_HEAT,
     }
 )
+_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
+_DEMO_HISTORY_SEED_VERSION = 1
+_DEMO_PRIOR_DAILY_USAGE_KWH: dict[str, tuple[float, ...]] = {
+    "refrigerator": (1.1, 1.2, 1.3, 1.1, 1.4, 1.2, 1.3),
+    "hvac": (24.0, 28.5, 31.2, 27.8, 33.1, 29.4, 30.6),
+    "water_heater": (5.8, 6.1, 5.9, 6.4, 6.0, 6.2, 5.7),
+    "washer": (0.7, 0.9, 0.6, 1.1, 0.8, 1.0, 0.7),
+    "dryer": (2.7, 3.2, 2.9, 3.5, 3.0, 3.4, 2.8),
+    "pool_pump": (4.2, 4.4, 4.1, 4.5, 4.3, 4.6, 4.2),
+    "car_charger": (9.6, 12.4, 10.1, 14.8, 8.5, 13.2, 11.1),
+    "mains_nilm": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
+    "mains": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
+}
+_DEMO_TODAY_USAGE_KWH: dict[str, float] = {
+    "refrigerator": 2.6,
+    "hvac": 62.0,
+    "water_heater": 10.8,
+    "washer": 1.8,
+    "dryer": 6.7,
+    "pool_pump": 7.4,
+    "car_charger": 26.0,
+    "mains_nilm": 78.0,
+    "mains": 78.0,
+}
 
 try:
     from homeassistant.components.recorder.statistics import (
@@ -2479,6 +2503,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             0.0,
         )
+        self._seed_demo_weather_context_history(
+            config,
+            now,
+            outdoor_temperature=outdoor_temperature,
+        )
         history = self._weather_context_history_samples(circuit_id, now)
         evidence = evaluate_weather_context(
             outdoor_temperature=outdoor_temperature,
@@ -2809,6 +2838,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not self._nilm_enabled(config):
             return alerts
 
+        self._seed_demo_nilm_state(config, sample.timestamp)
+
         min_delta_w = _nilm_min_delta_w(
             self._sensitivity_for_circuit(config.circuit_id)
         )
@@ -3017,6 +3048,399 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.nilm_unknown_loads_by_circuit[circuit_id] = dict(
             self.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
         )
+
+    def _seed_demo_event_history(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> None:
+        if not _is_demo_config(config):
+            return
+
+        profile = get_profile_definition(config.appliance_profile)
+        minimum_starts = max(profile.minimum_cycles, 8)
+        circuit_events = [
+            event
+            for event in self.store_data.events
+            if event.circuit_id == config.circuit_id
+        ]
+        start_count = sum(
+            1 for event in circuit_events if event.event_type is EventType.START
+        )
+        oldest = min((event.timestamp for event in circuit_events), default=None)
+        mature_by_count = start_count >= minimum_starts
+        mature_by_age = oldest is not None and now - oldest >= timedelta(
+            days=profile.minimum_learning_days,
+        )
+        if mature_by_count and mature_by_age:
+            return
+
+        self.store_data.events = [
+            event
+            for event in self.store_data.events
+            if not (
+                event.circuit_id == config.circuit_id
+                and event.features.get("demo_seed_version")
+                == _DEMO_HISTORY_SEED_VERSION
+            )
+        ]
+        base = now - timedelta(days=max(profile.minimum_learning_days, 7), hours=1)
+        seeded: list[CircuitEvent] = []
+        for index in range(minimum_starts):
+            start = base + timedelta(hours=index * 4)
+            stop = start + timedelta(minutes=45)
+            seeded.append(
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id=config.circuit_id,
+                    event_type=EventType.START,
+                    features={
+                        "demo_seed_version": _DEMO_HISTORY_SEED_VERSION,
+                        "cycle_index": index,
+                    },
+                )
+            )
+            seeded.append(
+                CircuitEvent(
+                    timestamp=stop,
+                    circuit_id=config.circuit_id,
+                    event_type=EventType.STOP,
+                    features={
+                        "demo_seed_version": _DEMO_HISTORY_SEED_VERSION,
+                        "cycle_index": index,
+                    },
+                )
+            )
+        self.store_data.events.extend(seeded)
+        self._mark_store_dirty()
+
+    def _seed_demo_power_quality_baselines(
+        self: Self,
+        config: CircuitConfig,
+        features: Mapping[str, float],
+    ) -> None:
+        if not _is_demo_config(config):
+            return
+
+        changed = False
+        for feature, value in features.items():
+            key = _baseline_key(config.circuit_id, feature)
+            if key in self.store_data.baselines:
+                continue
+            self.store_data.baselines[key] = _demo_baseline(feature, value)
+            changed = True
+        if changed:
+            self._mark_store_dirty()
+
+    def _seed_demo_energy_usage_history(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+        settings: EnergyUsageSettings,
+    ) -> None:
+        if not _is_demo_config(config) or sample.energy is None:
+            return
+
+        energy_kwh = _float_or_none(sample.energy)
+        if energy_kwh is None or energy_kwh <= 0.0:
+            return
+
+        window_days = max(int(settings.window_days), 1)
+        today = now.date().isoformat()
+        history = self.store_data.energy_usage_by_circuit.setdefault(
+            config.circuit_id,
+            {},
+        )
+        days = history.get("days")
+        prior_day_count = (
+            sum(
+                1
+                for day in days
+                if isinstance(day, Mapping) and str(day.get("date", "")) < today
+            )
+            if isinstance(days, list)
+            else 0
+        )
+        if prior_day_count >= window_days and _float_or_none(
+            history.get("last_energy_kwh"),
+        ) is not None:
+            return
+
+        circuit_key = _demo_circuit_key(config)
+        prior_usage = _demo_prior_usage(circuit_key, window_days)
+        today_usage = _demo_today_usage(circuit_key, energy_kwh)
+        start_date = now.date() - timedelta(days=window_days)
+        history["days"] = [
+            {
+                "date": (start_date + timedelta(days=index)).isoformat(),
+                "usage_kwh": round(float(usage), 3),
+            }
+            for index, usage in enumerate(prior_usage)
+        ]
+        history["last_energy_kwh"] = round(max(energy_kwh - today_usage, 0.0), 3)
+        history["last_sample_at"] = (now - timedelta(minutes=5)).isoformat()
+        history["_demo_seed_version"] = _DEMO_HISTORY_SEED_VERSION
+        history["_demo_seed_date"] = today
+        self._mark_store_dirty()
+
+    def _seed_demo_weather_context_history(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+        *,
+        outdoor_temperature: float | None,
+    ) -> None:
+        if (
+            not _is_demo_config(config)
+            or config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES
+            or outdoor_temperature is None
+        ):
+            return
+
+        raw_history = self.store_data.weather_context_history_by_circuit.setdefault(
+            config.circuit_id,
+            [],
+        )
+        comparable_count = 0
+        for sample in raw_history:
+            if not isinstance(sample, Mapping):
+                continue
+            sample_time = _datetime_or_none(sample.get("timestamp"))
+            sample_temp = _float_or_none(sample.get("temperature"))
+            if (
+                sample_time is not None
+                and sample_time.date() < now.date()
+                and sample_temp is not None
+                and abs(sample_temp - outdoor_temperature) <= 3.0
+            ):
+                comparable_count += 1
+        if comparable_count >= 3:
+            return
+
+        self.store_data.weather_context_history_by_circuit[config.circuit_id] = [
+            {
+                "timestamp": (
+                    now - timedelta(days=7 - index, hours=2)
+                ).isoformat(),
+                "temperature": round(float(outdoor_temperature) + offset, 3),
+                "runtime_minutes": runtime,
+                "duty_cycle_percent": duty,
+                "energy_kwh": round(runtime * 0.055, 3),
+                "start_count": 3 + (index % 2),
+                "_demo_seed_version": _DEMO_HISTORY_SEED_VERSION,
+            }
+            for index, (offset, runtime, duty) in enumerate(
+                (
+                    (-2.0, 78.0, 12.5),
+                    (-1.0, 84.0, 13.8),
+                    (0.0, 92.0, 15.0),
+                    (1.0, 97.0, 15.7),
+                    (2.0, 104.0, 16.9),
+                )
+            )
+        ]
+        self._mark_store_dirty()
+
+    def _seed_demo_standby_history(
+        self: Self,
+        config: CircuitConfig,
+        sample: Any,
+        now: datetime,
+        settings: StandbySettings,
+    ) -> None:
+        if not _is_demo_config(config):
+            return
+
+        power_w = _demand_power_w(sample)
+        if power_w is None:
+            return
+
+        min_samples = max(int(settings.min_samples), 1)
+        history = self.store_data.standby_by_circuit.setdefault(
+            config.circuit_id,
+            {},
+        )
+        samples = history.get("samples")
+        cutoff = now - timedelta(hours=max(int(settings.window_hours), 1))
+        existing_count = (
+            sum(
+                1
+                for raw_sample in samples
+                if isinstance(raw_sample, Mapping)
+                and (
+                    sample_time := _datetime_or_none(raw_sample.get("timestamp"))
+                )
+                is not None
+                and sample_time >= cutoff
+            )
+            if isinstance(samples, list)
+            else 0
+        )
+        if existing_count >= min_samples:
+            return
+
+        window_hours = max(int(settings.window_hours), 1)
+        sample_spacing_minutes = max(
+            int((window_hours * 60) / max(min_samples + 1, 2)),
+            5,
+        )
+        low_power_w = max(float(settings.standby_threshold_w) + 4.0, power_w * 0.04)
+        seeded: list[dict[str, Any]] = []
+        for index in range(max(min_samples - 1, 0)):
+            timestamp = now - timedelta(
+                minutes=sample_spacing_minutes * (min_samples - index),
+            )
+            seeded.append(
+                {
+                    "timestamp": timestamp.isoformat(),
+                    "real_power_w": round(
+                        low_power_w + ((index % 4) * 1.5),
+                        3,
+                    ),
+                    "_demo_seed_version": _DEMO_HISTORY_SEED_VERSION,
+                }
+            )
+        history["samples"] = seeded
+        self._mark_store_dirty()
+
+    def _seed_demo_nilm_state(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> None:
+        if not _is_demo_config(config):
+            return
+
+        if not self.store_data.nilm_signatures.get(config.circuit_id):
+            self.store_data.nilm_signatures[config.circuit_id] = [
+                {
+                    "signature_id": "demo_motor_load_l1",
+                    "median_delta_w": 920.0,
+                    "median_delta_var": 510.0,
+                    "median_delta_va": 1052.0,
+                    "median_delta_pf": -0.05,
+                    "median_leg_a_delta_w": 910.0,
+                    "median_leg_b_delta_w": 20.0,
+                    "leg_balance_ratio": 0.956,
+                    "dominant_leg": "a",
+                    "split_phase_type": "single_leg",
+                    "occurrence_count": 8,
+                    "confidence": 0.82,
+                    "classification": "motor",
+                    "review_state": "new",
+                },
+                {
+                    "signature_id": "demo_resistive_load_240v",
+                    "median_delta_w": 4100.0,
+                    "median_delta_var": 180.0,
+                    "median_delta_va": 4104.0,
+                    "median_delta_pf": 0.0,
+                    "median_leg_a_delta_w": 2050.0,
+                    "median_leg_b_delta_w": 2050.0,
+                    "leg_balance_ratio": 0.0,
+                    "dominant_leg": "balanced",
+                    "split_phase_type": "split_phase",
+                    "occurrence_count": 5,
+                    "confidence": 0.78,
+                    "classification": "resistive",
+                    "review_state": "new",
+                },
+            ]
+            self._mark_store_dirty()
+
+        if not self.store_data.nilm_unknown_loads_by_circuit.get(config.circuit_id):
+            first_seen = now - timedelta(days=6, hours=3)
+            last_start = now - timedelta(minutes=38)
+            self.store_data.nilm_unknown_loads_by_circuit[config.circuit_id] = {
+                "circuit_id": config.circuit_id,
+                "unknown_load_count": 2,
+                "active_unknown_load_count": 1,
+                "ambiguous_unknown_load_count": 0,
+                "simultaneous_unknown_event_count": 1,
+                "unknown_estimated_energy_today_kwh": 1.1,
+                "unknown_estimated_energy_7_days_kwh": 7.8,
+                "unknown_estimated_energy_30_days_kwh": 32.4,
+                "largest_unknown_load": "demo_resistive_load_240v",
+                "highest_unknown_energy_load": "demo_motor_load_l1",
+                "unknown_loads": [
+                    {
+                        "signature_id": "demo_motor_load_l1",
+                        "display_name": "Motor-like 120 V load",
+                        "likely_type": "motor",
+                        "voltage_class": "120 V",
+                        "split_phase_type": "single_leg",
+                        "dominant_leg": "a",
+                        "typical_watts": 920.0,
+                        "typical_var": 510.0,
+                        "typical_va": 1052.0,
+                        "typical_power_factor": 0.875,
+                        "confidence": 0.82,
+                        "occurrence_count": 8,
+                        "first_seen": first_seen.isoformat(),
+                        "last_seen": last_start.isoformat(),
+                        "review_state": "new",
+                        "separation_status": "separable",
+                        "running_state": "probably_on",
+                        "last_start": last_start.isoformat(),
+                        "last_stop": None,
+                        "current_runtime_minutes": 38.0,
+                        "runtime_today_minutes": 72.0,
+                        "runtime_7_days_minutes": 508.0,
+                        "runtime_30_days_minutes": 2110.0,
+                        "estimated_energy_today_kwh": 1.1,
+                        "estimated_energy_7_days_kwh": 7.8,
+                        "estimated_energy_30_days_kwh": 32.4,
+                        "energy_estimate_confidence": 0.82,
+                        "evidence": (
+                            "Recurring single-leg signature with motor-like VAR "
+                            "and power-factor behavior."
+                        ),
+                    },
+                    {
+                        "signature_id": "demo_resistive_load_240v",
+                        "display_name": "Resistive 240 V load",
+                        "likely_type": "resistive",
+                        "voltage_class": "240 V",
+                        "split_phase_type": "split_phase",
+                        "dominant_leg": "balanced",
+                        "typical_watts": 4100.0,
+                        "typical_var": 180.0,
+                        "typical_va": 4104.0,
+                        "typical_power_factor": 0.999,
+                        "confidence": 0.78,
+                        "occurrence_count": 5,
+                        "first_seen": first_seen.isoformat(),
+                        "last_seen": (now - timedelta(hours=4)).isoformat(),
+                        "review_state": "new",
+                        "separation_status": "separable",
+                        "running_state": "probably_off",
+                        "last_start": (now - timedelta(hours=5)).isoformat(),
+                        "last_stop": (now - timedelta(hours=4)).isoformat(),
+                        "current_runtime_minutes": 0.0,
+                        "runtime_today_minutes": 58.0,
+                        "runtime_7_days_minutes": 238.0,
+                        "runtime_30_days_minutes": 960.0,
+                        "estimated_energy_today_kwh": 0.0,
+                        "estimated_energy_7_days_kwh": 0.0,
+                        "estimated_energy_30_days_kwh": 0.0,
+                        "energy_estimate_confidence": 0.78,
+                        "evidence": (
+                            "Balanced split-phase signature with very high power "
+                            "factor, consistent with a resistive load."
+                        ),
+                    },
+                ],
+            }
+            self._mark_store_dirty()
+
+        self._nilm_total_events_by_circuit[config.circuit_id] = max(
+            self._nilm_total_events_by_circuit[config.circuit_id],
+            12,
+        )
+        self._nilm_unmatched_edges[config.circuit_id] = self._nilm_unmatched_edges[
+            config.circuit_id
+        ][:4]
 
     def _refresh_balance_state(
         self: Self,
@@ -3905,11 +4329,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if raw_state is None:
                 continue
             attributes = getattr(raw_state, "attributes", {}) or {}
+            last_updated = getattr(raw_state, "last_updated", now) or now
+            if _is_demo_source_entity_id(sensor.entity_id):
+                last_updated = now
             states[sensor.entity_id] = SourceState(
                 entity_id=sensor.entity_id,
                 state=str(getattr(raw_state, "state", "")),
                 unit=attributes.get("unit_of_measurement") or sensor.unit,
-                last_updated=getattr(raw_state, "last_updated", now) or now,
+                last_updated=last_updated,
                 device_class=attributes.get("device_class"),
                 state_class=attributes.get("state_class"),
             )
@@ -3927,6 +4354,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state.learning_by_circuit[config.circuit_id] = True
             self._clear_power_quality_state(config.circuit_id)
             return None
+
+        self._seed_demo_event_history(config, now)
+        self._seed_demo_power_quality_baselines(config, features)
 
         baselines: dict[str, Any] = {}
         learning_new_features = False
@@ -3992,6 +4422,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             config,
             config.circuit_id,
         )
+        self._seed_demo_energy_usage_history(config, sample, now, settings)
         result = record_energy_usage(
             self.store_data.energy_usage_by_circuit.setdefault(
                 config.circuit_id,
@@ -4615,6 +5046,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         power_w = _demand_power_w(sample)
         settings = self._standby_settings_for_config(config, config.circuit_id)
+        self._seed_demo_standby_history(config, sample, now, settings)
         result = record_standby_sample(
             self.store_data.standby_by_circuit.setdefault(config.circuit_id, {}),
             circuit_id=config.circuit_id,
@@ -5057,6 +5489,52 @@ def _sum_optional_values(*raw_values: Any) -> float | None:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _is_demo_source_entity_id(entity_id: str) -> bool:
+    return str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
+
+
+def _is_demo_config(config: CircuitConfig) -> bool:
+    return any(_is_demo_source_entity_id(sensor.entity_id) for sensor in config.sensors)
+
+
+def _demo_circuit_key(config: CircuitConfig) -> str:
+    if (
+        config.mode is CircuitMode.MAINS_NILM
+        or config.appliance_profile is ApplianceProfile.MAINS_NILM
+    ):
+        return "mains_nilm"
+    return str(config.circuit_id).removeprefix("cs_energy_analyzer_demo_")
+
+
+def _demo_prior_usage(circuit_key: str, window_days: int) -> tuple[float, ...]:
+    template = _DEMO_PRIOR_DAILY_USAGE_KWH.get(
+        circuit_key,
+        _DEMO_PRIOR_DAILY_USAGE_KWH["refrigerator"],
+    )
+    return tuple(float(template[index % len(template)]) for index in range(window_days))
+
+
+def _demo_today_usage(circuit_key: str, energy_kwh: float) -> float:
+    preferred = _DEMO_TODAY_USAGE_KWH.get(circuit_key, max(energy_kwh * 0.15, 0.5))
+    if energy_kwh <= preferred:
+        return round(max(energy_kwh * 0.2, 0.001), 3)
+    return round(float(preferred), 3)
+
+
+def _demo_baseline(feature: str, value: float) -> BaselineStats:
+    spread_floor = 0.01 if "ratio" in feature or "factor" in feature else 5.0
+    spread = max(abs(float(value)) * 0.05, spread_floor)
+    return BaselineStats(
+        feature=feature,
+        sample_count=20,
+        median=float(value),
+        mad=spread,
+        p10=float(value) - spread,
+        p90=float(value) + spread,
+        confidence=1.0,
+    )
 
 
 def _energy_usage_spike_message(
