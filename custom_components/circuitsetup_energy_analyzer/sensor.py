@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
-from .const import DOMAIN
+from .const import CONF_OUTDOOR_TEMPERATURE_ENTITY, DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
     EntityCategory,
@@ -301,6 +301,42 @@ def nilm_unknown_loads_attributes(state: Any, circuit_id: str) -> dict[str, Any]
         {},
     )
     return dict(inventory) if isinstance(inventory, Mapping) else {}
+
+
+_WEATHER_CONTEXT_STATUS_LABELS = {
+    "no_temperature_source": "No Temperature Source",
+    "learning": "Learning",
+    "weather_correlated": "Weather Correlated",
+    "above_weather_adjusted_range": "Above Weather-Adjusted Range",
+}
+
+
+def weather_context_value(state: Any, circuit_id: str) -> str:
+    """Return a friendly weather-context status for an HVAC circuit."""
+    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
+    status = _weather_context_status(evidence)
+    return _WEATHER_CONTEXT_STATUS_LABELS.get(status, friendly_feature_name(status))
+
+
+def weather_context_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return weather-context evidence attributes for an HVAC circuit."""
+    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
+    if isinstance(evidence, Mapping):
+        return dict(evidence)
+    if is_dataclass(evidence) and not isinstance(evidence, type):
+        return asdict(evidence)
+    return {}
+
+
+def _weather_context_status(evidence: Any) -> str:
+    if isinstance(evidence, Mapping):
+        return str(evidence.get("status") or "no_temperature_source")
+    status = getattr(evidence, "status", None)
+    if status:
+        return str(status)
+    if isinstance(evidence, str):
+        return evidence
+    return "no_temperature_source"
 
 
 def daily_energy_usage_value(state: Any, circuit_id: str) -> float:
@@ -1140,6 +1176,7 @@ SENSOR_ICONS: Mapping[str, str] = {
     "nilm_unknown_loads": "mdi:home-search-outline",
     "nilm_unmatched_load_percentage": "mdi:chart-scatter-plot",
     "nilm_topology_status": "mdi:source-branch",
+    "weather_context": "mdi:thermometer-lines",
     "daily_energy_usage": "mdi:counter",
     "energy_usage_share": "mdi:chart-pie",
     "energy_usage_status": "mdi:lightning-bolt-outline",
@@ -1351,6 +1388,12 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="NILM Topology Status",
         value_fn=nilm_topology_status_value,
         attributes_fn=_mapping_attributes("nilm_topology_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="weather_context",
+        name_suffix="Weather Context",
+        value_fn=weather_context_value,
+        attributes_fn=weather_context_attributes,
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
@@ -1739,6 +1782,7 @@ _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     "electrical_health",
     "energy_summary",
     "daily_energy_usage",
+    "weather_context",
 }
 _NORMAL_ENTITY_SENSOR_KEYS = {
     "health_summary",
@@ -1747,6 +1791,7 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "energy_summary",
     "settings_suggestions",
     "daily_energy_usage",
+    "weather_context",
     "energy_usage_share",
     "energy_usage_status",
     "energy_goal_usage",
@@ -1906,6 +1951,13 @@ _STANDBY_SENSOR_KEYS = {
     "standby_threshold",
     "standby_status",
     "always_on_limit_usage",
+}
+_WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context"}
+_WEATHER_CONTEXT_PROFILES = {
+    ApplianceProfile.HVAC,
+    ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.HVAC_BLOWER,
+    ApplianceProfile.ELECTRIC_HEAT,
 }
 _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.REFRIGERATOR,
@@ -2224,6 +2276,10 @@ def sensor_description_applies(
                 or _stored_settings(coordinator, "standby_settings_by_circuit", circuit)
             )
         )
+    if key in _WEATHER_CONTEXT_SENSOR_KEYS:
+        return profile in _WEATHER_CONTEXT_PROFILES and _has_temperature_source(
+            coordinator,
+        )
     return False
 
 
@@ -2343,6 +2399,19 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
     settings_by_circuit = getattr(store_data, field_name, {}) if store_data else {}
     settings = settings_by_circuit.get(_circuit_id(circuit), {})
     return isinstance(settings, Mapping) and bool(settings)
+
+
+def _has_temperature_source(coordinator: Any) -> bool:
+    value = _coordinator_config_value(coordinator, CONF_OUTDOOR_TEMPERATURE_ENTITY)
+    return value is not None and bool(str(value).strip())
+
+
+def _coordinator_config_value(coordinator: Any, key: str) -> Any:
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        if isinstance(container, Mapping) and container.get(key):
+            return container[key]
+    return None
 
 
 def _has_solar_flow_sources(coordinator: Any) -> bool:

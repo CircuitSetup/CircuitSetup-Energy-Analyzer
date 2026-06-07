@@ -450,6 +450,9 @@
       "nilm_topology_status": {
         "name": "NILM topology status"
       },
+      "weather_context": {
+        "name": "Weather Context"
+      },
       "daily_energy_usage": {
         "name": "Daily energy usage"
       },
