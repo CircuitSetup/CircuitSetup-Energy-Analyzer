@@ -13,6 +13,12 @@ The integration learns conservative per-circuit baselines for single-phase appli
   assignment and override support.
 - Supports single-phase circuits, dual-phase appliances, mixed circuits, and
   experimental mains NILM disaggregation.
+- Builds an experimental mains NILM unknown-load inventory with likely load
+  type, 120 V versus 240 V hints, dominant leg, typical watts/VAR/VA, power
+  factor, runtime, kWh estimates, and new/missing load evidence.
+- Optionally uses an outdoor temperature sensor to put HVAC compressor,
+  blower, and electric-heat activity in weather context before treating longer
+  runtime as unusual.
 - Learns conservative per-circuit baselines before alerting, then requires
   repeated anomalies and reports them as possible issues with observed evidence.
 - Suggests evidence-based advanced settings after enough history, with user
@@ -113,6 +119,10 @@ The setup and options screens are designed to avoid hand-written JSON:
 - Mains Source Entities: optional whole-panel or aggregate sensors for
   experimental mains NILM and balance views. Use L1/L2 or leg A/B naming when
   split-phase mains context is available.
+- Outdoor Temperature Entity: optional temperature sensor used only for HVAC
+  weather context. Choose a real outdoor sensor, weather-station sensor, or
+  reliable outdoor helper entity; leave it blank if you do not want HVAC
+  runtime compared with outdoor conditions.
 - Circuit Assignments: review one detected circuit group at a time, see the
   selected sensors, then confirm or change the appliance type and circuit mode.
   Turn off Include Circuit for plugs, lights, or other groups that should not
@@ -128,6 +138,9 @@ Existing `well_pump` input is accepted as a legacy alias for `water_pump`.
 
 Mains sensors are optional, but they are required for the whole-home balance,
 Mains NILM, solar-flow, and utility comparison features.
+The outdoor temperature sensor is also optional. When configured, it applies to
+HVAC, HVAC compressor, HVAC blower, and electric-heat appliance profiles and
+adds a Weather Context entity for those circuits.
 
 ![Mains sensor selection controls for optional whole-panel sources](docs/images/readme/mains-sensors.png)
 
@@ -204,6 +217,10 @@ Start with these entities for each appliance:
   evidence needs review.
 - `Energy Summary` shows whether usage, goals, billing, cost, or high-usage evidence
   needs review.
+- `Weather Context` appears for HVAC-like circuits when an outdoor temperature
+  entity is configured. It explains whether today's HVAC activity looks
+  consistent with similar outdoor temperatures or is above the learned
+  weather-adjusted range.
 - `Settings Suggestions` shows the count of pending advanced-setting
   recommendations. Its attributes include `pending_count` and `recommendations`
   with the evidence and recommendation IDs.
@@ -477,6 +494,30 @@ dryer, or refrigerator compressor run that exceeds a user-selected duration, and
 
 ![Run cycle diagnostic entities in an observed evidence card](docs/images/readme/run-cycle-diagnostics.png)
 
+## HVAC Weather Context
+
+HVAC runtime is strongly affected by outdoor conditions. A compressor running
+longer on a 94 F afternoon is different from the same runtime on a mild day, so
+the analyzer can use one optional outdoor temperature entity as context for
+HVAC-like appliances.
+
+Set **Outdoor Temperature Entity** during setup or later from **Configure**.
+Use a real outdoor temperature sensor, weather-station sensor, or reliable
+outdoor helper entity. Indoor thermostats are usually not a good source because
+they measure the controlled space rather than the weather load on the house.
+
+When configured, the analyzer records retained samples for HVAC, HVAC
+compressor, HVAC blower, and electric-heat profiles. Each sample includes
+outdoor temperature, today's runtime minutes, duty cycle, and start count. Once
+there are enough similar-temperature samples, `Weather Context` can report
+`Weather Correlated` when activity is in the learned range or
+`Above Weather-Adjusted Range` when activity is much higher than similar
+weather has usually required.
+
+This does not diagnose an HVAC fault. It explains whether the activity should
+be viewed against weather context before a user changes thresholds or acts on
+an alert.
+
 ## Recent Activity Timeline
 
 Each configured circuit exposes a compact recent-activity timeline from the
@@ -719,6 +760,29 @@ evidence.
 ## Experimental NILM
 
 Experimental NILM is opt-in. It can be enabled for mains aggregate channels or mixed circuits to discover recurring load signatures, but it should be treated as a hinting system rather than a diagnostic authority. Unknown signatures stay unknown until a user confirms and labels them.
+
+For Mains NILM circuits, the analyzer now builds an experimental Unknown Load
+Inventory from recurring aggregate signatures that do not clearly match known
+directly monitored circuits. Each unknown load estimate includes likely load
+type, 120 V versus 240 V hint, dominant leg, typical watts, VAR, VA, power
+factor, confidence, first seen, last seen, running state, estimated runtime,
+and estimated daily/weekly/monthly kWh. Likely types are evidence labels such
+as motor, resistive, heating-element candidate, EV-charger candidate, power
+electronics, or unknown. They are not final appliance names.
+
+When more than one unknown load is present, the inventory keeps them as
+separate virtual signatures whenever their power, VAR/VA/PF relationship, leg
+pattern, and recurrence are separable. If multiple loads overlap in the same
+transition window, the entry is marked ambiguous or lower confidence rather
+than forcing one appliance guess. The user can review the attributes, decide
+whether the evidence looks familiar, and later label, ignore, or merge NILM
+signatures as direct controls are added.
+
+New and missing load evidence is also intentionally conservative. The analyzer
+can surface evidence such as a recurring 900 W single-leg load that appeared
+this week or a normally recurring pump-like signature that has not appeared
+recently, but it should still be treated as a prompt to investigate, not a
+fault diagnosis.
 
 When mains NILM has two real-power source channels that can be mapped to
 split-phase legs, such as L1/L2 or leg A/B entity names, the analyzer keeps leg
@@ -968,6 +1032,7 @@ signals.
 | Run Cycle Runtime | `sensor.<circuit>_run_cycle_runtime` | Today's total active runtime from retained start/stop evidence. | Normal entity for appliance circuits | Seconds |
 | Run Cycle Duty Cycle | `sensor.<circuit>_run_cycle_duty_cycle` | Percent of today spent active. | Normal entity for appliance circuits | `0` to `100%` |
 | Run Cycle Status | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and Running. | Advanced diagnostic, hidden by default | `running`, `idle`, `no_activity` |
+| Weather Context | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state when an outdoor temperature entity is configured. Attributes include outdoor temperature, temperature bin, observed runtime and duty cycle, expected ranges, and explanation. | Default visible for HVAC-like circuits with outdoor temperature context | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
 | Metric Consistency Score | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, hidden by default | Percentage mismatch |
 | Metric Consistency Status | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, hidden by default | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
 
@@ -1023,6 +1088,7 @@ and homes with solar inverter or generation circuits.
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | NILM Discovered Signatures | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Normal entity for Mains NILM circuits | Integer counts |
+| NILM Unknown Loads | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes include `unknown_load_count`, `unknown_loads`, likely type, voltage class, dominant leg, typical W/VAR/VA/PF, confidence, first/last seen, running state, runtime, kWh estimates, and ambiguity evidence. | Normal entity for Mains NILM circuits | `0`, `1`, or higher counts |
 | NILM Unmatched Load Percentage | `sensor.<circuit>_nilm_unmatched_load_percentage` | Percent of aggregate load not matched to known monitored circuits. | Normal entity for Mains NILM circuits | `0` to `100%` or higher during inconsistent mapping |
 | NILM Topology Status | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, hidden by default | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
 | Balance Power | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. | Normal entity for mains circuits | Watts; positive is unmonitored load; strongly negative can suggest mapping or sign issues |
