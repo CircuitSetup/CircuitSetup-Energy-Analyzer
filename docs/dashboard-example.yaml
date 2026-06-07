@@ -127,14 +127,34 @@ views:
             entities:
               - entity: sensor.mains_nilm_balance_power
                 name: Mains Balance
+          - type: conditional
+            conditions:
               - entity: sensor.mains_nilm_solar_flow_status
-                name: Solar Flow
-              - entity: sensor.mains_nilm_solar_surplus_power
-                name: Solar Surplus
-              - entity: sensor.mains_nilm_utility_comparison_difference
-                name: Utility Difference
+                state_not: unavailable
+              - entity: sensor.mains_nilm_solar_flow_status
+                state_not: unknown
+            card:
+              type: entities
+              title: Solar flow
+              entities:
+                - entity: sensor.mains_nilm_solar_flow_status
+                  name: Solar Flow
+                - entity: sensor.mains_nilm_solar_surplus_power
+                  name: Solar Surplus
+          - type: conditional
+            conditions:
               - entity: sensor.mains_nilm_utility_comparison_status
-                name: Utility Status
+                state_not: unavailable
+              - entity: sensor.mains_nilm_utility_comparison_status
+                state_not: unknown
+            card:
+              type: entities
+              title: Utility comparison
+              entities:
+                - entity: sensor.mains_nilm_utility_comparison_difference
+                  name: Utility Difference
+                - entity: sensor.mains_nilm_utility_comparison_status
+                  name: Utility Status
           - type: statistics-graph
             title: Mains daily energy
             days_to_show: 7
@@ -176,17 +196,31 @@ views:
       - type: grid
         title: HVAC Weather Context
         cards:
-          - type: tile
-            entity: sensor.hvac_weather_context
-            name: Outdoor Weather Context
-            vertical: false
-          - type: history-graph
-            title: Runtime and duty cycle
-            hours_to_show: 72
-            entities:
-              - entity: sensor.hvac_run_cycle_runtime
-              - entity: sensor.hvac_run_cycle_duty_cycle
-              - entity: sensor.hvac_daily_energy_usage
+          - type: conditional
+            conditions:
+              - entity: sensor.hvac_weather_context
+                state_not: unavailable
+              - entity: sensor.hvac_weather_context
+                state_not: unknown
+            card:
+              type: tile
+              entity: sensor.hvac_weather_context
+              name: Outdoor Weather Context
+              vertical: false
+          - type: conditional
+            conditions:
+              - entity: sensor.hvac_weather_context
+                state_not: unavailable
+              - entity: sensor.hvac_weather_context
+                state_not: unknown
+            card:
+              type: history-graph
+              title: Runtime and duty cycle
+              hours_to_show: 72
+              entities:
+                - entity: sensor.hvac_run_cycle_runtime
+                - entity: sensor.hvac_run_cycle_duty_cycle
+                - entity: sensor.hvac_daily_energy_usage
 
       - type: grid
         title: NILM Unknown Loads

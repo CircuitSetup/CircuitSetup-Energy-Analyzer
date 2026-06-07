@@ -655,6 +655,21 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     assert "Notifications and repairs" in dashboard_text
 
 
+def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
+    dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    refs = _dashboard_entity_refs_with_conditional_context(dashboard)
+    optional_entities = {
+        "sensor.hvac_weather_context",
+        "sensor.mains_nilm_solar_flow_status",
+        "sensor.mains_nilm_solar_surplus_power",
+        "sensor.mains_nilm_utility_comparison_difference",
+        "sensor.mains_nilm_utility_comparison_status",
+    }
+
+    assert optional_entities <= set(refs)
+    assert all(refs[entity] for entity in optional_entities)
+
+
 def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -1030,6 +1045,35 @@ def _dashboard_entity_refs(dashboard_text: str) -> list[str]:
         match.group(1)
         for match in re.finditer(r"entity:\s*([a-z_]+\.[A-Za-z0-9_]+)", dashboard_text)
     ]
+
+
+def _dashboard_entity_refs_with_conditional_context(
+    node: object,
+    *,
+    conditional: bool = False,
+) -> dict[str, bool]:
+    refs: dict[str, bool] = {}
+    if isinstance(node, dict):
+        current_conditional = conditional or node.get("type") == "conditional"
+        entity = node.get("entity")
+        if isinstance(entity, str):
+            refs[entity] = refs.get(entity, False) or current_conditional
+        for value in node.values():
+            refs.update(
+                _dashboard_entity_refs_with_conditional_context(
+                    value,
+                    conditional=current_conditional,
+                )
+            )
+    elif isinstance(node, list):
+        for item in node:
+            refs.update(
+                _dashboard_entity_refs_with_conditional_context(
+                    item,
+                    conditional=conditional,
+                )
+            )
+    return refs
 
 
 def _png_dimensions(path: Path) -> tuple[int, int]:
