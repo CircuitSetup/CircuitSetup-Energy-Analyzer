@@ -2462,12 +2462,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         circuit_id = config.circuit_id
         if config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES:
-            self.state.weather_context_by_circuit.pop(circuit_id, None)
+            self._clear_weather_context_state(circuit_id)
             return
 
         outdoor_entity = self._outdoor_temperature_entity()
         if not outdoor_entity:
-            self.state.weather_context_by_circuit.pop(circuit_id, None)
+            self._clear_weather_context_state(circuit_id)
             return
 
         outdoor_temperature = self._temperature_f_for_entity(outdoor_entity)
@@ -2479,7 +2479,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             0.0,
         )
-        history = self._weather_context_history_samples(circuit_id)
+        history = self._weather_context_history_samples(circuit_id, now)
         evidence = evaluate_weather_context(
             outdoor_temperature=outdoor_temperature,
             current_runtime_minutes=runtime_minutes,
@@ -2501,6 +2501,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             if changed:
                 self._mark_store_dirty()
+
+    def _clear_weather_context_state(self: Self, circuit_id: str) -> None:
+        removed = False
+        if self.state.weather_context_by_circuit.pop(circuit_id, None) is not None:
+            removed = True
+        if self.store_data.weather_context_by_circuit.pop(circuit_id, None) is not None:
+            removed = True
+        if (
+            self.store_data.weather_context_history_by_circuit.pop(circuit_id, None)
+            is not None
+        ):
+            removed = True
+        if removed:
+            self._mark_store_dirty()
 
     def _outdoor_temperature_entity(self: Self) -> str:
         for source in (self.options, self.entry_data):
@@ -2537,6 +2551,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _weather_context_history_samples(
         self: Self,
         circuit_id: str,
+        now: datetime,
     ) -> list[WeatherContextSample]:
         samples: list[WeatherContextSample] = []
         raw_samples = self.store_data.weather_context_history_by_circuit.get(
@@ -2545,6 +2560,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         for raw_sample in raw_samples:
             if not isinstance(raw_sample, Mapping):
+                continue
+            sample_time = _datetime_or_none(raw_sample.get("timestamp"))
+            if sample_time is None or sample_time.date() >= now.date():
                 continue
             temperature = _float_or_none(raw_sample.get("temperature"))
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
@@ -2589,13 +2607,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             [],
         )
-        if history and history[-1].get("timestamp") == sample["timestamp"]:
-            if history[-1] == sample:
-                return False
-            history[-1] = sample
-        else:
-            history.append(sample)
-            del history[:-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES]
+        for index in range(len(history) - 1, -1, -1):
+            existing_time = _datetime_or_none(history[index].get("timestamp"))
+            if existing_time is not None and existing_time.date() == now.date():
+                if history[index] == sample:
+                    return False
+                history[index] = sample
+                return True
+
+        history.append(sample)
+        del history[:-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES]
         return True
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .const import CONF_SOURCE_ENTITIES, DOMAIN, PLATFORMS
+from .const import (
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_SOURCE_ENTITIES,
+    DOMAIN,
+    PLATFORMS,
+)
 from .coordinator import EnergyAnalyzerCoordinator
 from .panel import async_setup_panel, async_unload_panel
 from .services import async_setup_services, async_unload_services
@@ -82,6 +87,15 @@ def _source_entities_for_entry(
             entry_data.get(CONF_SOURCE_ENTITIES, []),
         )
     )
+    outdoor_temperature_entity = str(
+        entry_options.get(
+            CONF_OUTDOOR_TEMPERATURE_ENTITY,
+            entry_data.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, ""),
+        )
+        or ""
+    ).strip()
+    if outdoor_temperature_entity:
+        entity_ids.append(outdoor_temperature_entity)
     for config in getattr(coordinator, "circuit_configs", ()):
         for sensor in getattr(config, "sensors", ()):
             entity_ids.append(sensor.entity_id)
