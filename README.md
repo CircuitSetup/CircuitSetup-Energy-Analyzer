@@ -128,6 +128,8 @@ The setup and options screens are designed to avoid hand-written JSON:
   Turn off Include Circuit for plugs, lights, or other groups that should not
   receive appliance-specific analysis.
 
+![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
+
 ![Circuit assignment editor showing circuit mode and power flow controls](docs/images/readme/assignment-editor.png)
 
 Recommended v1 appliance types include broad `hvac`, more specific
@@ -560,7 +562,7 @@ cost, and whether the circuit is currently in the TOU period. These values are
 estimates and do not include fixed fees, demand charges, taxes, tiered rates,
 or every utility billing rule.
 
-![Seven-day active power chart used with cost and Time-of-Use estimates](docs/images/readme/cost-time-of-use.png)
+![Advanced circuit settings panel with Billing And Cost available for cost and Time-of-Use tuning](docs/images/readme/cost-time-of-use.png)
 
 ## History CSV Export
 
@@ -598,7 +600,7 @@ possible-issue notification with the current demand, monthly cutoff, rank, and
 window length. This is demand evidence, not a replacement for Home Assistant's
 Energy Dashboard energy graphs.
 
-![Peak demand tracking entities with current demand evidence](docs/images/readme/peak-demand-tracking.png)
+![Home Assistant History graph for HVAC current demand used in peak-demand tracking](docs/images/readme/peak-demand-tracking.png)
 
 ## Circuit Capacity Tracking
 
@@ -619,7 +621,7 @@ These diagnostics are operational evidence only. They do not verify breaker,
 wire, plug, appliance, or electrical-code suitability; use a qualified
 electrician for circuit sizing and safety decisions.
 
-![Circuit capacity tracking entities with breaker capacity evidence](docs/images/readme/circuit-capacity-tracking.png)
+![Home Assistant History graph for refrigerator circuit capacity usage](docs/images/readme/circuit-capacity-tracking.png)
 
 ## Dual-Phase Leg Imbalance
 
@@ -636,7 +638,7 @@ dominant leg, both leg wattages, optional currents/voltages, and the threshold
 used. Notifications are created only after repeated over-threshold observations
 and are labeled as possible issues.
 
-![Dual-phase leg imbalance entities with car charger leg status evidence](docs/images/readme/dual-phase-leg-imbalance.png)
+![Home Assistant History graph for HVAC dual-phase leg imbalance](docs/images/readme/dual-phase-leg-imbalance.png)
 
 ## Power Metric Consistency
 
@@ -654,7 +656,7 @@ incorrect units, stale/missing optional sensors, or calibration problems. The
 diagnostic entities expose the expected VA, reported VA, VA percent difference,
 expected PF, reported PF, PF difference, and tolerance values.
 
-![Power metric consistency entities in an observed evidence card](docs/images/readme/power-metric-consistency.png)
+![Home Assistant History graph for HVAC power metric consistency score](docs/images/readme/power-metric-consistency.png)
 
 ## Mains Balance
 
@@ -705,7 +707,7 @@ If export is much larger than measured solar generation, the solar-flow status
 reports `inconsistent_export`, which can point to CT orientation, missing
 generation channels, battery export, or a solar/mains mapping problem.
 
-![Reactive power trend used with solar-flow diagnostic evidence](docs/images/readme/solar-flow-diagnostics.png)
+![Mains, Solar, and NILM dashboard section used for solar-flow and balance diagnostics](docs/images/readme/solar-flow-diagnostics.png)
 
 ## Utility And Opower Comparison
 
@@ -755,7 +757,7 @@ Always On load repeatedly exceeds that configured limit, the notification
 reports the observed watts, window, and configured limit as possible-issue
 evidence.
 
-![Seven-day active power trend used for Always On and standby evidence](docs/images/readme/always-on-standby.png)
+![Home Assistant History graph for refrigerator Always On power](docs/images/readme/always-on-standby.png)
 
 ## Experimental NILM
 
@@ -826,7 +828,7 @@ Persistent notifications are reserved for important evidence about appliance beh
 
 Home Assistant Repairs are used for setup, configuration, and data-quality problems: missing required sensors, stale source sensors, phase mismatch, missing mains NILM sensors, or low NILM confidence. Repairs should help fix the integration inputs before appliance analysis continues.
 
-![Observed evidence card used for possible-issue notifications and setup review](docs/images/readme/notifications-repairs.png)
+![Dynamic Energy Analyzer evidence graph opened from a notification link](docs/images/readme/notifications-repairs.png)
 
 ## Sensor Reference
 
