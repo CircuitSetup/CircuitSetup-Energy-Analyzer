@@ -109,13 +109,14 @@ def prune_stale_entity_registry_entries(
         registry.async_remove(entity_id)
 
 
-def unhide_integration_hidden_entity_registry_entries(
+def hide_entity_registry_entries(
     hass: Any,
     *,
     entry_id: str,
     entity_domain: str,
+    hidden_unique_id_suffixes: set[str],
 ) -> None:
-    """Clear integration-hidden registry rows without changing user-hidden rows."""
+    """Mark existing detail entities hidden when defaults become less noisy."""
     try:
         from homeassistant.helpers import entity_registry as er
     except ImportError:
@@ -133,14 +134,19 @@ def unhide_integration_hidden_entity_registry_entries(
     prefix = f"{entity_domain}."
     for entry in values:
         entity_id = str(getattr(entry, "entity_id", ""))
+        unique_id = str(getattr(entry, "unique_id", ""))
         if (
             getattr(entry, "config_entry_id", None) != entry_id
             or getattr(entry, "platform", None) != DOMAIN
             or not entity_id.startswith(prefix)
-            or getattr(entry, "hidden_by", None) != hidden_by
+            or getattr(entry, "hidden_by", None) is not None
+            or not any(
+                unique_id.endswith(f"_{suffix}")
+                for suffix in hidden_unique_id_suffixes
+            )
         ):
             continue
-        update_entity(entity_id, hidden_by=None)
+        update_entity(entity_id, hidden_by=hidden_by)
 
 
 def sync_entity_registry_categories(
