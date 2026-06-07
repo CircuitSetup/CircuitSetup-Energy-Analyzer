@@ -368,9 +368,9 @@ circuits.
    It opens `/circuitsetup-energy-analyzer-evidence`, the dynamic Alert Evidence panel
    with the alert ID, circuit, and feature in the URL. The panel dynamically
    selects graph entities and the graph window from the alert evidence payload.
-4. The standard dashboard is a fallback. Import or adapt
-   `docs/dashboard-example.yaml` when you want overview cards or a static
-   dashboard view alongside the dynamic panel.
+4. Import or adapt `docs/dashboard-example.yaml` when you want appliance,
+   mains, NILM, weather-context, and energy-overview cards alongside the
+   dynamic panel.
 5. The related Alert Evidence entity exposes `evidence_path`, `graph_entities`,
    `source_entities`, `graph_window_start`, and `graph_window_end` attributes.
    Use them when dashboard cards, blueprints, or notifications need to point to
@@ -840,15 +840,15 @@ shows an entity name with `(Hidden)` on a dashboard, that usually means a card
 explicitly references an entity that the integration intentionally hid by
 default.
 
-![Appliance-first Energy Analyzer dashboard with health summaries and evidence cards](docs/images/readme/demo-dashboard.png)
+![Appliance-first Energy Analyzer dashboard with appliance status rollups and mains analysis cards](docs/images/readme/demo-dashboard.png)
 
 ## Appliance Drilldown Pattern
 
 For each important appliance, use the same card order so the dashboard is easy
 to scan without surfacing internal detail sensors:
 
-1. Current state: Health Summary, Activity Summary, Electrical Health, and Energy Summary.
-2. Appliance automations: the Running binary sensor for on/off automation triggers.
+1. Appliance status card: Activity Summary, Electrical Health, Energy Summary, and Daily Energy Usage.
+2. Appliance automations: use the Running binary sensor for on/off automation triggers without repeating it on every overview card.
 3. Energy tracking: Daily Energy Usage plus Energy Summary, which rolls daily goals, billing, cost, and usage-spike evidence together.
 4. Electrical review: Electrical Health, which rolls power quality, power metric consistency, leg imbalance, mains balance, and solar flow diagnostics together.
 5. Setup and data quality: Repairs, notifications, and entity attributes for missing sensors, stale data, and advanced evidence.

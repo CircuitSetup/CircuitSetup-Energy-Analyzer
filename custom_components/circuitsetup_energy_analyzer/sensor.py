@@ -2005,7 +2005,7 @@ _POWER_QUALITY_ROLES = {
 _DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
 _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
     "mains_l1": {
-        SensorRole.ENERGY: 742.1,
+        SensorRole.ENERGY: 868.4,
         SensorRole.REAL_POWER: 1850.0,
         SensorRole.CURRENT: 15.4,
         SensorRole.POWER_FACTOR: 0.96,
@@ -2015,7 +2015,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "mains_l2": {
-        SensorRole.ENERGY: 731.4,
+        SensorRole.ENERGY: 852.7,
         SensorRole.REAL_POWER: 1680.0,
         SensorRole.CURRENT: 14.1,
         SensorRole.POWER_FACTOR: 0.95,
@@ -2025,7 +2025,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "refrigerator": {
-        SensorRole.ENERGY: 41.9,
+        SensorRole.ENERGY: 52.6,
         SensorRole.REAL_POWER: 285.0,
         SensorRole.CURRENT: 2.8,
         SensorRole.POWER_FACTOR: 0.58,
@@ -2034,7 +2034,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "hvac_l1": {
-        SensorRole.ENERGY: 134.9,
+        SensorRole.ENERGY: 188.4,
         SensorRole.REAL_POWER: 3300.0,
         SensorRole.CURRENT: 28.0,
         SensorRole.POWER_FACTOR: 0.72,
@@ -2043,7 +2043,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "hvac_l2": {
-        SensorRole.ENERGY: 119.6,
+        SensorRole.ENERGY: 171.9,
         SensorRole.REAL_POWER: 900.0,
         SensorRole.CURRENT: 7.4,
         SensorRole.POWER_FACTOR: 0.95,
@@ -2052,7 +2052,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "water_heater_l1": {
-        SensorRole.ENERGY: 63.2,
+        SensorRole.ENERGY: 84.3,
         SensorRole.REAL_POWER: 2050.0,
         SensorRole.CURRENT: 17.2,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2061,7 +2061,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "water_heater_l2": {
-        SensorRole.ENERGY: 63.5,
+        SensorRole.ENERGY: 84.1,
         SensorRole.REAL_POWER: 2050.0,
         SensorRole.CURRENT: 17.1,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2070,7 +2070,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "washer": {
-        SensorRole.ENERGY: 9.8,
+        SensorRole.ENERGY: 14.2,
         SensorRole.REAL_POWER: 420.0,
         SensorRole.CURRENT: 4.2,
         SensorRole.POWER_FACTOR: 0.83,
@@ -2079,7 +2079,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "dryer_l1": {
-        SensorRole.ENERGY: 42.5,
+        SensorRole.ENERGY: 63.7,
         SensorRole.REAL_POWER: 2600.0,
         SensorRole.CURRENT: 21.8,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2088,7 +2088,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "dryer_l2": {
-        SensorRole.ENERGY: 42.1,
+        SensorRole.ENERGY: 63.1,
         SensorRole.REAL_POWER: 2550.0,
         SensorRole.CURRENT: 21.2,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2097,7 +2097,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "car_charger_l1": {
-        SensorRole.ENERGY: 97.3,
+        SensorRole.ENERGY: 151.4,
         SensorRole.REAL_POWER: 4600.0,
         SensorRole.CURRENT: 38.5,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2106,7 +2106,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "car_charger_l2": {
-        SensorRole.ENERGY: 96.8,
+        SensorRole.ENERGY: 150.8,
         SensorRole.REAL_POWER: 4550.0,
         SensorRole.CURRENT: 37.9,
         SensorRole.POWER_FACTOR: 0.99,
@@ -2115,7 +2115,7 @@ _DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
         SensorRole.FREQUENCY: 60.0,
     },
     "pool_pump": {
-        SensorRole.ENERGY: 52.4,
+        SensorRole.ENERGY: 77.6,
         SensorRole.REAL_POWER: 950.0,
         SensorRole.CURRENT: 10.1,
         SensorRole.POWER_FACTOR: 0.86,

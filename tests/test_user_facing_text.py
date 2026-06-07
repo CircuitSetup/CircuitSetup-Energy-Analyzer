@@ -403,9 +403,13 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     card_types = [card.get("type") for card in cards]
 
     assert card_types.count("entities") <= 10
+    assert "button" in card_types
+    assert "gauge" in card_types
     assert "glance" in card_types
+    assert "history-graph" in card_types
     assert "statistics-graph" in card_types
-    assert any(card.get("title") == "At a glance" for card in cards)
+    assert "tile" in card_types
+    assert any(card.get("title") == "Appliance Status" for card in cards)
     statistics_cards = [
         card for card in cards if card.get("type") == "statistics-graph"
     ]
@@ -424,16 +428,18 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
 
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
-    intentional_alert_evidence_refs = {
-        "sensor.hvac_alert_evidence",
-        "sensor.hvac_power_quality_evidence",
-        "sensor.hvac_leg_imbalance_status",
-        "sensor.hvac_metric_consistency_status",
-        "sensor.hvac_leg_imbalance",
-        "sensor.hvac_power_quality_score",
-        "sensor.hvac_reactive_power_drift",
-        "sensor.hvac_apparent_power_drift",
-        "sensor.hvac_power_factor_drift",
+    intentional_feature_panel_refs = {
+        "sensor.hvac_run_cycle_duty_cycle",
+        "sensor.hvac_run_cycle_runtime",
+        "sensor.mains_nilm_balance_power",
+        "sensor.mains_nilm_monitored_coverage",
+        "sensor.mains_nilm_nilm_discovered_signatures",
+        "sensor.mains_nilm_nilm_unknown_loads",
+        "sensor.mains_nilm_nilm_unmatched_load_percentage",
+        "sensor.mains_nilm_solar_flow_status",
+        "sensor.mains_nilm_solar_surplus_power",
+        "sensor.mains_nilm_utility_comparison_difference",
+        "sensor.mains_nilm_utility_comparison_status",
     }
     hidden_sensor_keys = {
         description.key
@@ -449,7 +455,7 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     hidden_refs = sorted(
         ref
         for ref in refs
-        if ref not in intentional_alert_evidence_refs
+        if ref not in intentional_feature_panel_refs
         if (
             ref.startswith("sensor.")
             and any(ref.endswith(f"_{key}") for key in hidden_sensor_keys)
@@ -474,12 +480,28 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     }
 
     assert {
-        "Needs attention",
-        "Appliance overview",
-        "Energy tracking",
-        "Power quality detail",
-        "Mains, solar, and NILM",
+        "Appliance Status",
+        "Mains, Solar, and NILM",
+        "Energy Tracking",
+        "HVAC Weather Context",
+        "NILM Unknown Loads",
+        "Settings And Exports",
+        "Power Quality Detail",
+        "Alert Philosophy",
     } <= section_titles
+    assert section_titles.isdisjoint(
+        {
+            "Needs attention",
+            "Appliance overview",
+            "Energy tracking",
+            "Power quality detail",
+            "Alert evidence",
+        }
+    )
+    assert [section.get("title") for section in _dashboard_sections(dashboard)][:2] == [
+        "Appliance Status",
+        "Mains, Solar, and NILM",
+    ]
     assert "Waiting For Energy Change" in dashboard_text
     assert "sensor.hvac_activity_summary" in dashboard_text
     assert "sensor.hvac_electrical_health" in dashboard_text
@@ -487,20 +509,11 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     assert "sensor.washer_activity_summary" in dashboard_text
     assert "sensor.dryer_activity_summary" in dashboard_text
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
-    assert "sensor.hvac_health_summary" in dashboard_text
     assert "sensor.water_heater_energy_summary" in dashboard_text
     assert "sensor.mains_nilm_activity_summary" in dashboard_text
-    assert "binary_sensor.washer_running" in dashboard_text
-    assert "binary_sensor.dryer_running" in dashboard_text
-
-    needs_attention = yaml.safe_dump(
-        _dashboard_section(dashboard, "Needs attention")
-    )
-    assert "possible issue" in needs_attention
-    assert "Repairs" in needs_attention
 
     appliance_overview = yaml.safe_dump(
-        _dashboard_section(dashboard, "Appliance overview")
+        _dashboard_section(dashboard, "Appliance Status")
     )
     for appliance in (
         "Refrigerator",
@@ -509,42 +522,52 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         "Pool pump",
         "Washer",
         "Dryer",
+        "Car charger",
     ):
         assert appliance in appliance_overview
+    for circuit in (
+        "refrigerator",
+        "hvac",
+        "water_heater",
+        "pool_pump",
+        "washer",
+        "dryer",
+        "car_charger",
+    ):
+        assert f"sensor.{circuit}_activity_summary" in appliance_overview
+        assert f"sensor.{circuit}_electrical_health" in appliance_overview
+        assert f"sensor.{circuit}_energy_summary" in appliance_overview
+        assert f"sensor.{circuit}_daily_energy_usage" in appliance_overview
+        assert f"sensor.{circuit}_health_summary" not in appliance_overview
 
     power_quality_detail = yaml.safe_dump(
-        _dashboard_section(dashboard, "Power quality detail")
+        _dashboard_section(dashboard, "Power Quality Detail")
     )
     assert "sensor.hvac_electrical_health" in power_quality_detail
-    assert "sensor.refrigerator_activity_summary" in power_quality_detail
+    assert "sensor.mains_nilm_electrical_health" in power_quality_detail
 
 
-def test_dashboard_example_includes_alert_evidence_graph_section() -> None:
+def test_dashboard_example_removes_static_alert_evidence_view() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     dashboard = yaml.safe_load(dashboard_text)
     views = _dashboard_views(dashboard)
-    alert_view = next(
-        (view for view in views if view.get("path") == "alert-evidence"),
-        None,
-    )
     refs = set(_dashboard_entity_refs(dashboard_text))
 
-    assert alert_view is not None
-    assert alert_view.get("type") == "sections"
-    assert alert_view.get("title") == "Alert Evidence"
-    assert alert_view.get("sections")[0].get("title") == "Alert evidence"
-    assert "Alert evidence" in dashboard_text
-    assert "Open from notifications" in dashboard_text
-    assert "standard Home Assistant cards are static" in dashboard_text
-    assert "Duplicate or adapt these HVAC cards" in dashboard_text
-    assert "HVAC evidence graph" in yaml.safe_dump(alert_view)
-    assert {
+    assert len(views) == 1
+    assert views[0].get("path") == "overview"
+    assert all(view.get("path") != "alert-evidence" for view in views)
+    assert "title: Alert Evidence" not in dashboard_text
+    assert "path: alert-evidence" not in dashboard_text
+    assert "Open from notifications" not in dashboard_text
+    assert refs.isdisjoint(
+        {
         "sensor.hvac_alert_evidence",
         "sensor.hvac_leg_imbalance",
         "sensor.hvac_power_quality_score",
         "sensor.hvac_reactive_power_drift",
         "sensor.hvac_power_factor_drift",
-    } <= refs
+        }
+    )
 
 
 def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
@@ -569,9 +592,9 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     }
 
     assert stale_entities.isdisjoint(set(_dashboard_entity_refs(dashboard_text)))
-    assert "sensor.mains_nilm_health_summary" in dashboard_text
     assert "sensor.mains_nilm_activity_summary" in dashboard_text
     assert "sensor.mains_nilm_electrical_health" in dashboard_text
+    assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
 
 
 def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
@@ -579,45 +602,56 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     refs = set(_dashboard_entity_refs(dashboard_text))
 
     expected_entities = {
-        "sensor.refrigerator_health_summary",
         "sensor.refrigerator_activity_summary",
         "sensor.refrigerator_electrical_health",
         "sensor.refrigerator_energy_summary",
         "sensor.refrigerator_daily_energy_usage",
-        "sensor.hvac_health_summary",
         "sensor.hvac_activity_summary",
         "sensor.hvac_electrical_health",
         "sensor.hvac_energy_summary",
         "sensor.hvac_daily_energy_usage",
-        "sensor.water_heater_health_summary",
+        "sensor.hvac_weather_context",
+        "sensor.hvac_run_cycle_runtime",
+        "sensor.hvac_run_cycle_duty_cycle",
+        "sensor.water_heater_activity_summary",
         "sensor.water_heater_electrical_health",
         "sensor.water_heater_energy_summary",
         "sensor.water_heater_daily_energy_usage",
-        "sensor.washer_health_summary",
+        "sensor.pool_pump_activity_summary",
+        "sensor.pool_pump_electrical_health",
+        "sensor.pool_pump_energy_summary",
+        "sensor.pool_pump_daily_energy_usage",
         "sensor.washer_activity_summary",
         "sensor.washer_electrical_health",
         "sensor.washer_energy_summary",
         "sensor.washer_daily_energy_usage",
-        "sensor.dryer_health_summary",
         "sensor.dryer_activity_summary",
         "sensor.dryer_electrical_health",
         "sensor.dryer_energy_summary",
         "sensor.dryer_daily_energy_usage",
-        "sensor.mains_nilm_health_summary",
+        "sensor.car_charger_activity_summary",
+        "sensor.car_charger_electrical_health",
+        "sensor.car_charger_energy_summary",
+        "sensor.car_charger_daily_energy_usage",
         "sensor.mains_nilm_activity_summary",
         "sensor.mains_nilm_electrical_health",
         "sensor.mains_nilm_energy_summary",
         "sensor.mains_nilm_daily_energy_usage",
-        "binary_sensor.refrigerator_running",
-        "binary_sensor.hvac_running",
-        "binary_sensor.water_heater_running",
-        "binary_sensor.pool_pump_running",
-        "binary_sensor.washer_running",
-        "binary_sensor.dryer_running",
+        "sensor.mains_nilm_balance_power",
+        "sensor.mains_nilm_monitored_coverage",
+        "sensor.mains_nilm_nilm_unknown_loads",
+        "sensor.mains_nilm_nilm_discovered_signatures",
+        "sensor.mains_nilm_nilm_unmatched_load_percentage",
+        "sensor.mains_nilm_solar_flow_status",
+        "sensor.mains_nilm_solar_surplus_power",
+        "sensor.mains_nilm_utility_comparison_difference",
+        "sensor.mains_nilm_utility_comparison_status",
     }
     assert expected_entities <= refs
+    assert not any(ref.endswith("_health_summary") for ref in refs)
+    assert not any(ref.startswith("binary_sensor.") for ref in refs)
     assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
-    assert "Alert philosophy" in dashboard_text
+    assert "Alert Philosophy" in dashboard_text
     assert "Notifications and repairs" in dashboard_text
 
 
@@ -778,7 +812,7 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
 
     assert "Appliance Drilldown Pattern" in readme_text
     for phrase in (
-        "Current state",
+        "Appliance status card",
         "Appliance automations",
         "Energy tracking",
         "Electrical review",
@@ -839,7 +873,9 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     assert "Companion App" in readme_text
     assert "clickAction" in readme_text
     assert "/circuitsetup-energy-analyzer-evidence" in readme_text
-    assert "standard dashboard is a fallback" in normalized_text
+    assert "appliance, mains, nilm, weather-context, and energy-overview cards" in (
+        normalized_text.lower()
+    )
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include a Markdown link" in normalized_text

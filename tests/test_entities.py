@@ -925,6 +925,26 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
         _demo_source_value,
     )
 
+    expected_recent_energy_kwh = {
+        "mains_l1": 868.4,
+        "mains_l2": 852.7,
+        "refrigerator": 52.6,
+        "hvac_l1": 188.4,
+        "hvac_l2": 171.9,
+        "water_heater_l1": 84.3,
+        "water_heater_l2": 84.1,
+        "pool_pump": 77.6,
+        "washer": 14.2,
+        "dryer_l1": 63.7,
+        "dryer_l2": 63.1,
+        "car_charger_l1": 151.4,
+        "car_charger_l2": 150.8,
+    }
+    assert {
+        circuit_id: _demo_source_value(circuit_id, SensorRole.ENERGY)
+        for circuit_id in expected_recent_energy_kwh
+    } == expected_recent_energy_kwh
+
     hvac_l1_w = _demo_source_value("hvac_l1", SensorRole.REAL_POWER)
     hvac_l2_w = _demo_source_value("hvac_l2", SensorRole.REAL_POWER)
     imbalance = evaluate_dual_phase_leg_imbalance(
@@ -2368,7 +2388,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
     }
     assert (
         by_entity_id["sensor.cs_energy_analyzer_demo_washer_energy"].native_value
-        == 9.8
+        == 14.2
     )
     assert (
         by_entity_id[
@@ -2394,10 +2414,10 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
     )
     assert by_entity_id[
         "sensor.cs_energy_analyzer_demo_dryer_l1_energy"
-    ].native_value == 42.5
+    ].native_value == 63.7
     assert by_entity_id[
         "sensor.cs_energy_analyzer_demo_dryer_l2_energy"
-    ].native_value == 42.1
+    ].native_value == 63.1
     assert (
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_dryer_l1_active_power"
