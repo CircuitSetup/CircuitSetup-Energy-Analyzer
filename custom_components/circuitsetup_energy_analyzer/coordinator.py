@@ -141,6 +141,7 @@ from .solar_flow import (
 )
 from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
+from .unknown_loads import build_unknown_load_inventory
 from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
@@ -150,7 +151,6 @@ from .utility_comparison import (
     select_latest_statistics_energy,
     select_statistics_energy_for_period,
 )
-from .unknown_loads import build_unknown_load_inventory
 from .ux import (
     alert_evidence_detail,
     alert_policy_name_for_sensitivity,

@@ -4,8 +4,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from .nilm import NilmEdge
-from .nilm import NilmSignature
+from .nilm import NilmEdge, NilmSignature
 
 MIN_OCCURRENCES = 3
 MIN_CONFIDENCE = 0.5
@@ -392,19 +391,23 @@ def _evidence(
 
     if not _has_enough_evidence(signature):
         evidence.append(
-            "Limited recurring evidence; keep this as unknown until more samples are observed."
+            "Limited recurring evidence; keep this as unknown until more samples "
+            "are observed."
         )
     elif likely_type == "heating_element_candidate":
         evidence.append(
-            "Possible heating element candidate: balanced 240 V, high W, low VAR, and PF near unity."
+            "Possible heating element candidate: balanced 240 V, high W, "
+            "low VAR, and PF near unity."
         )
     elif likely_type == "motor":
         evidence.append(
-            "Possible motor-like pattern: single-leg 120 V, meaningful reactive power, and lower estimated PF."
+            "Possible motor-like pattern: single-leg 120 V, meaningful "
+            "reactive power, and lower estimated PF."
         )
     elif likely_type == "power_electronics":
         evidence.append(
-            "Possible power-electronics pattern: VA and VAR are high versus real power without the single-leg motor pattern."
+            "Possible power-electronics pattern: VA and VAR are high versus "
+            "real power without the single-leg motor pattern."
         )
     else:
         evidence.append("No conservative helper pattern matched; keep this as unknown.")

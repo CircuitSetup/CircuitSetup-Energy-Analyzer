@@ -298,10 +298,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         metric_consistency_status_value,
         monitored_coverage_value,
         monitored_power_value,
-        nilm_unknown_loads_attributes,
-        nilm_unknown_loads_value,
         nilm_signature_count_value,
         nilm_topology_status_value,
+        nilm_unknown_loads_attributes,
+        nilm_unknown_loads_value,
         nilm_unmatched_load_percentage_value,
         peak_demand_value,
         power_factor_drift_value,
@@ -1180,12 +1180,14 @@ def test_weather_context_sensor_exposes_readable_status_and_evidence() -> None:
     assert weather_context_value(state, "blower") == "Weather Correlated"
     assert weather_context_value(state, "custom") == "Needs Manual Review"
     assert weather_context_value(state, "plain") == "Learning"
-    assert weather_context_value(SimpleNamespace(), "missing") == "No Temperature Source"
+    assert (
+        weather_context_value(SimpleNamespace(), "missing")
+        == "No Temperature Source"
+    )
     assert weather_context_attributes(state, "missing") == {}
 
 
-def test_weather_context_sensor_metadata_is_user_facing_and_visible_by_default() -> None:
-    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
+def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
         CircuitAnalyzerSensor,

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-from custom_components.circuitsetup_energy_analyzer.nilm import NilmSignature
+from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge, NilmSignature
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
     build_unknown_load_inventory,
     estimate_unknown_load,
 )
-
 
 BASE_TIME = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
 
@@ -59,7 +57,7 @@ def edge(
     )
 
 
-def test_estimate_unknown_load_marks_single_leg_reactive_signature_as_possible_motor() -> None:
+def test_estimate_unknown_load_marks_reactive_signature_as_motor() -> None:
     result = estimate_unknown_load(
         signature(
             "sig-motor-b",
@@ -104,7 +102,7 @@ def test_estimate_unknown_load_marks_single_leg_reactive_signature_as_possible_m
     assert "diagnosis" not in result["display_name"].lower()
 
 
-def test_estimate_unknown_load_marks_balanced_high_watt_low_var_signature_as_heating_candidate() -> None:
+def test_estimate_unknown_load_marks_balanced_low_var_as_heat_candidate() -> None:
     result = estimate_unknown_load(
         signature(
             "sig-heat",
@@ -127,7 +125,7 @@ def test_estimate_unknown_load_marks_balanced_high_watt_low_var_signature_as_hea
     assert "candidate" in " ".join(result["evidence"]).lower()
 
 
-def test_estimate_unknown_load_marks_high_va_reactive_non_motor_signature_as_power_electronics() -> None:
+def test_estimate_unknown_load_marks_reactive_va_as_power_electronics() -> None:
     result = estimate_unknown_load(
         signature(
             "sig-electronics",
