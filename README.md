@@ -81,7 +81,7 @@ custom_components/circuitsetup_energy_analyzer
 
 ## Setup overview
 
-The setup flow is designed so you do not need to hand-write JSON.
+The setup flow is designed so you do not need to hand-write JSON or edit YAML for normal configuration.
 
 ![CircuitSetup Energy Analyzer options menu with setup actions](docs/images/readme/options-menu.png)
 
@@ -94,6 +94,7 @@ During setup, you choose:
 | **Mains Source Entities** | Optional whole-panel or aggregate sensors used for mains balance, experimental Mains NILM, solar-flow, and utility comparison. |
 | **Outdoor Temperature Entity** | Optional outdoor temperature source used only for HVAC weather context. |
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
+| **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
 
 ![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
 
@@ -117,6 +118,7 @@ During setup, you choose:
    - The selected source sensors.
 9. Save the configuration.
 10. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
+11. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, or other feature settings.
 
 ## Classify circuits carefully
 
@@ -244,11 +246,30 @@ Do this before changing thresholds or assuming an appliance has failed.
 
 ## Optional features
 
-Enable and tune only the features you need. Most settings are available from:
+Enable and tune optional features from the integration options screen. Manual YAML editing is not required.
+
+Go to:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
 ![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
+
+Use **Advanced Circuit Settings** to configure circuit-specific options such as:
+
+- Energy-usage spike thresholds
+- Daily energy goals
+- Billing-cycle settings
+- Cost and Time-of-Use estimates
+- Demand settings
+- Circuit capacity limits
+- Dual-phase leg-imbalance settings
+- Metric-consistency tolerances
+- Mains-balance settings
+- Solar-flow thresholds
+- Standby and Always On settings
+- Activity-alert sensitivity
+
+Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
 | Feature | What it does | Needs |
 |---|---|---|
@@ -274,33 +295,25 @@ Enable and tune only the features you need. Most settings are available from:
 
 ### Energy usage spikes
 
-For circuits with cumulative kWh sensors, the analyzer derives daily usage from positive energy deltas. By default, it compares today's usage with the previous 7 full days and treats a large repeated increase as possible issue evidence.
+For circuits with cumulative kWh sensors, the analyzer derives daily usage from positive energy deltas. By default, it compares today's usage with a learned rolling window and treats a large repeated increase as possible issue evidence.
 
 Use this for appliances where daily usage should usually stay within a predictable range, such as refrigerators, freezers, water heaters, HVAC, pumps, or EV charging circuits.
 
-Tune it with:
+Configure this from:
 
-```yaml
-action: circuitsetup_energy_analyzer.set_energy_usage_settings
-data:
-  circuit_id: refrigerator
-  window_days: 7
-  daily_spike_ratio: 0.25
-```
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Use the energy-usage settings to adjust the comparison window and spike threshold without editing YAML.
 
 ### Daily energy goals
 
 Daily goals add a notification layer around a kWh target. Use Home Assistant's Energy Dashboard for normal energy charts; use this feature when you want per-circuit goal evidence.
 
-```yaml
-action: circuitsetup_energy_analyzer.set_energy_goal_settings
-data:
-  circuit_id: hvac
-  daily_goal_kwh: 12
-  goal_alert_ratio: 1.0
-```
+Configure this from:
 
-Set `daily_goal_kwh` to `0` to clear the goal.
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Set a daily kWh goal for the circuit. Set the goal back to `0` to clear it.
 
 ### Run-cycle diagnostics
 
@@ -323,19 +336,21 @@ Add an outdoor temperature entity during setup or later from **Configure**. Use 
 
 Billing and cost features estimate usage and cost from analyzer-retained data. They do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
-Use them for household awareness and alerts, not for exact utility-bill reproduction.
+Configure billing-cycle and cost settings from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
 ### Demand and capacity
 
 Demand tracking uses rolling average watts. Capacity tracking compares amps with a configured breaker or circuit rating.
 
-```yaml
-action: circuitsetup_energy_analyzer.set_capacity_settings
-data:
-  circuit_id: car_charger
-  breaker_amps: 50
-  warning_ratio: 0.8
-```
+Configure this from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Use the demand and capacity settings to set the breaker or circuit rating, warning threshold, and demand-window behavior.
 
 Capacity diagnostics are operational evidence only. They do not verify breaker, wire, plug, appliance, or code suitability.
 
@@ -347,6 +362,10 @@ For 240 V loads, the analyzer can compare leg A and leg B while the appliance is
 - CT orientation problems
 - Phase mapping problems
 - Appliance behavior changes
+
+Configure leg-imbalance settings from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
 A leg imbalance alert means "review the evidence," not "replace the appliance."
 
@@ -362,6 +381,10 @@ A mismatch can point to:
 - Stale sensors
 - Calibration problems
 
+Configure metric-consistency tolerances from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
 This is especially useful with CircuitSetup/ATM90E32 data because multiple electrical measurements are available per channel.
 
 ### Mains balance
@@ -369,6 +392,10 @@ This is especially useful with CircuitSetup/ATM90E32 data because multiple elect
 Mains balance compares whole-home mains power with the sum of directly monitored load circuits.
 
 A positive balance often represents ordinary unmonitored loads, such as lights or plug loads. A strongly negative balance can suggest CT direction, phase pairing, solar configuration, multiplier, or double-counting problems.
+
+Configure mains-balance settings from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
 ### Solar flow
 
@@ -383,6 +410,10 @@ For homes with a signed mains/net source and solar generation circuits, the anal
 - Solar surplus
 - Flexible-load solar support
 
+Configure solar-flow thresholds from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
 This feature is read-only. Use ordinary Home Assistant automations if you want to turn on an EV charger, water heater, pool pump, or other flexible load when solar surplus is available.
 
 ### Utility / Opower comparison
@@ -391,19 +422,21 @@ Utility comparison checks whether utility-reported kWh roughly agrees with measu
 
 Configure it on a mains or aggregate circuit. You can use a utility/Opower entity, a recorder statistic ID, or let the analyzer choose automatically when possible.
 
+Utility comparison settings are available from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
 Before acting on a mismatch, verify that the utility and measured sources cover the same time period. Utility integrations can update late.
 
 ### Always On and standby
 
 For load circuits with real-power data, the analyzer estimates an Always On load from the lowest retained power level in the standby window. It can also classify the current state as off, standby, or on.
 
-```yaml
-action: circuitsetup_energy_analyzer.set_standby_settings
-data:
-  circuit_id: refrigerator
-  standby_threshold_w: 12
-  always_on_alert_w: 35
-```
+Configure this from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Use the standby and Always On settings to set standby thresholds, Always On alert limits, and related sensitivity options.
 
 ### Experimental NILM
 
@@ -486,6 +519,10 @@ Companion App mobile notifications can use the `evidence_path` template variable
 
 ## Practical automations
 
+Automations can be created from the Home Assistant automation editor. Manual YAML editing is not required for normal setup or advanced circuit settings.
+
+The examples below show the underlying automation/action structure for users who prefer YAML or want to copy service calls into scripts, blueprints, or Developer Tools.
+
 ### Washer finished notification
 
 Use the Running binary sensor for simple appliance-finished notifications.
@@ -505,6 +542,8 @@ action:
 ```
 
 ### Pause alerts during service
+
+Use maintenance mode before servicing an appliance, replacing equipment, moving CTs, or making wiring changes that could make analyzer evidence temporarily misleading.
 
 ```yaml
 action: circuitsetup_energy_analyzer.start_maintenance
@@ -534,11 +573,13 @@ data:
   circuit_id: refrigerator
 ```
 
-## Developer Tools actions
+## Optional Developer Tools actions
 
-Most users should use the integration options screens. Developer Tools actions are available for scripts, automations, and advanced workflows.
+Most users should configure the analyzer from the Home Assistant UI:
 
-Useful action families include:
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+The service actions below are optional. They are useful when you want to call analyzer functions from Home Assistant automations, scripts, dashboards, blueprints, or Developer Tools.
 
 | Purpose | Actions |
 |---|---|
@@ -554,7 +595,7 @@ Useful action families include:
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
 | Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
 
-When calling services, set `circuit_id` to the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
+When calling actions manually or from an automation, set `circuit_id` to the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
 
 ## Common setup states
 
@@ -675,5 +716,5 @@ Use `raw_status` for automations because it is more stable than the display labe
 6. Start with the four summary entities on dashboards.
 7. Let the analyzer learn.
 8. Use alerts as evidence, not diagnoses.
-9. Tune advanced settings only when the evidence shows the defaults do not fit your system.
+9. Tune advanced settings from **Configure > Advanced Circuit Settings** when the evidence shows the defaults do not fit your system.
 10. Use Home Assistant's Energy Dashboard for long-term energy charts and this integration for behavior, data quality, and circuit diagnostics.
