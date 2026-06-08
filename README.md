@@ -651,25 +651,154 @@ sensor.refrigerator_daily_energy_usage
 binary_sensor.refrigerator_running
 ```
 
-| Group | Examples | Use |
-|---|---|---|
-| Summary | `health_summary`, `activity_summary`, `electrical_health`, `energy_summary` | Everyday dashboard state. |
-| Learning and evidence | `readiness`, `learning_progress`, `alert_evidence`, `recent_activity` | Troubleshooting and advanced dashboards. |
-| Data quality | `data_quality_checklist`, `energy_dashboard_status` | Setup and source-data review. |
-| Energy | `daily_energy_usage`, `energy_usage_status`, `energy_goal_status` | Daily usage, spikes, and goals. |
-| Billing and cost | `billing_cycle_usage`, `billing_cycle_forecast`, `cost_cycle`, `cost_status` | Cycle forecasting and cost estimates. |
-| Run cycle | `run_cycle_count`, `run_cycle_runtime`, `run_cycle_duty_cycle`, `run_cycle_status` | Appliance behavior and running patterns. |
-| Demand and capacity | `current_demand`, `peak_demand`, `capacity_usage`, `capacity_status` | High-load circuit awareness. |
-| Dual-phase | `leg_imbalance`, `leg_imbalance_status` | 240 V appliance leg review. |
-| Electrical metrics | `metric_consistency_score`, `metric_consistency_status` | W/VA/PF/V/A consistency checks. |
-| Mains | `balance_power`, `monitored_power`, `monitored_coverage`, `balance_status` | Whole-home monitored versus unmonitored load. |
-| Solar | `solar_generation_power`, `solar_grid_import_power`, `solar_grid_export_power`, `solar_surplus_status` | Solar flow and surplus evidence. |
-| Utility | `utility_comparison_difference`, `utility_comparison_status` | Measured kWh versus utility/Opower sanity check. |
-| Standby | `always_on_power`, `standby_threshold`, `standby_status`, `always_on_limit_usage` | Always-on and standby review. |
-| Experimental NILM | `nilm_discovered_signatures`, `nilm_unknown_loads`, `nilm_topology_status` | Unknown whole-home load evidence. |
-| Binary sensors | `learning`, `data_quality_problem`, `maintenance`, `running` | Automations and state checks. |
-
 Advanced diagnostic entities are often hidden by default. Enable them only when you want more detail or need them for automations.
+
+## Sensor reference
+
+The analyzer creates entities based on the circuit mode, appliance profile, source sensors, and enabled feature settings. Not every circuit will have every entity.
+
+In the patterns below, `<circuit>` is the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, `solar`, or `mains`.
+
+### Core appliance status sensors
+
+Start with these on dashboards.
+
+| Friendly name | Entity pattern | What it means | When you see it | Common outputs |
+|---|---|---|---|---|
+| **Health Summary** | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
+| **Activity Summary** | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
+| **Electrical Health** | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
+| **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
+| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from a cumulative energy source. | Visible when usable energy data exists. | `0.0 kWh` and higher daily totals |
+| **Running** | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Visible for appliance circuits with active-power sensors. | `on`, `off` |
+
+### Core diagnostic and evidence sensors
+
+These help explain why a summary changed. They are useful for troubleshooting, automations, and temporary diagnostic dashboards.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values as evidence accumulates |
+| **Last Event** | `sensor.<circuit>_last_event` | Latest retained event type. | Advanced diagnostic, hidden by default. | `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, `unknown` |
+| **Readiness** | `sensor.<circuit>_readiness` | Machine-readable readiness state with attributes explaining blocked or learning checks. | Advanced diagnostic, hidden by default. | `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, `nilm_review` |
+| **Learning Progress** | `sensor.<circuit>_learning_progress` | Percent of baseline learning completed for the circuit. | Advanced diagnostic, hidden by default. | `0` to `100%` |
+| **Data Quality Checklist** | `sensor.<circuit>_data_quality_checklist` | Missing, stale, invalid, or mismatched source-data checklist. | Advanced diagnostic, hidden by default. | `ok`, `problem` |
+| **Energy Dashboard Status** | `sensor.<circuit>_energy_dashboard_status` | Whether the configured energy or power source has metadata that Home Assistant's Energy Dashboard can use. | Diagnostic. | `ready`, `needs_energy_source`, or metadata issue states |
+| **Alert Evidence** | `sensor.<circuit>_alert_evidence` | Feature behind the latest active alert evidence. | Advanced diagnostic, hidden by default. | Feature names such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`; blank when quiet |
+| **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, hidden by default. | `No recent activity`, `start`, `stop`, issue summary text |
+| **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, hidden by default. | Integer counts |
+| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Diagnostic. | `standard`, `high`, `low`, or another stored preset |
+| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Normal entity, hidden by default. | `0`, `1`, or higher counts |
+
+### Appliance behavior and power-quality sensors
+
+These are most useful for dedicated appliance circuits such as refrigerators, freezers, HVAC, electric heat, water heaters, ovens, washers, dryers, pumps, EV chargers, motor loads, and resistive loads. Mixed circuits may expose fewer appliance-specific signals.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values when relationships drift |
+| **Power Quality Evidence** | `sensor.<circuit>_power_quality_evidence` | Text evidence for the latest power-quality observation. | Advanced diagnostic, hidden by default. | Blank text, baseline/learning text, or possible-issue evidence |
+| **Reactive Power Drift** | `sensor.<circuit>_reactive_power_drift` | Ratio-style drift in VAR behavior compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
+| **Apparent Power Drift** | `sensor.<circuit>_apparent_power_drift` | Ratio-style drift in VA behavior compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
+| **Power Factor Drift** | `sensor.<circuit>_power_factor_drift` | Ratio-style drift in power factor compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
+| **Run Cycle Count** | `sensor.<circuit>_run_cycle_count` | Today's retained start count for cyclic appliances. | Normal entity for appliance circuits. | Integer cycle counts |
+| **Run Cycle Runtime** | `sensor.<circuit>_run_cycle_runtime` | Today's total active runtime from retained start/stop evidence. | Normal entity for appliance circuits. | Seconds |
+| **Run Cycle Duty Cycle** | `sensor.<circuit>_run_cycle_duty_cycle` | Percent of today spent active. | Normal entity for appliance circuits. | `0` to `100%` |
+| **Run Cycle Status** | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and the Running binary sensor. | Advanced diagnostic, hidden by default. | `running`, `idle`, `no_activity` |
+| **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Visible for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
+| **Outdoor Temperature** | `sensor.<circuit>_outdoor_temperature` | Graphable outdoor temperature value used by HVAC weather context. | Visible for HVAC-like circuits when outdoor temperature context is configured. | Numeric temperature in `°F` or `°C` |
+| **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, hidden by default. | Percentage mismatch |
+| **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, hidden by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
+
+### Energy usage, goals, billing, and cost sensors
+
+These require cumulative energy inputs. Use Home Assistant's Energy Dashboard for normal energy history; these entities exist for analyzer evidence, alerts, and per-circuit summaries.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Default visible when energy data exists. | `kWh` |
+| **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Normal entity when energy tracking exists. | Percentage values |
+| **Energy Usage Status** | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. Use this to tell true zero usage from "waiting for first kWh increase." | Diagnostic when energy tracking exists. | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |
+| **Energy Goal Usage** | `sensor.<circuit>_energy_goal_usage` | Today's usage as a percent of the configured daily goal. | Normal entity when a goal is configured. | Percentage values |
+| **Energy Goal Status** | `sensor.<circuit>_energy_goal_status` | Daily goal tracker state. | Normal entity when a goal is configured. | `unconfigured`, `tracking`, `near_goal`, `over_goal` |
+| **Billing Cycle Usage** | `sensor.<circuit>_billing_cycle_usage` | Current billing-cycle kWh for the circuit. | Normal entity when billing tracking exists. | `kWh` |
+| **Billing Cycle Forecast** | `sensor.<circuit>_billing_cycle_forecast` | Projected end-of-cycle kWh based on current pace. | Normal entity when billing tracking exists. | `kWh` |
+| **Billing Cycle Budget Usage** | `sensor.<circuit>_billing_cycle_budget_usage` | Current or projected budget usage percentage. | Normal entity when a budget is configured. | Percentage values |
+| **Billing Cycle Status** | `sensor.<circuit>_billing_cycle_status` | Billing-cycle budget state. | Normal entity when billing tracking exists. | `no_budget`, `tracking`, `over_budget`, `projected_over_budget` |
+| **Cost Current Rate** | `sensor.<circuit>_cost_current_rate` | Active per-kWh cost rate for the circuit. | Normal entity when cost tracking exists. | Decimal currency-per-kWh values |
+| **Cost Cycle** | `sensor.<circuit>_cost_cycle` | Current cycle cost estimate. | Normal entity when cost tracking exists. | Numeric cost estimates |
+| **Cost Cycle Forecast** | `sensor.<circuit>_cost_cycle_forecast` | Projected end-of-cycle cost estimate. | Normal entity when cost tracking exists. | Numeric cost estimates |
+| **Cost Status** | `sensor.<circuit>_cost_status` | Cost tracker state. | Normal entity when cost tracking exists. | `unconfigured`, `tracking`, `tou_peak` |
+
+### Demand, capacity, and dual-phase sensors
+
+These are aimed at high-power circuits such as HVAC, electric heat, water heaters, ovens, dryers, pool pumps, water pumps, sump pumps, EV chargers, mains feeds, and similar loads.
+
+Capacity sensors require either current sensors or real power plus voltage, and a configured breaker or capacity value.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Current Demand** | `sensor.<circuit>_current_demand` | Current rolling average demand. | Normal entity when demand tracking exists. | Watts |
+| **Peak Demand** | `sensor.<circuit>_peak_demand` | Highest rolling demand observed today. | Normal entity when demand tracking exists. | Watts |
+| **Demand Limit Usage** | `sensor.<circuit>_demand_limit_usage` | Current demand as a percent of a configured demand limit. | Normal entity when a limit is configured. | Percentage values |
+| **Demand Peak Rank** | `sensor.<circuit>_demand_peak_rank` | Rank of the current rolling demand among retained monthly peak windows. | Normal entity when demand tracking exists. | `0` when unavailable; integer ranks such as `1`, `2`, `3` |
+| **Demand Peak Status** | `sensor.<circuit>_demand_peak_status` | Whether current demand is notable for the month. | Advanced diagnostic, hidden by default. | `unavailable`, `below_monthly_peak`, `near_monthly_peak`, `monthly_peak` |
+| **Demand Status** | `sensor.<circuit>_demand_status` | Demand tracker state. | Advanced diagnostic, hidden by default. | `unconfigured`, `tracking`, over-limit evidence states |
+| **Circuit Capacity Usage** | `sensor.<circuit>_capacity_usage` | Current amps as a percent of configured circuit capacity. | Normal entity when capacity is configured. | Percentage values |
+| **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Advanced diagnostic, hidden by default. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
+| **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Normal entity for dual-phase circuits. | Percentage imbalance |
+| **Leg Imbalance Status** | `sensor.<circuit>_leg_imbalance_status` | Split-phase balance state. | Advanced diagnostic, hidden by default. | `not_dual_phase`, `missing_leg_power`, `idle`, `tracking`, `imbalanced` |
+
+### Mains NILM, balance, solar, and utility comparison sensors
+
+These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with solar generation, and homes using utility or Opower comparison data.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **NILM Discovered Signatures** | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Normal entity for Mains NILM circuits. | Integer counts |
+| **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes can include likely type, voltage class, dominant leg, W/VAR/VA/PF, confidence, first/last seen, running state, runtime, kWh estimates, and ambiguity evidence. | Normal entity for Mains NILM circuits. | `0`, `1`, or higher counts |
+| **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, hidden by default. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
+| **Balance Power** | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. Positive values usually mean unmonitored load; strongly negative values can suggest mapping or sign issues. | Normal entity for mains circuits. | Watts |
+| **Monitored Power** | `sensor.<circuit>_monitored_power` | Sum of directly monitored non-generation load circuits. | Normal entity for mains circuits. | Watts |
+| **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Percent of current mains power explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Normal entity for mains circuits. | Percentage values |
+| **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, hidden by default. | `missing_mains`, `tracking`, `negative_balance` |
+| **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Grid Import Power** | `sensor.<circuit>_solar_grid_import_power` | Current grid import. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Grid Export Power** | `sensor.<circuit>_solar_grid_export_power` | Current grid export. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Self Consumption** | `sensor.<circuit>_solar_self_consumption` | Percent of generated solar consumed on site. | Normal entity for solar/generation circuits. | Percentage values |
+| **Solar Powered** | `sensor.<circuit>_solar_powered` | Percent of current site load powered by solar. | Normal entity for solar/generation circuits. | Percentage values |
+| **Solar Flow Status** | `sensor.<circuit>_solar_flow_status` | Instantaneous solar-flow state. | Normal entity for solar/generation circuits. | `missing_mains`, `missing_generation`, `no_generation`, `importing`, `exporting`, `self_powered`, `inconsistent_export` |
+| **Solar Surplus Power** | `sensor.<circuit>_solar_surplus_power` | Exported solar available as surplus. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Load Shift Power** | `sensor.<circuit>_solar_load_shift_power` | Surplus power above the configured load-shift threshold. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Flexible Load Power** | `sensor.<circuit>_solar_flexible_load_power` | Current power used by flexible loads such as EV chargers, water heaters, HVAC, or pool pumps. | Normal entity for solar/generation circuits. | Watts |
+| **Solar Flexible Load Coverage** | `sensor.<circuit>_solar_flexible_load_coverage` | Percent of active flexible-load power estimated to be solar-covered. | Normal entity for solar/generation circuits. | Percentage values |
+| **Solar Load Shift Status** | `sensor.<circuit>_solar_load_shift_status` | Flexible-load solar support state. | Normal entity for solar/generation circuits. | `not_applicable`, `waiting_for_surplus`, `surplus_candidate`, `active_solar_supported`, `active_grid_supported` |
+| **Solar Surplus Status** | `sensor.<circuit>_solar_surplus_status` | Solar surplus state. | Normal entity for solar/generation circuits. | `missing_mains`, `missing_generation`, `no_generation`, `no_surplus`, `surplus_available`, `high_surplus`, `inconsistent_export` |
+| **Utility Comparison Difference** | `sensor.<circuit>_utility_comparison_difference` | Difference between measured kWh and utility/Opower kWh. | Normal entity when utility comparison exists. | Percentage difference |
+| **Utility Comparison Status** | `sensor.<circuit>_utility_comparison_status` | Utility comparison state. | Normal entity when utility comparison exists. | `unconfigured`, `missing_utility`, `missing_measured`, `tracking`, `mismatch` |
+
+### Standby and Always On sensors
+
+These apply to non-mains load circuits with real-power data. They are useful for refrigerators, freezers, pumps, HVAC blower circuits, motor loads, electronics, and appliances with known standby behavior.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Always On Power** | `sensor.<circuit>_always_on_power` | Lowest retained power level in the standby window. | Normal entity for non-mains load circuits. | Watts |
+| **Standby Threshold** | `sensor.<circuit>_standby_threshold` | Configured watts threshold separating off, standby, and on behavior. | Normal entity for non-mains load circuits. | Watts |
+| **Standby Status** | `sensor.<circuit>_standby_status` | Current standby state. | Normal entity for non-mains load circuits. | `learning`, `off`, `standby`, `on` |
+| **Always On Limit Usage** | `sensor.<circuit>_always_on_limit_usage` | Always-on estimate as a percent of the configured limit. | Normal entity for non-mains load circuits. | Percentage values |
+
+### Binary sensors
+
+Diagnostic binary sensors are created for configured circuits. Operational binary sensors appear only when the circuit has the required profile and source data.
+
+| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+|---|---|---|---|---|
+| **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Advanced diagnostic, hidden by default. | `on`, `off` |
+| **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, hidden by default. | `on`, `off` |
+| **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, hidden by default. | `on`, `off` |
+| **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Default visible for appliance circuits. | `on`, `off` |
 
 ## Status glossary
 
@@ -677,26 +806,60 @@ Common status values include:
 
 | Display label | Raw status | Meaning |
 |---|---|---|
-| Ready | `ready` | The analyzer has enough data for this check. |
-| Learning | `learning` | More history or cycles are needed. |
-| Needs data | `needs_data` | Required source data is missing or unusable. |
-| Missing Metrics | `missing_metrics` | The check needs more electrical measurements. |
-| Waiting For Energy Change | `waiting_for_delta` | A cumulative kWh source is present, but no positive increase has been observed. |
-| Running | `running` | The circuit is currently above the active-load threshold. |
-| Idle | `idle` | The circuit is below the active-load threshold for this check. |
-| Standby | `standby` | Latest power is within the configured standby range. |
-| Over Goal | `over_goal` | Daily energy usage is over the configured goal. |
-| Projected Over Budget | `projected_over_budget` | Current usage projects above the billing-cycle budget. |
-| Over Limit | `over_limit` | The measured value is above a configured limit. |
-| Imbalanced | `imbalanced` | Dual-phase leg difference is repeatedly above the warning threshold. |
-| Metric Mismatch | `metric_mismatch` | One or more power relationships changed beyond tolerance. |
-| Negative Balance | `negative_balance` | Monitored load power is higher than mains power beyond tolerance. |
+| Active Grid Supported | `active_grid_supported` | A flexible load is running, but current solar surplus does not cover it. |
+| Active Solar Supported | `active_solar_supported` | A flexible load is running and appears to be covered by current solar surplus. |
+| Apparent Power Mismatch | `apparent_power_mismatch` | Reported VA does not match the relationship expected from voltage, current, and real power. |
+| Consistent | `consistent` | The available measurements are internally consistent. |
 | Exporting | `exporting` | Signed mains power currently indicates grid export. |
-| Importing | `importing` | Signed mains power currently indicates grid import. |
-| Surplus Available | `surplus_available` | Solar export is above the configured surplus threshold. |
 | High Surplus | `high_surplus` | Solar export is above the configured high-surplus threshold. |
+| Idle | `idle` | The circuit is below the active-load threshold for this check. |
+| Imbalanced | `imbalanced` | Dual-phase leg difference is repeatedly above the warning threshold. |
+| Importing | `importing` | Signed mains power currently indicates grid import. |
 | Inconsistent Export | `inconsistent_export` | Grid export is larger than measured generation; check solar/mains mapping. |
+| Leg Mismatch | `leg_mismatch` | Mains NILM evidence repeatedly points to a different split-phase leg than the assignment. |
+| Metric Mismatch | `metric_mismatch` | One or more power relationships changed beyond tolerance. |
+| Missing Current | `missing_current` | The check needs a current sensor, or enough power and voltage data to estimate current. |
+| Missing Generation | `missing_generation` | Solar-flow checks need at least one generation circuit. |
+| Missing Mains | `missing_mains` | The check needs a mains, whole-home, or aggregate source. |
+| Missing Measured | `missing_measured` | Utility comparison needs a measured kWh source. |
+| Missing Metrics | `missing_metrics` | The check needs more matching voltage, current, real power, apparent power, or power factor sensors. |
+| Missing Utility | `missing_utility` | Utility comparison needs a utility or Opower source. |
+| Mismatch | `mismatch` | The measured value differs from the comparison source beyond tolerance. |
+| Monthly Peak | `monthly_peak` | The current rolling demand is the highest retained monthly demand window. |
+| Near Goal | `near_goal` | Daily energy usage is near the configured goal threshold. |
+| Near Monthly Peak | `near_monthly_peak` | The current rolling demand is near the highest retained monthly demand windows. |
+| Negative Balance | `negative_balance` | Monitored load power is higher than mains power beyond tolerance; check mapping, signs, solar, or CT orientation. |
+| No Activity | `no_activity` | No recent run-cycle activity has been observed. |
+| No Budget | `no_budget` | No billing-cycle budget is configured. |
+| No Generation | `no_generation` | No solar generation is currently being measured. |
+| No Match | `no_match` | No matching NILM event has been observed yet. |
+| No Monitored Circuits | `no_monitored_circuits` | Mains balance needs at least one monitored load circuit. |
+| No Surplus | `no_surplus` | No solar export surplus is currently available. |
+| Not Applicable | `not_applicable` | The check does not apply to the current circuit configuration. |
+| Not Dual Phase | `not_dual_phase` | The check only applies to dual-phase circuits. |
+| Off | `off` | Latest power is below the configured standby threshold. |
+| On | `on` | Latest power is above the standby range. |
+| Over Budget | `over_budget` | Billing-cycle usage is over the configured budget. |
+| Over Goal | `over_goal` | Daily energy usage is over the configured goal. |
+| Over Limit | `over_limit` | The measured value is above a configured limit. |
+| Over Threshold | `over_threshold` | The measured value is above a configured threshold. |
 | Possible Issue | `possible_issue` | Repeated evidence crossed an alert threshold. |
+| Power Factor Mismatch | `power_factor_mismatch` | Reported power factor does not match real power divided by apparent power. |
+| Projected Over Budget | `projected_over_budget` | Current usage projects above the billing-cycle budget. |
+| Ready | `ready` | The analyzer has enough data for this check. |
+| Running | `running` | The circuit is currently above the active-load threshold. |
+| Self Powered | `self_powered` | Solar generation is approximately covering current site load. |
+| Standby | `standby` | Latest power is within the configured standby range. |
+| Surplus Available | `surplus_available` | Solar export is above the configured surplus threshold. |
+| Surplus Candidate | `surplus_candidate` | An idle flexible load could be a candidate while solar surplus is available. |
+| Topology Match | `topology_match` | Mains NILM evidence matches the configured circuit mode. |
+| Topology Mismatch | `topology_mismatch` | Mains NILM evidence conflicts with the configured circuit mode. |
+| TOU Peak | `tou_peak` | Current time is inside the configured time-of-use peak period. |
+| Tracking | `tracking` | The analyzer has enough inputs and is tracking this check. |
+| Unavailable | `unavailable` | This check does not have enough retained data yet. |
+| Unconfigured | `unconfigured` | This optional check has not been configured. |
+| Waiting For Energy Change | `waiting_for_delta` | A cumulative kWh source is present, but no positive energy increase has been observed. |
+| Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
 
 For automations and debugging, status sensors may expose:
 
