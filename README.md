@@ -4,7 +4,7 @@ CircuitSetup Energy Analyzer is a Home Assistant custom integration that turns c
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=CircuitSetup&repository=CircuitSetup-Energy-Analyzer&category=Integration)
 
-It is designed for the [CircuitSetup Expandable 6 Channel ESP32 Energy Meter Main Board](https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/) exposed through ESPHome ATM90E32 sensors, but it can also work with other meters when they expose compatible Home Assistant sensor entities for:
+It is designed for the [CircuitSetup Expandable 6 Channel ESP32 Energy Meter Main Board](https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/) exposed through [ESPHome ATM90E32](https://esphome.io/components/sensor/atm90e32/) sensors, but it can also work with other meters when they expose compatible Home Assistant sensor entities for:
 
 - Power
 - Current
@@ -53,7 +53,7 @@ You need:
 - Home Assistant `2025.1.0` or newer.
 - HACS, if installing through the recommended method.
 - One or more energy-meter sensors already available in Home Assistant.
-- For CircuitSetup meters, ESPHome entities from an ATM90E32-based meter are the expected source.
+- For CircuitSetup meters, ESPHome entities from an ATM90E32-based meter are the expected source (uncomment [power quality](https://github.com/CircuitSetup/Expandable-6-Channel-ESP32-Energy-Meter/blob/63c6f8935700eeee3c033c74a1d3ebdd15e706b3/Software/ESPHome/6chan_energy_meter_main_board.yaml#L80) in your config)
 - Cumulative kWh sensors if you want daily energy, goals, billing-cycle, cost, utility comparison, or Energy Dashboard readiness checks.
 - Current sensors, or power plus voltage, if you want capacity/amp checks.
 - Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
