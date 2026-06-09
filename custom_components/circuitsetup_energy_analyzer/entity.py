@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .const import CONF_CIRCUITS, DOMAIN
+from .models import ApplianceProfile
 
 try:
     from homeassistant.helpers.entity import EntityCategory
@@ -31,6 +32,64 @@ class CircuitInfo:
     name: str
     appliance_profile: str | None = None
     sensors: tuple[Any, ...] = ()
+
+
+APPLIANCE_ICON_BY_PROFILE: dict[ApplianceProfile, str] = {
+    ApplianceProfile.REFRIGERATOR: "mdi:fridge",
+    ApplianceProfile.FREEZER: "mdi:fridge",
+    ApplianceProfile.HVAC: "mdi:air-conditioner",
+    ApplianceProfile.HVAC_COMPRESSOR: "mdi:air-conditioner",
+    ApplianceProfile.HVAC_BLOWER: "mdi:fan",
+    ApplianceProfile.ELECTRIC_HEAT: "mdi:radiator",
+    ApplianceProfile.WATER_HEATER: "mdi:water-boiler",
+    ApplianceProfile.OVEN: "mdi:stove",
+    ApplianceProfile.MICROWAVE: "mdi:microwave",
+    ApplianceProfile.WASHER: "mdi:washing-machine",
+    ApplianceProfile.DRYER: "mdi:tumble-dryer",
+    ApplianceProfile.POOL_PUMP: "mdi:pool",
+    ApplianceProfile.WATER_PUMP: "mdi:pump",
+    ApplianceProfile.WELL_PUMP: "mdi:pump",
+    ApplianceProfile.SUMP_PUMP: "mdi:pump",
+    ApplianceProfile.EV_CHARGER: "mdi:ev-station",
+    ApplianceProfile.SOLAR_INVERTER: "mdi:solar-power",
+    ApplianceProfile.MOTOR_LOAD: "mdi:engine",
+    ApplianceProfile.RESISTIVE_LOAD: "mdi:flash",
+    ApplianceProfile.MIXED: "mdi:power-plug",
+    ApplianceProfile.MAINS_NILM: "mdi:home-lightning-bolt",
+}
+
+
+def _appliance_profile_for_circuit(profile_value: Any) -> ApplianceProfile | None:
+    """Return a normalized appliance profile for icon selection."""
+    if isinstance(profile_value, ApplianceProfile):
+        return profile_value
+    if profile_value is None:
+        return None
+
+    raw_profile = str(profile_value).strip().lower()
+    aliases = {
+        "air_conditioner": ApplianceProfile.HVAC.value,
+        "hvac_system": ApplianceProfile.HVAC.value,
+        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
+        "blower": ApplianceProfile.HVAC_BLOWER.value,
+        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
+        "dryer": ApplianceProfile.DRYER.value,
+        "washer": ApplianceProfile.WASHER.value,
+        "refrigerator": ApplianceProfile.REFRIGERATOR.value,
+        "freezer": ApplianceProfile.FREEZER.value,
+        "oven": ApplianceProfile.OVEN.value,
+        "microwave": ApplianceProfile.MICROWAVE.value,
+        "mains": ApplianceProfile.MAINS_NILM.value,
+        "main_nilm": ApplianceProfile.MAINS_NILM.value,
+        "main_nilm_load": ApplianceProfile.MAINS_NILM.value,
+    }
+    normalized = aliases.get(raw_profile, raw_profile)
+    try:
+        return ApplianceProfile(normalized)
+    except ValueError:
+        return None
 
 
 def circuit_info_from_config(circuit: Any) -> CircuitInfo | None:
@@ -278,6 +337,9 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
         self._entry_id = entry_id
         self._circuit_id = circuit.circuit_id
         self._circuit_name = circuit.name
+        self._circuit_profile = _appliance_profile_for_circuit(
+            circuit.appliance_profile,
+        )
         self._attr_name = f"{circuit.name} {name_suffix}"
         self._attr_unique_id = f"{entry_id}_{circuit.circuit_id}_{key}"
 
@@ -304,10 +366,28 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
     @property
     def device_info(self) -> dict[str, Any]:
         """Group diagnostic entities by analyzed circuit in Home Assistant."""
+        if self._circuit_profile:
+            icon = APPLIANCE_ICON_BY_PROFILE.get(
+                self._circuit_profile,
+                "mdi:power-plug",
+            )
+        elif self._circuit_id == "mains":
+            icon = APPLIANCE_ICON_BY_PROFILE.get(
+                ApplianceProfile.MAINS_NILM,
+                "mdi:power-plug",
+            )
+        elif self._circuit_id == "solar":
+            icon = APPLIANCE_ICON_BY_PROFILE.get(
+                ApplianceProfile.SOLAR_INVERTER,
+                "mdi:power-plug",
+            )
+        else:
+            icon = "mdi:power-plug"
         return {
             "identifiers": {(DOMAIN, f"{self._entry_id}_{self._circuit_id}")},
             "name": self._circuit_name,
             "manufacturer": "CircuitSetup",
+            "icon": icon,
         }
 
     @property
