@@ -1050,6 +1050,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         finally:
             if self._source_update_task is asyncio.current_task():
                 self._source_update_task = None
+                if self.started and self._pending_source_update_entities:
+                    self.pending_source_update_entities = tuple(
+                        sorted(self._pending_source_update_entities)
+                    )
+                    self._source_update_task = asyncio.create_task(
+                        self._async_process_debounced_source_update()
+                    )
 
     def _cancel_pending_source_update(self: Self) -> None:
         """Cancel queued source-state processing during restart/unload."""
