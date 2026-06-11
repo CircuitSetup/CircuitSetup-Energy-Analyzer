@@ -3,6 +3,7 @@
 from .activity import ActivityAlertProcessor
 from .base import FeatureProcessor, FeatureResult, ProcessingContext, StateUpdate
 from .billing import BillingCycleProcessor
+from .capacity import CapacityProcessor
 from .cost import CostProcessor
 from .cycles import RunCycleProcessor
 from .demand import DemandProcessor
@@ -13,6 +14,7 @@ from .events import CircuitEventProcessor
 __all__ = [
     "ActivityAlertProcessor",
     "BillingCycleProcessor",
+    "CapacityProcessor",
     "CircuitEventProcessor",
     "CostProcessor",
     "DemandProcessor",

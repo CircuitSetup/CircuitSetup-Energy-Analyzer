@@ -10,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
 )
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.billing import BillingCycleSettings
+from custom_components.circuitsetup_energy_analyzer.capacity import CapacitySettings
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.cost import CostSettings
 from custom_components.circuitsetup_energy_analyzer.demand import DemandSettings
@@ -22,6 +23,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitMode,
     CircuitSample,
     EventType,
+    SensorRef,
+    SensorRole,
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
@@ -741,4 +744,245 @@ def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
             "demand_w": 2500.0,
             "window_minutes": 15,
         }
+    ]
+
+
+def test_capacity_processor_records_current_and_returns_capacity_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.capacity import (
+        CapacityProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.ev_current", SensorRole.CURRENT),),
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="ev",
+        real_power=6720.0,
+        current=28.0,
+        voltage=240.0,
+        reactive_power=0.0,
+        apparent_power=6720.0,
+        power_factor=1.0,
+        frequency=60.0,
+        energy=0.0,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = CapacityProcessor(
+        settings_for_config=lambda _circuit_id: CapacitySettings(
+            breaker_amps=30.0,
+            warning_ratio=0.8,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        source_states_for=lambda _config, _now: {},
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is True
+    assert len(result.state_updates) == 3
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "circuit_capacity"
+    assert policy.observations[0].observed_value == 28.0
+    assert policy.observations[0].baseline_value == 24.0
+    assert "EV Charger current is 28 A" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("capacity_usage_by_circuit", "ev")] == 93.3
+    assert updates[("capacity_status_by_circuit", "ev")] == "over_limit"
+    assert updates[("capacity_evidence_by_circuit", "ev")] == {
+        "status": "over_limit",
+        "current_amps": 28.0,
+        "breaker_amps": 30.0,
+        "warning_threshold_amps": 24.0,
+        "capacity_usage_percent": 93.3,
+        "warning_ratio": 0.8,
+        "current_source": "current_sensor",
+    }
+    assert context.store_data.demand_by_circuit["ev"]["capacity_current_samples"] == [
+        {
+            "timestamp": now.isoformat(),
+            "current_amps": 28.0,
+        }
+    ]
+
+
+def test_capacity_processor_without_current_does_not_create_storage_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.capacity import (
+        CapacityProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = CapacityProcessor(
+        settings_for_config=lambda _circuit_id: CapacitySettings(
+            breaker_amps=15.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        source_states_for=lambda _config, _now: {},
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="fridge",
+        real_power=None,
+        current=None,
+        voltage=120.0,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=0.0,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is False
+    assert result.alerts == []
+    assert context.store_data.demand_by_circuit == {}
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("capacity_status_by_circuit", "fridge")] == "missing_current"
+
+
+def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.normalize import SourceState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.capacity import (
+        CapacityProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        demand_by_circuit={
+            "hvac": {
+                "capacity_current_samples": [
+                    {
+                        "timestamp": (now - timedelta(days=46)).isoformat(),
+                        "current_amps": 19.0,
+                    },
+                    {
+                        "timestamp": (now - timedelta(days=2)).isoformat(),
+                        "current_amps": 20.0,
+                    },
+                ]
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC Compressor",
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.hvac_l1_current", SensorRole.CURRENT, leg="a"),
+            SensorRef("sensor.hvac_l2_current", SensorRole.CURRENT, leg="b"),
+        ),
+    )
+    policy = _CaptureAlertPolicy()
+    processor = CapacityProcessor(
+        settings_for_config=lambda _circuit_id: CapacitySettings(
+            breaker_amps=40.0,
+            warning_ratio=0.8,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        source_states_for=lambda _config, _now: {
+            "sensor.hvac_l1_current": SourceState(
+                entity_id="sensor.hvac_l1_current",
+                state="31",
+                unit="A",
+                last_updated=now,
+            ),
+            "sensor.hvac_l2_current": SourceState(
+                entity_id="sensor.hvac_l2_current",
+                state="34",
+                unit="A",
+                last_updated=now,
+            ),
+        },
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="hvac",
+        real_power=7200.0,
+        current=66.0,
+        voltage=120.0,
+        reactive_power=0.0,
+        apparent_power=7200.0,
+        power_factor=1.0,
+        frequency=60.0,
+        energy=0.0,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is True
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("capacity_evidence_by_circuit", "hvac")]
+    assert evidence["current_amps"] == 34.0
+    assert evidence["capacity_usage_percent"] == 85.0
+    assert store_data.demand_by_circuit["hvac"]["capacity_current_samples"] == [
+        {
+            "timestamp": (now - timedelta(days=2)).isoformat(),
+            "current_amps": 20.0,
+        },
+        {
+            "timestamp": now.isoformat(),
+            "current_amps": 34.0,
+        },
     ]
