@@ -1,0 +1,229 @@
+"""Power quality baseline and alert processor."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from ..alerting import Observation
+from ..baseline import build_baseline
+from ..models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from ..normalize import NormalizedCircuitSample
+from ..power_quality import (
+    PowerQualityEvidence,
+    extract_power_quality_features,
+    relationship_rms_score,
+    score_power_quality_features,
+    select_power_quality_evidence,
+)
+from .base import FeatureResult, ProcessingContext, StateUpdate
+
+
+class _AlertPolicy(Protocol):
+    """Small alert policy surface used by this processor."""
+
+    min_average_score: float
+    min_baseline_confidence: float
+
+    def observe(self, observation: Observation) -> AlertEvidence | None:
+        """Fold an observation into the alert policy."""
+
+
+type PowerQualityAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type LearningMaturePredicate = Callable[[CircuitConfig, Any], bool]
+type DemoEventSeeder = Callable[[CircuitConfig, Any], None]
+type DemoPowerQualityBaselineSeeder = Callable[
+    [CircuitConfig, Mapping[str, float]],
+    None,
+]
+
+
+@dataclass(slots=True)
+class PowerQualityResult(FeatureResult):
+    """Processor result with optional request to clear power quality state."""
+
+    clear_power_quality_state: str | None = None
+
+
+class PowerQualityProcessor:
+    """Track power quality baselines, runtime evidence, and alerts."""
+
+    name = "power_quality"
+
+    def __init__(
+        self,
+        *,
+        alert_policy_for_circuit: PowerQualityAlertPolicyProvider,
+        learning_mature: LearningMaturePredicate,
+        seed_demo_event_history: DemoEventSeeder,
+        seed_demo_power_quality_baselines: DemoPowerQualityBaselineSeeder,
+        baseline_values: defaultdict[str, list[float]] | None = None,
+    ) -> None:
+        self._alert_policy_for_circuit = alert_policy_for_circuit
+        self._learning_mature = learning_mature
+        self._seed_demo_event_history = seed_demo_event_history
+        self._seed_demo_power_quality_baselines = seed_demo_power_quality_baselines
+        self._baseline_values = (
+            baseline_values if baseline_values is not None else defaultdict(list)
+        )
+
+    def process(
+        self,
+        sample: NormalizedCircuitSample,
+        circuit_config: CircuitConfig,
+        context: ProcessingContext,
+    ) -> PowerQualityResult:
+        """Record power quality state and return repeated anomaly alerts."""
+        circuit_id = circuit_config.circuit_id
+        policy = self._alert_policy_for_circuit(circuit_id)
+        features = extract_power_quality_features(sample)
+        if not features:
+            return PowerQualityResult(
+                state_updates=[
+                    StateUpdate(("learning_by_circuit", circuit_id), True),
+                ],
+                clear_power_quality_state=circuit_id,
+            )
+
+        self._seed_demo_event_history(circuit_config, context.now)
+        self._seed_demo_power_quality_baselines(circuit_config, features)
+
+        baselines: dict[str, Any] = {}
+        learning_new_features = False
+        store_dirty = False
+        for feature, value in features.items():
+            key = _baseline_key(circuit_id, feature)
+            baseline = context.store_data.baselines.get(key)
+            if baseline is None:
+                values = self._baseline_values[key]
+                values.append(value)
+                if len(values) >= 15:
+                    baseline = build_baseline(feature, values)
+                    context.store_data.baselines[key] = baseline
+                    store_dirty = True
+                learning_new_features = True
+            if baseline is not None:
+                baselines[feature] = baseline
+
+        scores = score_power_quality_features(features, baselines)
+        evidence = select_power_quality_evidence(
+            circuit_config,
+            scores,
+            min_relationship_score=policy.min_average_score,
+        )
+        if (
+            evidence is None
+            and circuit_config.mode is not CircuitMode.MIXED
+            and circuit_config.appliance_profile is not ApplianceProfile.MIXED
+        ):
+            evidence = real_power_fallback_evidence(scores, policy)
+
+        mature = self._learning_mature(circuit_config, context.now)
+        has_confident_scores = any(score.baseline_confidence >= 0.6 for score in scores)
+        learning = learning_new_features or not mature or not has_confident_scores
+        feature_result = PowerQualityResult(
+            state_updates=[
+                StateUpdate(("learning_by_circuit", circuit_id), learning),
+                *power_quality_state_updates(circuit_id, scores, evidence),
+            ],
+            store_dirty=store_dirty,
+        )
+        if not mature or not has_confident_scores or evidence is None:
+            return feature_result
+
+        alert = policy.observe(
+            Observation(
+                circuit_id=circuit_id,
+                feature=evidence.feature,
+                score=evidence.score,
+                baseline_confidence=evidence.baseline_confidence,
+                observed_at=context.now,
+                observed_value=evidence.observed_value,
+                baseline_value=evidence.baseline_value,
+                message=evidence.message,
+                features=evidence.features,
+            )
+        )
+        if alert is not None:
+            feature_result.alerts.append(alert)
+            feature_result.notifications.append(alert)
+        return feature_result
+
+
+def real_power_fallback_evidence(
+    scores: Iterable[Any],
+    policy: _AlertPolicy,
+) -> PowerQualityEvidence | None:
+    """Return real-power fallback evidence when no relationship evidence wins."""
+    for score in scores:
+        if (
+            score.feature == "real_power"
+            and score.baseline_confidence >= policy.min_baseline_confidence
+        ):
+            return PowerQualityEvidence(
+                feature="real_power",
+                message="",
+                observed_value=score.observed_value,
+                baseline_value=score.baseline_value,
+                change_ratio=score.change_ratio,
+                score=score.score,
+                baseline_confidence=score.baseline_confidence,
+                features={"real_power": score.score},
+            )
+    return None
+
+
+def power_quality_state_updates(
+    circuit_id: str,
+    scores: Iterable[Any],
+    evidence: PowerQualityEvidence | None,
+) -> list[StateUpdate]:
+    """Build analyzer state updates for power quality scores and drifts."""
+
+    def drift(primary: str, fallback: str) -> float:
+        candidates = [
+            score
+            for feature in (primary, fallback)
+            if (score := by_feature.get(feature)) is not None
+        ]
+        if not candidates:
+            return 0.0
+        score = max(
+            candidates,
+            key=lambda candidate: (
+                abs(candidate.change_ratio),
+                candidate.score,
+            ),
+        )
+        return abs(score.change_ratio)
+
+    scores = list(scores)
+    by_feature = {score.feature: score for score in scores}
+    return [
+        StateUpdate(
+            ("power_quality_score_by_circuit", circuit_id),
+            relationship_rms_score(scores),
+        ),
+        StateUpdate(
+            ("power_quality_evidence_by_circuit", circuit_id),
+            evidence.message if evidence is not None else "",
+        ),
+        StateUpdate(
+            ("reactive_power_drift_by_circuit", circuit_id),
+            drift("reactive_power", "reactive_to_real_ratio"),
+        ),
+        StateUpdate(
+            ("apparent_power_drift_by_circuit", circuit_id),
+            drift("apparent_power", "apparent_to_real_ratio"),
+        ),
+        StateUpdate(
+            ("power_factor_drift_by_circuit", circuit_id),
+            drift("power_factor", "power_factor_deficit"),
+        ),
+    ]
+
+
+def _baseline_key(circuit_id: str, feature: str) -> str:
+    return f"{circuit_id}:{feature}"

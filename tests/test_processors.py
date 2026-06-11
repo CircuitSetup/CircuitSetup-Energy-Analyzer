@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSetti
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
+    BaselineStats,
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
@@ -1399,3 +1400,196 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
         "always_on_limit_usage_percent": 0.0,
         "status": "learning",
     }
+
+
+def test_power_quality_processor_updates_state_and_returns_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:real_power": BaselineStats(
+                feature="real_power",
+                sample_count=20,
+                median=120.0,
+                mad=5.0,
+                p10=110.0,
+                p90=130.0,
+                confidence=1.0,
+            ),
+            "fridge:reactive_power": BaselineStats(
+                feature="reactive_power",
+                sample_count=20,
+                median=20.0,
+                mad=2.0,
+                p10=16.0,
+                p90=24.0,
+                confidence=1.0,
+            ),
+            "fridge:apparent_power": BaselineStats(
+                feature="apparent_power",
+                sample_count=20,
+                median=122.0,
+                mad=5.0,
+                p10=112.0,
+                p90=132.0,
+                confidence=1.0,
+            ),
+            "fridge:power_factor": BaselineStats(
+                feature="power_factor",
+                sample_count=20,
+                median=0.98,
+                mad=0.02,
+                p10=0.94,
+                p90=1.0,
+                confidence=1.0,
+            ),
+            "fridge:reactive_to_real_ratio": BaselineStats(
+                feature="reactive_to_real_ratio",
+                sample_count=20,
+                median=0.16,
+                mad=0.02,
+                p10=0.12,
+                p90=0.2,
+                confidence=1.0,
+            ),
+            "fridge:apparent_to_real_ratio": BaselineStats(
+                feature="apparent_to_real_ratio",
+                sample_count=20,
+                median=1.02,
+                mad=0.02,
+                p10=0.98,
+                p90=1.06,
+                confidence=1.0,
+            ),
+            "fridge:power_factor_deficit": BaselineStats(
+                feature="power_factor_deficit",
+                sample_count=20,
+                median=0.02,
+                mad=0.01,
+                p10=0.0,
+                p90=0.04,
+                confidence=1.0,
+            ),
+            "fridge:apparent_power_residual": BaselineStats(
+                feature="apparent_power_residual",
+                sample_count=20,
+                median=0.03,
+                mad=0.01,
+                p10=0.0,
+                p90=0.06,
+                confidence=1.0,
+            ),
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="fridge",
+        real_power=120.0,
+        current=1.0,
+        voltage=120.0,
+        reactive_power=80.0,
+        apparent_power=145.0,
+        power_factor=0.83,
+        frequency=60.0,
+        energy=0.0,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_power_quality_baselines=lambda _config, _features: None,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is False
+    assert len(result.state_updates) == 6
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].circuit_id == "fridge"
+    assert policy.observations[0].baseline_confidence == 1.0
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("learning_by_circuit", "fridge")] is False
+    assert updates[("power_quality_score_by_circuit", "fridge")] > 0.0
+    assert updates[("power_quality_evidence_by_circuit", "fridge")]
+    assert updates[("reactive_power_drift_by_circuit", "fridge")] > 0.0
+    assert updates[("apparent_power_drift_by_circuit", "fridge")] > 0.0
+    assert updates[("power_factor_drift_by_circuit", "fridge")] > 0.0
+
+
+def test_power_quality_processor_requests_clear_when_features_missing() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="fridge",
+        real_power=None,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=0.0,
+    )
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_power_quality_baselines=lambda _config, _features: None,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.clear_power_quality_state == "fridge"
+    assert result.alerts == []
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("learning_by_circuit", "fridge")] is True
