@@ -61,7 +61,7 @@ from .const import (
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
 )
-from .cost import CostSettings, record_cost_sample
+from .cost import CostSettings
 from .cycles import (
     MIN_CYCLE_BASELINE_CONFIDENCE,
     RUN_CYCLE_DURATION_FEATURE,
@@ -134,6 +134,7 @@ from .processors import (
     ActivityAlertProcessor,
     BillingCycleProcessor,
     CircuitEventProcessor,
+    CostProcessor,
     EnergyGoalProcessor,
     EnergyUsageProcessor,
     FeatureResult,
@@ -691,6 +692,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             settings_for_config=self._billing_cycle_settings_for_config,
             alert_policy_for_circuit=self._billing_alert_policy_for_circuit,
         )
+        self._cost_processor = CostProcessor(
+            settings_for_config=self._cost_settings_for_config,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -995,7 +999,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, billing_alerts = await self._apply_feature_result(billing_result)
             alerts.extend(billing_alerts)
 
-            self._observe_cost(config, sample, now)
+            cost_result = self._cost_processor.process(sample, config, context)
+            await self._apply_feature_result(cost_result)
 
             demand_alert = self._observe_demand(config, sample, now)
             if demand_alert is not None:
@@ -5145,36 +5150,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_cost(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> None:
-        settings = self._cost_settings_for_config(config, config.circuit_id)
-        result = record_cost_sample(
-            self.store_data.cost_by_circuit.setdefault(config.circuit_id, {}),
-            circuit_id=config.circuit_id,
-            timestamp=now,
-            energy_kwh=sample.energy,
-            settings=settings,
-        )
-        if result is None:
-            return
-
-        self._mark_store_dirty()
-        self.state.cost_current_rate_by_circuit[config.circuit_id] = (
-            result.current_rate_per_kwh
-        )
-        self.state.cost_cycle_by_circuit[config.circuit_id] = result.cycle_cost
-        self.state.cost_cycle_forecast_by_circuit[config.circuit_id] = (
-            result.projected_cycle_cost
-        )
-        self.state.cost_status_by_circuit[config.circuit_id] = result.status
-        self.state.cost_evidence_by_circuit[config.circuit_id] = (
-            _cost_evidence_payload(result)
-        )
-
     def _observe_demand(
         self: Self,
         config: CircuitConfig,
@@ -5948,23 +5923,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _cost_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "cycle_start": result.cycle_start,
-        "cycle_end": result.cycle_end,
-        "cycle_start_day": result.cycle_start_day,
-        "current_rate_per_kwh": result.current_rate_per_kwh,
-        "active_rate_name": result.active_rate_name,
-        "delta_kwh": result.delta_kwh,
-        "delta_cost": result.delta_cost,
-        "cycle_cost": result.cycle_cost,
-        "projected_cycle_cost": result.projected_cycle_cost,
-        "elapsed_days": result.elapsed_days,
-        "cycle_days": result.cycle_days,
-        "status": result.status,
-    }
 
 
 def _demand_limit_message(

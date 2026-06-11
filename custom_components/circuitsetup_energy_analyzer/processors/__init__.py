@@ -3,6 +3,7 @@
 from .activity import ActivityAlertProcessor
 from .base import FeatureProcessor, FeatureResult, ProcessingContext, StateUpdate
 from .billing import BillingCycleProcessor
+from .cost import CostProcessor
 from .cycles import RunCycleProcessor
 from .energy_goal import EnergyGoalProcessor
 from .energy_usage import EnergyUsageProcessor
@@ -12,6 +13,7 @@ __all__ = [
     "ActivityAlertProcessor",
     "BillingCycleProcessor",
     "CircuitEventProcessor",
+    "CostProcessor",
     "EnergyGoalProcessor",
     "EnergyUsageProcessor",
     "FeatureProcessor",
