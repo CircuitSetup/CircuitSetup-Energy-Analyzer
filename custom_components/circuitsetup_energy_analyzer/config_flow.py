@@ -213,6 +213,7 @@ _SENSITIVITY_LABELS = {
     "low": "Low",
 }
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
+FIELD_REMOVE_FROM_ANALYSIS = "remove_from_analysis"
 FIELD_INCLUDED_SENSORS = "included_sensors"
 FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_CIRCUIT_NAME = "circuit_name"
@@ -898,12 +899,21 @@ DATA_SCHEMA = _setup_schema()
 
 def _assignment_schema(group: Mapping[str, Any]) -> Any:
     entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
-    return vol.Schema(
+    schema: dict[Any, Any] = {
+        vol.Required(
+            FIELD_INCLUDE_CIRCUIT,
+            default=True,
+        ): bool,
+    }
+    if bool(group.get("allow_remove_from_analysis", False)):
+        schema[
+            vol.Optional(
+                FIELD_REMOVE_FROM_ANALYSIS,
+                default=False,
+            )
+        ] = bool
+    schema.update(
         {
-            vol.Required(
-                FIELD_INCLUDE_CIRCUIT,
-                default=True,
-            ): bool,
             vol.Required(
                 FIELD_INCLUDED_SENSORS,
                 default=_selected_entity_ids_for_group(group),
@@ -926,12 +936,11 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
             ): _select_selector(power_flow_options()),
             vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
-                default=str(
-                    group.get("retention_mode") or DEFAULT_RETENTION_MODE
-                ),
+                default=str(group.get("retention_mode") or DEFAULT_RETENTION_MODE),
             ): _select_selector(retention_mode_options()),
         }
     )
+    return vol.Schema(schema)
 
 
 def _assignment_picker_schema(groups: Iterable[Mapping[str, Any]]) -> Any:
@@ -1940,6 +1949,11 @@ def _start_assignment_review(
         mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
         existing_circuits=existing_circuit_list,
     )
+    if update_existing:
+        groups = [
+            {**group, "allow_remove_from_analysis": True}
+            for group in groups
+        ]
     flow._pending_config = dict(pending_config)
     flow._assignment_groups = groups
     flow._assignment_index = 0
@@ -1992,6 +2006,10 @@ def _circuit_from_assignment_group(
     group: Mapping[str, Any],
     user_input: Mapping[str, Any],
 ) -> dict[str, Any] | None:
+    if bool(group.get("allow_remove_from_analysis", False)) and bool(
+        user_input.get(FIELD_REMOVE_FROM_ANALYSIS, False)
+    ):
+        return None
     if not bool(user_input.get(FIELD_INCLUDE_CIRCUIT, True)):
         return None
 
@@ -2148,7 +2166,20 @@ def _final_config_from_single_assignment_update(
         final_circuits.append(dict(circuit))
     if replacement is not None and not replaced:
         final_circuits.append(replacement)
+    if not final_circuits:
+        return _final_config_from_empty_assignment_update(pending_config)
     return _final_config_from_reviewed_circuits(pending_config, final_circuits)
+
+
+def _final_config_from_empty_assignment_update(
+    pending_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    final_config = dict(pending_config)
+    final_config[CONF_CIRCUITS] = []
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits([])
+    if CONF_KNOWN_LOAD_CIRCUITS in final_config:
+        final_config[CONF_KNOWN_LOAD_CIRCUITS] = []
+    return final_config
 
 
 def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str:

@@ -1781,6 +1781,121 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_options_assignment_review_can_remove_selected_appliance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    circuits = [
+        {
+            "circuit_id": "refrigerator",
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": "refrigerator",
+            "mode": "single_phase",
+            "power_flow": "load",
+            "retention_mode": "standard",
+            "sensors": [
+                {"entity_id": "sensor.refrigerator_power", "role": "real_power"},
+            ],
+        },
+        {
+            "circuit_id": "microwave",
+            "name": "Microwave",
+            "appliance_profile": "microwave",
+            "mode": "single_phase",
+            "power_flow": "load",
+            "retention_mode": "standard",
+            "sensors": [
+                {"entity_id": "sensor.microwave_power", "role": "real_power"},
+            ],
+        },
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.microwave_power",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.microwave_power",
+            ],
+            CONF_CIRCUITS: circuits,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "microwave"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert "remove_from_analysis" in _schema_keys(result["data_schema"])
+
+    result = await flow.async_step_assign({"remove_from_analysis": True})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert entry.options[CONF_CIRCUITS] == [circuits[0]]
+    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
+    assert entry.options[CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power",
+        "sensor.microwave_power",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_review_can_remove_last_appliance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    circuits = [
+        {
+            "circuit_id": "microwave",
+            "name": "Microwave",
+            "appliance_profile": "microwave",
+            "mode": "single_phase",
+            "power_flow": "load",
+            "retention_mode": "standard",
+            "sensors": [
+                {"entity_id": "sensor.microwave_power", "role": "real_power"},
+            ],
+        },
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: ["sensor.microwave_power"],
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.microwave_power"],
+            CONF_CIRCUITS: circuits,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "microwave"}
+    )
+    assert "remove_from_analysis" in _schema_keys(result["data_schema"])
+
+    result = await flow.async_step_assign({"remove_from_analysis": True})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert entry.options[CONF_CIRCUITS] == []
+    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.microwave_power"]
+    assert entry.options[CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.microwave_power"]
+
+
 def test_circuit_mode_options_use_human_labels() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         circuit_mode_options,

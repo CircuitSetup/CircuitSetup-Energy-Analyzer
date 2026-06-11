@@ -313,6 +313,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         descriptions = strings[section]["step"]["assign"]["data_description"]
         assert data == {
             "include_circuit": "Include Circuit",
+            "remove_from_analysis": "Remove From Analysis",
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
@@ -325,6 +326,8 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert all(description.endswith(".") for description in descriptions.values())
         assert "appliance" in descriptions["appliance_profile"].lower()
         assert "selected sensors" in descriptions["include_circuit"].lower()
+        assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
+        assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
         assert "mains nilm" in descriptions["circuit_mode"].lower()
         assert "only" in descriptions["circuit_mode"].lower()
