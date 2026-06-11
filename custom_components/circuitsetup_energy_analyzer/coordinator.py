@@ -3142,17 +3142,26 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> float:
         durations = [
-            self._binary_entity_active_minutes(entity_id, now)
+            self._flow_entity_active_minutes(entity_id, now)
             for entity_id in entity_ids
         ]
         return round(max(durations, default=0.0), 3)
 
-    def _binary_entity_active_minutes(
+    def _flow_entity_active(self: Self, entity_id: str | None) -> bool | None:
+        active = self._binary_entity_active(entity_id)
+        if active is not None:
+            return active
+        value = self._numeric_entity_value(entity_id)
+        if value is None:
+            return None
+        return value > 0.0
+
+    def _flow_entity_active_minutes(
         self: Self,
         entity_id: str,
         now: datetime,
     ) -> float:
-        if self._binary_entity_active(entity_id) is not True:
+        if self._flow_entity_active(entity_id) is not True:
             return 0.0
         raw_state = self._raw_state_for_entity(entity_id)
         changed_at = _datetime_or_none(getattr(raw_state, "last_changed", None))

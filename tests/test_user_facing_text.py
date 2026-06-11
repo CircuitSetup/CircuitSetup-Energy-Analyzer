@@ -186,6 +186,9 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
+    assert "binary" in descriptions["water_flow_sensor_entities"].lower()
+    assert "numeric" in descriptions["water_flow_sensor_entities"].lower()
+    assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
     assert "review circuit assignments" in strings["config"]["step"]["user"][
@@ -221,6 +224,9 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
+    assert "binary" in descriptions["water_flow_sensor_entities"].lower()
+    assert "numeric" in descriptions["water_flow_sensor_entities"].lower()
+    assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
     assert "review circuit assignments" in strings["options"]["step"]["sources"][

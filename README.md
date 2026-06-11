@@ -61,7 +61,7 @@ You need:
 - Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
 - An outdoor temperature sensor if you want HVAC weather context.
 - A rain sensor if you want sump, well, or water-pump activity compared with rainfall and HVAC condensate context.
-- A boolean water-flow sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity.
+- A binary water-flow sensor or numeric flow-rate sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity. Numeric flow sensors are treated as off at `0` and active when greater than `0`.
 
 The integration works best when each important appliance or circuit has a clean group of related source sensors.
 
@@ -101,7 +101,7 @@ During setup, you choose:
 | **Outdoor Temperature Entity** | Optional outdoor temperature source used only for HVAC weather context. |
 | **Rain Sensor** | Optional boolean rain sensor used to explain expected sump, well-pump, or water-pump activity. |
 | **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |
-| **Water Flow Sensors** | Optional boolean water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. |
+| **Water Flow Sensors** | Optional binary or numeric water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. Binary sensors are active when on; numeric flow-rate sensors are active when greater than `0`. |
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
 | **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
 
@@ -344,7 +344,7 @@ Most users should configure these options from the Home Assistant UI. Developer 
 | **Run-cycle diagnostics** | Tracks start count, runtime, duty cycle, and running state for appliance-style circuits. | Real-power data and enough cycles. |
 | **HVAC weather context** | Compares HVAC runtime with similar outdoor temperatures before treating runtime as unusual. | HVAC-like circuit plus outdoor temperature sensor. |
 | **Rain and pump correlation** | Compares pump runtime with rain, optional rain intensity, and HVAC compressor activity before flagging unusual pump behavior. | Sump pump, water pump, or well pump plus rain sensor. |
-| **Water-flow correlation** | Compares boolean water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
+| **Water-flow correlation** | Compares binary or numeric water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
 | **Recent activity timeline** | Keeps recent start/stop/steady-window events and recent possible-issue evidence. | Configured circuit with retained evidence. |
 | **Billing-cycle forecasts** | Tracks current-cycle kWh and projected end-of-cycle usage. | Cumulative energy sensor. |
 | **Cost and Time-of-Use estimates** | Estimates current-cycle and projected cost from configured rates. | Cumulative energy sensor and configured rates. |
@@ -414,7 +414,7 @@ The analyzer can report weather-explained pump activity, possible excess pump ac
 
 ### Water-flow correlation
 
-Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one boolean water-flow sensor is configured.
+Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
 
 The analyzer compares how long the water-flow sensor has been active with recent mapped appliance runtime. It can report:
 

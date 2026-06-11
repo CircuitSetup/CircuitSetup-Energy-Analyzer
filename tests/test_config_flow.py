@@ -651,6 +651,22 @@ def test_setup_schema_exposes_water_context_sources() -> None:
     assert CONF_WATER_FLOW_SENSOR_ENTITIES in keys
 
 
+def test_water_flow_selector_allows_binary_and_numeric_sensor_entities() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    config = config_flow._water_flow_entity_selector_config(multiple=True)
+
+    assert config == {
+        "entity": {
+            "multiple": True,
+            "filter": [
+                {"domain": "binary_sensor"},
+                {"domain": "sensor"},
+            ],
+        }
+    }
+
+
 def test_optional_context_entity_selectors_do_not_default_to_blank_entity_ids() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 

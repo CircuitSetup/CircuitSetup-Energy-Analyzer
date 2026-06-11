@@ -25,7 +25,7 @@
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
-          "water_flow_sensor_entities": "Optional boolean water-flow sensors used to compare water movement with washer, well pump, water pump, and water heater activity.",
+          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -134,7 +134,7 @@
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
-          "water_flow_sensor_entities": "Optional boolean water-flow sensors used to compare water movement with washer, well pump, water pump, and water heater activity.",
+          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -323,8 +323,8 @@
               "rain_pump_correlation_enabled": "Compare pump activity with rain and HVAC compressor activity before flagging unusual pump runtime.",
               "rain_response_window_minutes": "Minutes after rain starts or continues where higher pump activity may be expected.",
               "rain_activity_delta_threshold_pct": "Percent above the weather-adjusted expected pump runtime before repeated possible-issue evidence can be raised.",
-              "water_flow_correlation_enabled": "Compare boolean water-flow sensors with mapped water-using appliances.",
-              "linked_flow_sensor_entities": "Optional flow sensors to use for this appliance. Leave blank to use the global water-flow sensors.",
+              "water_flow_correlation_enabled": "Compare binary or numeric water-flow sensors with mapped water-using appliances.",
+              "linked_flow_sensor_entities": "Optional binary or numeric flow sensors to use for this appliance. Leave blank to use the global water-flow sensors.",
               "expects_water_flow": "Turn this off for appliances or pumps that should not correspond to the selected flow sensors.",
               "flow_mismatch_threshold_minutes": "Minutes of unexplained flow or appliance activity before the mismatch is considered evidence."
             }

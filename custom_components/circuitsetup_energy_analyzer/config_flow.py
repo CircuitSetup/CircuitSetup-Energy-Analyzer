@@ -721,6 +721,22 @@ def _binary_sensor_entity_selector(*, multiple: bool = False) -> Any:
     )
 
 
+def _water_flow_entity_selector_config(*, multiple: bool = True) -> dict[str, Any]:
+    return {
+        "entity": {
+            "multiple": multiple,
+            "filter": [
+                {"domain": "binary_sensor"},
+                {"domain": "sensor"},
+            ],
+        }
+    }
+
+
+def _water_flow_entity_selector(*, multiple: bool = True) -> Any:
+    return _selector(_water_flow_entity_selector_config(multiple=multiple), str)
+
+
 def _single_sensor_entity_selector() -> Any:
     return _selector(
         {
@@ -831,7 +847,7 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             vol.Optional(
                 CONF_WATER_FLOW_SENSOR_ENTITIES,
                 default=[],
-            ): _binary_sensor_entity_selector(multiple=True),
+            ): _water_flow_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,
@@ -1348,7 +1364,7 @@ def _water_context_fields(
                 vol.Optional(
                     CONF_LINKED_FLOW_SENSOR_ENTITIES,
                     default=list(settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES, [])),
-                ): _binary_sensor_entity_selector(multiple=True),
+                ): _water_flow_entity_selector(multiple=True),
                 vol.Optional(
                     CONF_EXPECTS_WATER_FLOW,
                     default=bool(
@@ -3360,7 +3376,7 @@ def _options_schema(
             vol.Optional(
                 CONF_WATER_FLOW_SENSOR_ENTITIES,
                 default=water_flow_sensor_entities,
-            ): _binary_sensor_entity_selector(multiple=True),
+            ): _water_flow_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=options.get(
