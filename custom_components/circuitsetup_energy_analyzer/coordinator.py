@@ -69,7 +69,6 @@ from .cycles import (
     RUN_CYCLE_DURATION_FEATURE,
     cycle_baseline_feature_values,
     cycle_summary_payload,
-    select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
 )
 from .demand import (
@@ -139,6 +138,7 @@ from .processors import (
     EnergyUsageProcessor,
     FeatureResult,
     ProcessingContext,
+    RunCycleProcessor,
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
@@ -679,6 +679,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             settings_for_config=self._energy_goal_settings_for_config,
             alert_policy_for_circuit=self._goal_alert_policy_for_circuit,
         )
+        self._run_cycle_processor = RunCycleProcessor(
+            alert_policy_for_circuit=self._cycle_alert_policy_for_circuit,
+            learning_mature=self._learning_mature,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -963,12 +967,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, goal_alerts = await self._apply_feature_result(goal_result)
             alerts.extend(goal_alerts)
 
-            cycle_alert = self._observe_run_cycle(config, now)
-            if cycle_alert is not None:
-                alerts.append(cycle_alert)
-                self.store_data.alerts.append(cycle_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(cycle_alert)
+            cycle_result = self._run_cycle_processor.process(sample, config, context)
+            _, cycle_alerts = await self._apply_feature_result(cycle_result)
+            alerts.extend(cycle_alerts)
 
             activity_alert = self._observe_activity_alert(config, now)
             if activity_alert is not None:
@@ -5112,66 +5113,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 features=evidence.features,
             )
         )
-
-    def _observe_run_cycle(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        summary = summarize_circuit_cycles(
-            self.store_data.events,
-            circuit_id=config.circuit_id,
-            now=now,
-        )
-        baselines = self._cycle_baselines_for_config(config, now)
-        if not self._learning_mature(config, now):
-            return None
-
-        policy = self._cycle_alert_policy_for_circuit(config.circuit_id)
-        evidence = select_cycle_anomaly_evidence(
-            config,
-            summary,
-            baselines,
-            min_score=policy.min_average_score,
-        )
-        if evidence is None:
-            return None
-
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature=evidence.feature,
-                score=evidence.score,
-                baseline_confidence=evidence.baseline_confidence,
-                observed_at=now,
-                observed_value=evidence.observed_value,
-                baseline_value=evidence.baseline_value,
-                message=evidence.message,
-                features=evidence.features,
-            )
-        )
-
-    def _cycle_baselines_for_config(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> dict[str, BaselineStats]:
-        baselines: dict[str, BaselineStats] = {}
-        values_by_feature = cycle_baseline_feature_values(
-            self.store_data.events,
-            circuit_id=config.circuit_id,
-            now=now,
-        )
-        for feature, values in values_by_feature.items():
-            key = _baseline_key(config.circuit_id, feature)
-            baseline = self.store_data.baselines.get(key)
-            if baseline is None and len(values) >= 9:
-                baseline = build_baseline(feature, values)
-                self.store_data.baselines[key] = baseline
-                self._mark_store_dirty()
-            if baseline is not None:
-                baselines[feature] = baseline
-        return baselines
 
     def _observe_activity_alert(
         self: Self,

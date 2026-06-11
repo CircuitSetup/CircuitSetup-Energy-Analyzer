@@ -54,6 +54,8 @@ def _energy_sample(energy_kwh: float) -> CircuitSample:
 
 
 class _CaptureAlertPolicy:
+    min_average_score = 1.5
+
     def __init__(self) -> None:
         self.observations: list[Observation] = []
 
@@ -397,3 +399,78 @@ def test_energy_goal_processor_updates_state_and_returns_goal_alert() -> None:
         "goal_alert_ratio": 0.9,
         "status": "over_goal",
     }
+
+
+def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    events: list[CircuitEvent] = []
+    for offset in range(1, 10):
+        started_at = now - timedelta(days=offset, hours=1)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=started_at,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=started_at + timedelta(minutes=20),
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+    )
+    store_data = FeatureStoreData(events=events)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.store_dirty is True
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == RUN_CYCLE_DURATION_FEATURE
+    assert policy.observations[0].observed_value == 3600.0
+    assert policy.observations[0].baseline_value == 1200.0
+    assert "Kitchen Fridge has been running for 1 h" in result.alerts[0].message
+
+    baseline = store_data.baselines["fridge:run_cycle_duration_s"]
+    assert baseline.feature == RUN_CYCLE_DURATION_FEATURE
+    assert baseline.median == 1200.0
