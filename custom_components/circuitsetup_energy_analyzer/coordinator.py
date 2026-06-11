@@ -177,6 +177,17 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
 WATER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
+ALERT_HISTORY_MAX_ITEMS = 500
+ALERT_HISTORY_MAX_AGE = timedelta(days=180)
+ALERT_FEEDBACK_MAX_ITEMS = 500
+ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
+NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
+NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
+RECOMMENDATION_HISTORY_MAX_ITEMS = 200
+RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
+RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
+RECOMMENDATION_DECISIONS_MAX_AGE = timedelta(days=365)
+RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS = 100
 HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
@@ -4580,6 +4591,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_standby(now)
         self._prune_weather_context(now)
         self._prune_water_context(now)
+        self._prune_alert_history(now)
+        self._prune_nilm_history()
+        self._prune_alert_feedback(now)
+        self._prune_recommendation_history(now)
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -4654,6 +4669,82 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for sample in history
                 if _sample_timestamp_is_at_or_after(sample, cutoff)
             ][-WATER_CONTEXT_HISTORY_MAX_SAMPLES:]
+
+    def _prune_alert_history(self: Self, now: datetime) -> None:
+        cutoff = now - ALERT_HISTORY_MAX_AGE
+        self.store_data.alerts = sorted(
+            (alert for alert in self.store_data.alerts if alert.timestamp >= cutoff),
+            key=lambda alert: alert.timestamp,
+            reverse=True,
+        )[:ALERT_HISTORY_MAX_ITEMS]
+
+    def _prune_nilm_history(self: Self) -> None:
+        for circuit_id, signatures in self.store_data.nilm_signatures.items():
+            self.store_data.nilm_signatures[circuit_id] = _newest_mapping_items(
+                signatures,
+                NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+            )
+        for inventory in self.store_data.nilm_unknown_loads_by_circuit.values():
+            unknown_loads = inventory.get("unknown_loads")
+            if isinstance(unknown_loads, list):
+                inventory["unknown_loads"] = _newest_mapping_items(
+                    unknown_loads,
+                    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
+                )
+
+    def _prune_alert_feedback(self: Self, now: datetime) -> None:
+        cutoff = now - ALERT_FEEDBACK_MAX_AGE
+        retained = {
+            key: value
+            for key, value in self.store_data.alert_feedback.items()
+            if _mapping_time(value, "created_at", "timestamp") >= cutoff
+        }
+        self.store_data.alert_feedback = dict(
+            sorted(
+                retained.items(),
+                key=lambda item: _mapping_time(item[1], "created_at", "timestamp"),
+                reverse=True,
+            )[:ALERT_FEEDBACK_MAX_ITEMS]
+        )
+
+    def _prune_recommendation_history(self: Self, now: datetime) -> None:
+        cutoff = now - RECOMMENDATION_HISTORY_MAX_AGE
+        recommendations = {
+            recommendation_id: recommendation
+            for recommendation_id, recommendation in (
+                self.store_data.settings_recommendations.items()
+            )
+            if recommendation.status is RecommendationStatus.PENDING
+            or recommendation.created_at >= cutoff
+        }
+        self.store_data.settings_recommendations = dict(
+            sorted(
+                recommendations.items(),
+                key=lambda item: _recommendation_sort_key(item[1]),
+                reverse=True,
+            )[:RECOMMENDATION_HISTORY_MAX_ITEMS]
+        )
+
+        decision_cutoff = now - RECOMMENDATION_DECISIONS_MAX_AGE
+        decisions = {
+            unique_key: decision
+            for unique_key, decision in (
+                self.store_data.settings_recommendation_decisions.items()
+            )
+            if decision.decided_at >= decision_cutoff
+        }
+        self.store_data.settings_recommendation_decisions = dict(
+            sorted(
+                decisions.items(),
+                key=lambda item: item[1].decided_at,
+                reverse=True,
+            )[:RECOMMENDATION_DECISIONS_MAX_ITEMS]
+        )
+        self.store_data.settings_recommendation_notification_episode_key = (
+            self.store_data.settings_recommendation_notification_episode_key[
+                :RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+            ]
+        )
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
@@ -5125,6 +5216,36 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _datetime_floor() -> datetime:
+    return datetime.min.replace(tzinfo=UTC)
+
+
+def _mapping_time(item: Any, *keys: str) -> datetime:
+    if not isinstance(item, Mapping):
+        return _datetime_floor()
+    for key in keys or ("last_seen", "timestamp", "created_at", "first_seen"):
+        parsed = _datetime_or_none(item.get(key))
+        if parsed is not None:
+            return parsed
+    return _datetime_floor()
+
+
+def _newest_mapping_items(items: Any, max_items: int) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    mapped_items = [dict(item) for item in items if isinstance(item, Mapping)]
+    return sorted(mapped_items, key=_mapping_time, reverse=True)[:max_items]
+
+
+def _recommendation_sort_key(
+    recommendation: SettingRecommendation,
+) -> tuple[bool, datetime]:
+    return (
+        recommendation.status is RecommendationStatus.PENDING,
+        max(recommendation.created_at, recommendation.expires_at),
+    )
 
 
 def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:

@@ -1365,6 +1365,141 @@ async def test_runtime_entry_retention_applies_when_circuit_omits_retention() ->
     assert old_event not in fake_store.saved_events[-1]
 
 
+def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        ALERT_FEEDBACK_MAX_ITEMS,
+        ALERT_HISTORY_MAX_ITEMS,
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    alerts = [
+        AlertEvidence(
+            timestamp=now - timedelta(hours=index),
+            circuit_id="fridge",
+            severity=Severity.WARNING,
+            message=f"Possible issue {index}",
+            feature="real_power",
+        )
+        for index in range(ALERT_HISTORY_MAX_ITEMS + 25)
+    ]
+    feedback = {
+        f"fridge:real_power:{index}": {
+            "action": "expected",
+            "created_at": (now - timedelta(hours=index)).isoformat(),
+        }
+        for index in range(ALERT_FEEDBACK_MAX_ITEMS + 25)
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        store_data=FeatureStoreData(alerts=alerts, alert_feedback=feedback),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert len(coordinator.store_data.alerts) == ALERT_HISTORY_MAX_ITEMS
+    assert coordinator.store_data.alerts[0].message == "Possible issue 0"
+    assert len(coordinator.store_data.alert_feedback) == ALERT_FEEDBACK_MAX_ITEMS
+    assert "fridge:real_power:0" in coordinator.store_data.alert_feedback
+    assert (
+        f"fridge:real_power:{ALERT_FEEDBACK_MAX_ITEMS + 24}"
+        not in coordinator.store_data.alert_feedback
+    )
+
+
+def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        settings_advisor as advisor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+        NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
+        RECOMMENDATION_DECISIONS_MAX_ITEMS,
+        RECOMMENDATION_HISTORY_MAX_ITEMS,
+        RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS,
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    signatures = [
+        {
+            "signature_id": f"sig-{index}",
+            "last_seen": (now - timedelta(minutes=index)).isoformat(),
+        }
+        for index in range(NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT + 10)
+    ]
+    unknown_loads = [
+        {
+            "signature_id": f"unknown-{index}",
+            "last_seen": (now - timedelta(minutes=index)).isoformat(),
+        }
+        for index in range(NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT + 10)
+    ]
+    recommendations = {
+        f"rec-{index}": _settings_recommendation(
+            advisor,
+            recommendation_id=f"rec-{index}",
+            unique_key=f"hvac:setting:{index}",
+            created_at=now - timedelta(hours=index),
+            expires_at=now + timedelta(days=30),
+        )
+        for index in range(RECOMMENDATION_HISTORY_MAX_ITEMS + 10)
+    }
+    decisions = {
+        f"hvac:setting:{index}": advisor.RecommendationDecision(
+            unique_key=f"hvac:setting:{index}",
+            status=advisor.RecommendationStatus.DENIED,
+            decided_at=now - timedelta(hours=index),
+            denied_value=index,
+        )
+        for index in range(RECOMMENDATION_DECISIONS_MAX_ITEMS + 10)
+    }
+    episodes = tuple(
+        (f"rec-{index}", "hvac")
+        for index in range(RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS + 10)
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={"mains": signatures},
+            nilm_unknown_loads_by_circuit={
+                "mains": {"unknown_loads": unknown_loads}
+            },
+            settings_recommendations=recommendations,
+            settings_recommendation_decisions=decisions,
+            settings_recommendation_notification_episode_key=episodes,
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert (
+        len(coordinator.store_data.nilm_signatures["mains"])
+        == NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT
+    )
+    assert coordinator.store_data.nilm_signatures["mains"][0]["signature_id"] == (
+        "sig-0"
+    )
+    assert len(
+        coordinator.store_data.nilm_unknown_loads_by_circuit["mains"]["unknown_loads"]
+    ) == NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT
+    assert (
+        len(coordinator.store_data.settings_recommendations)
+        == RECOMMENDATION_HISTORY_MAX_ITEMS
+    )
+    assert "rec-0" in coordinator.store_data.settings_recommendations
+    assert (
+        len(coordinator.store_data.settings_recommendation_decisions)
+        == RECOMMENDATION_DECISIONS_MAX_ITEMS
+    )
+    assert "hvac:setting:0" in coordinator.store_data.settings_recommendation_decisions
+    assert len(
+        coordinator.store_data.settings_recommendation_notification_episode_key
+    ) == RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+
+
 @pytest.mark.asyncio
 async def test_runtime_skips_store_write_when_update_has_no_persisted_changes() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
