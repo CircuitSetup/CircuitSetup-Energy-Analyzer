@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, ModuleType, SimpleNamespace
@@ -345,6 +346,105 @@ async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> 
     assert coordinator.source_entities == ("sensor.well_pump_power",)
     await coordinator.async_stop()
     assert unsubscribed == ["sensor.fridge_power", "sensor.well_pump_power"]
+
+
+@pytest.mark.asyncio
+async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+    process_calls = 0
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    async def fake_process_update(self):
+        nonlocal process_calls
+        process_calls += 1
+        return self.state
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        coordinator_module.EnergyAnalyzerCoordinator,
+        "async_process_update",
+        fake_process_update,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
+    await asyncio.sleep(0.03)
+
+    assert process_calls == 1
+    assert coordinator.pending_source_update_entities == ()
+    assert coordinator.last_source_update_entities == (
+        "sensor.fridge_current",
+        "sensor.fridge_power",
+        "sensor.fridge_var",
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_stop_cancels_pending_source_state_update(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+    process_calls = 0
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    async def fake_process_update(self):
+        nonlocal process_calls
+        process_calls += 1
+        return self.state
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        5.0,
+    )
+    monkeypatch.setattr(
+        coordinator_module.EnergyAnalyzerCoordinator,
+        "async_process_update",
+        fake_process_update,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+
+    await coordinator.async_stop()
+    await asyncio.sleep(0)
+
+    assert process_calls == 0
+    assert coordinator.pending_source_update_entities == ()
+    assert coordinator.last_source_update_entities == ()
 
 
 @pytest.mark.asyncio
