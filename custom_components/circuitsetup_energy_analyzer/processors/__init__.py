@@ -11,6 +11,7 @@ from .energy_goal import EnergyGoalProcessor
 from .energy_usage import EnergyUsageProcessor
 from .events import CircuitEventProcessor
 from .leg_imbalance import LegImbalanceProcessor
+from .mains_balance import MainsBalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
 from .power_quality import PowerQualityProcessor
 from .standby import StandbyProcessor
@@ -28,6 +29,7 @@ __all__ = [
     "FeatureProcessor",
     "FeatureResult",
     "LegImbalanceProcessor",
+    "MainsBalanceProcessor",
     "MetricConsistencyProcessor",
     "ProcessingContext",
     "PowerQualityProcessor",
