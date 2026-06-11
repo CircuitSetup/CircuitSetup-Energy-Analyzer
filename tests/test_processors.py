@@ -1493,6 +1493,116 @@ def test_solar_flow_processor_respects_selection_and_settings_overrides() -> Non
     ]
 
 
+def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        KnownLoadMatch,
+        NilmEdge,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                entity_id="sensor.fridge_power",
+                role=SensorRole.REAL_POWER,
+                leg="a",
+            ),
+        ),
+    )
+    match = KnownLoadMatch(
+        edge=NilmEdge(
+            timestamp=now,
+            delta_w=620.1234,
+            delta_var=30.0,
+            delta_va=621.0,
+            delta_pf=0.02,
+            direction="on",
+            leg_a_delta_w=310.0,
+            leg_b_delta_w=310.0,
+            leg_balance_ratio=0.0,
+            dominant_leg="balanced",
+            split_phase_type="balanced_240v",
+        ),
+        known_circuit_id="fridge",
+        confidence=0.92,
+        known_power_w=618.5555,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.NilmTopologyProcessor(
+        known_config_for_circuit=lambda circuit_id: (
+            fridge if circuit_id == "fridge" else None
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(mains, match, context)
+
+    assert len(result.state_updates) == 2
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("nilm_topology_status_by_circuit", "fridge")] == (
+        "topology_mismatch"
+    )
+    evidence = updates[("nilm_topology_evidence_by_circuit", "fridge")]
+    assert evidence == {
+        "status": "topology_mismatch",
+        "matched_mains_circuit_id": "mains",
+        "event_type": "start",
+        "configured_mode": "single_phase",
+        "configured_leg": "a",
+        "expected_split_phase_types": ["single_leg_a", "single_leg_b"],
+        "expected_dominant_legs": ["a"],
+        "observed_split_phase_type": "balanced_240v",
+        "observed_dominant_leg": "balanced",
+        "observed_leg": None,
+        "suggested_leg": None,
+        "observed_leg_a_delta_w": 310.0,
+        "observed_leg_b_delta_w": 310.0,
+        "observed_leg_balance_ratio": 0.0,
+        "matched_delta_w": 620.123,
+        "known_event_power_w": 618.556,
+        "match_confidence": 0.92,
+    }
+    assert result.store_dirty is False
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "nilm_topology_mismatch"
+    assert policy.observations[0].features == {
+        "match_confidence": 0.92,
+        "matched_delta_w": 620.123,
+        "known_event_power_w": 618.556,
+        "observed_leg_balance_ratio": 0.0,
+    }
+    assert "configured as single phase" in result.alerts[0].message
+    assert "balanced_240v" in result.alerts[0].message
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
