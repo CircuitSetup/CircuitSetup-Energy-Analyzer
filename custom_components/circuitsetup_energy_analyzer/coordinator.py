@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -173,6 +174,7 @@ from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
 
+SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
 WATER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
 HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
@@ -823,6 +825,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.mapping_checks_run = 0
         self.state = AnalyzerState()
         self.source_entities: tuple[str, ...] = ()
+        self.pending_source_update_entities: tuple[str, ...] = ()
+        self.last_source_update_entities: tuple[str, ...] = ()
+        self._pending_source_update_entities: set[str] = set()
+        self._source_update_task: asyncio.Task[Any] | None = None
         self.started = False
         self._unsub_state_change: Any = None
         self._hydrate_state_from_store()
@@ -833,6 +839,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if self._unsub_state_change is not None:
             self._unsub_state_change()
             self._unsub_state_change = None
+        self._cancel_pending_source_update()
 
         self.source_entities = tuple(source_entities)
         self.started = True
@@ -851,6 +858,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if self._unsub_state_change is not None:
             self._unsub_state_change()
             self._unsub_state_change = None
+        self._cancel_pending_source_update()
         self.started = False
 
     def _apply_config_entry_settings(self: Self) -> None:
@@ -1000,7 +1008,45 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
-        await self.async_process_update()
+        entity_id = _event_entity_id(event)
+        if entity_id:
+            self._pending_source_update_entities.add(entity_id)
+        self.pending_source_update_entities = tuple(
+            sorted(self._pending_source_update_entities)
+        )
+        if self._source_update_task is not None and not self._source_update_task.done():
+            return
+        self._source_update_task = asyncio.create_task(
+            self._async_process_debounced_source_update()
+        )
+
+    async def _async_process_debounced_source_update(self: Self) -> None:
+        """Process one analyzer update for a burst of source state changes."""
+        try:
+            await asyncio.sleep(SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS)
+            changed_entities = tuple(sorted(self._pending_source_update_entities))
+            self._pending_source_update_entities.clear()
+            self.pending_source_update_entities = ()
+            self.last_source_update_entities = changed_entities
+            if not self.started:
+                return
+            await self.async_process_update()
+        except asyncio.CancelledError:
+            self._pending_source_update_entities.clear()
+            self.pending_source_update_entities = ()
+            self._source_update_task = None
+            raise
+        finally:
+            if self._source_update_task is asyncio.current_task():
+                self._source_update_task = None
+
+    def _cancel_pending_source_update(self: Self) -> None:
+        """Cancel queued source-state processing during restart/unload."""
+        if self._source_update_task is not None and not self._source_update_task.done():
+            self._source_update_task.cancel()
+        self._source_update_task = None
+        self._pending_source_update_entities.clear()
+        self.pending_source_update_entities = ()
 
     def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
         """Build immutable runtime context for feature processors."""
@@ -5885,6 +5931,14 @@ def _weekday_tuple_value(
 
 def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
     return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
+
+
+def _event_entity_id(event: Any) -> str:
+    """Extract a Home Assistant state-change entity id from an event-like object."""
+    data = getattr(event, "data", {})
+    if not isinstance(data, Mapping):
+        return ""
+    return str(data.get("entity_id") or "").strip()
 
 
 def _optional_positive_float_value(
