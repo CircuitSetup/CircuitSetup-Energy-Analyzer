@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.billing import BillingCycleSettings
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.cost import CostSettings
 from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -607,3 +608,69 @@ def test_billing_cycle_processor_updates_state_and_returns_budget_alert() -> Non
     assert evidence["projected_budget_usage_percent"] == 136.4
     assert evidence["status"] == "projected_over_budget"
     assert store_data.billing_by_circuit["fridge"]["last_energy_kwh"] == 110.0
+
+
+def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        cost_by_circuit={
+            "fridge": {
+                "cycle_start": "2026-06-01",
+                "cycle_cost": 0.0,
+                "last_energy_kwh": 100.0,
+                "last_sample_at": "2026-06-10T12:00:00+00:00",
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            cycle_start_day=1,
+            default_rate_per_kwh=0.20,
+        ),
+    )
+
+    result = processor.process(_energy_sample(115.0), config, context)
+
+    assert result.store_dirty is True
+    assert result.alerts == []
+    assert result.notifications == []
+    assert len(result.state_updates) == 5
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.2
+    assert updates[("cost_cycle_by_circuit", "fridge")] == 3.0
+    assert updates[("cost_cycle_forecast_by_circuit", "fridge")] == 8.18
+    assert updates[("cost_status_by_circuit", "fridge")] == "tracking"
+    evidence = updates[("cost_evidence_by_circuit", "fridge")]
+    assert evidence["cycle_start"] == "2026-06-01"
+    assert evidence["cycle_end"] == "2026-07-01"
+    assert evidence["delta_kwh"] == 15.0
+    assert evidence["delta_cost"] == 3.0
+    assert evidence["cycle_cost"] == 3.0
+    assert evidence["projected_cycle_cost"] == 8.18
+    assert evidence["status"] == "tracking"
+    assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
