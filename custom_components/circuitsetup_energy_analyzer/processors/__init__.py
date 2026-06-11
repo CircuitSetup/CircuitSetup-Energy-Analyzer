@@ -14,6 +14,7 @@ from .leg_imbalance import LegImbalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
 from .power_quality import PowerQualityProcessor
 from .standby import StandbyProcessor
+from .utility_comparison import UtilityComparisonProcessor
 
 __all__ = [
     "ActivityAlertProcessor",
@@ -33,4 +34,5 @@ __all__ = [
     "RunCycleProcessor",
     "StandbyProcessor",
     "StateUpdate",
+    "UtilityComparisonProcessor",
 ]
