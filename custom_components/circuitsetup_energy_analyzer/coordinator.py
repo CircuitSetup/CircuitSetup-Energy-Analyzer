@@ -70,10 +70,7 @@ from .cycles import (
     summarize_circuit_cycles,
 )
 from .demand import (
-    DemandLimitEvidence,
-    DemandPeakEvidence,
     DemandSettings,
-    record_demand_sample,
 )
 from .energy_dashboard import (
     evaluate_energy_dashboard_readiness,
@@ -135,6 +132,7 @@ from .processors import (
     BillingCycleProcessor,
     CircuitEventProcessor,
     CostProcessor,
+    DemandProcessor,
     EnergyGoalProcessor,
     EnergyUsageProcessor,
     FeatureResult,
@@ -695,6 +693,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._cost_processor = CostProcessor(
             settings_for_config=self._cost_settings_for_config,
         )
+        self._demand_processor = DemandProcessor(
+            settings_for_config=self._demand_settings_for_config,
+            alert_policy_for_circuit=self._demand_alert_policy_for_circuit,
+            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(circuit_id)
+            ].days,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1002,12 +1007,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             cost_result = self._cost_processor.process(sample, config, context)
             await self._apply_feature_result(cost_result)
 
-            demand_alert = self._observe_demand(config, sample, now)
-            if demand_alert is not None:
-                alerts.append(demand_alert)
-                self.store_data.alerts.append(demand_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(demand_alert)
+            demand_result = self._demand_processor.process(sample, config, context)
+            _, demand_alerts = await self._apply_feature_result(demand_result)
+            alerts.extend(demand_alerts)
 
             capacity_alert = self._observe_capacity(config, sample, now)
             if capacity_alert is not None:
@@ -5150,90 +5152,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_demand(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        power_w = _demand_power_w(sample)
-        settings = self._demand_settings_for_config(config, config.circuit_id)
-        result = record_demand_sample(
-            self.store_data.demand_by_circuit.setdefault(config.circuit_id, {}),
-            circuit_id=config.circuit_id,
-            timestamp=now,
-            real_power_w=power_w,
-            settings=settings,
-            retention_days=RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(config.circuit_id)
-            ].days,
-        )
-        if result is None:
-            return None
-
-        if result.monthly_peak_recorded:
-            self._mark_store_dirty()
-        self.state.current_demand_w_by_circuit[config.circuit_id] = (
-            result.current_demand_w
-        )
-        self.state.peak_demand_w_by_circuit[config.circuit_id] = result.peak_demand_w
-        self.state.demand_limit_usage_by_circuit[config.circuit_id] = (
-            result.demand_limit_usage
-        )
-        self.state.demand_peak_rank_by_circuit[config.circuit_id] = (
-            result.monthly_peak_rank
-        )
-        self.state.demand_peak_status_by_circuit[config.circuit_id] = (
-            result.monthly_peak_status
-        )
-        self.state.demand_evidence_by_circuit[config.circuit_id] = (
-            _demand_evidence_payload(result)
-        )
-
-        if result.limit_exceeded is not None:
-            self._mark_store_dirty()
-            evidence = result.limit_exceeded
-            policy = self._demand_alert_policy_for_circuit(config.circuit_id)
-            score = (
-                evidence.current_demand_w / evidence.demand_limit_w
-                if evidence.demand_limit_w > 0.0
-                else 0.0
-            )
-            return policy.observe(
-                Observation(
-                    circuit_id=config.circuit_id,
-                    feature="demand_limit",
-                    score=score,
-                    baseline_confidence=1.0,
-                    observed_at=now,
-                    observed_value=evidence.current_demand_w,
-                    baseline_value=evidence.demand_limit_w,
-                    message=_demand_limit_message(config, evidence),
-                    features=evidence.features,
-                )
-            )
-
-        if result.monthly_peak_warning is not None:
-            self._mark_store_dirty()
-            evidence = result.monthly_peak_warning
-            policy = self._demand_alert_policy_for_circuit(config.circuit_id)
-            score = max(1.0, evidence.monthly_peak_usage_percent / 100.0)
-            return policy.observe(
-                Observation(
-                    circuit_id=config.circuit_id,
-                    feature="demand_monthly_peak",
-                    score=score,
-                    baseline_confidence=1.0,
-                    observed_at=now,
-                    observed_value=evidence.current_demand_w,
-                    baseline_value=evidence.monthly_peak_cutoff_w,
-                    message=_demand_monthly_peak_message(config, evidence),
-                    features=evidence.features,
-                )
-            )
-
-        return None
-
     def _record_capacity_current_sample(
         self: Self,
         circuit_id: str,
@@ -5923,54 +5841,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _demand_limit_message(
-    config: CircuitConfig,
-    evidence: DemandLimitEvidence,
-) -> str:
-    return (
-        f"Possible issue: {config.name} demand averaged "
-        f"{_format_w(evidence.current_demand_w)} W over "
-        f"{evidence.window_minutes} minutes, above the configured "
-        f"{_format_w(evidence.demand_limit_w)} W limit."
-    )
-
-
-def _demand_monthly_peak_message(
-    config: CircuitConfig,
-    evidence: DemandPeakEvidence,
-) -> str:
-    return (
-        f"Possible issue: {config.name} demand averaged "
-        f"{_format_w(evidence.current_demand_w)} W over "
-        f"{evidence.window_minutes} minutes, near this month's top "
-        f"{evidence.peak_rank_count} demand windows. It is "
-        f"{_format_percent(evidence.monthly_peak_usage_percent)}% of the "
-        f"{_format_w(evidence.monthly_peak_cutoff_w)} W cutoff."
-    )
-
-
-def _demand_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "date": result.date,
-        "current_demand_w": result.current_demand_w,
-        "peak_demand_w": result.peak_demand_w,
-        "demand_window_minutes": result.window_minutes,
-        "demand_limit_w": result.demand_limit_w,
-        "demand_limit_usage_percent": result.demand_limit_usage,
-        "status": (
-            "over_limit"
-            if result.limit_exceeded is not None
-            else ("tracking" if result.demand_limit_w is not None else "unconfigured")
-        ),
-        "monthly_peak_rank": result.monthly_peak_rank,
-        "monthly_peak_status": result.monthly_peak_status,
-        "monthly_peak_cutoff_w": result.monthly_peak_cutoff_w,
-        "monthly_peak_usage_percent": result.monthly_peak_usage_percent,
-        "monthly_peak_rank_count": result.monthly_peak_rank_count,
-        "monthly_peak_warning_ratio": result.monthly_peak_warning_ratio,
-    }
 
 
 def _capacity_limit_message(config: CircuitConfig, result: Any) -> str:

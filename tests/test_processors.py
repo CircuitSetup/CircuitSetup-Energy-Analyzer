@@ -12,6 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.billing import BillingCycleSettings
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.cost import CostSettings
+from custom_components.circuitsetup_energy_analyzer.demand import DemandSettings
 from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -674,3 +675,70 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert evidence["projected_cycle_cost"] == 8.18
     assert evidence["status"] == "tracking"
     assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
+
+
+def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+            demand_limit_w=2000.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+
+    result = processor.process(_sample(0, 2500.0), config, context)
+
+    assert result.store_dirty is True
+    assert len(result.state_updates) == 6
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "demand_limit"
+    assert policy.observations[0].observed_value == 2500.0
+    assert policy.observations[0].baseline_value == 2000.0
+    assert "EV Charger demand averaged 2500 W" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("current_demand_w_by_circuit", "ev")] == 2500.0
+    assert updates[("peak_demand_w_by_circuit", "ev")] == 2500.0
+    assert updates[("demand_limit_usage_by_circuit", "ev")] == 125.0
+    assert updates[("demand_peak_rank_by_circuit", "ev")] == 1
+    assert updates[("demand_peak_status_by_circuit", "ev")] == "monthly_peak"
+    evidence = updates[("demand_evidence_by_circuit", "ev")]
+    assert evidence["status"] == "over_limit"
+    assert evidence["current_demand_w"] == 2500.0
+    assert evidence["demand_limit_w"] == 2000.0
+    assert evidence["demand_limit_usage_percent"] == 125.0
+    assert context.store_data.demand_by_circuit["ev"]["monthly_peak_windows"] == [
+        {
+            "timestamp": now.isoformat(),
+            "demand_w": 2500.0,
+            "window_minutes": 15,
+        }
+    ]
