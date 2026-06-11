@@ -87,8 +87,6 @@ from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
     DEFAULT_POWER_FACTOR_TOLERANCE,
-    MetricConsistencyResult,
-    evaluate_metric_consistency,
 )
 from .models import (
     AlertEvidence,
@@ -135,6 +133,7 @@ from .processors import (
     EnergyUsageProcessor,
     FeatureResult,
     LegImbalanceProcessor,
+    MetricConsistencyProcessor,
     ProcessingContext,
     RunCycleProcessor,
 )
@@ -710,6 +709,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._leg_imbalance_processor = LegImbalanceProcessor(
             alert_policy_for_circuit=self._leg_imbalance_alert_policy_for_circuit,
         )
+        self._metric_consistency_processor = MetricConsistencyProcessor()
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1035,7 +1035,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             alerts.extend(leg_imbalance_alerts)
 
-            self._observe_metric_consistency(config, sample)
+            metric_consistency_result = self._metric_consistency_processor.process(
+                sample,
+                config,
+                context,
+            )
+            await self._apply_feature_result(metric_consistency_result)
 
             standby_alert = self._observe_standby(config, sample, now)
             if standby_alert is not None:
@@ -5122,48 +5127,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_metric_consistency(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-    ) -> None:
-        settings = self.store_data.metric_consistency_settings_by_circuit.get(
-            config.circuit_id,
-            {},
-        )
-        result = evaluate_metric_consistency(
-            real_power_w=getattr(sample, "real_power", None),
-            apparent_power_va=getattr(sample, "apparent_power", None),
-            power_factor=getattr(sample, "power_factor", None),
-            voltage_v=getattr(sample, "voltage", None),
-            current_a=getattr(sample, "current", None),
-            leg_a_voltage_v=getattr(sample, "leg_a_voltage", None),
-            leg_a_current_a=getattr(sample, "leg_a_current", None),
-            leg_b_voltage_v=getattr(sample, "leg_b_voltage", None),
-            leg_b_current_a=getattr(sample, "leg_b_current", None),
-            apparent_power_tolerance_percent=_positive_float_value(
-                settings.get("apparent_power_tolerance_percent"),
-                default=DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
-            ),
-            power_factor_tolerance=_positive_float_value(
-                settings.get("power_factor_tolerance"),
-                default=DEFAULT_POWER_FACTOR_TOLERANCE,
-            ),
-            minimum_apparent_power_va=_nonnegative_float_value(
-                settings.get("minimum_apparent_power_va"),
-                default=DEFAULT_MIN_APPARENT_POWER_VA,
-            ),
-        )
-        self.state.metric_consistency_score_by_circuit[config.circuit_id] = (
-            result.mismatch_score_percent
-        )
-        self.state.metric_consistency_status_by_circuit[config.circuit_id] = (
-            result.status
-        )
-        self.state.metric_consistency_evidence_by_circuit[config.circuit_id] = (
-            _metric_consistency_evidence_payload(result)
-        )
-
     def _observe_standby(
         self: Self,
         config: CircuitConfig,
@@ -5668,28 +5631,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _metric_consistency_evidence_payload(
-    result: MetricConsistencyResult,
-) -> dict[str, Any]:
-    return {
-        "status": result.status,
-        "mismatch_score_percent": result.mismatch_score_percent,
-        "expected_apparent_power_va": result.expected_apparent_power_va,
-        "reported_apparent_power_va": result.reported_apparent_power_va,
-        "apparent_power_difference_percent": (
-            result.apparent_power_difference_percent
-        ),
-        "apparent_power_tolerance_percent": (
-            result.apparent_power_tolerance_percent
-        ),
-        "apparent_power_source": result.apparent_power_source,
-        "expected_power_factor": result.expected_power_factor,
-        "reported_power_factor": result.reported_power_factor,
-        "power_factor_difference": result.power_factor_difference,
-        "power_factor_tolerance": result.power_factor_tolerance,
-    }
 
 
 def _standby_limit_message(
