@@ -16,7 +16,7 @@ from .activity_timeline import (
     timeline_payload,
 )
 from .aggregation import aggregate_dual_phase
-from .alerting import ConservativeAlertPolicy, Observation
+from .alerting import ConservativeAlertPolicy
 from .balance import (
     DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
 )
@@ -130,6 +130,7 @@ from .processors import (
     SolarFlowProcessor,
     StandbyProcessor,
     UtilityComparisonProcessor,
+    WaterContextAlertProcessor,
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
@@ -744,6 +745,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._nilm_topology_processor = NilmTopologyProcessor(
             known_config_for_circuit=self._config_for_circuit,
             alert_policy_for_circuit=self._nilm_topology_alert_policy_for_circuit,
+        )
+        self._water_context_alert_processor = WaterContextAlertProcessor(
+            alert_policy_for_circuit=self._water_context_alert_policy_for_circuit,
         )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -2823,55 +2827,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> AlertEvidence | None:
-        circuit_id = config.circuit_id
-        for feature, evidence in (
-            (
-                "rain_pump_correlation",
-                self.state.rain_pump_context_by_circuit.get(circuit_id, {}),
-            ),
-            (
-                "water_flow_correlation",
-                self.state.water_flow_context_by_circuit.get(circuit_id, {}),
-            ),
-        ):
-            if not isinstance(evidence, Mapping):
-                continue
-            status = str(evidence.get("status") or "")
-            if status not in {
-                "possible_excess_pump_activity",
-                "possible_missing_pump_activity",
-                "possible_flow_without_load",
-                "possible_load_without_flow",
-                "possible_sensor_problem",
-            }:
-                continue
-            policy = self._water_context_alert_policy_for_circuit(
-                circuit_id,
-                feature,
-            )
-            observed_value = _water_context_observed_value(evidence)
-            baseline_value = _water_context_baseline_value(evidence)
-            confidence = _float_or_none(evidence.get("confidence")) or 0.0
-            score = max(
-                1.0,
-                abs(observed_value - baseline_value) / max(baseline_value, 1.0),
-            )
-            alert = policy.observe(
-                Observation(
-                    circuit_id=circuit_id,
-                    feature=feature,
-                    score=score,
-                    baseline_confidence=confidence,
-                    observed_at=now,
-                    observed_value=observed_value,
-                    baseline_value=baseline_value,
-                    message=_water_context_alert_message(config.name, evidence),
-                    features=_water_context_alert_features(evidence),
-                )
-            )
-            if alert is not None:
-                return alert
-        return None
+        result = self._water_context_alert_processor.process(
+            config,
+            self._build_processing_context(now),
+        )
+        return result.alerts[0] if result.alerts else None
 
     def _rain_pump_context_evidence(
         self: Self,
@@ -5163,50 +5123,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _water_context_observed_value(evidence: Mapping[str, Any]) -> float:
-    for key in ("mismatch_minutes", "pump_runtime_minutes", "flow_active_minutes"):
-        value = _float_or_none(evidence.get(key))
-        if value is not None:
-            return value
-    return 0.0
-
-
-def _water_context_baseline_value(evidence: Mapping[str, Any]) -> float:
-    for key in ("expected_runtime_minutes", "dry_baseline_minutes"):
-        value = _float_or_none(evidence.get(key))
-        if value is not None:
-            return value
-    threshold = _float_or_none(evidence.get("flow_mismatch_threshold_minutes"))
-    return threshold if threshold is not None else 0.0
-
-
-def _water_context_alert_features(evidence: Mapping[str, Any]) -> dict[str, float]:
-    features: dict[str, float] = {}
-    for key in (
-        "mismatch_minutes",
-        "pump_runtime_minutes",
-        "expected_runtime_minutes",
-        "flow_active_minutes",
-        "confidence",
-    ):
-        value = _float_or_none(evidence.get(key))
-        if value is not None:
-            features[key] = value
-    return features
-
-
-def _water_context_alert_message(
-    circuit_name: str,
-    evidence: Mapping[str, Any],
-) -> str:
-    summary = str(evidence.get("friendly_summary") or "").strip()
-    status = str(evidence.get("status") or "possible_issue")
-    status_label = status.replace("_", " ").title()
-    if summary:
-        return f"Possible issue: {circuit_name} water context changed. {summary}"
-    return f"Possible issue: {circuit_name} water context changed: {status_label}."
 
 
 def _format_kwh(value: float) -> str:
