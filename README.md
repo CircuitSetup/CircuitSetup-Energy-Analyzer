@@ -257,48 +257,6 @@ When a single appliance needs review, use this pattern:
 4. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
 5. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
 
-### Screenshots
-
-![Mains sensor selection panel](docs/images/readme/mains-sensors.png)
-
-![Circuit modes selector](docs/images/readme/circuit-modes.png)
-
-![Power-flow selector](docs/images/readme/power-flow.png)
-
-![Energy usage spike settings](docs/images/readme/energy-usage-spikes.png)
-
-![Daily energy goal settings](docs/images/readme/daily-energy-goals.png)
-
-![Run-cycle diagnostics](docs/images/readme/run-cycle-diagnostics.png)
-
-![Recent activity timeline](docs/images/readme/recent-activity-timeline.png)
-
-![Billing-cycle forecast settings](docs/images/readme/billing-cycle-forecasts.png)
-
-![Cost and Time-of-Use settings](docs/images/readme/cost-time-of-use.png)
-
-![History CSV export controls](docs/images/readme/history-csv-export.png)
-
-![Peak demand tracking](docs/images/readme/peak-demand-tracking.png)
-
-![Circuit capacity tracking](docs/images/readme/circuit-capacity-tracking.png)
-
-![Dual-phase leg imbalance](docs/images/readme/dual-phase-leg-imbalance.png)
-
-![Power metric consistency](docs/images/readme/power-metric-consistency.png)
-
-![Mains balance](docs/images/readme/mains-balance.png)
-
-![Solar flow diagnostics](docs/images/readme/solar-flow-diagnostics.png)
-
-![Utility comparison](docs/images/readme/utility-comparison.png)
-
-![Always On and standby tracking](docs/images/readme/always-on-standby.png)
-
-![Experimental NILM](docs/images/readme/experimental-nilm.png)
-
-![Alert philosophy](docs/images/readme/alert-philosophy.png)
-
 ## Let the analyzer learn
 
 During the first week, expect many entities to say `Learning`, `Needs data`, or `Waiting For Energy Change`.

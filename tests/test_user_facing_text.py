@@ -1059,36 +1059,15 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         "docs/images/readme/integration-overview.png",
         "docs/images/readme/options-menu.png",
         "docs/images/readme/assignment-editor.png",
-        "docs/images/readme/mains-sensors.png",
         "docs/images/readme/advanced-settings.png",
-        "docs/images/readme/circuit-modes.png",
-        "docs/images/readme/power-flow.png",
-        "docs/images/readme/energy-usage-spikes.png",
-        "docs/images/readme/daily-energy-goals.png",
-        "docs/images/readme/run-cycle-diagnostics.png",
-        "docs/images/readme/recent-activity-timeline.png",
-        "docs/images/readme/billing-cycle-forecasts.png",
-        "docs/images/readme/cost-time-of-use.png",
-        "docs/images/readme/history-csv-export.png",
-        "docs/images/readme/peak-demand-tracking.png",
-        "docs/images/readme/circuit-capacity-tracking.png",
-        "docs/images/readme/dual-phase-leg-imbalance.png",
-        "docs/images/readme/power-metric-consistency.png",
-        "docs/images/readme/mains-balance.png",
-        "docs/images/readme/solar-flow-diagnostics.png",
-        "docs/images/readme/utility-comparison.png",
-        "docs/images/readme/always-on-standby.png",
-        "docs/images/readme/experimental-nilm.png",
-        "docs/images/readme/alert-philosophy.png",
         "docs/images/readme/notifications-panel.png",
         "docs/images/readme/notifications-repairs.png",
         "docs/images/readme/demo-dashboard.png",
     }
 
     assert expected <= set(refs)
+    assert "### Screenshots" not in readme_text
     focused_native_refs = {
-        "docs/images/readme/energy-usage-spikes.png",
-        "docs/images/readme/daily-energy-goals.png",
         "docs/images/readme/notifications-panel.png",
     }
     for ref in sorted(set(refs)):
