@@ -1657,6 +1657,13 @@ async def test_options_assignment_step_starts_from_saved_sources() -> None:
     result = await flow.async_step_assign()
 
     assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "hvac_blower"}
+    )
+
+    assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "circuit_name") == "HVAC Blower"
     assert _schema_default(result["data_schema"], "appliance_profile") == "hvac_blower"
@@ -1747,8 +1754,9 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
         }
     )
 
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_CIRCUITS] == [
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert entry.options[CONF_CIRCUITS] == [
         circuits[0],
         {
             "circuit_id": "downstairs_hvac",
@@ -2212,6 +2220,13 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     result = await flow.async_step_assign()
 
     assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "cs_energy_analyzer_demo_hvac"}
+    )
+
+    assert result["type"] == "form"
     assert _schema_default(result["data_schema"], "circuit_name") == "HVAC"
 
     result = await flow.async_step_assign(
@@ -2227,11 +2242,12 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
         }
     )
 
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == (
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert entry.options[CONF_CIRCUITS][0]["circuit_id"] == (
         "cs_energy_analyzer_demo_hvac"
     )
-    assert result["data"][CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
+    assert entry.options[CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
 
 
 @pytest.mark.asyncio

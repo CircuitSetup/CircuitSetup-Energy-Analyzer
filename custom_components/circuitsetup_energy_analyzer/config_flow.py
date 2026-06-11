@@ -1949,7 +1949,7 @@ def _start_assignment_review(
     flow._assignment_selected_circuit_id = None
     if update_existing and len(groups) == 1:
         flow._assignment_selected_circuit_id = _assignment_group_value(groups[0])
-    if show_picker and len(groups) > 1:
+    if show_picker:
         return _assignment_picker_form(flow)
     return _assignment_review_form(flow)
 
@@ -2775,6 +2775,11 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             if assignment_result.get("type") == "form":
                 return assignment_result
             final_config = assignment_result
+            if bool(getattr(self, "_assignment_update_existing", False)):
+                return await _async_save_assignment_edit_and_return_to_picker(
+                    self,
+                    final_config,
+                )
             return self.async_create_entry(title="", data=final_config)
 
         return _assignment_review_form(self)
@@ -3618,6 +3623,47 @@ def _options_with_updates(
     options = dict(getattr(config_entry, "options", {}) or {})
     options.update(dict(updates))
     return options
+
+
+async def _async_save_assignment_edit_and_return_to_picker(
+    flow: Any,
+    final_config: Mapping[str, Any],
+) -> config_entries.ConfigFlowResult:
+    """Persist one edited assignment and reopen the assignment picker."""
+    saved_config = dict(final_config)
+    await _async_save_options_flow_config(flow, saved_config)
+    return _start_assignment_review(
+        flow,
+        saved_config,
+        existing_circuits=saved_config.get(CONF_CIRCUITS, []) or [],
+        show_picker=True,
+        update_existing=True,
+    )
+
+
+async def _async_save_options_flow_config(
+    flow: Any,
+    options: Mapping[str, Any],
+) -> None:
+    """Save options during an in-progress options flow when possible."""
+    config_entry = getattr(flow, "_config_entry", None)
+    if config_entry is None:
+        return
+    hass = getattr(flow, "hass", None)
+    config_entries_manager = getattr(hass, "config_entries", None)
+    update_entry = getattr(config_entries_manager, "async_update_entry", None)
+    if callable(update_entry):
+        update_entry(config_entry, options=dict(options))
+        reload_entry = getattr(config_entries_manager, "async_reload", None)
+        if callable(reload_entry):
+            reload_result = reload_entry(getattr(config_entry, "entry_id", ""))
+            if hasattr(reload_result, "__await__"):
+                await reload_result
+        return
+    try:
+        config_entry.options = dict(options)
+    except AttributeError:
+        pass
 
 
 def _apply_entity_detail_profile_to_existing_entities(
