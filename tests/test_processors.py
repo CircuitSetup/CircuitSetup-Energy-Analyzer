@@ -7,6 +7,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
@@ -188,6 +189,37 @@ async def test_coordinator_applies_feature_result() -> None:
     assert coordinator._store_dirty is True
 
 
+@pytest.mark.asyncio
+async def test_coordinator_state_update_without_store_data_change_stays_clean() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={DOMAIN: {}}),
+        entry_data={},
+        store_data=FeatureStoreData(),
+    )
+
+    await coordinator._apply_feature_result(
+        FeatureResult(
+            state_updates=[
+                StateUpdate(
+                    path=("health_summary_by_circuit", "fridge"),
+                    value="Running",
+                )
+            ],
+        )
+    )
+
+    assert coordinator.state.health_summary_by_circuit["fridge"] == "Running"
+    assert coordinator._store_dirty is False
+
+
 def test_event_processor_returns_events() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -295,3 +327,73 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     assert evidence["status"] == "over_threshold"
     assert evidence["daily_usage_share_percent"] == 25.8
     assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9
+
+
+def test_energy_goal_processor_updates_state_and_returns_goal_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_goal import (
+        EnergyGoalProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    state = AnalyzerState(
+        daily_energy_usage_by_circuit={"fridge": 20.5},
+        energy_usage_evidence_by_circuit={
+            "fridge": {
+                "date": now.date().isoformat(),
+                "daily_usage_kwh": 20.5,
+            }
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyGoalProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyGoalSettings(
+            daily_goal_kwh=20.0,
+            goal_alert_ratio=0.9,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.store_dirty is False
+    assert len(result.state_updates) == 3
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "daily_energy_goal"
+    assert policy.observations[0].observed_value == 20.5
+    assert policy.observations[0].baseline_value == 20.0
+    assert "Kitchen Fridge used 20.5 kWh today" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("energy_goal_usage_by_circuit", "fridge")] == 102.5
+    assert updates[("energy_goal_status_by_circuit", "fridge")] == "over_goal"
+    evidence = updates[("energy_goal_evidence_by_circuit", "fridge")]
+    assert evidence == {
+        "date": "2026-06-11",
+        "daily_usage_kwh": 20.5,
+        "daily_goal_kwh": 20.0,
+        "goal_usage_percent": 102.5,
+        "alert_threshold_kwh": 18.0,
+        "goal_alert_ratio": 0.9,
+        "status": "over_goal",
+    }
