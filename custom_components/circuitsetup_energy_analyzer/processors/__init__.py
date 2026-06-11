@@ -12,6 +12,7 @@ from .energy_usage import EnergyUsageProcessor
 from .events import CircuitEventProcessor
 from .leg_imbalance import LegImbalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
+from .standby import StandbyProcessor
 
 __all__ = [
     "ActivityAlertProcessor",
@@ -28,5 +29,6 @@ __all__ = [
     "MetricConsistencyProcessor",
     "ProcessingContext",
     "RunCycleProcessor",
+    "StandbyProcessor",
     "StateUpdate",
 ]

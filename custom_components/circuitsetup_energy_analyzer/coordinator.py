@@ -136,6 +136,7 @@ from .processors import (
     MetricConsistencyProcessor,
     ProcessingContext,
     RunCycleProcessor,
+    StandbyProcessor,
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
@@ -155,7 +156,7 @@ from .solar_flow import (
     SolarFlowInput,
     calculate_solar_flow,
 )
-from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
+from .standby import StandbySettings
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .unknown_loads import build_unknown_load_inventory
 from .usage import EnergyUsageSettings
@@ -710,6 +711,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert_policy_for_circuit=self._leg_imbalance_alert_policy_for_circuit,
         )
         self._metric_consistency_processor = MetricConsistencyProcessor()
+        self._standby_processor = StandbyProcessor(
+            settings_for_config=self._standby_settings_for_config,
+            alert_policy_for_circuit=self._standby_alert_policy_for_circuit,
+            seed_demo_history=lambda config, sample, context, settings: (
+                self._seed_demo_standby_history(config, sample, context.now, settings)
+            ),
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1042,12 +1050,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
             await self._apply_feature_result(metric_consistency_result)
 
-            standby_alert = self._observe_standby(config, sample, now)
-            if standby_alert is not None:
-                alerts.append(standby_alert)
-                self.store_data.alerts.append(standby_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(standby_alert)
+            if (
+                config.power_flow is PowerFlowMode.GENERATION
+                or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
+            ):
+                self._clear_standby_state(config.circuit_id)
+            else:
+                standby_result = self._standby_processor.process(
+                    sample,
+                    config,
+                    context,
+                )
+                _, standby_alerts = await self._apply_feature_result(standby_result)
+                alerts.extend(standby_alerts)
 
         for config, sample in samples:
             for nilm_alert in self._process_nilm_sample(config, sample, events):
@@ -5127,71 +5142,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_standby(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        if (
-            config.power_flow is PowerFlowMode.GENERATION
-            or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
-        ):
-            self._clear_standby_state(config.circuit_id)
-            return None
-
-        power_w = _demand_power_w(sample)
-        settings = self._standby_settings_for_config(config, config.circuit_id)
-        self._seed_demo_standby_history(config, sample, now, settings)
-        result = record_standby_sample(
-            self.store_data.standby_by_circuit.setdefault(config.circuit_id, {}),
-            circuit_id=config.circuit_id,
-            timestamp=now,
-            real_power_w=power_w,
-            settings=settings,
-        )
-        if result is None:
-            return None
-
-        self.state.always_on_power_w_by_circuit[config.circuit_id] = (
-            result.always_on_power_w
-        )
-        self.state.standby_threshold_w_by_circuit[config.circuit_id] = (
-            result.standby_threshold_w
-        )
-        self.state.standby_status_by_circuit[config.circuit_id] = result.status
-        self.state.always_on_limit_usage_by_circuit[config.circuit_id] = (
-            result.always_on_limit_usage
-        )
-        self.state.standby_evidence_by_circuit[config.circuit_id] = (
-            _standby_evidence_payload(result)
-        )
-
-        if result.limit_exceeded is None:
-            return None
-
-        self._mark_store_dirty()
-        evidence = result.limit_exceeded
-        policy = self._standby_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            evidence.always_on_power_w / evidence.always_on_alert_w
-            if evidence.always_on_alert_w > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="always_on_power",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=evidence.always_on_power_w,
-                baseline_value=evidence.always_on_alert_w,
-                message=_standby_limit_message(config, evidence),
-                features=evidence.features,
-            )
-        )
-
     def _energy_usage_settings_for_config(
         self: Self,
         config: CircuitConfig | None,
@@ -5631,31 +5581,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _standby_limit_message(
-    config: CircuitConfig,
-    evidence: StandbyLimitEvidence,
-) -> str:
-    return (
-        f"Possible issue: {config.name} Always On is "
-        f"{_format_w(evidence.always_on_power_w)} W over the last "
-        f"{evidence.window_hours} hours, above the configured "
-        f"{_format_w(evidence.always_on_alert_w)} W limit."
-    )
-
-
-def _standby_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "always_on_power_w": result.always_on_power_w,
-        "current_power_w": result.current_power_w,
-        "standby_threshold_w": result.standby_threshold_w,
-        "sample_count": result.sample_count,
-        "window_hours": result.window_hours,
-        "always_on_alert_w": result.always_on_alert_w,
-        "always_on_limit_usage_percent": result.always_on_limit_usage,
-        "status": result.status,
-    }
 
 
 def _utility_comparison_message(config: CircuitConfig, result: Any) -> str:

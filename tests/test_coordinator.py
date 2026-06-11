@@ -7040,6 +7040,56 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_clears_standby_state_for_generation_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 8, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.solar_power"
+            return SimpleNamespace(
+                state="-500",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "power_flow": "generation",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+    coordinator.state.always_on_power_w_by_circuit["solar"] = 25.0
+    coordinator.state.standby_threshold_w_by_circuit["solar"] = 8.0
+    coordinator.state.standby_status_by_circuit["solar"] = "standby"
+    coordinator.state.always_on_limit_usage_by_circuit["solar"] = 120.0
+    coordinator.state.standby_evidence_by_circuit["solar"] = {"status": "standby"}
+
+    await coordinator.async_process_update()
+
+    assert "solar" not in coordinator.state.always_on_power_w_by_circuit
+    assert "solar" not in coordinator.state.standby_threshold_w_by_circuit
+    assert "solar" not in coordinator.state.standby_status_by_circuit
+    assert "solar" not in coordinator.state.always_on_limit_usage_by_circuit
+    assert "solar" not in coordinator.state.standby_evidence_by_circuit
+
+
+@pytest.mark.asyncio
 async def test_runtime_persists_standby_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
