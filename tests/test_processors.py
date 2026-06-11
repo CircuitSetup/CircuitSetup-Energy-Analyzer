@@ -9,6 +9,7 @@ from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
     ActivityAlertSettings,
 )
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+from custom_components.circuitsetup_energy_analyzer.billing import BillingCycleSettings
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -531,3 +532,78 @@ def test_activity_alert_processor_returns_left_on_alert() -> None:
     assert policy.observations[0].observed_value == 45.0
     assert policy.observations[0].baseline_value == 30.0
     assert "Dryer has been active for 45 minutes" in result.alerts[0].message
+
+
+def test_billing_cycle_processor_updates_state_and_returns_budget_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.billing import (
+        BillingCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        billing_by_circuit={
+            "fridge": {
+                "cycle_start": "2026-06-01",
+                "cycle_usage_kwh": 0.0,
+                "last_energy_kwh": 100.0,
+                "last_sample_at": "2026-06-10T12:00:00+00:00",
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = BillingCycleProcessor(
+        settings_for_config=lambda _config, _circuit_id: BillingCycleSettings(
+            cycle_start_day=1,
+            budget_kwh=20.0,
+            budget_alert_ratio=1.0,
+            min_elapsed_days=3,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(110.0), config, context)
+
+    assert result.store_dirty is True
+    assert len(result.state_updates) == 5
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "billing_cycle_budget"
+    assert policy.observations[0].observed_value == 27.273
+    assert policy.observations[0].baseline_value == 20.0
+    assert "Kitchen Fridge is projected to use 27.273 kWh" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("billing_cycle_usage_kwh_by_circuit", "fridge")] == 10.0
+    assert updates[("billing_cycle_forecast_kwh_by_circuit", "fridge")] == 27.273
+    assert updates[("billing_cycle_budget_usage_by_circuit", "fridge")] == 50.0
+    assert updates[("billing_cycle_status_by_circuit", "fridge")] == (
+        "projected_over_budget"
+    )
+    evidence = updates[("billing_cycle_evidence_by_circuit", "fridge")]
+    assert evidence["cycle_start"] == "2026-06-01"
+    assert evidence["cycle_end"] == "2026-07-01"
+    assert evidence["cycle_usage_kwh"] == 10.0
+    assert evidence["projected_cycle_kwh"] == 27.273
+    assert evidence["projected_budget_usage_percent"] == 136.4
+    assert evidence["status"] == "projected_over_budget"
+    assert store_data.billing_by_circuit["fridge"]["last_energy_kwh"] == 110.0

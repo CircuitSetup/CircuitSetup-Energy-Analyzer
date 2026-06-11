@@ -24,9 +24,7 @@ from .balance import (
 )
 from .baseline import build_baseline
 from .billing import (
-    BillingCycleBudgetEvidence,
     BillingCycleSettings,
-    record_billing_cycle_usage,
 )
 from .capacity import (
     DEFAULT_CAPACITY_WARNING_RATIO,
@@ -134,6 +132,7 @@ from .power_quality import (
 )
 from .processors import (
     ActivityAlertProcessor,
+    BillingCycleProcessor,
     CircuitEventProcessor,
     EnergyGoalProcessor,
     EnergyUsageProcessor,
@@ -688,6 +687,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             settings_for_config=self._activity_alert_settings_for_config,
             alert_policy_for_circuit=self._activity_alert_policy_for_circuit,
         )
+        self._billing_cycle_processor = BillingCycleProcessor(
+            settings_for_config=self._billing_cycle_settings_for_config,
+            alert_policy_for_circuit=self._billing_alert_policy_for_circuit,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -984,12 +987,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, activity_alerts = await self._apply_feature_result(activity_result)
             alerts.extend(activity_alerts)
 
-            billing_alert = self._observe_billing_cycle(config, sample, now)
-            if billing_alert is not None:
-                alerts.append(billing_alert)
-                self.store_data.alerts.append(billing_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(billing_alert)
+            billing_result = self._billing_cycle_processor.process(
+                sample,
+                config,
+                context,
+            )
+            _, billing_alerts = await self._apply_feature_result(billing_result)
+            alerts.extend(billing_alerts)
 
             self._observe_cost(config, sample, now)
 
@@ -5141,65 +5145,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_billing_cycle(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        settings = self._billing_cycle_settings_for_config(
-            config,
-            config.circuit_id,
-        )
-        result = record_billing_cycle_usage(
-            self.store_data.billing_by_circuit.setdefault(config.circuit_id, {}),
-            circuit_id=config.circuit_id,
-            timestamp=now,
-            energy_kwh=sample.energy,
-            settings=settings,
-        )
-        if result is None:
-            return None
-
-        self._mark_store_dirty()
-        self.state.billing_cycle_usage_kwh_by_circuit[config.circuit_id] = (
-            result.cycle_usage_kwh
-        )
-        self.state.billing_cycle_forecast_kwh_by_circuit[config.circuit_id] = (
-            result.projected_cycle_kwh
-        )
-        self.state.billing_cycle_budget_usage_by_circuit[config.circuit_id] = (
-            result.budget_usage_percent
-        )
-        self.state.billing_cycle_status_by_circuit[config.circuit_id] = result.status
-        self.state.billing_cycle_evidence_by_circuit[config.circuit_id] = (
-            _billing_cycle_evidence_payload(result)
-        )
-
-        if result.budget_exceeded is None:
-            return None
-
-        evidence = result.budget_exceeded
-        policy = self._billing_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            evidence.projected_cycle_kwh / evidence.budget_kwh
-            if evidence.budget_kwh > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="billing_cycle_budget",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=evidence.projected_cycle_kwh,
-                baseline_value=evidence.budget_kwh,
-                message=_billing_cycle_budget_message(config, evidence),
-                features=evidence.features,
-            )
-        )
-
     def _observe_cost(
         self: Self,
         config: CircuitConfig,
@@ -6003,36 +5948,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _billing_cycle_budget_message(
-    config: CircuitConfig,
-    evidence: BillingCycleBudgetEvidence,
-) -> str:
-    return (
-        f"Possible issue: {config.name} is projected to use "
-        f"{_format_kwh(evidence.projected_cycle_kwh)} kWh in the "
-        f"{evidence.cycle_start} to {evidence.cycle_end} billing cycle, above "
-        f"the configured {_format_kwh(evidence.budget_kwh)} kWh "
-        f"billing-cycle budget."
-    )
-
-
-def _billing_cycle_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "cycle_start": result.cycle_start,
-        "cycle_end": result.cycle_end,
-        "cycle_start_day": result.cycle_start_day,
-        "cycle_usage_kwh": result.cycle_usage_kwh,
-        "projected_cycle_kwh": result.projected_cycle_kwh,
-        "elapsed_days": result.elapsed_days,
-        "cycle_days": result.cycle_days,
-        "budget_kwh": result.budget_kwh,
-        "budget_alert_ratio": result.budget_alert_ratio,
-        "budget_usage_percent": result.budget_usage_percent,
-        "projected_budget_usage_percent": result.projected_budget_usage_percent,
-        "status": result.status,
-    }
 
 
 def _cost_evidence_payload(result: Any) -> dict[str, Any]:
