@@ -34,6 +34,7 @@ from custom_components.circuitsetup_energy_analyzer.phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
+from custom_components.circuitsetup_energy_analyzer.standby import StandbySettings
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
 
@@ -1253,4 +1254,148 @@ def test_metric_consistency_processor_updates_state_from_store_settings() -> Non
         "reported_power_factor": 0.8,
         "power_factor_difference": 0.0,
         "power_factor_tolerance": 0.1,
+    }
+
+
+def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        standby_by_circuit={
+            "office": {
+                "samples": [
+                    {
+                        "timestamp": (now - timedelta(hours=offset + 1)).isoformat(),
+                        "real_power_w": 45.0,
+                    }
+                    for offset in range(6)
+                ]
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="office",
+        name="Office",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.StandbyProcessor(
+        settings_for_config=lambda _config, _circuit_id: StandbySettings(
+            standby_threshold_w=8.0,
+            always_on_alert_w=25.0,
+            min_samples=6,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        seed_demo_history=lambda _config, _sample, _context, _settings: None,
+    )
+
+    result = processor.process(_sample(0, 46.0), config, context)
+
+    assert result.store_dirty is True
+    assert len(result.state_updates) == 5
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "always_on_power"
+    assert policy.observations[0].observed_value == 45.0
+    assert policy.observations[0].baseline_value == 25.0
+    assert "Office Always On is 45 W" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("always_on_power_w_by_circuit", "office")] == 45.0
+    assert updates[("standby_threshold_w_by_circuit", "office")] == 8.0
+    assert updates[("standby_status_by_circuit", "office")] == "on"
+    assert updates[("always_on_limit_usage_by_circuit", "office")] == 180.0
+    assert updates[("standby_evidence_by_circuit", "office")] == {
+        "always_on_power_w": 45.0,
+        "current_power_w": 46.0,
+        "standby_threshold_w": 8.0,
+        "sample_count": 7,
+        "window_hours": 48,
+        "always_on_alert_w": 25.0,
+        "always_on_limit_usage_percent": 180.0,
+        "status": "on",
+    }
+
+
+def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="office",
+        name="Office",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    seeded: list[str] = []
+
+    def seed_demo_history(
+        seeded_config: CircuitConfig,
+        _sample: CircuitSample,
+        seeded_context: ProcessingContext,
+        settings: StandbySettings,
+    ) -> None:
+        seeded.append(seeded_config.circuit_id)
+        assert seeded_context is context
+        assert settings.min_samples == 3
+
+    processor = processors.StandbyProcessor(
+        settings_for_config=lambda _config, _circuit_id: StandbySettings(
+            min_samples=3,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        seed_demo_history=seed_demo_history,
+    )
+
+    result = processor.process(_sample(0, 4.0), config, context)
+
+    assert seeded == ["office"]
+    assert result.store_dirty is False
+    assert result.alerts == []
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("always_on_power_w_by_circuit", "office")] == 0.0
+    assert updates[("standby_status_by_circuit", "office")] == "learning"
+    assert updates[("standby_evidence_by_circuit", "office")] == {
+        "always_on_power_w": 0.0,
+        "current_power_w": 4.0,
+        "standby_threshold_w": 8.0,
+        "sample_count": 1,
+        "window_hours": 48,
+        "always_on_alert_w": None,
+        "always_on_limit_usage_percent": 0.0,
+        "status": "learning",
     }
