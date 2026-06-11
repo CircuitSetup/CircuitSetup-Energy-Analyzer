@@ -63,6 +63,31 @@ def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> N
     ) == ["old-circuit"]
 
 
+def test_circuit_device_info_uses_only_device_registry_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        CircuitAnalyzerEntity,
+        CircuitInfo,
+    )
+
+    entity = CircuitAnalyzerEntity(
+        SimpleNamespace(data=AnalyzerState()),
+        entry_id="entry-1",
+        circuit=CircuitInfo(
+            circuit_id="fridge",
+            name="Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR.value,
+        ),
+        key="health_summary",
+        name_suffix="Health Summary",
+    )
+
+    assert entity.device_info == {
+        "identifiers": {(DOMAIN, "entry-1_fridge")},
+        "name": "Fridge",
+        "manufacturer": "CircuitSetup",
+    }
+
+
 def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> (
     None
 ):
