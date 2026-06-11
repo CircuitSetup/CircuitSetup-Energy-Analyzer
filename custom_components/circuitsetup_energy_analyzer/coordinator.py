@@ -10,7 +10,7 @@ from statistics import median
 from typing import Any, Self
 
 from . import notifications, repairs
-from .activity_alerts import ActivityAlertSettings, evaluate_activity_alert
+from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
     build_recent_activity_timeline,
     timeline_payload,
@@ -133,6 +133,7 @@ from .power_quality import (
     select_power_quality_evidence,
 )
 from .processors import (
+    ActivityAlertProcessor,
     CircuitEventProcessor,
     EnergyGoalProcessor,
     EnergyUsageProcessor,
@@ -683,6 +684,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert_policy_for_circuit=self._cycle_alert_policy_for_circuit,
             learning_mature=self._learning_mature,
         )
+        self._activity_alert_processor = ActivityAlertProcessor(
+            settings_for_config=self._activity_alert_settings_for_config,
+            alert_policy_for_circuit=self._activity_alert_policy_for_circuit,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -971,12 +976,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, cycle_alerts = await self._apply_feature_result(cycle_result)
             alerts.extend(cycle_alerts)
 
-            activity_alert = self._observe_activity_alert(config, now)
-            if activity_alert is not None:
-                alerts.append(activity_alert)
-                self.store_data.alerts.append(activity_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(activity_alert)
+            activity_result = self._activity_alert_processor.process(
+                sample,
+                config,
+                context,
+            )
+            _, activity_alerts = await self._apply_feature_result(activity_result)
+            alerts.extend(activity_alerts)
 
             billing_alert = self._observe_billing_cycle(config, sample, now)
             if billing_alert is not None:
@@ -5106,43 +5112,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 feature=evidence.feature,
                 score=evidence.score,
                 baseline_confidence=evidence.baseline_confidence,
-                observed_at=now,
-                observed_value=evidence.observed_value,
-                baseline_value=evidence.baseline_value,
-                message=evidence.message,
-                features=evidence.features,
-            )
-        )
-
-    def _observe_activity_alert(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        summary = summarize_circuit_cycles(
-            self.store_data.events,
-            circuit_id=config.circuit_id,
-            now=now,
-        )
-        evidence = evaluate_activity_alert(
-            circuit_id=config.circuit_id,
-            circuit_name=config.name,
-            summary=summary,
-            settings=self._activity_alert_settings_for_config(
-                config,
-                config.circuit_id,
-            ),
-        )
-        if evidence is None:
-            return None
-
-        policy = self._activity_alert_policy_for_circuit(config.circuit_id)
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature=evidence.feature,
-                score=evidence.score,
-                baseline_confidence=1.0,
                 observed_at=now,
                 observed_value=evidence.observed_value,
                 baseline_value=evidence.baseline_value,

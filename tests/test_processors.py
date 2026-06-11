@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
+    ActivityAlertSettings,
+)
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
@@ -474,3 +477,57 @@ def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> N
     baseline = store_data.baselines["fridge:run_cycle_duration_s"]
     assert baseline.feature == RUN_CYCLE_DURATION_FEATURE
     assert baseline.median == 1200.0
+
+
+def test_activity_alert_processor_returns_left_on_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=45),
+                circuit_id="dryer",
+                event_type=EventType.START,
+            )
+        ]
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.store_dirty is False
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "activity_left_on"
+    assert policy.observations[0].observed_value == 45.0
+    assert policy.observations[0].baseline_value == 30.0
+    assert "Dryer has been active for 45 minutes" in result.alerts[0].message
