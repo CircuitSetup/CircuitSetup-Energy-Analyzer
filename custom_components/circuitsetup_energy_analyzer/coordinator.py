@@ -19,8 +19,6 @@ from .aggregation import aggregate_dual_phase
 from .alerting import ConservativeAlertPolicy, Observation
 from .balance import (
     DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
-    BalanceInput,
-    calculate_balance,
 )
 from .billing import (
     BillingCycleSettings,
@@ -125,6 +123,7 @@ from .processors import (
     EnergyUsageProcessor,
     FeatureResult,
     LegImbalanceProcessor,
+    MainsBalanceProcessor,
     MetricConsistencyProcessor,
     PowerQualityProcessor,
     ProcessingContext,
@@ -744,6 +743,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             load_energy_entity_ids_for_sum=self._load_energy_entity_ids_for_sum,
         )
+        self._mains_balance_processor = MainsBalanceProcessor(
+            settings_for_circuit=lambda circuit_id: (
+                self.store_data.balance_settings_by_circuit.get(circuit_id, {})
+            ),
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1102,7 +1106,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
-        self._refresh_balance_state(samples)
+        self._refresh_balance_state(samples, now)
         self._refresh_solar_flow_state(samples)
         alerts.extend(await self._observe_utility_comparisons(now))
 
@@ -4172,57 +4176,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _refresh_balance_state(
         self: Self,
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
+        now: datetime,
     ) -> None:
-        mains_items = [
-            (config, sample)
-            for config, sample in samples
-            if config.mode is CircuitMode.MAINS_NILM
-            or config.appliance_profile is ApplianceProfile.MAINS_NILM
-        ]
-        if not mains_items:
-            return
-
-        monitored = [
-            BalanceInput(
-                circuit_id=config.circuit_id,
-                real_power_w=sample.real_power,
-                generation=config.power_flow is PowerFlowMode.GENERATION
-                or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER,
-            )
-            for config, sample in samples
-            if config not in {item[0] for item in mains_items}
-        ]
-        for config, sample in mains_items:
-            settings = self.store_data.balance_settings_by_circuit.get(
-                config.circuit_id,
-                {},
-            )
-            result = calculate_balance(
-                mains=BalanceInput(
-                    circuit_id=config.circuit_id,
-                    real_power_w=sample.real_power,
-                ),
-                monitored=monitored,
-                negative_tolerance_w=_nonnegative_float_value(
-                    settings.get("negative_tolerance_w"),
-                    default=DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
-                ),
-            )
-            circuit_id = config.circuit_id
-            self.state.balance_power_w_by_circuit[circuit_id] = (
-                result.balance_power_w
-            )
-            self.state.monitored_power_w_by_circuit[circuit_id] = (
-                result.monitored_power_w
-            )
-            self.state.monitored_coverage_percent_by_circuit[circuit_id] = (
-                result.monitored_coverage_percent
-            )
-            self.state.balance_status_by_circuit[circuit_id] = result.status
-            self.state.balance_evidence_by_circuit[circuit_id] = {
-                **result.features,
-                "status": result.status,
-            }
+        result = self._mains_balance_processor.process(
+            samples,
+            self._build_processing_context(now),
+        )
+        for update in result.state_updates:
+            _apply_state_update(self.state, update.path, update.value)
 
     def _refresh_solar_flow_state(
         self: Self,

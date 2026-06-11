@@ -9,6 +9,9 @@ from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
     ActivityAlertSettings,
 )
 from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+from custom_components.circuitsetup_energy_analyzer.balance import (
+    DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+)
 from custom_components.circuitsetup_energy_analyzer.billing import BillingCycleSettings
 from custom_components.circuitsetup_energy_analyzer.capacity import CapacitySettings
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
@@ -24,6 +27,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitMode,
     CircuitSample,
     EventType,
+    PowerFlowMode,
     SensorRef,
     SensorRole,
     Severity,
@@ -1080,6 +1084,107 @@ def test_leg_imbalance_processor_updates_state_and_returns_alert() -> None:
         "right_voltage_v": 119.0,
         "voltage_difference_v": 2.0,
         "dominant_leg": "a",
+    }
+
+
+def test_mains_balance_processor_updates_state_for_mains_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        balance_settings_by_circuit={
+            "mains": {"negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W},
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    hvac = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor = processors.MainsBalanceProcessor(
+        settings_for_circuit=lambda circuit_id: (
+            store_data.balance_settings_by_circuit.get(circuit_id, {})
+        ),
+    )
+
+    result = processor.process(
+        [
+            (mains, sample("mains", 5000.0)),
+            (hvac, sample("hvac", 2400.0)),
+            (fridge, sample("fridge", 300.0)),
+            (solar, sample("solar", -1800.0)),
+        ],
+        context,
+    )
+
+    assert result.alerts == []
+    assert result.notifications == []
+    assert result.store_dirty is False
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("balance_power_w_by_circuit", "mains")] == 2300.0
+    assert updates[("monitored_power_w_by_circuit", "mains")] == 2700.0
+    assert updates[("monitored_coverage_percent_by_circuit", "mains")] == 54.0
+    assert updates[("balance_status_by_circuit", "mains")] == "tracking"
+    assert updates[("balance_evidence_by_circuit", "mains")] == {
+        "mains_power_w": 5000.0,
+        "monitored_power_w": 2700.0,
+        "balance_power_w": 2300.0,
+        "monitored_coverage_percent": 54.0,
+        "monitored_circuit_count": 2.0,
+        "status": "tracking",
     }
 
 
