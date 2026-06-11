@@ -1049,6 +1049,8 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "- Health Summary:" not in readme_text
     assert "Known Load Share" in readme_text
     assert "how much of current mains power is explained" in readme_text
+    assert "Advanced diagnostic, disabled by default." in readme_text
+    assert "Advanced diagnostic, hidden by default." not in readme_text
 
 
 def test_readme_explains_compatible_meter_support_and_links_product() -> None:

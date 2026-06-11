@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from .const import CONF_CIRCUITS, DOMAIN
@@ -21,6 +22,14 @@ except ModuleNotFoundError:
 
         def __init__(self, coordinator: Any) -> None:
             self.coordinator = coordinator
+
+
+class EntityTier(StrEnum):
+    """Default Home Assistant entity exposure tier."""
+
+    SUMMARY = "summary"
+    FEATURE = "feature"
+    DIAGNOSTIC = "diagnostic"
 
 
 @dataclass(frozen=True, slots=True)

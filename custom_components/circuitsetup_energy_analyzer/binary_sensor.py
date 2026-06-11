@@ -8,6 +8,7 @@ from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
     EntityCategory,
+    EntityTier,
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
@@ -154,6 +155,7 @@ class DiagnosticBinarySensorDescription:
     entity_category: Any | None = EntityCategory.DIAGNOSTIC
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
+    entity_tier: EntityTier = EntityTier.DIAGNOSTIC
     entity_picture: str | None = None
     force_update: bool = False
     has_entity_name: bool = False
@@ -178,18 +180,21 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         key="learning",
         name_suffix="Learning",
         value_fn=is_learning,
+        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="data_quality_problem",
         name_suffix="Data Quality Problem",
         value_fn=has_data_quality_problem,
+        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="maintenance",
         name_suffix="Maintenance",
         value_fn=is_maintenance_active,
+        entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
@@ -198,6 +203,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         value_fn=is_appliance_running,
         device_class="running",
         entity_category=None,
+        entity_tier=EntityTier.SUMMARY,
     ),
     DiagnosticBinarySensorDescription(
         key="water_flow_mismatch",
@@ -205,6 +211,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         value_fn=has_water_flow_mismatch,
         device_class="problem",
         entity_category=None,
+        entity_tier=EntityTier.FEATURE,
     ),
 )
 
@@ -233,6 +240,12 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
         )
         self._attr_device_class = description.device_class
         self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = (
+            description.entity_registry_enabled_default
+        )
+        self._attr_entity_registry_visible_default = (
+            description.entity_registry_visible_default
+        )
         self._attr_icon = description.icon or BINARY_SENSOR_ICONS.get(description.key)
 
     @property

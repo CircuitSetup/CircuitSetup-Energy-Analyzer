@@ -198,7 +198,7 @@ Choose the closest profile. The profile controls which checks are useful, which 
 
 ## Summary-First Diagnostics
 
-Most users should build dashboards from the summary entities first. Detailed diagnostic entities are still available, but many are hidden by default so dashboards stay readable.
+Most users should build dashboards from the summary entities first. Detailed diagnostic entities are still available, but advanced troubleshooting entities are disabled by default so Home Assistant does not record unnecessary state history unless you opt in.
 
 For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, the main entities follow this pattern:
 
@@ -758,7 +758,7 @@ sensor.refrigerator_daily_energy_usage
 binary_sensor.refrigerator_running
 ```
 
-Advanced diagnostic entities are often hidden by default. Enable them only when you want more detail or need them for automations.
+Advanced diagnostic entities are disabled by default. Enable them from the Home Assistant entity registry only when you want more detail or need them for automations.
 
 ## Sensor reference
 
@@ -788,16 +788,16 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values as evidence accumulates |
-| **Last Event** | `sensor.<circuit>_last_event` | Latest retained event type. | Advanced diagnostic, hidden by default. | `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, `unknown` |
-| **Readiness** | `sensor.<circuit>_readiness` | Machine-readable readiness state with attributes explaining blocked or learning checks. | Advanced diagnostic, hidden by default. | `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, `nilm_review` |
-| **Learning Progress** | `sensor.<circuit>_learning_progress` | Percent of baseline learning completed for the circuit. | Advanced diagnostic, hidden by default. | `0` to `100%` |
-| **Data Quality Checklist** | `sensor.<circuit>_data_quality_checklist` | Missing, stale, invalid, or mismatched source-data checklist. | Advanced diagnostic, hidden by default. | `ok`, `problem` |
-| **Energy Dashboard Status** | `sensor.<circuit>_energy_dashboard_status` | Whether the configured energy or power source has metadata that Home Assistant's Energy Dashboard can use. | Diagnostic. | `ready`, `needs_energy_source`, or metadata issue states |
-| **Alert Evidence** | `sensor.<circuit>_alert_evidence` | Feature behind the latest active alert evidence. | Advanced diagnostic, hidden by default. | Feature names such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`; blank when quiet |
-| **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, hidden by default. | `No recent activity`, `start`, `stop`, issue summary text |
-| **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, hidden by default. | Integer counts |
-| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Diagnostic. | `standard`, `high`, `low`, or another stored preset |
+| **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Advanced diagnostic, disabled by default. | `0.0` when quiet; higher values as evidence accumulates |
+| **Last Event** | `sensor.<circuit>_last_event` | Latest retained event type. | Advanced diagnostic, disabled by default. | `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, `unknown` |
+| **Readiness** | `sensor.<circuit>_readiness` | Machine-readable readiness state with attributes explaining blocked or learning checks. | Advanced diagnostic, disabled by default. | `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, `nilm_review` |
+| **Learning Progress** | `sensor.<circuit>_learning_progress` | Percent of baseline learning completed for the circuit. | Advanced diagnostic, disabled by default. | `0` to `100%` |
+| **Data Quality Checklist** | `sensor.<circuit>_data_quality_checklist` | Missing, stale, invalid, or mismatched source-data checklist. | Advanced diagnostic, disabled by default. | `ok`, `problem` |
+| **Energy Dashboard Status** | `sensor.<circuit>_energy_dashboard_status` | Whether the configured energy or power source has metadata that Home Assistant's Energy Dashboard can use. | Advanced diagnostic, disabled by default. | `ready`, `needs_energy_source`, or metadata issue states |
+| **Alert Evidence** | `sensor.<circuit>_alert_evidence` | Feature behind the latest active alert evidence. | Advanced diagnostic, disabled by default. | Feature names such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`; blank when quiet |
+| **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, disabled by default. | `No recent activity`, `start`, `stop`, issue summary text |
+| **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, disabled by default. | Integer counts |
+| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `standard`, `high`, `low`, or another stored preset |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Normal entity, hidden by default. | `0`, `1`, or higher counts |
 
 ### Appliance behavior and power-quality sensors
@@ -806,22 +806,22 @@ These are most useful for dedicated appliance circuits such as refrigerators, fr
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values when relationships drift |
-| **Power Quality Evidence** | `sensor.<circuit>_power_quality_evidence` | Text evidence for the latest power-quality observation. | Advanced diagnostic, hidden by default. | Blank text, baseline/learning text, or possible-issue evidence |
-| **Reactive Power Drift** | `sensor.<circuit>_reactive_power_drift` | Ratio-style drift in VAR behavior compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
-| **Apparent Power Drift** | `sensor.<circuit>_apparent_power_drift` | Ratio-style drift in VA behavior compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
-| **Power Factor Drift** | `sensor.<circuit>_power_factor_drift` | Ratio-style drift in power factor compared with the learned baseline. | Advanced diagnostic, hidden by default. | `0.0` or positive drift values |
+| **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Advanced diagnostic, disabled by default. | `0.0` when quiet; higher values when relationships drift |
+| **Power Quality Evidence** | `sensor.<circuit>_power_quality_evidence` | Text evidence for the latest power-quality observation. | Advanced diagnostic, disabled by default. | Blank text, baseline/learning text, or possible-issue evidence |
+| **Reactive Power Drift** | `sensor.<circuit>_reactive_power_drift` | Ratio-style drift in VAR behavior compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
+| **Apparent Power Drift** | `sensor.<circuit>_apparent_power_drift` | Ratio-style drift in VA behavior compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
+| **Power Factor Drift** | `sensor.<circuit>_power_factor_drift` | Ratio-style drift in power factor compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
 | **Run Cycle Count** | `sensor.<circuit>_run_cycle_count` | Today's retained start count for cyclic appliances. | Normal entity for appliance circuits. | Integer cycle counts |
 | **Run Cycle Runtime** | `sensor.<circuit>_run_cycle_runtime` | Today's total active runtime from retained start/stop evidence. | Normal entity for appliance circuits. | Seconds |
 | **Run Cycle Duty Cycle** | `sensor.<circuit>_run_cycle_duty_cycle` | Percent of today spent active. | Normal entity for appliance circuits. | `0` to `100%` |
-| **Run Cycle Status** | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and the Running binary sensor. | Advanced diagnostic, hidden by default. | `running`, `idle`, `no_activity` |
+| **Run Cycle Status** | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and the Running binary sensor. | Advanced diagnostic, disabled by default. | `running`, `idle`, `no_activity` |
 | **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Visible for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
 | **Outdoor Temperature** | `sensor.<circuit>_outdoor_temperature` | Graphable outdoor temperature value used by HVAC weather context. | Visible for HVAC-like circuits when outdoor temperature context is configured. | Numeric temperature in `°F` or `°C` |
 | **Rain Pump Correlation** | `sensor.<circuit>_rain_pump_correlation` | Pump runtime compared with rain, optional rain intensity, HVAC compressor context, and learned dry-weather runtime. Attributes include rain source, rain activity, compressor context, observed runtime, dry baseline, and explanation. | Visible for sump pump, water pump, and well pump circuits when a rain source is configured. | `Unconfigured`, `Learning`, `Normal`, `Rain Explained`, `Compressor Explained`, `Weather Explained`, `Possible Excess Pump Activity`, `Possible Missing Pump Activity` |
 | **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
 | **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | Minutes |
-| **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, hidden by default. | Percentage mismatch |
-| **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, hidden by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
+| **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, disabled by default. | Percentage mismatch |
+| **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, disabled by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
 
 ### Energy usage, goals, billing, and cost sensors
 
@@ -855,12 +855,12 @@ Capacity sensors require either current sensors or real power plus voltage, and 
 | **Peak Demand** | `sensor.<circuit>_peak_demand` | Highest rolling demand observed today. | Normal entity when demand tracking exists. | Watts |
 | **Demand Limit Usage** | `sensor.<circuit>_demand_limit_usage` | Current demand as a percent of a configured demand limit. | Normal entity when a limit is configured. | Percentage values |
 | **Demand Peak Rank** | `sensor.<circuit>_demand_peak_rank` | Rank of the current rolling demand among retained monthly peak windows. | Normal entity when demand tracking exists. | `0` when unavailable; integer ranks such as `1`, `2`, `3` |
-| **Demand Peak Status** | `sensor.<circuit>_demand_peak_status` | Whether current demand is notable for the month. | Advanced diagnostic, hidden by default. | `unavailable`, `below_monthly_peak`, `near_monthly_peak`, `monthly_peak` |
-| **Demand Status** | `sensor.<circuit>_demand_status` | Demand tracker state. | Advanced diagnostic, hidden by default. | `unconfigured`, `tracking`, over-limit evidence states |
+| **Demand Peak Status** | `sensor.<circuit>_demand_peak_status` | Whether current demand is notable for the month. | Advanced diagnostic, disabled by default. | `unavailable`, `below_monthly_peak`, `near_monthly_peak`, `monthly_peak` |
+| **Demand Status** | `sensor.<circuit>_demand_status` | Demand tracker state. | Advanced diagnostic, disabled by default. | `unconfigured`, `tracking`, over-limit evidence states |
 | **Circuit Capacity Usage** | `sensor.<circuit>_capacity_usage` | Current amps as a percent of configured circuit capacity. | Normal entity when capacity is configured. | Percentage values |
-| **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Advanced diagnostic, hidden by default. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
+| **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Advanced diagnostic, disabled by default. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
 | **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Normal entity for dual-phase circuits. | Percentage imbalance |
-| **Leg Imbalance Status** | `sensor.<circuit>_leg_imbalance_status` | Split-phase balance state. | Advanced diagnostic, hidden by default. | `not_dual_phase`, `missing_leg_power`, `idle`, `tracking`, `imbalanced` |
+| **Leg Imbalance Status** | `sensor.<circuit>_leg_imbalance_status` | Split-phase balance state. | Advanced diagnostic, disabled by default. | `not_dual_phase`, `missing_leg_power`, `idle`, `tracking`, `imbalanced` |
 
 ### Mains NILM, balance, solar, and utility comparison sensors
 
@@ -870,11 +870,11 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 |---|---|---|---|---|
 | **NILM Discovered Signatures** | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Normal entity for Mains NILM circuits. | Integer counts |
 | **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes can include likely type, voltage class, dominant leg, W/VAR/VA/PF, confidence, first/last seen, running state, runtime, kWh estimates, and ambiguity evidence. | Normal entity for Mains NILM circuits. | `0`, `1`, or higher counts |
-| **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, hidden by default. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
+| **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, disabled by default. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
 | **Balance Power** | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. Positive values usually mean unmonitored load; strongly negative values can suggest mapping or sign issues. | Normal entity for mains circuits. | Watts |
 | **Monitored Power** | `sensor.<circuit>_monitored_power` | Sum of directly monitored non-generation load circuits. | Normal entity for mains circuits. | Watts |
 | **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Normal entity for mains circuits. | Percentage values |
-| **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, hidden by default. | `missing_mains`, `tracking`, `negative_balance` |
+| **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, disabled by default. | `missing_mains`, `tracking`, `negative_balance` |
 | **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Normal entity for solar/generation circuits. | Watts |
 | **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Normal entity for solar/generation circuits. | Watts |
 | **Solar Grid Import Power** | `sensor.<circuit>_solar_grid_import_power` | Current grid import. | Normal entity for solar/generation circuits. | Watts |
@@ -908,9 +908,9 @@ Diagnostic binary sensors are created for configured circuits. Operational binar
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Advanced diagnostic, hidden by default. | `on`, `off` |
-| **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, hidden by default. | `on`, `off` |
-| **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, hidden by default. | `on`, `off` |
+| **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Advanced diagnostic, disabled by default. | `on`, `off` |
+| **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, disabled by default. | `on`, `off` |
+| **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, disabled by default. | `on`, `off` |
 | **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Default visible for appliance circuits. | `on`, `off` |
 | **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Default visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `on`, `off` |
 

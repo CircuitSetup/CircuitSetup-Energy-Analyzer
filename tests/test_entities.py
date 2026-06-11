@@ -1154,6 +1154,7 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
 
 
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
     )
@@ -1164,6 +1165,7 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
         "entity_registry_enabled_default",
         "entity_registry_visible_default",
         "entity_picture",
+        "entity_tier",
         "force_update",
         "has_entity_name",
         "icon",
@@ -1184,14 +1186,20 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        assert description.entity_registry_enabled_default is True
+        if description.entity_tier is EntityTier.DIAGNOSTIC:
+            assert description.entity_registry_enabled_default is False
+        else:
+            assert description.entity_registry_enabled_default is True
         assert description.last_reset is None
         assert description.options is None
         assert description.unit_of_measurement is None
 
 
 def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
-    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        EntityCategory,
+        EntityTier,
+    )
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
         CircuitAnalyzerSensor,
@@ -1220,7 +1228,12 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         for description in SENSOR_DESCRIPTIONS
         if description.entity_registry_enabled_default is True
     }
-    assert enabled_by_default == set(descriptions)
+    diagnostic_keys = {
+        description.key
+        for description in SENSOR_DESCRIPTIONS
+        if description.entity_tier is EntityTier.DIAGNOSTIC
+    }
+    assert enabled_by_default == set(descriptions) - diagnostic_keys
 
     normal_entity_keys = {
         "health_summary",
@@ -1241,17 +1254,13 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "run_cycle_count",
         "run_cycle_runtime",
         "run_cycle_duty_cycle",
-        "run_cycle_status",
         "current_demand",
         "peak_demand",
         "demand_limit_usage",
-        "demand_status",
         "capacity_usage",
-        "capacity_status",
         "balance_power",
         "monitored_power",
         "monitored_coverage",
-        "balance_status",
         "solar_generation_power",
         "solar_site_consumption_power",
         "solar_grid_import_power",
@@ -1285,6 +1294,32 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
     assert descriptions["settings_suggestions"].entity_registry_enabled_default is True
     assert descriptions["settings_suggestions"].entity_registry_visible_default is False
+    assert descriptions["health_summary"].entity_tier is EntityTier.SUMMARY
+    assert descriptions["daily_energy_usage"].entity_tier is EntityTier.SUMMARY
+    assert descriptions["energy_goal_status"].entity_tier is EntityTier.FEATURE
+    assert descriptions["power_quality_score"].entity_tier is EntityTier.DIAGNOSTIC
+    assert descriptions["power_quality_score"].entity_registry_enabled_default is False
+    assert descriptions["metric_consistency_status"].entity_tier is (
+        EntityTier.DIAGNOSTIC
+    )
+    assert (
+        descriptions["metric_consistency_status"].entity_registry_enabled_default
+        is False
+    )
+    for diagnostic_status_key in {
+        "run_cycle_status",
+        "demand_status",
+        "capacity_status",
+        "leg_imbalance_status",
+        "balance_status",
+    }:
+        assert descriptions[diagnostic_status_key].entity_tier is (
+            EntityTier.DIAGNOSTIC
+        )
+        assert (
+            descriptions[diagnostic_status_key].entity_registry_enabled_default
+            is False
+        )
 
     for key in descriptions:
         expected_category = (
@@ -1311,7 +1346,9 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         description=descriptions["power_quality_evidence"],
     )
     assert normal_entity._attr_entity_category is None
+    assert normal_entity._attr_entity_registry_enabled_default is True
     assert diagnostic_entity._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert diagnostic_entity._attr_entity_registry_enabled_default is False
 
 
 def test_sensor_entities_use_purpose_specific_icons() -> None:
@@ -1721,6 +1758,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,
     )
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
 
     required_attrs = {
         "device_class",
@@ -1728,6 +1766,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
         "entity_registry_enabled_default",
         "entity_registry_visible_default",
         "entity_picture",
+        "entity_tier",
         "force_update",
         "has_entity_name",
         "icon",
@@ -1742,24 +1781,32 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        assert description.entity_registry_enabled_default is True
+        if description.entity_tier is EntityTier.DIAGNOSTIC:
+            assert description.entity_registry_enabled_default is False
+        else:
+            assert description.entity_registry_enabled_default is True
         assert description.unit_of_measurement is None
 
     descriptions = {
         description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
     }
     assert descriptions["learning"].entity_registry_visible_default is False
-    assert descriptions["learning"].entity_registry_enabled_default is True
+    assert descriptions["learning"].entity_registry_enabled_default is False
+    assert descriptions["learning"].entity_tier is EntityTier.DIAGNOSTIC
     assert (
         descriptions["data_quality_problem"].entity_registry_visible_default is False
     )
     assert (
-        descriptions["data_quality_problem"].entity_registry_enabled_default is True
+        descriptions["data_quality_problem"].entity_registry_enabled_default is False
     )
+    assert descriptions["data_quality_problem"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["maintenance"].entity_registry_visible_default is False
-    assert descriptions["maintenance"].entity_registry_enabled_default is True
+    assert descriptions["maintenance"].entity_registry_enabled_default is False
+    assert descriptions["maintenance"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["running"].entity_registry_visible_default is True
     assert descriptions["running"].entity_registry_enabled_default is True
+    assert descriptions["running"].entity_tier is EntityTier.SUMMARY
+    assert descriptions["water_flow_mismatch"].entity_tier is EntityTier.FEATURE
 
 
 def test_binary_sensor_entities_use_purpose_specific_icons() -> None:

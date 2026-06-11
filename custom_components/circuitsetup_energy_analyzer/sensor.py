@@ -17,6 +17,7 @@ from .entity import (
     CircuitAnalyzerEntity,
     CoordinatorEntity,
     EntityCategory,
+    EntityTier,
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
@@ -1277,6 +1278,7 @@ class DiagnosticSensorDescription:
     entity_category: Any | None = EntityCategory.DIAGNOSTIC
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
+    entity_tier: EntityTier = EntityTier.DIAGNOSTIC
     entity_picture: str | None = None
     force_update: bool = False
     has_entity_name: bool = False
@@ -1953,12 +1955,15 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
 )
 
-_VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
+_SUMMARY_SENSOR_KEYS = {
     "health_summary",
     "activity_summary",
     "electrical_health",
     "energy_summary",
     "daily_energy_usage",
+}
+_VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
+    *_SUMMARY_SENSOR_KEYS,
     "weather_context",
     "outdoor_temperature",
     "rain_pump_correlation",
@@ -1983,17 +1988,13 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "run_cycle_count",
     "run_cycle_runtime",
     "run_cycle_duty_cycle",
-    "run_cycle_status",
     "current_demand",
     "peak_demand",
     "demand_limit_usage",
-    "demand_status",
     "capacity_usage",
-    "capacity_status",
     "balance_power",
     "monitored_power",
     "monitored_coverage",
-    "balance_status",
     "solar_generation_power",
     "solar_site_consumption_power",
     "solar_grid_import_power",
@@ -2022,19 +2023,35 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "standby_status",
     "always_on_limit_usage",
 }
-SENSOR_DESCRIPTIONS = tuple(
-    replace(
+
+
+def _entity_tier_for_sensor_key(key: str) -> EntityTier:
+    if key in _SUMMARY_SENSOR_KEYS:
+        return EntityTier.SUMMARY
+    if key in _NORMAL_ENTITY_SENSOR_KEYS:
+        return EntityTier.FEATURE
+    return EntityTier.DIAGNOSTIC
+
+
+def _with_entity_defaults(
+    description: DiagnosticSensorDescription,
+) -> DiagnosticSensorDescription:
+    tier = _entity_tier_for_sensor_key(description.key)
+    return replace(
         description,
         entity_category=(
-            None
-            if description.key in _NORMAL_ENTITY_SENSOR_KEYS
-            else description.entity_category
+            None if tier is not EntityTier.DIAGNOSTIC else description.entity_category
         ),
+        entity_registry_enabled_default=tier is not EntityTier.DIAGNOSTIC,
         entity_registry_visible_default=(
             description.key in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
         ),
+        entity_tier=tier,
     )
-    for description in SENSOR_DESCRIPTIONS
+
+
+SENSOR_DESCRIPTIONS = tuple(
+    _with_entity_defaults(description) for description in SENSOR_DESCRIPTIONS
 )
 
 
@@ -3124,6 +3141,12 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         )
         self.entity_description = description
         self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = (
+            description.entity_registry_enabled_default
+        )
+        self._attr_entity_registry_visible_default = (
+            description.entity_registry_visible_default
+        )
         self._attr_icon = description.icon or SENSOR_ICONS.get(description.key)
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
