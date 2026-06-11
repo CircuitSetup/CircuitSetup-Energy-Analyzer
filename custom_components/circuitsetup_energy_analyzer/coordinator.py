@@ -29,7 +29,6 @@ from .billing import (
 from .capacity import (
     DEFAULT_CAPACITY_WARNING_RATIO,
     CapacitySettings,
-    evaluate_circuit_capacity,
 )
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -130,6 +129,7 @@ from .power_quality import (
 from .processors import (
     ActivityAlertProcessor,
     BillingCycleProcessor,
+    CapacityProcessor,
     CircuitEventProcessor,
     CostProcessor,
     DemandProcessor,
@@ -700,6 +700,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
         )
+        self._capacity_processor = CapacityProcessor(
+            settings_for_config=self._capacity_settings_for_config,
+            alert_policy_for_circuit=self._capacity_alert_policy_for_circuit,
+            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(circuit_id)
+            ].days,
+            source_states_for=self._source_states_for,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1011,12 +1019,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, demand_alerts = await self._apply_feature_result(demand_result)
             alerts.extend(demand_alerts)
 
-            capacity_alert = self._observe_capacity(config, sample, now)
-            if capacity_alert is not None:
-                alerts.append(capacity_alert)
-                self.store_data.alerts.append(capacity_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(capacity_alert)
+            capacity_result = self._capacity_processor.process(sample, config, context)
+            _, capacity_alerts = await self._apply_feature_result(capacity_result)
+            alerts.extend(capacity_alerts)
 
             leg_imbalance_alert = self._observe_leg_imbalance(config, sample, now)
             if leg_imbalance_alert is not None:
@@ -4580,46 +4585,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         return tuple(entity_ids)
 
-    def _capacity_current_a(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> float | None:
-        if config.mode is CircuitMode.DUAL_PHASE:
-            leg_currents = self._dual_phase_leg_currents(config, now)
-            if leg_currents:
-                return max(leg_currents)
-        current = getattr(sample, "current", None)
-        if current is None:
-            return None
-        if config.mode is CircuitMode.DUAL_PHASE and current > 0.0:
-            return float(current) / 2.0
-        return float(current)
-
-    def _dual_phase_leg_currents(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> tuple[float, ...]:
-        states = self._source_states_for(config, now)
-        currents: list[float] = []
-        for sensor in config.sensors:
-            if sensor.role is not SensorRole.CURRENT:
-                continue
-            if _normalized_leg(sensor.leg) is None:
-                continue
-            source = states.get(sensor.entity_id)
-            if source is None:
-                continue
-            try:
-                value = float(source.state)
-            except ValueError:
-                continue
-            if value > 0.0:
-                currents.append(value)
-        return tuple(currents)
-
     def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
         return normalize_sensitivity(
             self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
@@ -5150,89 +5115,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 overrides.get("max_idle_minutes"),
                 default=None,
             ),
-        )
-
-    def _record_capacity_current_sample(
-        self: Self,
-        circuit_id: str,
-        now: datetime,
-        current_amps: float | None,
-    ) -> bool:
-        if current_amps is None:
-            return False
-        try:
-            parsed = abs(float(current_amps))
-        except (TypeError, ValueError):
-            return False
-
-        history = self.store_data.demand_by_circuit.setdefault(circuit_id, {})
-        samples = [
-            sample
-            for sample in _coerce_timestamped_dicts(
-                history.get("capacity_current_samples"),
-            )
-            if _sample_timestamp_is_at_or_after(
-                sample,
-                now - RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)],
-            )
-        ]
-        samples.append(
-            {
-                "timestamp": now.isoformat(),
-                "current_amps": round(parsed, 2),
-            }
-        )
-        history["capacity_current_samples"] = samples
-        return True
-
-    def _observe_capacity(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        current_amps = self._capacity_current_a(config, sample, now)
-        result = evaluate_circuit_capacity(
-            circuit_id=config.circuit_id,
-            current_amps=current_amps,
-            real_power_w=_capacity_power_w(sample),
-            voltage_v=_capacity_voltage_v(config, sample),
-            settings=self._capacity_settings_for_config(config.circuit_id),
-        )
-        if self._record_capacity_current_sample(
-            config.circuit_id,
-            now,
-            current_amps,
-        ):
-            self._mark_store_dirty()
-        self.state.capacity_usage_by_circuit[config.circuit_id] = (
-            result.capacity_usage_percent
-        )
-        self.state.capacity_status_by_circuit[config.circuit_id] = result.status
-        self.state.capacity_evidence_by_circuit[config.circuit_id] = (
-            _capacity_evidence_payload(result)
-        )
-        if result.status != "over_limit":
-            return None
-
-        policy = self._capacity_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            result.current_amps / result.warning_threshold_amps
-            if result.warning_threshold_amps > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="circuit_capacity",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=result.current_amps,
-                baseline_value=result.warning_threshold_amps,
-                message=_capacity_limit_message(config, result),
-                features=result.features or {},
-            )
         )
 
     def _observe_leg_imbalance(
@@ -5841,29 +5723,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _capacity_limit_message(config: CircuitConfig, result: Any) -> str:
-    return (
-        f"Possible issue: {config.name} current is "
-        f"{_format_amps(result.current_amps)} A, which is "
-        f"{_format_percent(result.capacity_usage_percent)}% of the configured "
-        f"{_format_amps(result.breaker_amps)} A circuit capacity. This is above "
-        f"the configured {_format_percent(result.warning_ratio * 100)}% warning "
-        f"level ({_format_amps(result.warning_threshold_amps)} A)."
-    )
-
-
-def _capacity_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "status": result.status,
-        "current_amps": result.current_amps,
-        "breaker_amps": result.breaker_amps,
-        "warning_threshold_amps": result.warning_threshold_amps,
-        "capacity_usage_percent": result.capacity_usage_percent,
-        "warning_ratio": result.warning_ratio,
-        "current_source": result.current_source,
-    }
 
 
 def _leg_imbalance_message(
@@ -6499,21 +6358,6 @@ def _demand_power_w(sample: Any) -> float | None:
     if power_flow is PowerFlowMode.MAINS_NET:
         return max(float(power), 0.0)
     return max(float(power), 0.0)
-
-
-def _capacity_power_w(sample: Any) -> float | None:
-    power = getattr(sample, "real_power", None)
-    if power is None:
-        return None
-    return abs(float(power))
-
-
-def _capacity_voltage_v(config: CircuitConfig, sample: Any) -> float | None:
-    voltage = getattr(sample, "voltage", None)
-    if voltage is None:
-        return None
-    multiplier = 2.0 if config.mode is CircuitMode.DUAL_PHASE else 1.0
-    return abs(float(voltage)) * multiplier
 
 
 def _power_flow_direction(
