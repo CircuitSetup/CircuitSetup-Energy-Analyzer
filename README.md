@@ -114,6 +114,7 @@ During setup, you choose:
 Use the integration in this order:
 
 - **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Review Circuit Assignments**.
+- **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as adding a cumulative kWh source, fixing stale sensors, checking CT direction, or letting the analyzer learn.
 - **Classify circuits deliberately**: choose the appliance type, circuit mode, power-flow mode, and source sensors before trusting appliance evidence.
 - **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
@@ -203,6 +204,7 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 
 | Entity | Example | What it tells you |
 |---|---|---|
+| **Setup Health / Next Step** | `sensor.circuitsetup_energy_analyzer_setup_health` | The highest-priority setup action across the integration, with attributes for the reason, affected circuit, blocking issue count, and configuration path. |
 | **Health Summary** | `sensor.<circuit>_health_summary` | Whether the circuit is ready, learning, missing data, paused, or showing a possible issue. |
 | **Activity Summary** | `sensor.<circuit>_activity_summary` | What the appliance appears to be doing now: running, idle, standby, on, off, or no recent activity. |
 | **Electrical Health** | `sensor.<circuit>_electrical_health` | Combined electrical condition, including power-quality, metric-consistency, and leg-balance evidence when available. |
@@ -770,6 +772,7 @@ Start with these on dashboards.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, and learning readiness. Attributes include `blocking_issue_count`, `recommended_action`, `affected_circuit`, `open_path`, `reason`, and the full issue list. | Default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source` |
 | Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |

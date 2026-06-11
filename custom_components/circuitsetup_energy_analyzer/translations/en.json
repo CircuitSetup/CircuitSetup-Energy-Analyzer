@@ -425,6 +425,9 @@
   },
   "entity": {
     "sensor": {
+      "setup_health": {
+        "name": "Setup Health / Next Step"
+      },
       "anomaly_score": {
         "name": "Anomaly score"
       },

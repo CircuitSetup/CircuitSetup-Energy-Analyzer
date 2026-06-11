@@ -1037,6 +1037,8 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     )
     for row in (
         "| Health Summary | `sensor.<circuit>_health_summary` |",
+        "| Setup Health / Next Step | "
+        "`sensor.circuitsetup_energy_analyzer_setup_health` |",
         "| Energy | `sensor.<appliance>_energy` |",
         "| Active Power | `sensor.<appliance>_active_power` "
         "or `sensor.<appliance>_watts` |",

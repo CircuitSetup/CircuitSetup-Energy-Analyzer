@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
 from .const import (
+    CONF_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
@@ -13,6 +15,7 @@ from .const import (
 )
 from .entity import (
     CircuitAnalyzerEntity,
+    CoordinatorEntity,
     EntityCategory,
     circuit_info_from_config,
     circuits_for_entities,
@@ -64,6 +67,12 @@ except ModuleNotFoundError:
         """Fallback sensor state class constants."""
 
         MEASUREMENT = "measurement"
+
+
+SETUP_HEALTH_ENTITY_NAME = "CircuitSetup Energy Analyzer Setup Health"
+SETUP_HEALTH_ENTITY_KEY = "setup_health"
+SETUP_HEALTH_SUGGESTED_OBJECT_ID = "circuitsetup_energy_analyzer_setup_health"
+SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
 
 
 def anomaly_score_value(state: Any, circuit_id: str) -> float:
@@ -2647,6 +2656,454 @@ def _has_solar_flow_sources(coordinator: Any) -> bool:
     return False
 
 
+def setup_health_value(coordinator: Any) -> str:
+    """Return the highest-priority setup next step for the whole integration."""
+    return str(_setup_health_summary(coordinator)["state"])
+
+
+def setup_health_attributes(coordinator: Any) -> dict[str, Any]:
+    """Return actionable setup-health attributes for dashboards and automations."""
+    return dict(_setup_health_summary(coordinator)["attributes"])
+
+
+def _setup_health_summary(coordinator: Any) -> dict[str, Any]:
+    issues = _setup_health_issues(coordinator)
+    if issues:
+        primary = issues[0]
+        return {
+            "state": primary["state"],
+            "attributes": {
+                "blocking_issue_count": len(issues),
+                "recommended_action": primary["recommended_action"],
+                "affected_circuit": primary["affected_circuit"],
+                "affected_circuit_name": primary["affected_circuit_name"],
+                "open_path": primary["open_path"],
+                "reason": primary["reason"],
+                "issues": issues,
+            },
+        }
+
+    return {
+        "state": "Ready",
+        "attributes": {
+            "blocking_issue_count": 0,
+            "recommended_action": "No setup action needed",
+            "affected_circuit": None,
+            "affected_circuit_name": None,
+            "open_path": SETUP_HEALTH_OPEN_PATH,
+            "reason": (
+                "Configured circuits have enough setup data for their current checks."
+            ),
+            "issues": [],
+        },
+    }
+
+
+def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
+    state = getattr(coordinator, "data", None)
+    circuits = _setup_health_circuits(coordinator)
+    if not circuits:
+        return [
+            _setup_health_issue(
+                "Review circuit assignments",
+                "Review circuit assignments",
+                None,
+                "No circuit assignments are configured.",
+            )
+        ]
+
+    issues: list[dict[str, Any]] = []
+    for raw_circuit, circuit in circuits:
+        circuit_id = circuit.circuit_id
+        quality_issue = _setup_health_data_quality_issue(state, circuit)
+        if quality_issue is not None:
+            issues.append(quality_issue)
+
+        energy_status = _setup_health_status(
+            state,
+            "energy_dashboard_status_by_circuit",
+            circuit_id,
+        )
+        if energy_status in {"needs_energy_source", "power_ready"}:
+            issues.append(
+                _setup_health_issue(
+                    "Add cumulative kWh source",
+                    f"Add a cumulative kWh sensor to {circuit.name}",
+                    circuit,
+                    "Daily Energy Usage needs a cumulative energy source.",
+                )
+            )
+
+        energy_usage_status = _setup_health_status(
+            state,
+            "energy_usage_evidence_by_circuit",
+            circuit_id,
+        )
+        if energy_usage_status == "waiting_for_delta":
+            issues.append(
+                _setup_health_issue(
+                    "Let analyzer learn",
+                    f"Let analyzer learn {circuit.name} energy changes",
+                    circuit,
+                    (
+                        "A cumulative kWh source is present, but no increase has "
+                        "been observed yet."
+                    ),
+                )
+            )
+
+        readiness = readiness_value(state, circuit_id) if state is not None else "ready"
+        if readiness == "learning" or _setup_health_learning_in_progress(
+            state,
+            circuit_id,
+        ):
+            issues.append(
+                _setup_health_issue(
+                    "Let analyzer learn",
+                    f"Let analyzer learn {circuit.name}",
+                    circuit,
+                    "The analyzer is still collecting baseline evidence.",
+                )
+            )
+
+        if _setup_health_needs_capacity_settings(coordinator, raw_circuit):
+            issues.append(
+                _setup_health_issue(
+                    "Configure breaker amps",
+                    f"Configure breaker amps for {circuit.name}",
+                    circuit,
+                    "Capacity tracking needs the circuit breaker or capacity value.",
+                )
+            )
+
+        if _setup_health_needs_temperature_source(coordinator, raw_circuit):
+            issues.append(
+                _setup_health_issue(
+                    "Add outdoor temperature source",
+                    f"Add an outdoor temperature source for {circuit.name}",
+                    circuit,
+                    "HVAC weather context needs an outdoor temperature source.",
+                )
+            )
+
+        if _setup_health_status(
+            state,
+            "leg_imbalance_status_by_circuit",
+            circuit_id,
+        ) == "not_dual_phase":
+            issues.append(
+                _setup_health_issue(
+                    "Review circuit assignments",
+                    f"Review the circuit mode for {circuit.name}",
+                    circuit,
+                    (
+                        "A dual-phase check is running on a circuit that is not "
+                        "dual phase."
+                    ),
+                )
+            )
+
+        if _setup_health_status(
+            state,
+            "metric_consistency_status_by_circuit",
+            circuit_id,
+        ) == "missing_metrics":
+            issues.append(
+                _setup_health_issue(
+                    "Review circuit assignments",
+                    f"Add matching electrical metrics for {circuit.name}",
+                    circuit,
+                    (
+                        "Power Metric Consistency needs matching real power, apparent "
+                        "power, voltage, current, or power factor sensors."
+                    ),
+                )
+            )
+
+        if _setup_health_has_missing_mains_status(
+            state,
+            circuit_id,
+        ) and not _has_mains_source(coordinator):
+            issues.append(
+                _setup_health_issue(
+                    "Add mains source",
+                    "Add a mains or whole-home source",
+                    circuit,
+                    "Mains balance, NILM, or solar-flow checks need a mains source.",
+                )
+            )
+
+        if _setup_health_has_ct_direction_status(state, circuit_id):
+            issues.append(
+                _setup_health_issue(
+                    "Check CT direction",
+                    f"Check CT direction or power-flow mode for {circuit.name}",
+                    circuit,
+                    (
+                        "Signed power evidence suggests export, reversed CT "
+                        "orientation, or a mapping mismatch."
+                    ),
+                )
+            )
+
+    return _dedupe_setup_health_issues(issues)
+
+
+def _setup_health_circuits(coordinator: Any) -> tuple[tuple[Any, Any], ...]:
+    raw_circuits = tuple(getattr(coordinator, "circuit_configs", ()) or ())
+    if not raw_circuits:
+        entry_data = getattr(coordinator, "entry_data", {})
+        if isinstance(entry_data, Mapping):
+            raw_circuits = tuple(entry_data.get(CONF_CIRCUITS, ()) or ())
+
+    circuits: list[tuple[Any, Any]] = []
+    for raw_circuit in raw_circuits:
+        circuit = circuit_info_from_config(raw_circuit)
+        if circuit is not None:
+            circuits.append((raw_circuit, circuit))
+    return tuple(circuits)
+
+
+def _setup_health_issue(
+    state: str,
+    recommended_action: str,
+    circuit: Any | None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "recommended_action": recommended_action,
+        "affected_circuit": getattr(circuit, "circuit_id", None),
+        "affected_circuit_name": getattr(circuit, "name", None),
+        "open_path": SETUP_HEALTH_OPEN_PATH,
+        "reason": reason,
+    }
+
+
+def _setup_health_data_quality_issue(
+    state: Any,
+    circuit: Any,
+) -> dict[str, Any] | None:
+    checklist = _setup_health_mapping(
+        state,
+        "data_quality_checklist_by_circuit",
+        circuit.circuit_id,
+    )
+    data_quality = str(
+        getattr(state, "data_quality_by_circuit", {}).get(circuit.circuit_id, "")
+        if state is not None
+        else ""
+    )
+    quality_issues = [
+        str(issue)
+        for issue in (
+            checklist.get("quality_issues", []) if checklist is not None else []
+        )
+    ]
+    issue_text = " ".join([data_quality, *quality_issues]).lower()
+
+    if "negative_real_power_load" in issue_text:
+        return _setup_health_issue(
+            "Check CT direction",
+            f"Check CT direction or power-flow mode for {circuit.name}",
+            circuit,
+            (
+                "A load circuit is reporting sustained negative real power. "
+                "That can mean export or a reversed CT."
+            ),
+        )
+    if checklist is None:
+        return None
+    if checklist.get("source_data_fresh") is False or "stale" in issue_text:
+        return _setup_health_issue(
+            "Fix stale source sensor",
+            f"Fix stale source sensor data for {circuit.name}",
+            circuit,
+            "One or more selected source sensors have not updated recently.",
+        )
+    if (
+        checklist.get("required_sensors_present") is False
+        or "missing" in issue_text
+    ):
+        return _setup_health_issue(
+            "Review circuit assignments",
+            f"Review source sensors for {circuit.name}",
+            circuit,
+            "A configured circuit is missing a required source sensor.",
+        )
+    if (
+        checklist.get("numeric_states_valid") is False
+        or "non_numeric" in issue_text
+        or "unavailable" in issue_text
+    ):
+        return _setup_health_issue(
+            "Fix stale source sensor",
+            f"Fix unavailable or non-numeric source data for {circuit.name}",
+            circuit,
+            "One or more selected source sensors are unavailable or non-numeric.",
+        )
+    if quality_issues:
+        return _setup_health_issue(
+            "Review circuit assignments",
+            f"Review source data for {circuit.name}",
+            circuit,
+            "A configured circuit has source-data quality issues.",
+        )
+    return None
+
+
+def _setup_health_status(state: Any, field_name: str, circuit_id: str) -> str | None:
+    value = _setup_health_mapping_value(state, field_name, circuit_id)
+    if isinstance(value, Mapping):
+        status = value.get("status") or value.get("raw_status")
+        return str(status) if status else None
+    if value is None:
+        return None
+    return str(value)
+
+
+def _setup_health_mapping(
+    state: Any,
+    field_name: str,
+    circuit_id: str,
+) -> dict[str, Any] | None:
+    value = _setup_health_mapping_value(state, field_name, circuit_id)
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _setup_health_mapping_value(state: Any, field_name: str, circuit_id: str) -> Any:
+    mapping = getattr(state, field_name, {}) if state is not None else {}
+    if not isinstance(mapping, Mapping) or circuit_id not in mapping:
+        return None
+    return mapping.get(circuit_id)
+
+
+def _setup_health_learning_in_progress(state: Any, circuit_id: str) -> bool:
+    progress = _setup_health_mapping(state, "learning_progress_by_circuit", circuit_id)
+    return progress is not None and progress.get("alert_ready") is False
+
+
+def _setup_health_needs_capacity_settings(coordinator: Any, circuit: Any) -> bool:
+    roles = _sensor_roles(circuit)
+    profile = _appliance_profile(circuit)
+    mode = _circuit_mode(circuit)
+    has_capacity_input = SensorRole.CURRENT in roles or (
+        SensorRole.REAL_POWER in roles and SensorRole.VOLTAGE in roles
+    )
+    capacity_relevant = (
+        mode is CircuitMode.DUAL_PHASE or profile in _HIGH_POWER_PROFILES
+    )
+    return (
+        has_capacity_input
+        and capacity_relevant
+        and not _stored_settings(coordinator, "capacity_settings_by_circuit", circuit)
+    )
+
+
+def _setup_health_needs_temperature_source(coordinator: Any, circuit: Any) -> bool:
+    profile = _appliance_profile(circuit)
+    return profile in _WEATHER_CONTEXT_PROFILES and not _has_temperature_source(
+        coordinator,
+    )
+
+
+def _setup_health_has_missing_mains_status(state: Any, circuit_id: str) -> bool:
+    for field_name in (
+        "balance_status_by_circuit",
+        "solar_flow_status_by_circuit",
+        "solar_surplus_status_by_circuit",
+    ):
+        if _setup_health_status(state, field_name, circuit_id) == "missing_mains":
+            return True
+    return False
+
+
+def _setup_health_has_ct_direction_status(state: Any, circuit_id: str) -> bool:
+    for field_name in (
+        "balance_status_by_circuit",
+        "solar_flow_status_by_circuit",
+        "solar_surplus_status_by_circuit",
+    ):
+        if _setup_health_status(state, field_name, circuit_id) in {
+            "inconsistent_export",
+            "negative_balance",
+        }:
+            return True
+    return False
+
+
+def _has_mains_source(coordinator: Any) -> bool:
+    value = _coordinator_config_value(coordinator, CONF_MAINS_SOURCE_ENTITIES)
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set)):
+        return any(bool(str(item).strip()) for item in value)
+    return False
+
+
+def _dedupe_setup_health_issues(
+    issues: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+    for issue in issues:
+        key = (
+            issue.get("state"),
+            issue.get("affected_circuit"),
+            issue.get("reason"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(issue)
+    return deduped
+
+
+class SetupHealthSensor(CoordinatorEntity, SensorEntity):
+    """Top-level setup health and next-step sensor for the integration."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_entity_registry_visible_default = True
+    _attr_icon = "mdi:clipboard-check-outline"
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._attr_name = SETUP_HEALTH_ENTITY_NAME
+        self._attr_unique_id = f"{entry_id}_{SETUP_HEALTH_ENTITY_KEY}"
+        self._attr_suggested_object_id = SETUP_HEALTH_SUGGESTED_OBJECT_ID
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable suggested object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name."""
+        return self._attr_name
+
+    @property
+    def icon(self) -> str | None:
+        """Return the setup-health icon."""
+        return self._attr_icon
+
+    @property
+    def native_value(self) -> str:
+        """Return the current setup-health next step."""
+        return setup_health_value(self.coordinator)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return setup-health issue details."""
+        return setup_health_attributes(self.coordinator)
+
+
 class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     """Sensor exposing one analyzed value for a configured circuit."""
 
@@ -2894,7 +3351,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     """Set up diagnostic sensor entities for configured circuits."""
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
-    entities: list[SensorEntity] = []
+    entities: list[SensorEntity] = [
+        SetupHealthSensor(coordinator, entry_id=entry_id),
+    ]
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)

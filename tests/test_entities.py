@@ -344,6 +344,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         sensitivity_value,
         settings_suggestions_attributes,
         settings_suggestions_value,
+        setup_health_attributes,
+        setup_health_value,
         solar_flexible_load_coverage_value,
         solar_flexible_load_power_value,
         solar_flow_status_value,
@@ -777,6 +779,52 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         "recommendations": [],
     }
 
+    setup_coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            energy_dashboard_status_by_circuit={"fridge": "needs_energy_source"},
+            energy_dashboard_evidence_by_circuit={
+                "fridge": {"status": "needs_energy_source"}
+            },
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+    )
+    assert setup_health_value(setup_coordinator) == "Add cumulative kWh source"
+    assert setup_health_attributes(setup_coordinator) == {
+        "blocking_issue_count": 1,
+        "recommended_action": "Add a cumulative kWh sensor to Kitchen Fridge",
+        "affected_circuit": "fridge",
+        "affected_circuit_name": "Kitchen Fridge",
+        "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
+        "reason": "Daily Energy Usage needs a cumulative energy source.",
+        "issues": [
+            {
+                "state": "Add cumulative kWh source",
+                "recommended_action": (
+                    "Add a cumulative kWh sensor to Kitchen Fridge"
+                ),
+                "affected_circuit": "fridge",
+                "affected_circuit_name": "Kitchen Fridge",
+                "open_path": (
+                    "/config/integrations/integration/"
+                    "circuitsetup_energy_analyzer"
+                ),
+                "reason": "Daily Energy Usage needs a cumulative energy source.",
+            }
+        ],
+    }
+
+    ready_coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=())
+    assert setup_health_value(ready_coordinator) == "Review circuit assignments"
+    assert setup_health_attributes(ready_coordinator)["blocking_issue_count"] == 1
+
 
 def test_summary_sensors_answer_primary_user_questions() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
@@ -871,6 +919,100 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert energy_summary_attributes(power_only_state, "pump")[
         "summary_explanation"
     ] == "No cumulative kWh evidence is available for this circuit."
+
+
+def test_setup_health_prioritizes_actionable_next_steps() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    def coordinator_for(
+        circuit: CircuitConfig,
+        state: AnalyzerState | None = None,
+        *,
+        store_data: FeatureStoreData | None = None,
+        options: dict[str, object] | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            data=state or AnalyzerState(),
+            circuit_configs=(circuit,),
+            store_data=store_data,
+            options=options or {},
+        )
+
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    hvac = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.hvac_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.hvac_current", SensorRole.CURRENT),
+        ),
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+    stale = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power stale"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(stale) == "Fix stale source sensor"
+
+    negative_power = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": [
+                        "sensor.fridge_power negative_real_power_load"
+                    ],
+                    "required_sensors_present": True,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(negative_power) == "Check CT direction"
+
+    assert setup_health_value(coordinator_for(hvac)) == "Configure breaker amps"
+
+    weather_context = coordinator_for(
+        hvac,
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={"hvac": {"breaker_amps": 40.0}},
+        ),
+    )
+    assert setup_health_value(weather_context) == "Add outdoor temperature source"
+
+    missing_mains = coordinator_for(
+        mains,
+        AnalyzerState(balance_status_by_circuit={"mains": "missing_mains"}),
+    )
+    assert setup_health_value(missing_mains) == "Add mains source"
+    assert setup_health_attributes(missing_mains)["recommended_action"] == (
+        "Add a mains or whole-home source"
+    )
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -2118,7 +2260,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            energy_dashboard_status_by_circuit={"fridge": "needs_energy_source"},
+        ),
+        circuit_configs=(circuit,),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -2126,6 +2273,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_setup_health",
         "entry-1_fridge_anomaly_score",
         "entry-1_fridge_last_event",
         "entry-1_fridge_health_summary",
@@ -2147,11 +2295,19 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_energy_usage_share",
         "entry-1_fridge_energy_usage_status",
     ]
-    assert added_entities[0].device_info["identifiers"] == {
+    setup_health = added_entities[0]
+    assert setup_health.name == "CircuitSetup Energy Analyzer Setup Health"
+    assert setup_health.suggested_object_id == (
+        "circuitsetup_energy_analyzer_setup_health"
+    )
+    assert setup_health.native_value == "Add cumulative kWh source"
+    assert setup_health.extra_state_attributes["blocking_issue_count"] == 1
+    assert not hasattr(setup_health, "device_info")
+    assert added_entities[1].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
     }
-    assert not isinstance(added_entities[0].state, AnalyzerState)
-    assert added_entities[0].coordinator_state is coordinator.data
+    assert not isinstance(added_entities[1].state, AnalyzerState)
+    assert added_entities[1].coordinator_state is coordinator.data
 
 
 @pytest.mark.asyncio
