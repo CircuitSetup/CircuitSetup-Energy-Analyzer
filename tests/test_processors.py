@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -17,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
 
 
 def _sample(seconds: int, watts: float) -> CircuitSample:
@@ -33,6 +35,39 @@ def _sample(seconds: int, watts: float) -> CircuitSample:
         frequency=60.0,
         energy=0.0,
     )
+
+
+def _energy_sample(energy_kwh: float) -> CircuitSample:
+    return CircuitSample(
+        timestamp=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        real_power=180.0,
+        current=1.5,
+        voltage=120.0,
+        reactive_power=20.0,
+        apparent_power=181.1,
+        power_factor=0.99,
+        frequency=60.0,
+        energy=energy_kwh,
+    )
+
+
+class _CaptureAlertPolicy:
+    def __init__(self) -> None:
+        self.observations: list[Observation] = []
+
+    def observe(self, observation: Observation) -> AlertEvidence:
+        self.observations.append(observation)
+        return AlertEvidence(
+            timestamp=observation.observed_at,
+            circuit_id=observation.circuit_id,
+            severity=Severity.WARNING,
+            message=observation.message,
+            feature=observation.feature,
+            features=observation.features,
+            observed_value=observation.observed_value,
+            baseline_value=observation.baseline_value,
+        )
 
 
 def test_feature_result_defaults_are_independent() -> None:
@@ -187,3 +222,76 @@ def test_event_processor_returns_events() -> None:
     assert first.events == []
     assert [event.event_type for event in second.events] == [EventType.START]
     assert second.store_dirty is True
+
+
+def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    state = AnalyzerState()
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "fridge": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "days": [
+                    {
+                        "date": (now.date() - timedelta(days=offset)).isoformat(),
+                        "usage_kwh": 10.0,
+                    }
+                    for offset in range(1, 6)
+                ],
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(
+            window_days=5,
+            daily_spike_ratio=0.25,
+        ),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(112.9), config, context)
+
+    assert result.store_dirty is True
+    assert result.events == []
+    assert len(result.state_updates) == 3
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "daily_energy_usage_spike"
+    assert policy.observations[0].observed_value == 12.9
+    assert policy.observations[0].baseline_value == 12.5
+    assert "Kitchen Fridge used 12.9 kWh today" in result.alerts[0].message
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("daily_energy_usage_by_circuit", "fridge")] == 12.9
+    assert updates[("energy_usage_share_by_circuit", "fridge")] == 25.8
+    evidence = updates[("energy_usage_evidence_by_circuit", "fridge")]
+    assert evidence["status"] == "over_threshold"
+    assert evidence["daily_usage_share_percent"] == 25.8
+    assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9

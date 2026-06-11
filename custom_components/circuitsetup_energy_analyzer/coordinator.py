@@ -137,7 +137,12 @@ from .power_quality import (
     score_power_quality_features,
     select_power_quality_evidence,
 )
-from .processors import CircuitEventProcessor, FeatureResult, ProcessingContext
+from .processors import (
+    CircuitEventProcessor,
+    EnergyUsageProcessor,
+    FeatureResult,
+    ProcessingContext,
+)
 from .profiles import get_profile_definition
 from .settings_advisor import (
     AdvisorCircuitContext,
@@ -159,7 +164,7 @@ from .solar_flow import (
 from .standby import StandbyLimitEvidence, StandbySettings, record_standby_sample
 from .storage import RETENTION_WINDOWS, FeatureStoreData
 from .unknown_loads import build_unknown_load_inventory
-from .usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
+from .usage import EnergyUsageSettings
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_STATISTIC_PERIOD,
@@ -665,6 +670,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for config in self.circuit_configs
         }
         self._event_processor = CircuitEventProcessor(self._detectors)
+        self._energy_usage_processor = EnergyUsageProcessor(
+            settings_for_config=self._energy_usage_settings_for_config,
+            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(circuit_id)
+            ].days,
+            alert_policy_for_circuit=self._usage_alert_policy_for_circuit,
+            seed_demo_history=self._seed_demo_energy_usage_history,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -941,12 +954,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
                 await self._notify_alert(alert)
 
-            usage_alert = self._observe_energy_usage(config, sample, now)
-            if usage_alert is not None:
-                alerts.append(usage_alert)
-                self.store_data.alerts.append(usage_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(usage_alert)
+            usage_result = self._energy_usage_processor.process(sample, config, context)
+            _, usage_alerts = await self._apply_feature_result(usage_result)
+            alerts.extend(usage_alerts)
 
             goal_alert = self._observe_energy_goal(config, now)
             if goal_alert is not None:
@@ -5105,75 +5115,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-    def _observe_energy_usage(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        settings = self._energy_usage_settings_for_config(
-            config,
-            config.circuit_id,
-        )
-        self._seed_demo_energy_usage_history(config, sample, now, settings)
-        result = record_energy_usage(
-            self.store_data.energy_usage_by_circuit.setdefault(
-                config.circuit_id,
-                {},
-            ),
-            circuit_id=config.circuit_id,
-            timestamp=now,
-            energy_kwh=sample.energy,
-            settings=EnergyUsageSettings(
-                window_days=settings.window_days,
-                daily_spike_ratio=settings.daily_spike_ratio,
-            ),
-            retention_days=RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(config.circuit_id)
-            ].days,
-        )
-        if result is None:
-            return None
-
-        self._mark_store_dirty()
-        self.state.daily_energy_usage_by_circuit[config.circuit_id] = (
-            result.daily_usage_kwh
-        )
-        self.state.energy_usage_share_by_circuit[config.circuit_id] = round(
-            result.daily_usage_share * 100,
-            1,
-        )
-        self.state.energy_usage_evidence_by_circuit[config.circuit_id] = (
-            _energy_usage_evidence_payload(result)
-        )
-
-        if result.spike is None:
-            return None
-
-        spike = result.spike
-        policy = self._usage_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            spike.daily_usage_kwh / spike.threshold_kwh
-            if spike.threshold_kwh > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="daily_energy_usage_spike",
-                score=score,
-                baseline_confidence=min(
-                    spike.baseline_day_count / spike.window_days,
-                    1.0,
-                ),
-                observed_at=now,
-                observed_value=spike.daily_usage_kwh,
-                baseline_value=spike.threshold_kwh,
-                message=_energy_usage_spike_message(config, spike),
-                features=spike.features,
-            )
-        )
-
     def _observe_energy_goal(
         self: Self,
         config: CircuitConfig,
@@ -6228,77 +6169,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _energy_usage_spike_message(
-    config: CircuitConfig,
-    spike: EnergyUsageSpike,
-) -> str:
-    share_percent = round(spike.daily_usage_share * 100, 1)
-    threshold_percent = round(spike.threshold_ratio * 100)
-    return (
-        f"Possible issue: {config.name} used {_format_kwh(spike.daily_usage_kwh)} "
-        f"kWh today, which is {share_percent}% of its last {spike.window_days} "
-        f"days of usage ({_format_kwh(spike.baseline_total_kwh)} kWh). This is "
-        f"above the configured {threshold_percent}% daily usage threshold."
-    )
-
-
-def _energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
-    status = "over_threshold" if result.spike is not None else result.tracking_status
-    return {
-        "date": result.date,
-        "daily_usage_kwh": result.daily_usage_kwh,
-        "baseline_total_kwh": result.baseline_total_kwh,
-        "baseline_window_days": result.window_days,
-        "baseline_day_count": result.baseline_day_count,
-        "threshold_ratio": result.threshold_ratio,
-        "threshold_kwh": result.threshold_kwh,
-        "daily_usage_share_percent": round(result.daily_usage_share * 100, 1),
-        "status": status,
-        "raw_status": status,
-        "status_label": _status_label_for_evidence(status),
-        "status_explanation": _status_explanation_for_evidence(status),
-        "status_reason": result.status_reason,
-        "suggested_next_check": _energy_usage_next_check(status),
-    }
-
-
-def _status_label_for_evidence(status: str) -> str:
-    overrides = {"waiting_for_delta": "Waiting For Energy Change"}
-    if status in overrides:
-        return overrides[status]
-    return " ".join(part.capitalize() for part in status.split("_"))
-
-
-def _status_explanation_for_evidence(status: str) -> str:
-    if status == "waiting_for_delta":
-        return (
-            "A cumulative kWh source is present, but the analyzer has not "
-            "observed it increase since tracking started."
-        )
-    if status == "learning":
-        return "The analyzer is still collecting the rolling daily kWh baseline."
-    if status == "tracking":
-        return "The analyzer is tracking daily usage from cumulative kWh changes."
-    if status == "over_threshold":
-        return "Today usage is above the configured rolling-window threshold."
-    return f"{_status_label_for_evidence(status)} status reported by the analyzer."
-
-
-def _energy_usage_next_check(status: str) -> str:
-    if status == "waiting_for_delta":
-        return (
-            "Let the analyzer see the energy sensor increase, or confirm the "
-            "circuit has a cumulative kWh source."
-        )
-    if status == "learning":
-        return "Let the analyzer retain enough full days for the rolling baseline."
-    if status == "tracking":
-        return "No action is needed unless the usage looks wrong for the appliance."
-    if status == "over_threshold":
-        return "Review recent appliance runtime and confirm the mapped kWh source."
-    return "Review the sensor attributes for the observed evidence."
 
 
 def _energy_goal_message(
