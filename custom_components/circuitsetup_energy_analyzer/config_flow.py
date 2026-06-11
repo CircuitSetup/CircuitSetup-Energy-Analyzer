@@ -529,12 +529,9 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
-    if outdoor_temperature_entity:
-        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
-    if rain_sensor_entity:
-        validated[CONF_RAIN_SENSOR_ENTITY] = rain_sensor_entity
-    if rain_intensity_entity:
-        validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
+    validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
+    validated[CONF_RAIN_SENSOR_ENTITY] = rain_sensor_entity
+    validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
     if water_flow_sensor_entities:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     merged_source_entities = list(extra_source_entities)
@@ -692,6 +689,14 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     )
 
 
+def _optional_entity_marker(key: str, default: Any = None) -> vol.Optional:
+    """Return an optional selector marker without invalid blank entity defaults."""
+    value = str(default or "").strip()
+    if value:
+        return vol.Optional(key, default=value)
+    return vol.Optional(key)
+
+
 def _temperature_entity_selector() -> Any:
     return _selector(
         {
@@ -814,17 +819,14 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             ): _energy_entity_list_selector(
                 _selectable_source_entity_ids(source_entity_ids)
             ),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
-                default="",
             ): _temperature_entity_selector(),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_RAIN_SENSOR_ENTITY,
-                default="",
             ): _binary_sensor_entity_selector(),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_RAIN_INTENSITY_ENTITY,
-                default="",
             ): _single_sensor_entity_selector(),
             vol.Optional(
                 CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -3343,17 +3345,17 @@ def _options_schema(
                 CONF_EXTRA_SOURCE_ENTITIES,
                 default=extra_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
-                default=str(outdoor_temperature_entity or ""),
+                outdoor_temperature_entity,
             ): _temperature_entity_selector(),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_RAIN_SENSOR_ENTITY,
-                default=str(rain_sensor_entity or ""),
+                rain_sensor_entity,
             ): _binary_sensor_entity_selector(),
-            vol.Optional(
+            _optional_entity_marker(
                 CONF_RAIN_INTENSITY_ENTITY,
-                default=str(rain_intensity_entity or ""),
+                rain_intensity_entity,
             ): _single_sensor_entity_selector(),
             vol.Optional(
                 CONF_WATER_FLOW_SENSOR_ENTITIES,

@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import voluptuous as vol
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
@@ -273,6 +274,25 @@ def test_validate_options_input_preserves_outdoor_temperature_entity() -> None:
         validated[CONF_OUTDOOR_TEMPERATURE_ENTITY]
         == "sensor.weather_station_temperature"
     )
+
+
+def test_validate_options_input_preserves_blank_optional_context_overrides() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+    )
+
+    validated = validate_options_input(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: " ",
+            CONF_RAIN_SENSOR_ENTITY: "",
+            CONF_RAIN_INTENSITY_ENTITY: None,
+        }
+    )
+
+    assert validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] == ""
+    assert validated[CONF_RAIN_SENSOR_ENTITY] == ""
+    assert validated[CONF_RAIN_INTENSITY_ENTITY] == ""
 
 
 def test_validate_setup_input_requires_source_entities() -> None:
@@ -631,6 +651,18 @@ def test_setup_schema_exposes_water_context_sources() -> None:
     assert CONF_WATER_FLOW_SENSOR_ENTITIES in keys
 
 
+def test_optional_context_entity_selectors_do_not_default_to_blank_entity_ids() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entry = SimpleNamespace(data={}, options={})
+    options_schema = config_flow._options_schema(entry)
+
+    for schema in (config_flow.DATA_SCHEMA, options_schema):
+        assert _schema_default(schema, CONF_OUTDOOR_TEMPERATURE_ENTITY) is vol.UNDEFINED
+        assert _schema_default(schema, CONF_RAIN_SENSOR_ENTITY) is vol.UNDEFINED
+        assert _schema_default(schema, CONF_RAIN_INTENSITY_ENTITY) is vol.UNDEFINED
+
+
 @pytest.mark.asyncio
 async def test_options_mains_step_updates_mains_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
@@ -974,6 +1006,57 @@ async def test_options_assignment_review_preserves_outdoor_temperature_entity() 
     assert flow._pending_config[CONF_OUTDOOR_TEMPERATURE_ENTITY] == (
         "sensor.outdoor_temperature"
     )
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_review_saves_optional_rain_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        FIELD_CIRCUIT_MODE,
+        FIELD_CIRCUIT_NAME,
+        FIELD_CIRCUIT_RETENTION_MODE,
+        FIELD_INCLUDED_SENSORS,
+        FIELD_POWER_FLOW,
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.sump_pump_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.sump_pump_power"],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.sump_pump_power"],
+            CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain",
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.precipitation_rate",
+            CONF_SENSITIVITY: "standard",
+            CONF_RETENTION_MODE: "standard",
+        }
+    )
+
+    assert result["type"] == "form"
+    assert flow._pending_config[CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
+    assert flow._pending_config[CONF_RAIN_INTENSITY_ENTITY] == (
+        "sensor.precipitation_rate"
+    )
+
+    final = await flow.async_step_assign(
+        {
+            FIELD_CIRCUIT_NAME: "Sump Pump",
+            FIELD_CIRCUIT_MODE: "single_phase",
+            FIELD_POWER_FLOW: "load",
+            FIELD_CIRCUIT_RETENTION_MODE: "standard",
+            FIELD_INCLUDED_SENSORS: ["sensor.sump_pump_power"],
+        }
+    )
+
+    assert final["type"] == "create_entry"
+    assert final["data"][CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
+    assert final["data"][CONF_RAIN_INTENSITY_ENTITY] == "sensor.precipitation_rate"
 
 
 @pytest.mark.asyncio
