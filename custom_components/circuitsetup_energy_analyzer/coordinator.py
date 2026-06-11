@@ -116,8 +116,6 @@ from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sampl
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
-    LegImbalanceResult,
-    evaluate_dual_phase_leg_imbalance,
 )
 from .power_quality import (
     PowerQualityEvidence,
@@ -136,6 +134,7 @@ from .processors import (
     EnergyGoalProcessor,
     EnergyUsageProcessor,
     FeatureResult,
+    LegImbalanceProcessor,
     ProcessingContext,
     RunCycleProcessor,
 )
@@ -708,6 +707,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ].days,
             source_states_for=self._source_states_for,
         )
+        self._leg_imbalance_processor = LegImbalanceProcessor(
+            alert_policy_for_circuit=self._leg_imbalance_alert_policy_for_circuit,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1023,12 +1025,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             _, capacity_alerts = await self._apply_feature_result(capacity_result)
             alerts.extend(capacity_alerts)
 
-            leg_imbalance_alert = self._observe_leg_imbalance(config, sample, now)
-            if leg_imbalance_alert is not None:
-                alerts.append(leg_imbalance_alert)
-                self.store_data.alerts.append(leg_imbalance_alert)
-                self._mark_store_dirty()
-                await self._notify_alert(leg_imbalance_alert)
+            leg_imbalance_result = self._leg_imbalance_processor.process(
+                sample,
+                config,
+                context,
+            )
+            _, leg_imbalance_alerts = await self._apply_feature_result(
+                leg_imbalance_result
+            )
+            alerts.extend(leg_imbalance_alerts)
 
             self._observe_metric_consistency(config, sample)
 
@@ -5117,66 +5122,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
 
-    def _observe_leg_imbalance(
-        self: Self,
-        config: CircuitConfig,
-        sample: Any,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        if config.mode is not CircuitMode.DUAL_PHASE:
-            result = LegImbalanceResult(status="not_dual_phase")
-        else:
-            settings = self.store_data.leg_imbalance_settings_by_circuit.get(
-                config.circuit_id,
-                {},
-            )
-            result = evaluate_dual_phase_leg_imbalance(
-                left_real_power_w=getattr(sample, "leg_a_real_power", None),
-                right_real_power_w=getattr(sample, "leg_b_real_power", None),
-                left_current_a=getattr(sample, "leg_a_current", None),
-                right_current_a=getattr(sample, "leg_b_current", None),
-                left_voltage_v=getattr(sample, "leg_a_voltage", None),
-                right_voltage_v=getattr(sample, "leg_b_voltage", None),
-                threshold_ratio=_positive_float_value(
-                    settings.get("warning_ratio"),
-                    default=DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
-                ),
-                minimum_total_power_w=_nonnegative_float_value(
-                    settings.get("minimum_total_power_w"),
-                    default=DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-                ),
-            )
-
-        self.state.leg_imbalance_percent_by_circuit[config.circuit_id] = (
-            result.imbalance_percent
-        )
-        self.state.leg_imbalance_status_by_circuit[config.circuit_id] = result.status
-        self.state.leg_imbalance_evidence_by_circuit[config.circuit_id] = (
-            _leg_imbalance_evidence_payload(result)
-        )
-        if result.status != "imbalanced":
-            return None
-
-        policy = self._leg_imbalance_alert_policy_for_circuit(config.circuit_id)
-        score = (
-            result.imbalance_ratio / result.threshold_ratio
-            if result.threshold_ratio > 0.0
-            else 0.0
-        )
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="dual_phase_leg_imbalance",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=result.imbalance_ratio,
-                baseline_value=result.threshold_ratio,
-                message=_leg_imbalance_message(config, result),
-                features=result.features,
-            )
-        )
-
     def _observe_metric_consistency(
         self: Self,
         config: CircuitConfig,
@@ -5723,41 +5668,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
-
-
-def _leg_imbalance_message(
-    config: CircuitConfig,
-    result: LegImbalanceResult,
-) -> str:
-    return (
-        f"Possible issue: {config.name} split-phase legs are imbalanced: "
-        f"leg A is {_format_w(result.left_real_power_w or 0.0)} W and "
-        f"leg B is {_format_w(result.right_real_power_w or 0.0)} W "
-        f"({_format_percent(result.imbalance_percent)}% imbalance), above "
-        f"the configured {_format_percent(result.threshold_percent)}% "
-        "threshold. Review CT pairing, phase mapping, or appliance leg behavior."
-    )
-
-
-def _leg_imbalance_evidence_payload(
-    result: LegImbalanceResult,
-) -> dict[str, Any]:
-    return {
-        "status": result.status,
-        "leg_imbalance_ratio": result.imbalance_ratio,
-        "leg_imbalance_percent": result.imbalance_percent,
-        "threshold_ratio": result.threshold_ratio,
-        "threshold_percent": result.threshold_percent,
-        "minimum_total_power_w": result.minimum_total_power_w,
-        "left_real_power_w": result.left_real_power_w,
-        "right_real_power_w": result.right_real_power_w,
-        "left_current_a": result.left_current_a,
-        "right_current_a": result.right_current_a,
-        "left_voltage_v": result.left_voltage_v,
-        "right_voltage_v": result.right_voltage_v,
-        "voltage_difference_v": result.voltage_difference_v,
-        "dominant_leg": result.dominant_leg,
-    }
 
 
 def _metric_consistency_evidence_payload(
