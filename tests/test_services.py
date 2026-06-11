@@ -466,6 +466,105 @@ async def test_setting_recommendation_services_dispatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_circuit_services_fail_fast_for_unknown_circuit_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RELEARN_BASELINE,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_relearn_baseline(self, circuit_id: str) -> None:
+            self.calls.append(("async_relearn_baseline", (circuit_id,)))
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="Unknown circuit_id 'freezer'"):
+        await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
+            SimpleNamespace(data={"circuit_id": "freezer"})
+        )
+
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recalculate_recommendations_all_target_remains_explicit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self, circuits: set[str]) -> None:
+            self.circuits = circuits
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id in self.circuits
+
+        async def async_recalculate_setting_recommendations(
+            self,
+            circuit_id: str | None,
+        ) -> None:
+            self.calls.append(
+                ("async_recalculate_setting_recommendations", (circuit_id,))
+            )
+
+    fridge = FakeCoordinator({"fridge"})
+    hvac = FakeCoordinator({"hvac"})
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": fridge, "entry-2": hvac}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[
+        (DOMAIN, SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS)
+    ](SimpleNamespace(data={}))
+
+    assert fridge.calls == [
+        ("async_recalculate_setting_recommendations", (None,)),
+    ]
+    assert hvac.calls == [
+        ("async_recalculate_setting_recommendations", (None,)),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_setting_recommendation_services_require_unique_or_explicit_entry(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (

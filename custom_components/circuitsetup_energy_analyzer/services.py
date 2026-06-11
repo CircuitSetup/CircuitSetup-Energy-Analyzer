@@ -6,6 +6,13 @@ from typing import Any
 
 from .const import DOMAIN
 
+try:
+    from homeassistant.exceptions import HomeAssistantError
+except ModuleNotFoundError:
+
+    class HomeAssistantError(Exception):
+        """Fallback Home Assistant service error for tests without HA installed."""
+
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
 SERVICE_PAUSE_ALERTS = "pause_alerts"
 SERVICE_ACKNOWLEDGE_ALERT = "acknowledge_alert"
@@ -590,14 +597,77 @@ def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
     coordinators = _loaded_coordinators(hass)
     if not isinstance(circuit_id, str):
         return coordinators
+    if not coordinators:
+        return []
 
-    matched = [
-        coordinator
-        for coordinator in coordinators
-        if not hasattr(coordinator, "has_circuit")
-        or coordinator.has_circuit(circuit_id)
-    ]
-    return matched or coordinators
+    matched = []
+    for coordinator in coordinators:
+        known_circuit_ids = _known_circuit_ids(coordinator)
+        has_circuit = getattr(coordinator, "has_circuit", None)
+        if callable(has_circuit) and has_circuit(circuit_id):
+            matched.append(coordinator)
+        elif circuit_id in known_circuit_ids:
+            matched.append(coordinator)
+        elif not callable(has_circuit) and not known_circuit_ids:
+            matched.append(coordinator)
+    if matched:
+        return matched
+    raise HomeAssistantError(_unknown_circuit_message(circuit_id, coordinators))
+
+
+def _unknown_circuit_message(circuit_id: str, coordinators: list[Any]) -> str:
+    known_circuit_ids = sorted(
+        {
+            known_circuit_id
+            for coordinator in coordinators
+            for known_circuit_id in _known_circuit_ids(coordinator)
+        }
+    )
+    if known_circuit_ids:
+        return (
+            f"Unknown circuit_id '{circuit_id}'. Known circuit IDs: "
+            f"{', '.join(known_circuit_ids)}."
+        )
+    return f"Unknown circuit_id '{circuit_id}'."
+
+
+def _known_circuit_ids(coordinator: Any) -> set[str]:
+    circuit_ids = {
+        str(config.circuit_id)
+        for config in getattr(coordinator, "circuit_configs", ())
+        if getattr(config, "circuit_id", None)
+    }
+    store_data = getattr(coordinator, "store_data", None)
+    if store_data is None:
+        return circuit_ids
+    for attr in (
+        "energy_usage_by_circuit",
+        "demand_by_circuit",
+        "standby_by_circuit",
+        "weather_context_by_circuit",
+        "weather_context_history_by_circuit",
+        "water_context_history_by_circuit",
+        "nilm_signatures",
+        "nilm_unknown_loads_by_circuit",
+        "maintenance_by_circuit",
+    ):
+        values = getattr(store_data, attr, None)
+        if isinstance(values, Mapping):
+            circuit_ids.update(str(key) for key in values)
+    baselines = getattr(store_data, "baselines", None)
+    if isinstance(baselines, Mapping):
+        circuit_ids.update(str(key).split(":", 1)[0] for key in baselines)
+    alerts = getattr(store_data, "alerts", ())
+    if not isinstance(alerts, (str, bytes)):
+        try:
+            iterator = iter(alerts)
+        except TypeError:
+            iterator = iter(())
+        for alert in iterator:
+            alert_circuit_id = getattr(alert, "circuit_id", None)
+            if alert_circuit_id:
+                circuit_ids.add(str(alert_circuit_id))
+    return circuit_ids
 
 
 def _loaded_coordinators(hass: Any) -> list[Any]:
