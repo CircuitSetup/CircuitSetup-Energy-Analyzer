@@ -10,6 +10,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -2652,6 +2653,42 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_does_not_create_leg_imbalance_for_mains_nilm() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_l1_power", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.mains_l2_power", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT, leg="a"),
+            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="b"),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_mains_nilm_signature_count",
+        "entry-1_mains_balance_power",
+    } <= unique_ids
+    assert not {
+        "entry-1_mains_leg_imbalance",
+        "entry-1_mains_leg_imbalance_status",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -> (
     None
 ):
@@ -3416,3 +3453,42 @@ async def test_binary_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
         "mains",
         "mains",
     ]
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        async_setup_entry,
+    )
+
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+    )
+
+    async def entity_keys_for(coordinator: SimpleNamespace) -> set[str]:
+        hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+        entry = SimpleNamespace(entry_id="entry-1", data={})
+        added_entities = []
+        await async_setup_entry(hass, entry, added_entities.extend)
+        return {entity.unique_id for entity in added_entities}
+
+    without_flow = await entity_keys_for(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(washer,)),
+    )
+    with_flow = await entity_keys_for(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(washer,),
+            options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"]},
+            entry_data={},
+        ),
+    )
+
+    assert "entry-1_washer_water_flow_mismatch" not in without_flow
+    assert "entry-1_washer_water_flow_mismatch" in with_flow

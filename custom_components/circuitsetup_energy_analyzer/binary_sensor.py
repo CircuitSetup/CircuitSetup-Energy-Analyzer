@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .const import DOMAIN
+from .const import CONF_WATER_FLOW_SENSOR_ENTITIES, DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
     EntityCategory,
@@ -315,7 +315,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 description=description,
             )
             for description in BINARY_SENSOR_DESCRIPTIONS
-            if binary_sensor_description_applies(description, circuit)
+            if binary_sensor_description_applies(description, circuit, coordinator)
         )
 
     prune_stale_entity_registry_entries(
@@ -345,15 +345,20 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
 def binary_sensor_description_applies(
     description: DiagnosticBinarySensorDescription,
     circuit: Any,
+    coordinator: Any | None = None,
 ) -> bool:
     """Return whether a binary sensor is useful for this circuit."""
     if description.key == "water_flow_mismatch":
-        return _appliance_profile(getattr(circuit, "appliance_profile", None)) in {
-            ApplianceProfile.WATER_PUMP,
-            ApplianceProfile.WELL_PUMP,
-            ApplianceProfile.WATER_HEATER,
-            ApplianceProfile.WASHER,
-        }
+        return (
+            _appliance_profile(getattr(circuit, "appliance_profile", None))
+            in {
+                ApplianceProfile.WATER_PUMP,
+                ApplianceProfile.WELL_PUMP,
+                ApplianceProfile.WATER_HEATER,
+                ApplianceProfile.WASHER,
+            }
+            and _has_water_flow_source(coordinator)
+        )
     if description.key != "running":
         return True
     return (
@@ -385,6 +390,25 @@ def _sensor_role(sensor: Any) -> SensorRole | None:
         return SensorRole(str(role))
     except ValueError:
         return None
+
+
+def _has_water_flow_source(coordinator: Any | None) -> bool:
+    """Return true when a water-flow input is configured for the integration."""
+    if coordinator is None:
+        return False
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        value = container.get(CONF_WATER_FLOW_SENSOR_ENTITIES) if isinstance(
+            container,
+            dict,
+        ) else None
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (list, tuple, set)) and any(
+            bool(str(item).strip()) for item in value
+        ):
+            return True
+    return False
 
 
 def _appliance_profile(value: Any) -> ApplianceProfile | None:

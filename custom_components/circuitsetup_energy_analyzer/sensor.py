@@ -2566,9 +2566,7 @@ def sensor_description_applies(
             and _stored_settings(coordinator, "capacity_settings_by_circuit", circuit)
         )
     if key in _SPLIT_PHASE_SENSOR_KEYS:
-        return mode in {CircuitMode.DUAL_PHASE, CircuitMode.MAINS_NILM} and (
-            has_real_power or has_current
-        )
+        return mode is CircuitMode.DUAL_PHASE and (has_real_power or has_current)
     if key in _METRIC_CONSISTENCY_SENSOR_KEYS:
         has_consistency_context = (
             SensorRole.APPARENT_POWER in roles
