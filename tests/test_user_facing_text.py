@@ -758,6 +758,15 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     assert "Notifications and repairs" in dashboard_text
 
 
+def test_dashboard_example_keeps_safety_notice_near_alert_philosophy() -> None:
+    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
+    normalized_text = " ".join(dashboard_text.split())
+
+    assert "Demand and capacity findings are" in normalized_text
+    assert "operational evidence from energy measurements" in normalized_text
+    assert "not electrical safety verification" in normalized_text
+
+
 def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     refs = _dashboard_entity_refs_with_conditional_context(dashboard)

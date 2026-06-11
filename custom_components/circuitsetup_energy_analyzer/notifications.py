@@ -8,6 +8,7 @@ from typing import Any
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import DOMAIN
 from .models import AlertEvidence, CircuitConfig
+from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
 
 def notification_id_for_alert(alert: AlertEvidence) -> str:
@@ -42,6 +43,13 @@ def alert_notification_message(
         f"- Baseline value: {alert.baseline_value}",
         f"- Repeated observations: {alert.repeated_count}",
     ]
+    if feature_needs_electrical_safety_notice(alert.feature):
+        lines.extend(
+            (
+                "",
+                f"Safety notice: {ELECTRICAL_SAFETY_NOTICE}",
+            )
+        )
     return "\n".join(lines)
 
 

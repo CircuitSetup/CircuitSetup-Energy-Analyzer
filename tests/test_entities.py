@@ -1655,6 +1655,9 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
 
 
 def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
         CircuitAnalyzerSensor,
@@ -1703,6 +1706,14 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "status": "over_limit",
         "capacity_usage_percent": 85.0,
         "breaker_amps": 40.0,
+    }
+    demand_evidence_with_notice = {
+        **demand_evidence,
+        "safety_notice": ELECTRICAL_SAFETY_NOTICE,
+    }
+    capacity_evidence_with_notice = {
+        **capacity_evidence,
+        "safety_notice": ELECTRICAL_SAFETY_NOTICE,
     }
     leg_imbalance_evidence = {
         "status": "imbalanced",
@@ -1905,34 +1916,34 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["current_demand"],
-    ).extra_state_attributes == demand_evidence
+    ).extra_state_attributes == demand_evidence_with_notice
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["peak_demand"],
-    ).extra_state_attributes == demand_evidence
+    ).extra_state_attributes == demand_evidence_with_notice
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["demand_limit_usage"],
-    ).extra_state_attributes == demand_evidence
+    ).extra_state_attributes == demand_evidence_with_notice
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["demand_peak_rank"],
-    ).extra_state_attributes == demand_evidence
-    assert_status_attributes("demand_peak_status", demand_evidence)
-    assert_status_attributes("demand_status", demand_evidence)
+    ).extra_state_attributes == demand_evidence_with_notice
+    assert_status_attributes("demand_peak_status", demand_evidence_with_notice)
+    assert_status_attributes("demand_status", demand_evidence_with_notice)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["capacity_usage"],
-    ).extra_state_attributes == capacity_evidence
-    assert_status_attributes("capacity_status", capacity_evidence)
+    ).extra_state_attributes == capacity_evidence_with_notice
+    assert_status_attributes("capacity_status", capacity_evidence_with_notice)
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",

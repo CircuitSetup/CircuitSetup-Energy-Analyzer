@@ -21,6 +21,7 @@ from .models import (
     SensorRole,
 )
 from .notifications import notification_id_for_alert
+from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
 FRIENDLY_SENSITIVITY_ALIASES = {
     "low": "quiet",
@@ -100,7 +101,7 @@ def alert_evidence_detail(
     last_seen = _isoformat_or_none(alert.last_seen)
     graph_window_start, graph_window_end = alert_graph_window(alert)
     feature = _alert_feature(alert)
-    return {
+    detail = {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": alert.circuit_id,
         "feature": feature,
@@ -126,6 +127,9 @@ def alert_evidence_detail(
         "graph_window_start": graph_window_start.isoformat(),
         "graph_window_end": graph_window_end.isoformat(),
     }
+    if feature_needs_electrical_safety_notice(feature):
+        detail["safety_notice"] = ELECTRICAL_SAFETY_NOTICE
+    return detail
 
 
 def data_quality_checklist(

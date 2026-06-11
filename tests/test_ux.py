@@ -149,6 +149,29 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     }
 
 
+def test_alert_evidence_detail_includes_safety_notice_for_capacity_alerts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        alert_evidence_detail,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 30, tzinfo=UTC),
+        circuit_id="car_charger",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="capacity_usage",
+        observed_value=85.0,
+        baseline_value=80.0,
+    )
+
+    detail = alert_evidence_detail(alert)
+
+    assert detail["safety_notice"] == ELECTRICAL_SAFETY_NOTICE
+
+
 def test_data_quality_checklist_reports_required_optional_and_sample_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.normalize import (
         NormalizedCircuitSample,

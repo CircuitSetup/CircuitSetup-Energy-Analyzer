@@ -119,6 +119,29 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
     assert "sensor.hvac_l2_current" not in message
 
 
+def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="car_charger",
+        severity=Severity.WARNING,
+        message="Possible issue: car charger capacity usage is high",
+        feature="capacity_usage",
+        observed_value=85.0,
+        baseline_value=80.0,
+    )
+
+    message = alert_notification_message(alert)
+
+    assert ELECTRICAL_SAFETY_NOTICE in message
+
+
 def test_repair_issue_id_for_circuit_problem_is_stable() -> None:
     from custom_components.circuitsetup_energy_analyzer.repairs import (
         issue_id_for_circuit_problem,
