@@ -130,6 +130,7 @@ from .processors import (
     ProcessingContext,
     RunCycleProcessor,
     StandbyProcessor,
+    UtilityComparisonProcessor,
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
@@ -157,7 +158,6 @@ from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_STATISTIC_PERIOD,
     UtilityComparisonSettings,
-    compare_utility_energy,
     select_latest_statistics_energy,
     select_statistics_energy_for_period,
 )
@@ -719,6 +719,31 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._seed_demo_standby_history(config, sample, context.now, settings)
             ),
         )
+        self._utility_comparison_processor = UtilityComparisonProcessor(
+            settings_for_circuit=self._utility_comparison_settings_for_circuit,
+            alert_policy_for_circuit=self._utility_comparison_alert_policy_for_circuit,
+            energy_kwh_for_entity=self._energy_kwh_for_entity,
+            energy_kwh_sum_for_entities=self._energy_kwh_sum_for_entities,
+            statistics_kwh_for_id=(
+                lambda statistic_id, now, period: self._statistics_kwh_for_id(
+                    statistic_id,
+                    now,
+                    period=period,
+                )
+            ),
+            statistics_kwh_sum_for_entities=(
+                lambda entity_ids, now, period, start_time, end_time: (
+                    self._statistics_kwh_sum_for_entities(
+                        entity_ids,
+                        now,
+                        period=period,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                )
+            ),
+            load_energy_entity_ids_for_sum=self._load_energy_entity_ids_for_sum,
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1079,11 +1104,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(nilm_alert)
         self._refresh_balance_state(samples)
         self._refresh_solar_flow_state(samples)
-        for utility_alert in await self._observe_utility_comparisons(now):
-            alerts.append(utility_alert)
-            self.store_data.alerts.append(utility_alert)
-            self._mark_store_dirty()
-            await self._notify_alert(utility_alert)
+        alerts.extend(await self._observe_utility_comparisons(now))
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -4321,143 +4342,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> list[AlertEvidence]:
         alerts: list[AlertEvidence] = []
+        context = self._build_processing_context(now)
         for circuit_id in self.store_data.utility_comparison_settings_by_circuit:
             config = self._config_for_circuit(circuit_id)
             if config is None:
                 continue
-            alert = await self._observe_utility_comparison(config, now)
-            if alert is not None:
-                alerts.append(alert)
+            result = await self._utility_comparison_processor.process(config, context)
+            _, new_alerts = await self._apply_feature_result(result)
+            alerts.extend(new_alerts)
         return alerts
-
-    async def _observe_utility_comparison(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> AlertEvidence | None:
-        settings = self._utility_comparison_settings_for_circuit(config.circuit_id)
-        utility_source_type = _utility_source_type_for_settings(settings)
-        utility_period_start: datetime | None = None
-        utility_period_end: datetime | None = None
-        utility_data_lag_hours: float | None = None
-        if utility_source_type == "statistics":
-            utility_reading = await self._statistics_kwh_for_id(
-                settings.utility_statistic_id,
-                now,
-                period=settings.utility_statistic_period,
-            )
-            utility_kwh = utility_reading.energy_kwh
-            utility_period_start = utility_reading.period_start
-            utility_period_end = utility_reading.period_end
-            utility_data_lag_hours = utility_reading.data_lag_hours
-        else:
-            utility_kwh = self._energy_kwh_for_entity(
-                settings.utility_energy_entity,
-                now,
-            )
-
-        utility_period_available = (
-            utility_period_start is not None and utility_period_end is not None
-        )
-        if settings.measured_energy_entities:
-            comparison_source = "explicit_entities"
-            if utility_source_type == "statistics" and not utility_period_available:
-                measured_kwh = None
-                measured_entity_ids = settings.measured_energy_entities
-                measured_source_type = "statistics"
-            elif utility_period_available:
-                measured_kwh, measured_entity_ids = (
-                    await self._statistics_kwh_sum_for_entities(
-                        settings.measured_energy_entities,
-                        now,
-                        period=settings.utility_statistic_period,
-                        start_time=utility_period_start,
-                        end_time=utility_period_end,
-                    )
-                )
-                measured_source_type = "statistics"
-            else:
-                measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
-                    settings.measured_energy_entities,
-                    now,
-                )
-                measured_source_type = "entity_state"
-        else:
-            comparison_source = "circuit_energy_sum"
-            fallback_entities = self._load_energy_entity_ids_for_sum(config.circuit_id)
-            if utility_source_type == "statistics" and not utility_period_available:
-                measured_kwh = None
-                measured_entity_ids = fallback_entities
-                measured_source_type = "statistics"
-            elif utility_period_available:
-                measured_kwh, measured_entity_ids = (
-                    await self._statistics_kwh_sum_for_entities(
-                        fallback_entities,
-                        now,
-                        period=settings.utility_statistic_period,
-                        start_time=utility_period_start,
-                        end_time=utility_period_end,
-                    )
-                )
-                measured_source_type = "statistics"
-            else:
-                measured_kwh, measured_entity_ids = self._energy_kwh_sum_for_entities(
-                    fallback_entities,
-                    now,
-                )
-                measured_source_type = "entity_state"
-
-        result = compare_utility_energy(
-            settings=settings,
-            utility_kwh=utility_kwh,
-            measured_kwh=measured_kwh,
-            measured_entity_ids=measured_entity_ids,
-            comparison_source=comparison_source,
-            utility_source_type=utility_source_type,
-            measured_source_type=measured_source_type,
-            period_start=_datetime_iso_or_none(utility_period_start),
-            period_end=_datetime_iso_or_none(utility_period_end),
-            utility_data_lag_hours=utility_data_lag_hours,
-        )
-        self._update_utility_comparison_state(config.circuit_id, result)
-        if result.status != "mismatch":
-            return None
-
-        score = (
-            result.absolute_difference_percent / result.tolerance_percent
-            if result.tolerance_percent > 0.0
-            else result.absolute_difference_percent
-        )
-        policy = self._utility_comparison_alert_policy_for_circuit(config.circuit_id)
-        return policy.observe(
-            Observation(
-                circuit_id=config.circuit_id,
-                feature="utility_energy_mismatch",
-                score=score,
-                baseline_confidence=1.0,
-                observed_at=now,
-                observed_value=result.measured_kwh or 0.0,
-                baseline_value=result.utility_kwh or 0.0,
-                message=_utility_comparison_message(config, result),
-                features=result.features or {},
-            )
-        )
-
-    def _update_utility_comparison_state(
-        self: Self,
-        circuit_id: str,
-        result: Any,
-    ) -> None:
-        self.state.utility_comparison_difference_kwh_by_circuit[circuit_id] = (
-            result.difference_kwh
-        )
-        self.state.utility_comparison_difference_percent_by_circuit[circuit_id] = (
-            result.difference_percent
-        )
-        self.state.utility_comparison_status_by_circuit[circuit_id] = result.status
-        self.state.utility_comparison_evidence_by_circuit[circuit_id] = (
-            _utility_comparison_evidence_payload(result)
-        )
 
     def _energy_kwh_sum_for_entities(
         self: Self,
@@ -5453,20 +5346,6 @@ def _demo_baseline(feature: str, value: float) -> BaselineStats:
     )
 
 
-def _utility_comparison_message(config: CircuitConfig, result: Any) -> str:
-    return (
-        f"Utility comparison mismatch: {config.name} measured "
-        f"{_format_kwh(result.measured_kwh or 0.0)} kWh while "
-        f"{result.utility_source_id} reports "
-        f"{_format_kwh(result.utility_kwh or 0.0)} kWh. Difference is "
-        f"{_format_kwh(result.difference_kwh)} kWh "
-        f"({_format_percent(result.absolute_difference_percent)}%), above the "
-        f"{_format_percent(result.tolerance_percent)}% tolerance. Verify both "
-        "sensors cover the same billing or current-bill period before treating "
-        "this as a meter, CT, or utility-data problem."
-    )
-
-
 def _water_context_observed_value(evidence: Mapping[str, Any]) -> float:
     for key in ("mismatch_minutes", "pump_runtime_minutes", "flow_active_minutes"):
         value = _float_or_none(evidence.get(key))
@@ -5511,29 +5390,6 @@ def _water_context_alert_message(
     return f"Possible issue: {circuit_name} water context changed: {status_label}."
 
 
-def _utility_comparison_evidence_payload(result: Any) -> dict[str, Any]:
-    return {
-        "status": result.status,
-        "utility_energy_entity": result.utility_energy_entity,
-        "utility_statistic_id": result.utility_statistic_id,
-        "utility_source_id": result.utility_source_id,
-        "utility_source_type": result.utility_source_type,
-        "utility_statistic_period": result.utility_statistic_period,
-        "measured_energy_entities": list(result.measured_entity_ids),
-        "comparison_source": result.comparison_source,
-        "measured_source_type": result.measured_source_type,
-        "period_start": result.period_start,
-        "period_end": result.period_end,
-        "utility_data_lag_hours": result.utility_data_lag_hours,
-        "utility_kwh": result.utility_kwh,
-        "measured_kwh": result.measured_kwh,
-        "difference_kwh": result.difference_kwh,
-        "difference_percent": result.difference_percent,
-        "absolute_difference_percent": result.absolute_difference_percent,
-        "tolerance_percent": result.tolerance_percent,
-    }
-
-
 def _is_flexible_solar_load(config: CircuitConfig) -> bool:
     return (
         config.power_flow is PowerFlowMode.LOAD
@@ -5556,23 +5412,6 @@ def _format_amps(value: float) -> str:
 
 def _format_w(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def _datetime_iso_or_none(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.isoformat()
-
-
-def _utility_source_type_for_settings(settings: UtilityComparisonSettings) -> str:
-    raw = str(settings.utility_source_type or "auto").strip().lower()
-    if raw == "statistic":
-        raw = "statistics"
-    if raw not in {"auto", "entity", "statistics"}:
-        raw = "auto"
-    if raw == "auto":
-        return "statistics" if settings.utility_statistic_id.strip() else "entity"
-    return raw
 
 
 def _utility_statistic_period_value(value: Any) -> str:
