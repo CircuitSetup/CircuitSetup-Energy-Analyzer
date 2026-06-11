@@ -1179,3 +1179,78 @@ def test_leg_imbalance_processor_uses_store_settings_override() -> None:
     assert evidence["threshold_ratio"] == 0.75
     assert evidence["threshold_percent"] == 75.0
     assert evidence["minimum_total_power_w"] == 4000.0
+
+
+def test_metric_consistency_processor_updates_state_from_store_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            metric_consistency_settings_by_circuit={
+                "pump": {
+                    "apparent_power_tolerance_percent": 10.0,
+                    "power_factor_tolerance": 0.1,
+                    "minimum_apparent_power_va": 50.0,
+                }
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="pump",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.WATER_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="pump",
+        real_power=480.0,
+        current=10.0,
+        voltage=120.0,
+        reactive_power=0.0,
+        apparent_power=600.0,
+        power_factor=0.8,
+        frequency=60.0,
+        energy=0.0,
+    )
+    processor = processors.MetricConsistencyProcessor()
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is False
+    assert result.alerts == []
+    assert result.notifications == []
+    assert len(result.state_updates) == 3
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("metric_consistency_score_by_circuit", "pump")] == 50.0
+    assert updates[("metric_consistency_status_by_circuit", "pump")] == (
+        "apparent_power_mismatch"
+    )
+    assert updates[("metric_consistency_evidence_by_circuit", "pump")] == {
+        "status": "apparent_power_mismatch",
+        "mismatch_score_percent": 50.0,
+        "expected_apparent_power_va": 1200.0,
+        "reported_apparent_power_va": 600.0,
+        "apparent_power_difference_percent": -50.0,
+        "apparent_power_tolerance_percent": 10.0,
+        "apparent_power_source": "voltage_current",
+        "expected_power_factor": 0.8,
+        "reported_power_factor": 0.8,
+        "power_factor_difference": 0.0,
+        "power_factor_tolerance": 0.1,
+    }
