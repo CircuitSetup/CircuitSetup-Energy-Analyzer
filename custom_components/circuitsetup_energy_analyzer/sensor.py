@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
@@ -21,6 +21,8 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    entity_detail_level_for_coordinator,
+    entity_enabled_default_for_tier,
     hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
@@ -105,6 +107,34 @@ def health_summary_value(state: Any, circuit_id: str) -> str:
         "mixed_observation": "Mixed observation",
         "nilm_review": "NILM review",
     }.get(status, str(status).replace("_", " ").title())
+
+
+def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return health detail that would otherwise require noisy status entities."""
+    summary = health_summary_value(state, circuit_id)
+    readiness = readiness_value(state, circuit_id)
+    data_quality_problem = data_quality_checklist_value(state, circuit_id) == "problem"
+    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
+    maintenance_active = (
+        isinstance(maintenance, Mapping) and maintenance.get("active") is True
+    )
+    active_alert_count = _active_alert_count(state, circuit_id)
+    return {
+        "raw_status": _health_summary_raw_status(summary, readiness),
+        "status_label": summary,
+        "status_explanation": _health_summary_explanation(summary, readiness),
+        "learning_progress": learning_progress_value(state, circuit_id),
+        "readiness": readiness,
+        "data_quality_problem": data_quality_problem,
+        "maintenance_active": maintenance_active,
+        "active_alert_count": active_alert_count,
+        "next_step": _health_summary_next_step(
+            readiness,
+            data_quality_problem=data_quality_problem,
+            maintenance_active=maintenance_active,
+            active_alert_count=active_alert_count,
+        ),
+    }
 
 
 def readiness_value(state: Any, circuit_id: str) -> str:
@@ -929,6 +959,7 @@ def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "standby_status": standby_status,
         "run_cycle_count": run_cycle_count_value(state, circuit_id),
         "run_cycle_runtime_seconds": run_cycle_runtime_value(state, circuit_id),
+        "duty_cycle_percent": run_cycle_duty_cycle_value(state, circuit_id),
         "summary_explanation": _activity_summary_explanation(
             run_status,
             standby_status,
@@ -957,6 +988,12 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
         "leg_status_explanation": _status_explanation(leg_status),
+        "what_to_check_first": _electrical_health_first_check(
+            summary,
+            metric_status,
+            leg_status,
+            power_quality_evidence_value(state, circuit_id),
+        ),
     }
 
 
@@ -994,6 +1031,84 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "energy_usage_explanation": _status_explanation(energy_usage_status),
         "billing_cycle_explanation": _status_explanation(billing_status),
     }
+
+
+def _health_summary_raw_status(summary: str, readiness: str) -> str:
+    if readiness and readiness != "ready":
+        return readiness
+    normalized = summary.strip().lower().replace(" ", "_")
+    return normalized or "ready"
+
+
+def _health_summary_explanation(summary: str, readiness: str) -> str:
+    if summary == "Possible issue":
+        return "One or more analyzer alerts are active for this circuit."
+    if summary == "Needs data":
+        return "The analyzer needs valid source sensor data before checks are reliable."
+    if summary == "Learning":
+        return "The analyzer is still building a baseline for this circuit."
+    if summary == "Paused":
+        return "Alerts are currently paused for this circuit."
+    if readiness != "ready":
+        return _status_explanation(readiness)
+    return "No setup or health issue is currently active for this circuit."
+
+
+def _health_summary_next_step(
+    readiness: str,
+    *,
+    data_quality_problem: bool,
+    maintenance_active: bool,
+    active_alert_count: int,
+) -> str:
+    if data_quality_problem:
+        return "Review source sensor data"
+    if readiness == "learning":
+        return "Let analyzer learn"
+    if maintenance_active:
+        return "End maintenance when work is complete"
+    if active_alert_count:
+        return "Review alert evidence"
+    return "No action needed"
+
+
+def _electrical_health_first_check(
+    summary: str,
+    metric_status: str,
+    leg_status: str,
+    power_quality_evidence: str,
+) -> str:
+    if leg_status == "imbalanced":
+        return "Compare both legs of the dual-phase circuit and verify CT pairing."
+    if metric_status in {
+        "apparent_power_mismatch",
+        "power_factor_mismatch",
+        "metric_mismatch",
+    }:
+        return "Verify watts, amps, voltage, apparent power, and power factor sources."
+    if power_quality_evidence:
+        return (
+            "Compare recent VAR, VA, watts, and power factor to the learned "
+            "baseline."
+        )
+    if summary == "Needs Metrics":
+        return (
+            "Add matching electrical metrics such as watts, amps, voltage, VA, "
+            "or PF."
+        )
+    return "No electrical check is needed right now."
+
+
+def _active_alert_count(state: Any, circuit_id: str) -> int:
+    alerts = getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ())
+    if isinstance(alerts, int | float):
+        return max(int(alerts), 0)
+    if isinstance(alerts, Mapping):
+        return len(alerts)
+    try:
+        return len(tuple(alerts))
+    except TypeError:
+        return 0
 
 
 def _activity_summary_explanation(run_status: str, standby_status: str) -> str:
@@ -1399,6 +1514,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="health_summary",
         name_suffix="Health Summary",
         value_fn=health_summary_value,
+        attributes_fn=health_summary_attributes,
     ),
     DiagnosticSensorDescription(
         key="activity_summary",
@@ -2042,7 +2158,7 @@ def _with_entity_defaults(
         entity_category=(
             None if tier is not EntityTier.DIAGNOSTIC else description.entity_category
         ),
-        entity_registry_enabled_default=tier is not EntityTier.DIAGNOSTIC,
+        entity_registry_enabled_default=entity_enabled_default_for_tier(tier),
         entity_registry_visible_default=(
             description.key in _VISIBLE_BY_DEFAULT_SENSOR_KEYS
         ),
@@ -2053,6 +2169,9 @@ def _with_entity_defaults(
 SENSOR_DESCRIPTIONS = tuple(
     _with_entity_defaults(description) for description in SENSOR_DESCRIPTIONS
 )
+SENSOR_ENTITY_TIER_BY_KEY: dict[str, EntityTier] = {
+    description.key: description.entity_tier for description in SENSOR_DESCRIPTIONS
+}
 
 
 _CORE_SENSOR_KEYS = {
@@ -2689,31 +2808,74 @@ def _setup_health_summary(coordinator: Any) -> dict[str, Any]:
         primary = issues[0]
         return {
             "state": primary["state"],
-            "attributes": {
-                "blocking_issue_count": len(issues),
-                "recommended_action": primary["recommended_action"],
-                "affected_circuit": primary["affected_circuit"],
-                "affected_circuit_name": primary["affected_circuit_name"],
-                "open_path": primary["open_path"],
-                "reason": primary["reason"],
-                "issues": issues,
-            },
+            "attributes": _setup_health_attributes_for_issues(issues, primary),
         }
 
+    primary = {
+        "state": "Ready",
+        "recommended_action": "No setup action needed",
+        "affected_circuit": None,
+        "affected_circuit_name": None,
+        "open_path": SETUP_HEALTH_OPEN_PATH,
+        "reason": (
+            "Configured circuits have enough setup data for their current checks."
+        ),
+    }
     return {
         "state": "Ready",
-        "attributes": {
-            "blocking_issue_count": 0,
-            "recommended_action": "No setup action needed",
-            "affected_circuit": None,
-            "affected_circuit_name": None,
-            "open_path": SETUP_HEALTH_OPEN_PATH,
-            "reason": (
-                "Configured circuits have enough setup data for their current checks."
-            ),
-            "issues": [],
-        },
+        "attributes": _setup_health_attributes_for_issues([], primary),
     }
+
+
+def _setup_health_attributes_for_issues(
+    issues: list[dict[str, Any]],
+    primary: Mapping[str, Any],
+) -> dict[str, Any]:
+    affected_circuits = _setup_health_issue_circuits(issues)
+    return {
+        "blocking_issue_count": len(issues),
+        "issue_count": len(issues),
+        "warning_count": 0,
+        "next_step": primary["state"],
+        "recommended_action": primary["recommended_action"],
+        "affected_circuit": primary["affected_circuit"],
+        "affected_circuit_name": primary["affected_circuit_name"],
+        "affected_circuits": affected_circuits,
+        "open_path": primary["open_path"],
+        "reason": primary["reason"],
+        "learning_circuits": _setup_health_issue_circuits(
+            issues,
+            states={"Let analyzer learn"},
+        ),
+        "stale_sources": _setup_health_issue_circuits(
+            issues,
+            states={"Fix stale source sensor"},
+        ),
+        "missing_energy_sources": _setup_health_issue_circuits(
+            issues,
+            states={"Add cumulative kWh source"},
+        ),
+        "negative_power_loads": _setup_health_issue_circuits(
+            issues,
+            states={"Check CT direction"},
+        ),
+        "issues": issues,
+    }
+
+
+def _setup_health_issue_circuits(
+    issues: Iterable[Mapping[str, Any]],
+    *,
+    states: set[str] | None = None,
+) -> list[str]:
+    circuits: list[str] = []
+    for issue in issues:
+        if states is not None and issue.get("state") not in states:
+            continue
+        circuit_id = issue.get("affected_circuit")
+        if circuit_id is not None and circuit_id not in circuits:
+            circuits.append(str(circuit_id))
+    return circuits
 
 
 def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
@@ -3142,7 +3304,10 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         self.entity_description = description
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = (
-            description.entity_registry_enabled_default
+            entity_enabled_default_for_tier(
+                description.entity_tier,
+                entity_detail_level_for_coordinator(coordinator),
+            )
         )
         self._attr_entity_registry_visible_default = (
             description.entity_registry_visible_default

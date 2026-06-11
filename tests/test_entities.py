@@ -88,6 +88,111 @@ def test_circuit_device_info_uses_only_device_registry_fields() -> None:
     }
 
 
+def test_apply_entity_profile_to_registry_changes_only_integration_owned_rows(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
+
+    class FakeDisabler:
+        INTEGRATION = "integration"
+        USER = "user"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.fridge_activity_summary": SimpleNamespace(
+                    entity_id="sensor.fridge_activity_summary",
+                    unique_id="entry-1_fridge_activity_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                ),
+                "sensor.fridge_energy_goal_status": SimpleNamespace(
+                    entity_id="sensor.fridge_energy_goal_status",
+                    unique_id="entry-1_fridge_energy_goal_status",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                ),
+                "sensor.fridge_power_quality_evidence": SimpleNamespace(
+                    entity_id="sensor.fridge_power_quality_evidence",
+                    unique_id="entry-1_fridge_power_quality_evidence",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="integration",
+                ),
+                "sensor.fridge_alert_evidence": SimpleNamespace(
+                    entity_id="sensor.fridge_alert_evidence",
+                    unique_id="entry-1_fridge_alert_evidence",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="user",
+                ),
+            }
+            self.updated: list[tuple[str, object]] = []
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs.get("disabled_by")))
+            self.entities[entity_id].disabled_by = kwargs.get("disabled_by")
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryDisabler = FakeDisabler
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    simple_plan = entity.apply_entity_profile_to_registry(
+        SimpleNamespace(entity_registry=fake_registry),
+        entry_id="entry-1",
+        entity_domain="sensor",
+        tier_by_unique_id_suffix={
+            "activity_summary": EntityTier.SUMMARY,
+            "energy_goal_status": EntityTier.FEATURE,
+            "power_quality_evidence": EntityTier.DIAGNOSTIC,
+            "alert_evidence": EntityTier.DIAGNOSTIC,
+        },
+        detail_level="simple",
+    )
+
+    assert simple_plan["will_disable"] == 1
+    assert fake_registry.updated == [
+        ("sensor.fridge_energy_goal_status", "integration")
+    ]
+
+    expert_plan = entity.apply_entity_profile_to_registry(
+        SimpleNamespace(entity_registry=fake_registry),
+        entry_id="entry-1",
+        entity_domain="sensor",
+        tier_by_unique_id_suffix={
+            "activity_summary": EntityTier.SUMMARY,
+            "energy_goal_status": EntityTier.FEATURE,
+            "power_quality_evidence": EntityTier.DIAGNOSTIC,
+            "alert_evidence": EntityTier.DIAGNOSTIC,
+        },
+        detail_level="expert",
+    )
+
+    assert expert_plan["will_enable"] == 2
+    assert expert_plan["left_user_disabled"] == 1
+    assert fake_registry.updated[-2:] == [
+        ("sensor.fridge_energy_goal_status", None),
+        ("sensor.fridge_power_quality_evidence", None),
+    ]
+
+
 def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> (
     None
 ):
@@ -797,29 +902,23 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         ),
     )
     assert setup_health_value(setup_coordinator) == "Add cumulative kWh source"
-    assert setup_health_attributes(setup_coordinator) == {
-        "blocking_issue_count": 1,
-        "recommended_action": "Add a cumulative kWh sensor to Kitchen Fridge",
-        "affected_circuit": "fridge",
-        "affected_circuit_name": "Kitchen Fridge",
-        "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
-        "reason": "Daily Energy Usage needs a cumulative energy source.",
-        "issues": [
-            {
-                "state": "Add cumulative kWh source",
-                "recommended_action": (
-                    "Add a cumulative kWh sensor to Kitchen Fridge"
-                ),
-                "affected_circuit": "fridge",
-                "affected_circuit_name": "Kitchen Fridge",
-                "open_path": (
-                    "/config/integrations/integration/"
-                    "circuitsetup_energy_analyzer"
-                ),
-                "reason": "Daily Energy Usage needs a cumulative energy source.",
-            }
-        ],
-    }
+    setup_attrs = setup_health_attributes(setup_coordinator)
+    assert setup_attrs["blocking_issue_count"] == 1
+    assert setup_attrs["issue_count"] == 1
+    assert setup_attrs["warning_count"] == 0
+    assert setup_attrs["next_step"] == "Add cumulative kWh source"
+    assert setup_attrs["recommended_action"] == (
+        "Add a cumulative kWh sensor to Kitchen Fridge"
+    )
+    assert setup_attrs["affected_circuit"] == "fridge"
+    assert setup_attrs["affected_circuits"] == ["fridge"]
+    assert setup_attrs["missing_energy_sources"] == ["fridge"]
+    assert setup_attrs["learning_circuits"] == []
+    assert setup_attrs["stale_sources"] == []
+    assert setup_attrs["negative_power_loads"] == []
+    assert setup_attrs["issues"][0]["reason"] == (
+        "Daily Energy Usage needs a cumulative energy source."
+    )
 
     ready_coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=())
     assert setup_health_value(ready_coordinator) == "Review circuit assignments"
@@ -834,9 +933,13 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
         electrical_health_value,
         energy_summary_attributes,
         energy_summary_value,
+        health_summary_attributes,
+        health_summary_value,
     )
 
     state = AnalyzerState(
+        health_summary_by_circuit={"washer": "Possible issue"},
+        readiness_by_circuit={"washer": {"health_status": "possible_issue"}},
         run_cycle_status_by_circuit={"washer": "running"},
         run_cycle_count_by_circuit={"washer": 2},
         run_cycle_runtime_seconds_by_circuit={"washer": 1800.0},
@@ -861,7 +964,16 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
             "washer": {"status": "projected_over_budget", "budget_kwh": 50.0}
         },
         cost_status_by_circuit={"washer": "tracking"},
+        active_alerts_by_circuit={"washer": [object(), object()]},
     )
+
+    assert health_summary_value(state, "washer") == "Possible issue"
+    health_attrs = health_summary_attributes(state, "washer")
+    assert health_attrs["raw_status"] == "possible_issue"
+    assert health_attrs["status_label"] == "Possible issue"
+    assert health_attrs["active_alert_count"] == 2
+    assert health_attrs["next_step"] == "Review source sensor data"
+    assert health_attrs["learning_progress"] == 0.0
 
     assert activity_summary_value(state, "washer") == "Running"
     assert activity_summary_attributes(state, "washer") == {
@@ -869,6 +981,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
         "standby_status": "on",
         "run_cycle_count": 2,
         "run_cycle_runtime_seconds": 1800.0,
+        "duty_cycle_percent": 0.0,
         "summary_explanation": "The appliance is currently active.",
     }
 
@@ -1154,6 +1267,9 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
 
 
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        ENTITY_DETAIL_SIMPLE,
+    )
     from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1186,13 +1302,14 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        if description.entity_tier is EntityTier.DIAGNOSTIC:
-            assert description.entity_registry_enabled_default is False
-        else:
+        if description.entity_tier is EntityTier.SUMMARY:
             assert description.entity_registry_enabled_default is True
+        else:
+            assert description.entity_registry_enabled_default is False
         assert description.last_reset is None
         assert description.options is None
         assert description.unit_of_measurement is None
+    assert ENTITY_DETAIL_SIMPLE == "simple"
 
 
 def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
@@ -1223,17 +1340,16 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "rain_pump_correlation",
         "water_flow_correlation",
     }
-    enabled_by_default = {
+    simple_enabled_by_default = {
         description.key
         for description in SENSOR_DESCRIPTIONS
         if description.entity_registry_enabled_default is True
     }
-    diagnostic_keys = {
-        description.key
-        for description in SENSOR_DESCRIPTIONS
-        if description.entity_tier is EntityTier.DIAGNOSTIC
+    assert simple_enabled_by_default == {
+        key
+        for key, description in descriptions.items()
+        if description.entity_tier is EntityTier.SUMMARY
     }
-    assert enabled_by_default == set(descriptions) - diagnostic_keys
 
     normal_entity_keys = {
         "health_summary",
@@ -1292,7 +1408,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
 
     assert normal_entity_keys <= set(descriptions)
     assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
-    assert descriptions["settings_suggestions"].entity_registry_enabled_default is True
+    assert descriptions["settings_suggestions"].entity_registry_enabled_default is False
     assert descriptions["settings_suggestions"].entity_registry_visible_default is False
     assert descriptions["health_summary"].entity_tier is EntityTier.SUMMARY
     assert descriptions["daily_energy_usage"].entity_tier is EntityTier.SUMMARY
@@ -1349,6 +1465,36 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert normal_entity._attr_entity_registry_enabled_default is True
     assert diagnostic_entity._attr_entity_category == EntityCategory.DIAGNOSTIC
     assert diagnostic_entity._attr_entity_registry_enabled_default is False
+
+    standard_coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        options={"entity_detail_level": "standard"},
+    )
+    expert_coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        options={"entity_detail_level": "expert"},
+    )
+    standard_feature_entity = CircuitAnalyzerSensor(
+        standard_coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["energy_goal_status"],
+    )
+    standard_diagnostic_entity = CircuitAnalyzerSensor(
+        standard_coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["power_quality_evidence"],
+    )
+    expert_diagnostic_entity = CircuitAnalyzerSensor(
+        expert_coordinator,
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["power_quality_evidence"],
+    )
+    assert standard_feature_entity._attr_entity_registry_enabled_default is True
+    assert standard_diagnostic_entity._attr_entity_registry_enabled_default is False
+    assert expert_diagnostic_entity._attr_entity_registry_enabled_default is True
 
 
 def test_sensor_entities_use_purpose_specific_icons() -> None:
@@ -1781,10 +1927,10 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
             attr for attr in required_attrs if not hasattr(description, attr)
         )
         assert missing_attrs == []
-        if description.entity_tier is EntityTier.DIAGNOSTIC:
-            assert description.entity_registry_enabled_default is False
-        else:
+        if description.entity_tier is EntityTier.SUMMARY:
             assert description.entity_registry_enabled_default is True
+        else:
+            assert description.entity_registry_enabled_default is False
         assert description.unit_of_measurement is None
 
     descriptions = {
@@ -1807,6 +1953,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
     assert descriptions["running"].entity_registry_enabled_default is True
     assert descriptions["running"].entity_tier is EntityTier.SUMMARY
     assert descriptions["water_flow_mismatch"].entity_tier is EntityTier.FEATURE
+    assert descriptions["water_flow_mismatch"].entity_registry_enabled_default is False
 
 
 def test_binary_sensor_entities_use_purpose_specific_icons() -> None:

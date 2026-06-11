@@ -86,8 +86,17 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     assert detail["feature_name"] == "Reactive To Real Ratio"
     assert detail["severity"] == "warning"
     assert detail["message"] == "Possible issue"
+    assert detail["what_happened"] == (
+        "Reactive To Real Ratio changed from the learned or configured expectation. "
+        "Observed 0.42 compared with 0.24."
+    )
+    assert "VAR" in detail["why_it_matters"]
+    assert "watts, VAR, VA" in detail["what_to_check_first"]
     assert detail["baseline_value"] == 0.24
+    assert detail["expected_value"] == 0.24
     assert detail["observed_value"] == 0.42
+    assert detail["threshold"] is None
+    assert detail["sample_count"] is None
     assert detail["change_ratio"] == 0.75
     assert detail["percent_change"] == 75.0
     assert detail["repeated_count"] == 4
@@ -122,8 +131,14 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "feature_name": "Reactive To Real Ratio",
         "severity": "warning",
         "message": "Possible issue",
+        "what_happened": detail["what_happened"],
+        "why_it_matters": detail["why_it_matters"],
+        "what_to_check_first": detail["what_to_check_first"],
         "baseline_value": 0.24,
+        "expected_value": 0.24,
         "observed_value": 0.42,
+        "threshold": None,
+        "sample_count": None,
         "change_ratio": 0.75,
         "percent_change": 75.0,
         "repeated_count": 4,

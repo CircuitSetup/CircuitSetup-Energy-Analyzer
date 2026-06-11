@@ -12,6 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
@@ -24,6 +25,10 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DEFAULT_ENTITY_DETAIL_LEVEL,
+    ENTITY_DETAIL_EXPERT,
+    ENTITY_DETAIL_SIMPLE,
+    ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
 from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
@@ -363,6 +368,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "utility",
         "advanced",
         "recommendations",
+        "entity_detail",
     ]
     assert result["description_placeholders"] == {}
 
@@ -705,6 +711,46 @@ async def test_options_mains_step_updates_mains_source_entities() -> None:
             CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"],
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_options_entity_detail_step_saves_profile_and_can_apply(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    calls: list[tuple[object, object, str]] = []
+
+    def fake_apply(hass, entry, detail_level):
+        calls.append((hass, entry, detail_level))
+        return {"total": 3, "will_disable": 1}
+
+    monkeypatch.setattr(
+        config_flow,
+        "_apply_entity_detail_profile_to_existing_entities",
+        fake_apply,
+    )
+    hass = SimpleNamespace()
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = hass
+
+    result = await flow.async_step_entity_detail(
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            "apply_entity_detail_profile": True,
+        }
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "",
+        "data": {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
+    }
+    assert calls == [(hass, entry, ENTITY_DETAIL_EXPERT)]
 
 
 @pytest.mark.asyncio
@@ -2264,12 +2310,16 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
 
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         DATA_SCHEMA,
+        _entity_detail_schema,
         _options_schema,
     )
 
     assert voluptuous_serialize.convert(DATA_SCHEMA)
     assert voluptuous_serialize.convert(
         _options_schema(SimpleNamespace(data={}, options={}))
+    )
+    assert voluptuous_serialize.convert(
+        _entity_detail_schema(SimpleNamespace(data={}, options={}))
     )
 
 
@@ -2318,6 +2368,22 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
             ]
         }
     }
+    entity_detail_schema = config_flow._entity_detail_schema(
+        SimpleNamespace(data={}, options={})
+    )
+    assert _schema_validator(entity_detail_schema, CONF_ENTITY_DETAIL_LEVEL) == {
+        "select": {
+            "options": [
+                {"value": ENTITY_DETAIL_SIMPLE, "label": "Simple"},
+                {"value": ENTITY_DETAIL_STANDARD, "label": "Standard"},
+                {"value": ENTITY_DETAIL_EXPERT, "label": "Expert"},
+            ]
+        }
+    }
+    assert (
+        _schema_default(entity_detail_schema, CONF_ENTITY_DETAIL_LEVEL)
+        == DEFAULT_ENTITY_DETAIL_LEVEL
+    )
 
     appliance_options = _schema_validator(
         assignment_schema,

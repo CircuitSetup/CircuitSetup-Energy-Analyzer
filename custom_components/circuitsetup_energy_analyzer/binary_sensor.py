@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .const import DOMAIN
@@ -12,6 +12,8 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    entity_detail_level_for_coordinator,
+    entity_enabled_default_for_tier,
     hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
@@ -216,6 +218,29 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
 )
 
 
+def _with_binary_entity_defaults(
+    description: DiagnosticBinarySensorDescription,
+) -> DiagnosticBinarySensorDescription:
+    tier = description.entity_tier
+    return replace(
+        description,
+        entity_category=(
+            None if tier is not EntityTier.DIAGNOSTIC else description.entity_category
+        ),
+        entity_registry_enabled_default=entity_enabled_default_for_tier(tier),
+    )
+
+
+BINARY_SENSOR_DESCRIPTIONS = tuple(
+    _with_binary_entity_defaults(description)
+    for description in BINARY_SENSOR_DESCRIPTIONS
+)
+BINARY_SENSOR_ENTITY_TIER_BY_KEY: dict[str, EntityTier] = {
+    description.key: description.entity_tier
+    for description in BINARY_SENSOR_DESCRIPTIONS
+}
+
+
 class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
     """Binary sensor exposing one diagnostic flag for an analyzed circuit."""
 
@@ -241,7 +266,10 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
         self._attr_device_class = description.device_class
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = (
-            description.entity_registry_enabled_default
+            entity_enabled_default_for_tier(
+                description.entity_tier,
+                entity_detail_level_for_coordinator(coordinator),
+            )
         )
         self._attr_entity_registry_visible_default = (
             description.entity_registry_visible_default

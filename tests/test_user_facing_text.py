@@ -210,6 +210,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility": "Utility / Opower Comparison",
         "advanced": "Advanced Circuit Settings",
         "recommendations": "Review Suggested Settings",
+        "entity_detail": "Entity Detail Level",
     }
     assert all("_" not in label for label in init_step["menu_options"].values())
     assert "choose" in init_step["description"].lower()
@@ -232,6 +233,17 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "review circuit assignments" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
+    entity_detail = strings["options"]["step"]["entity_detail"]
+    assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
+    assert (
+        entity_detail["data"]["apply_entity_detail_profile"]
+        == "Apply To Existing Entities"
+    )
+    assert "simple" in entity_detail["data_description"]["entity_detail_level"].lower()
+    assert (
+        "manually disabled"
+        in entity_detail["data_description"]["apply_entity_detail_profile"].lower()
+    )
 
 
 def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> None:
@@ -355,6 +367,7 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
             ("options", "mains"),
             ("options", "nilm"),
             ("options", "utility"),
+            ("options", "entity_detail"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),

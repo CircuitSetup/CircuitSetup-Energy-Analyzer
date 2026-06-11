@@ -83,6 +83,8 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["alert"]["circuit_id"] == "hvac"
     assert payload["alert"]["feature"] == "leg_imbalance"
     assert payload["alert"]["feature_name"] == "Leg Imbalance"
+    assert payload["alert"]["what_happened"].startswith("Leg Imbalance changed")
+    assert "Verify both CTs" in payload["alert"]["what_to_check_first"]
     assert payload["alert"]["graph_entities"] == [
         "sensor.hvac_l1_watts",
         "sensor.hvac_l2_watts",

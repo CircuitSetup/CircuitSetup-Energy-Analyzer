@@ -200,6 +200,14 @@ Choose the closest profile. The profile controls which checks are useful, which 
 
 Most users should build dashboards from the summary entities first. Detailed diagnostic entities are still available, but advanced troubleshooting entities are disabled by default so Home Assistant does not record unnecessary state history unless you opt in.
 
+The integration has an **Entity Detail Level** option under **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure**:
+
+- **Simple**: default for most homes. Enables the main summary entities, Daily Energy Usage when usable, and appliance Running sensors.
+- **Standard**: also enables configured feature-status entities, such as energy goals, billing/cost, weather context, water-flow context, and other features you turned on.
+- **Expert**: enables detailed diagnostic entities by default for new circuits, useful for troubleshooting and custom diagnostic dashboards.
+
+Changing this setting affects new entities. Use **Apply To Existing Entities** on the same screen when you intentionally want the selected profile applied to current analyzer entities. Entities you manually disabled remain disabled.
+
 For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, the main entities follow this pattern:
 
 | Entity | Example | What it tells you |
@@ -211,9 +219,9 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goal, billing, cost, and high-usage evidence. |
 | **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh when a cumulative energy source is available. |
 | **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
-| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Hidden by default. |
+| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available in Standard/Expert detail or by enabling the entity. |
 
-Use summary sensors for dashboards and automations. Use advanced detail entities only when a summary changes or when you are investigating setup/data-quality evidence such as Metric Consistency Status.
+Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page explains what happened, why it matters, observed versus expected values, sample count, first/last seen times, and what to check first. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
 
 For power-meter interpretation:
 
@@ -762,7 +770,13 @@ Advanced diagnostic entities are disabled by default. Enable them from the Home 
 
 ## Sensor reference
 
-The analyzer creates entities based on the circuit mode, appliance profile, source sensors, and enabled feature settings. Not every circuit will have every entity.
+The analyzer creates entities based on the circuit mode, appliance profile, source sensors, enabled feature settings, and the selected **Entity Detail Level**. Not every circuit will have every entity.
+
+In the **Visibility** column:
+
+- **Default visible** means enabled in Simple mode.
+- **Feature-specific** means created only when the feature applies; enabled by default in Standard and Expert, and manually enableable from the entity registry in Simple.
+- **Advanced diagnostic** means disabled by default except when Expert is applied.
 
 In the patterns below, `<circuit>` is the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, `solar`, or `mains`.
 
@@ -772,7 +786,7 @@ Start with these on dashboards.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, and learning readiness. Attributes include `blocking_issue_count`, `recommended_action`, `affected_circuit`, `open_path`, `reason`, and the full issue list. | Default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source` |
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, and learning readiness. Attributes include `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list. | Default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source` |
 | Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
@@ -798,7 +812,7 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 | **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, disabled by default. | `No recent activity`, `start`, `stop`, issue summary text |
 | **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, disabled by default. | Integer counts |
 | **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `standard`, `high`, `low`, or another stored preset |
-| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Normal entity, hidden by default. | `0`, `1`, or higher counts |
+| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Feature-specific; enabled in Standard/Expert when applicable. | `0`, `1`, or higher counts |
 
 ### Appliance behavior and power-quality sensors
 
@@ -912,7 +926,7 @@ Diagnostic binary sensors are created for configured circuits. Operational binar
 | **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, disabled by default. | `on`, `off` |
 | **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, disabled by default. | `on`, `off` |
 | **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Default visible for appliance circuits. | `on`, `off` |
-| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Default visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `on`, `off` |
+| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Feature-specific for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `on`, `off` |
 
 ## Status Glossary
 

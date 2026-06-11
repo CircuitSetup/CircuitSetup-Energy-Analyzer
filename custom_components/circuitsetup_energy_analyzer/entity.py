@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from .const import CONF_CIRCUITS, DOMAIN
+from .const import (
+    CONF_CIRCUITS,
+    CONF_ENTITY_DETAIL_LEVEL,
+    DEFAULT_ENTITY_DETAIL_LEVEL,
+    DOMAIN,
+    ENTITY_DETAIL_EXPERT,
+    ENTITY_DETAIL_SIMPLE,
+    ENTITY_DETAIL_STANDARD,
+)
 
 try:
     from homeassistant.helpers.entity import EntityCategory
@@ -30,6 +38,213 @@ class EntityTier(StrEnum):
     SUMMARY = "summary"
     FEATURE = "feature"
     DIAGNOSTIC = "diagnostic"
+
+
+ENTITY_DETAIL_LEVELS = (
+    ENTITY_DETAIL_SIMPLE,
+    ENTITY_DETAIL_STANDARD,
+    ENTITY_DETAIL_EXPERT,
+)
+
+
+def normalize_entity_detail_level(value: Any) -> str:
+    """Return a supported entity detail level."""
+    normalized = str(value or "").strip().lower()
+    if normalized in ENTITY_DETAIL_LEVELS:
+        return normalized
+    return DEFAULT_ENTITY_DETAIL_LEVEL
+
+
+def entity_detail_level_for_coordinator(coordinator: Any) -> str:
+    """Return the active entity detail level from coordinator options/data."""
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        if isinstance(container, Mapping) and container.get(CONF_ENTITY_DETAIL_LEVEL):
+            return normalize_entity_detail_level(container[CONF_ENTITY_DETAIL_LEVEL])
+    return DEFAULT_ENTITY_DETAIL_LEVEL
+
+
+def entity_enabled_default_for_tier(
+    tier: EntityTier,
+    detail_level: Any = DEFAULT_ENTITY_DETAIL_LEVEL,
+) -> bool:
+    """Return whether a tier should be enabled by default for a detail level."""
+    level = normalize_entity_detail_level(detail_level)
+    if tier is EntityTier.SUMMARY:
+        return True
+    if tier is EntityTier.FEATURE:
+        return level in {ENTITY_DETAIL_STANDARD, ENTITY_DETAIL_EXPERT}
+    return level == ENTITY_DETAIL_EXPERT
+
+
+def desired_disabled_by_for_entity_tier(
+    tier: EntityTier,
+    detail_level: Any = DEFAULT_ENTITY_DETAIL_LEVEL,
+) -> str | None:
+    """Return registry disabled_by state desired for an entity tier."""
+    if entity_enabled_default_for_tier(tier, detail_level):
+        return None
+    return "integration"
+
+
+def entity_profile_registry_plan(
+    entries: Iterable[Any],
+    *,
+    entry_id: str,
+    entity_domain: str,
+    tier_by_unique_id_suffix: Mapping[str, EntityTier],
+    detail_level: Any,
+) -> dict[str, Any]:
+    """Preview registry enable/disable changes for applying a detail profile."""
+    actions = _entity_profile_registry_actions(
+        entries,
+        entry_id=entry_id,
+        entity_domain=entity_domain,
+        tier_by_unique_id_suffix=tier_by_unique_id_suffix,
+        detail_level=detail_level,
+    )
+    return {
+        "profile": normalize_entity_detail_level(detail_level),
+        "will_enable": sum(1 for action in actions if action["action"] == "enable"),
+        "will_disable": sum(1 for action in actions if action["action"] == "disable"),
+        "unchanged": sum(1 for action in actions if action["action"] == "unchanged"),
+        "left_user_disabled": sum(
+            1 for action in actions if action["action"] == "left_user_disabled"
+        ),
+        "total": len(actions),
+        "actions": actions,
+    }
+
+
+def apply_entity_profile_to_registry(
+    hass: Any,
+    *,
+    entry_id: str,
+    entity_domain: str,
+    tier_by_unique_id_suffix: Mapping[str, EntityTier],
+    detail_level: Any,
+) -> dict[str, Any]:
+    """Apply an entity detail profile to existing integration entities."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return {
+            "profile": normalize_entity_detail_level(detail_level),
+            "will_enable": 0,
+            "will_disable": 0,
+            "unchanged": 0,
+            "left_user_disabled": 0,
+            "total": 0,
+            "actions": [],
+        }
+
+    registry = er.async_get(hass)
+    update_entity = getattr(registry, "async_update_entity", None)
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    plan = entity_profile_registry_plan(
+        values,
+        entry_id=entry_id,
+        entity_domain=entity_domain,
+        tier_by_unique_id_suffix=tier_by_unique_id_suffix,
+        detail_level=detail_level,
+    )
+    if not callable(update_entity):
+        return plan
+
+    integration_disabler = _integration_registry_disabler(er)
+    for action in plan["actions"]:
+        entity_id = action["entity_id"]
+        if action["action"] == "disable":
+            update_entity(entity_id, disabled_by=integration_disabler)
+        elif action["action"] == "enable":
+            update_entity(entity_id, disabled_by=None)
+    return plan
+
+
+def _entity_profile_registry_actions(
+    entries: Iterable[Any],
+    *,
+    entry_id: str,
+    entity_domain: str,
+    tier_by_unique_id_suffix: Mapping[str, EntityTier],
+    detail_level: Any,
+) -> list[dict[str, Any]]:
+    prefix = f"{entity_domain}."
+    suffixes = sorted(tier_by_unique_id_suffix, key=len, reverse=True)
+    actions: list[dict[str, Any]] = []
+    for entry in entries:
+        entity_id = str(getattr(entry, "entity_id", ""))
+        unique_id = str(getattr(entry, "unique_id", ""))
+        if (
+            getattr(entry, "config_entry_id", None) != entry_id
+            or getattr(entry, "platform", None) != DOMAIN
+            or not entity_id.startswith(prefix)
+        ):
+            continue
+        suffix = next(
+            (
+                candidate
+                for candidate in suffixes
+                if unique_id.endswith(f"_{candidate}")
+            ),
+            None,
+        )
+        if suffix is None:
+            continue
+
+        tier = tier_by_unique_id_suffix[suffix]
+        desired_disabled_by = desired_disabled_by_for_entity_tier(
+            tier,
+            detail_level,
+        )
+        actual_disabled_by = _registry_disabled_by_name(
+            getattr(entry, "disabled_by", None)
+        )
+        action = _registry_profile_action(actual_disabled_by, desired_disabled_by)
+        actions.append(
+            {
+                "entity_id": entity_id,
+                "unique_id": unique_id,
+                "suffix": suffix,
+                "tier": tier.value,
+                "disabled_by": actual_disabled_by,
+                "desired_disabled_by": desired_disabled_by,
+                "action": action,
+            }
+        )
+    return actions
+
+
+def _registry_profile_action(
+    actual_disabled_by: str | None,
+    desired_disabled_by: str | None,
+) -> str:
+    if desired_disabled_by is None:
+        if actual_disabled_by is None:
+            return "unchanged"
+        if actual_disabled_by == "integration":
+            return "enable"
+        return "left_user_disabled"
+    if actual_disabled_by is None:
+        return "disable"
+    if actual_disabled_by == desired_disabled_by:
+        return "unchanged"
+    return "left_user_disabled"
+
+
+def _registry_disabled_by_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw_value = getattr(value, "value", value)
+    if raw_value is None:
+        return None
+    return str(raw_value).split(".")[-1].lower()
+
+
+def _integration_registry_disabler(registry_module: Any) -> Any:
+    disabler = getattr(registry_module, "RegistryEntryDisabler", None)
+    return getattr(disabler, "INTEGRATION", "integration")
 
 
 @dataclass(frozen=True, slots=True)

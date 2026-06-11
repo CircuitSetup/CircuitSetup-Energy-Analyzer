@@ -20,7 +20,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260606-hide-graph-sources"
+PANEL_MODULE_VERSION = "20260611-entity-detail-drilldown"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"

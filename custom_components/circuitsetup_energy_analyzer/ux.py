@@ -108,8 +108,14 @@ def alert_evidence_detail(
         "feature_name": friendly_feature_name(feature),
         "severity": alert.severity.value,
         "message": alert.message,
+        "what_happened": _alert_what_happened(alert, feature),
+        "why_it_matters": _alert_why_it_matters(feature),
+        "what_to_check_first": _alert_what_to_check_first(feature),
         "baseline_value": alert.baseline_value,
+        "expected_value": alert.baseline_value,
         "observed_value": alert.observed_value,
+        "threshold": _alert_threshold(alert.features),
+        "sample_count": _alert_sample_count(alert.features),
         "change_ratio": alert.change_ratio,
         "percent_change": round(alert.change_ratio * 100.0, 3),
         "repeated_count": alert.repeated_count,
@@ -130,6 +136,79 @@ def alert_evidence_detail(
     if feature_needs_electrical_safety_notice(feature):
         detail["safety_notice"] = ELECTRICAL_SAFETY_NOTICE
     return detail
+
+
+def _alert_what_happened(alert: AlertEvidence, feature: str) -> str:
+    feature_name = friendly_feature_name(feature)
+    return (
+        f"{feature_name} changed from the learned or configured expectation. "
+        f"Observed {alert.observed_value} compared with {alert.baseline_value}."
+    )
+
+
+def _alert_why_it_matters(feature: str) -> str:
+    lower = feature.lower()
+    if "capacity" in lower or "demand" in lower:
+        return (
+            "Demand and capacity evidence can show unusual operating load, but "
+            "it is not an electrical safety verification."
+        )
+    if "reactive" in lower or "power_factor" in lower or lower.endswith("_pf"):
+        return (
+            "Changes in VAR, VA, or power factor can indicate that the load is "
+            "operating differently than its learned pattern."
+        )
+    if "energy" in lower or "kwh" in lower:
+        return (
+            "Energy-use changes can identify appliances that are running longer "
+            "or using more energy than their recent baseline."
+        )
+    if "cycle" in lower or "activity" in lower:
+        return (
+            "Run-cycle changes can show equipment that is running longer, "
+            "short-cycling, or not running when expected."
+        )
+    return (
+        "Repeated analyzer evidence means this circuit is no longer matching "
+        "its recent learned or configured behavior."
+    )
+
+
+def _alert_what_to_check_first(feature: str) -> str:
+    lower = feature.lower()
+    if "capacity" in lower or "demand" in lower:
+        return "Review the appliance load and configured breaker/capacity settings."
+    if "leg" in lower or "phase" in lower:
+        return "Verify both CTs, leg assignment, and dual-phase circuit mapping."
+    if "reactive" in lower or "power_factor" in lower or lower.endswith("_pf"):
+        return "Compare watts, VAR, VA, current, voltage, and power factor readings."
+    if "energy" in lower or "kwh" in lower:
+        return "Check the cumulative kWh sensor and recent appliance runtime."
+    if "cycle" in lower or "activity" in lower:
+        return "Review recent run cycles and whether the appliance is expected to run."
+    return "Review the source sensors and recent activity for this circuit."
+
+
+def _alert_threshold(features: Mapping[str, Any]) -> Any:
+    for key in (
+        "threshold",
+        "threshold_w",
+        "threshold_kwh",
+        "limit",
+        "limit_w",
+        "warning_ratio",
+        "tolerance_percent",
+    ):
+        if key in features:
+            return features[key]
+    return None
+
+
+def _alert_sample_count(features: Mapping[str, Any]) -> Any:
+    for key in ("sample_count", "samples", "window_sample_count", "cycle_count"):
+        if key in features:
+            return features[key]
+    return None
 
 
 def data_quality_checklist(

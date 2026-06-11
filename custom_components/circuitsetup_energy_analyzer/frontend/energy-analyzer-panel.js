@@ -380,6 +380,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       </section>
       ${this._renderSafetyNotice(alert)}
       <section class="panel">
+        <h2>What Happened</h2>
+        <p>${this._escape(alert.what_happened || alert.message || "The analyzer found repeated evidence for this circuit.")}</p>
+      </section>
+      <section class="panel">
+        <h2>Why It Matters</h2>
+        <p>${this._escape(alert.why_it_matters || "Repeated analyzer evidence means this circuit is no longer matching its recent learned or configured behavior.")}</p>
+      </section>
+      <section class="panel summary">
+        ${this._metric("Expected", alert.expected_value)}
+        ${this._metric("Threshold", alert.threshold)}
+        ${this._metric("Samples", alert.sample_count)}
+        ${this._metric("First Seen", alert.first_seen)}
+        ${this._metric("Last Seen", alert.last_seen)}
+        ${this._metric("Check First", alert.what_to_check_first)}
+      </section>
+      <section class="panel">
         <h2>Evidence Window</h2>
         <p>${this._escape(alert.graph_window_start)} to ${this._escape(alert.graph_window_end)}</p>
       </section>

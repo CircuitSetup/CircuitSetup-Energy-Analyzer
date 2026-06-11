@@ -123,6 +123,7 @@ from .const import (
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
@@ -143,6 +144,7 @@ from .const import (
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+    DEFAULT_ENTITY_DETAIL_LEVEL,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
     DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
@@ -151,6 +153,9 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
+    ENTITY_DETAIL_EXPERT,
+    ENTITY_DETAIL_SIMPLE,
+    ENTITY_DETAIL_STANDARD,
 )
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
@@ -160,6 +165,10 @@ from .discovery import (
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
     infer_sensor_role,
+)
+from .entity import (
+    apply_entity_profile_to_registry,
+    normalize_entity_detail_level,
 )
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
@@ -257,6 +266,7 @@ FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W = "flexible_load_running_threshold_w"
 FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
+FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
 RECOMMENDATION_ACTION_APPLY = "apply"
 RECOMMENDATION_ACTION_DENY = "deny"
 RECOMMENDATION_ACTION_DISMISS = "dismiss"
@@ -469,6 +479,9 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
                 DEFAULT_ENABLE_EXPERIMENTAL_NILM,
             )
         ),
+        CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
+            user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
+        ),
         CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
@@ -521,6 +534,9 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
                 CONF_ENABLE_EXPERIMENTAL_NILM,
                 DEFAULT_ENABLE_EXPERIMENTAL_NILM,
             )
+        ),
+        CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
+            user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
         CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
@@ -791,6 +807,23 @@ def retention_mode_options() -> list[dict[str, str]]:
     return [
         {"value": value, "label": _RETENTION_MODE_LABELS[value]}
         for value in _RETENTION_MODE_OPTIONS
+    ]
+
+
+def entity_detail_level_options() -> list[dict[str, str]]:
+    return [
+        {
+            "value": ENTITY_DETAIL_SIMPLE,
+            "label": "Simple",
+        },
+        {
+            "value": ENTITY_DETAIL_STANDARD,
+            "label": "Standard",
+        },
+        {
+            "value": ENTITY_DETAIL_EXPERT,
+            "label": "Expert",
+        },
     ]
 
 
@@ -2671,6 +2704,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "utility",
                     "advanced",
                     "recommendations",
+                    "entity_detail",
                 ],
             )
 
@@ -2688,6 +2722,12 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     self._config_entry,
                     CONF_MAINS_SOURCE_ENTITIES,
                     [],
+                )
+            if CONF_ENTITY_DETAIL_LEVEL not in source_input:
+                source_input[CONF_ENTITY_DETAIL_LEVEL] = _entry_value(
+                    self._config_entry,
+                    CONF_ENTITY_DETAIL_LEVEL,
+                    DEFAULT_ENTITY_DETAIL_LEVEL,
                 )
             try:
                 validated = validate_options_input(
@@ -2974,6 +3014,35 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         return _recommendations_form(self, recommendations)
+
+    async def async_step_entity_detail(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit entity detail level and optionally apply it to existing entities."""
+        if user_input is not None:
+            detail_level = normalize_entity_detail_level(
+                user_input.get(CONF_ENTITY_DETAIL_LEVEL)
+            )
+            if bool(user_input.get(FIELD_APPLY_ENTITY_DETAIL_PROFILE, False)):
+                _apply_entity_detail_profile_to_existing_entities(
+                    getattr(self, "hass", None),
+                    self._config_entry,
+                    detail_level,
+                )
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_ENTITY_DETAIL_LEVEL: detail_level},
+                ),
+            )
+
+        return self.async_show_form(
+            step_id="entity_detail",
+            data_schema=_entity_detail_schema(self._config_entry),
+            errors={},
+        )
 
     async def _async_show_options_form(
         self,
@@ -3395,6 +3464,28 @@ def _options_schema(
     )
 
 
+def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
+    detail_level = normalize_entity_detail_level(
+        _entry_value(
+            config_entry,
+            CONF_ENTITY_DETAIL_LEVEL,
+            DEFAULT_ENTITY_DETAIL_LEVEL,
+        )
+    )
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_ENTITY_DETAIL_LEVEL,
+                default=detail_level,
+            ): _select_selector(entity_detail_level_options()),
+            vol.Optional(
+                FIELD_APPLY_ENTITY_DETAIL_PROFILE,
+                default=False,
+            ): bool,
+        }
+    )
+
+
 def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[str, Any]:
     options = getattr(config_entry, "options", {}) or {}
     data = getattr(config_entry, "data", {}) or {}
@@ -3429,6 +3520,12 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
                     CONF_ENABLE_EXPERIMENTAL_NILM,
                     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
                 ),
+            )
+        ),
+        CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
+            options.get(
+                CONF_ENTITY_DETAIL_LEVEL,
+                data.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL),
             )
         ),
         CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
@@ -3521,6 +3618,52 @@ def _options_with_updates(
     options = dict(getattr(config_entry, "options", {}) or {})
     options.update(dict(updates))
     return options
+
+
+def _apply_entity_detail_profile_to_existing_entities(
+    hass: Any,
+    config_entry: config_entries.ConfigEntry,
+    detail_level: str,
+) -> dict[str, Any]:
+    if hass is None:
+        return {
+            "profile": normalize_entity_detail_level(detail_level),
+            "will_enable": 0,
+            "will_disable": 0,
+            "unchanged": 0,
+            "left_user_disabled": 0,
+            "total": 0,
+        }
+
+    from .binary_sensor import BINARY_SENSOR_ENTITY_TIER_BY_KEY
+    from .sensor import SENSOR_ENTITY_TIER_BY_KEY
+
+    entry_id = getattr(config_entry, "entry_id", "")
+    sensor_plan = apply_entity_profile_to_registry(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
+        detail_level=detail_level,
+    )
+    binary_plan = apply_entity_profile_to_registry(
+        hass,
+        entry_id=entry_id,
+        entity_domain="binary_sensor",
+        tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
+        detail_level=detail_level,
+    )
+    return {
+        "profile": normalize_entity_detail_level(detail_level),
+        "will_enable": int(sensor_plan["will_enable"])
+        + int(binary_plan["will_enable"]),
+        "will_disable": int(sensor_plan["will_disable"])
+        + int(binary_plan["will_disable"]),
+        "unchanged": int(sensor_plan["unchanged"]) + int(binary_plan["unchanged"]),
+        "left_user_disabled": int(sensor_plan["left_user_disabled"])
+        + int(binary_plan["left_user_disabled"]),
+        "total": int(sensor_plan["total"]) + int(binary_plan["total"]),
+    }
 
 
 def _settings_map_for_entry(
