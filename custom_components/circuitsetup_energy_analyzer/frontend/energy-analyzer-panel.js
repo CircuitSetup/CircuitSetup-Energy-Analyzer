@@ -281,6 +281,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font-weight: 700;
           font-size: 13px;
         }
+        .safety-notice {
+          border-color: var(--warning-color, #f4b400);
+          background: var(--secondary-background-color, #fff8e1);
+        }
+        .safety-notice p {
+          margin-top: 8px;
+        }
         .chart {
           width: 100%;
           min-height: 340px;
@@ -371,6 +378,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric("Change", `${alert.percent_change}%`)}
         ${this._metric("Repeated", alert.repeated_count)}
       </section>
+      ${this._renderSafetyNotice(alert)}
       <section class="panel">
         <h2>Evidence Window</h2>
         <p>${this._escape(alert.graph_window_start)} to ${this._escape(alert.graph_window_end)}</p>
@@ -386,6 +394,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <button id="mark_expected" class="secondary" ${this._disabled("mark_expected")}>Mark Expected</button>
           <button id="mark_unhelpful" class="secondary" ${this._disabled("mark_unhelpful")}>Mark Unhelpful</button>
         </div>
+      </section>
+    `;
+  }
+
+  _renderSafetyNotice(alert) {
+    if (!alert.safety_notice) {
+      return "";
+    }
+    return `
+      <section class="panel safety-notice">
+        <h2>Safety Notice</h2>
+        <p>${this._escape(alert.safety_notice)}</p>
       </section>
     `;
   }
