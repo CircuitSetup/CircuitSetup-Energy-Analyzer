@@ -13,6 +13,7 @@ from .events import CircuitEventProcessor
 from .leg_imbalance import LegImbalanceProcessor
 from .mains_balance import MainsBalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
+from .nilm_sample import NilmSampleProcessor
 from .nilm_topology import NilmTopologyProcessor
 from .power_quality import PowerQualityProcessor
 from .solar_flow import SolarFlowProcessor
@@ -34,6 +35,7 @@ __all__ = [
     "LegImbalanceProcessor",
     "MainsBalanceProcessor",
     "MetricConsistencyProcessor",
+    "NilmSampleProcessor",
     "NilmTopologyProcessor",
     "ProcessingContext",
     "PowerQualityProcessor",

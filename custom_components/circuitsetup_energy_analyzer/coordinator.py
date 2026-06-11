@@ -100,10 +100,6 @@ from .nilm import (
     KnownLoadMatch,
     NilmEdge,
     NilmEdgeDetector,
-    classify_signature,
-    cluster_recurring_signatures,
-    mask_known_loads,
-    unmatched_load_percentage,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .phase_balance import (
@@ -123,6 +119,7 @@ from .processors import (
     LegImbalanceProcessor,
     MainsBalanceProcessor,
     MetricConsistencyProcessor,
+    NilmSampleProcessor,
     NilmTopologyProcessor,
     PowerQualityProcessor,
     ProcessingContext,
@@ -150,7 +147,6 @@ from .solar_flow import (
 )
 from .standby import StandbySettings
 from .storage import RETENTION_WINDOWS, FeatureStoreData
-from .unknown_loads import build_unknown_load_inventory
 from .usage import EnergyUsageSettings
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
@@ -746,6 +742,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             known_config_for_circuit=self._config_for_circuit,
             alert_policy_for_circuit=self._nilm_topology_alert_policy_for_circuit,
         )
+        self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
+        self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
+        self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
+        self.ignored_nilm_signatures: set[tuple[str, str]] = set()
+        self._nilm_sample_processor = NilmSampleProcessor(
+            nilm_enabled=self._nilm_enabled,
+            seed_demo_nilm_state=self._seed_demo_nilm_state,
+            min_delta_w_for_circuit=(
+                lambda circuit_id: _nilm_min_delta_w(
+                    self._sensitivity_for_circuit(circuit_id),
+                )
+            ),
+            detectors=self._nilm_detectors,
+            total_events_by_circuit=self._nilm_total_events_by_circuit,
+            unmatched_edges_by_circuit=self._nilm_unmatched_edges,
+            ignored_signatures=self.ignored_nilm_signatures,
+            known_load_events=self._known_load_events,
+            observe_topology=(
+                lambda config, match, _context: [
+                    alert
+                    for alert in [
+                        self._observe_nilm_known_load_topology(config, match)
+                    ]
+                    if alert is not None
+                ]
+            ),
+        )
         self._water_context_alert_processor = WaterContextAlertProcessor(
             alert_policy_for_circuit=self._water_context_alert_policy_for_circuit,
         )
@@ -793,12 +816,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for part in self.store_data.settings_recommendation_notification_episode_key
         )
         self._active_repair_issues: set[tuple[str, str]] = set()
-        self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
-        self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
-        self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
         self._store_dirty = False
         self.paused_circuits: set[str] = set()
-        self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
         self.last_exported_history_csv: str = ""
         self.mapping_checks_run = 0
@@ -3522,60 +3541,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         sample: NormalizedCircuitSample,
         events: Iterable[CircuitEvent],
     ) -> list[AlertEvidence]:
-        alerts: list[AlertEvidence] = []
-        if not self._nilm_enabled(config):
-            return alerts
-
-        self._seed_demo_nilm_state(config, sample.timestamp)
-
-        min_delta_w = _nilm_min_delta_w(
-            self._sensitivity_for_circuit(config.circuit_id)
+        result = self._nilm_sample_processor.process(
+            sample,
+            config,
+            self._build_processing_context(sample.timestamp),
+            events=events,
         )
-        detector = self._nilm_detectors.setdefault(
-            config.circuit_id,
-            NilmEdgeDetector(min_delta_w=min_delta_w),
-        )
-        detector.min_delta_w = min_delta_w
-        edges = detector.process(sample)
-        if edges:
-            known_events = self._known_load_events(config.circuit_id, events)
-            mask = mask_known_loads(edges, known_events)
-            for match in mask.matched_edges:
-                alert = self._observe_nilm_known_load_topology(config, match)
-                if alert is not None:
-                    alerts.append(alert)
-            self._nilm_total_events_by_circuit[config.circuit_id] += len(edges)
-            self._nilm_unmatched_edges[config.circuit_id].extend(mask.unmatched_edges)
-
-            signatures = cluster_recurring_signatures(
-                self._nilm_unmatched_edges[config.circuit_id]
-            )
-            payloads = self._nilm_signature_payloads(config.circuit_id, signatures)
-            if payloads != self.store_data.nilm_signatures.get(config.circuit_id, []):
-                self.store_data.nilm_signatures[config.circuit_id] = payloads
-                self._mark_store_dirty()
-            inventory = build_unknown_load_inventory(
-                circuit_id=config.circuit_id,
-                signatures=signatures,
-                edges=self._nilm_unmatched_edges[config.circuit_id],
-                now=sample.timestamp,
-                existing_state=(
-                    self.store_data.nilm_unknown_loads_by_circuit.get(
-                        config.circuit_id,
-                        {},
-                    )
-                ),
-            )
-            if inventory != self.store_data.nilm_unknown_loads_by_circuit.get(
-                config.circuit_id
-            ):
-                self.store_data.nilm_unknown_loads_by_circuit[
-                    config.circuit_id
-                ] = inventory
-                self._mark_store_dirty()
-
-        self._refresh_nilm_state(config.circuit_id)
-        return alerts
+        for update in result.state_updates:
+            _apply_state_update(self.state, update.path, update.value)
+        if result.store_dirty:
+            self._mark_store_dirty()
+        return list(result.alerts)
 
     def _known_load_events(
         self: Self,
@@ -3623,81 +3599,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str,
         signatures: Iterable[Any],
     ) -> list[dict[str, Any]]:
-        existing = {
-            str(signature.get("signature_id")): dict(signature)
-            for signature in self.store_data.nilm_signatures.get(circuit_id, [])
-        }
-        payloads: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for signature in signatures:
-            current = existing.get(signature.signature_id, {})
-            metadata_current = (
-                current
-                if _nilm_signature_metadata_compatible(signature, current)
-                else {}
-            )
-            user_label = metadata_current.get("user_label")
-            classified_signature = replace(signature, user_label=user_label)
-            ignored = bool(metadata_current.get("ignored")) or (
-                circuit_id,
-                signature.signature_id,
-            ) in self.ignored_nilm_signatures and bool(metadata_current)
-            payload = {
-                "signature_id": signature.signature_id,
-                "median_delta_w": signature.median_delta_w,
-                "median_delta_var": signature.median_delta_var,
-                "median_delta_va": signature.median_delta_va,
-                "median_delta_pf": signature.median_delta_pf,
-                "median_leg_a_delta_w": signature.median_leg_a_delta_w,
-                "median_leg_b_delta_w": signature.median_leg_b_delta_w,
-                "leg_balance_ratio": signature.leg_balance_ratio,
-                "dominant_leg": signature.dominant_leg,
-                "split_phase_type": signature.split_phase_type,
-                "occurrence_count": signature.occurrence_count,
-                "confidence": signature.confidence,
-                "classification": classify_signature(classified_signature),
-            }
-            if user_label:
-                payload["user_label"] = user_label
-            if ignored:
-                payload["ignored"] = True
-            for key in ("review_state", "expected", "merged_into"):
-                if key in metadata_current:
-                    payload[key] = metadata_current[key]
-            payloads.append(payload)
-            seen.add(signature.signature_id)
-
-        for signature_id, signature in existing.items():
-            if signature_id not in seen and (
-                signature.get("user_label") or signature.get("ignored")
-                or signature.get("expected") or signature.get("merged_into")
-                or signature.get("review_state")
-            ):
-                payloads.append(signature)
-
-        return payloads
+        return self._nilm_sample_processor._nilm_signature_payloads(
+            circuit_id,
+            signatures,
+            self._build_processing_context(self._now_fn()),
+        )
 
     def _refresh_nilm_state(self: Self, circuit_id: str) -> None:
-        signatures = self.store_data.nilm_signatures.get(circuit_id, [])
-        active_count = sum(
-            1
-            for signature in signatures
-            if not signature.get("ignored")
-            and signature.get("review_state") != "merged"
+        result = self._nilm_sample_processor.refresh_state(
+            circuit_id,
+            self._build_processing_context(self._now_fn()),
         )
-        self.state.nilm_signature_count_by_circuit[circuit_id] = active_count
-        self.state.nilm_unmatched_load_percentage_by_circuit[circuit_id] = (
-            unmatched_load_percentage(
-                self._nilm_total_events_by_circuit[circuit_id],
-                len(self._nilm_unmatched_edges[circuit_id]),
-            )
-        )
-        self.state.nilm_review_by_circuit[circuit_id] = [
-            _nilm_review_payload(signature) for signature in signatures
-        ]
-        self.state.nilm_unknown_loads_by_circuit[circuit_id] = dict(
-            self.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
-        )
+        for update in result.state_updates:
+            _apply_state_update(self.state, update.path, update.value)
 
     def _seed_demo_event_history(
         self: Self,
@@ -5186,19 +5100,6 @@ def _alert_feedback_key(alert: AlertEvidence) -> str:
     return f"{alert.circuit_id}:{_alert_feature(alert)}"
 
 
-def _nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(signature)
-    if payload.get("review_state"):
-        return payload
-    if payload.get("ignored"):
-        payload["review_state"] = "ignored"
-    elif payload.get("user_label"):
-        payload["review_state"] = "labeled"
-    else:
-        payload["review_state"] = "new"
-    return payload
-
-
 def _normalized_temperature_unit(unit: str) -> str:
     normalized = str(unit or "").strip().lower()
     if normalized in {"°f", "f", "fahrenheit"}:
@@ -5222,48 +5123,6 @@ def _temperature_from_fahrenheit(value: float, unit: str) -> float:
     if unit == "°C":
         return (value - 32.0) * 5.0 / 9.0
     return value
-
-
-def _nilm_signature_metadata_compatible(
-    signature: Any,
-    current: dict[str, Any],
-) -> bool:
-    if not current:
-        return False
-
-    current_type = str(current.get("split_phase_type") or "")
-    signature_type = str(getattr(signature, "split_phase_type", "unknown") or "unknown")
-    if current_type:
-        if not _nilm_split_phase_metadata_compatible(current_type, signature_type):
-            return False
-    elif signature_type not in {"unknown", "missing_leg_data"}:
-        return False
-
-    checks = (
-        ("median_delta_w", 0.2),
-        ("median_delta_var", 0.35),
-        ("median_delta_va", 0.35),
-    )
-    for key, tolerance_ratio in checks:
-        current_value = _float_or_none(current.get(key))
-        signature_value = _float_or_none(getattr(signature, key, None))
-        if current_value is None or signature_value is None:
-            continue
-        tolerance = max(abs(signature_value) * tolerance_ratio, 25.0)
-        if abs(current_value - signature_value) > tolerance:
-            return False
-
-    return True
-
-
-def _nilm_split_phase_metadata_compatible(
-    current_type: str,
-    signature_type: str,
-) -> bool:
-    uncertain = {"unknown", "missing_leg_data"}
-    if current_type in uncertain or signature_type in uncertain:
-        return current_type in uncertain and signature_type in uncertain
-    return current_type == signature_type
 
 
 def _weather_context_mode(config: CircuitConfig) -> str:

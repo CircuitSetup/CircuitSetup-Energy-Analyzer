@@ -1664,6 +1664,97 @@ def test_water_context_alert_processor_returns_flow_alert() -> None:
     }
 
 
+def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdgeDetector
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    state = AnalyzerState()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    topology_alerts: list[AlertEvidence] = []
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: topology_alerts,
+    )
+
+    def sample(index: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=index * 30),
+            circuit_id="mains",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=10.0 if watts < 200 else 150.0,
+            apparent_power=abs(watts),
+            power_factor=0.8,
+            frequency=60.0,
+            energy=None,
+        )
+
+    results = [
+        processor.process(
+            sample(index, watts),
+            config,
+            context,
+            events=(),
+        )
+        for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1)
+    ]
+
+    assert any(result.store_dirty for result in results)
+    assert isinstance(processor.detectors["mains"], NilmEdgeDetector)
+    assert processor.total_events_by_circuit["mains"] == 5
+    assert len(processor.unmatched_edges_by_circuit["mains"]) == 5
+    assert topology_alerts == []
+    assert len(store_data.nilm_signatures["mains"]) == 1
+
+    signature = store_data.nilm_signatures["mains"][0]
+    assert signature["signature_id"].startswith("on-")
+    assert signature["occurrence_count"] == 3
+    assert signature["classification"].startswith("possible")
+    updates = {update.path: update.value for update in results[-1].state_updates}
+    assert updates[("nilm_signature_count_by_circuit", "mains")] == 1
+    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == 100.0
+    assert updates[("nilm_review_by_circuit", "mains")][0]["signature_id"] == (
+        signature["signature_id"]
+    )
+    inventory = updates[("nilm_unknown_loads_by_circuit", "mains")]
+    assert inventory["unknown_load_count"] == 1
+    assert inventory["unknown_loads"][0]["signature_id"] == signature["signature_id"]
+    assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
