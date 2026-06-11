@@ -127,6 +127,22 @@ def is_laundry_appliance_running(
     return is_appliance_running(state, circuit_id, appliance_profile)
 
 
+def has_water_flow_mismatch(
+    state: Any,
+    circuit_id: str,
+    appliance_profile: ApplianceProfile | str | None = None,
+) -> bool:
+    """Return whether water-flow evidence currently indicates a possible issue."""
+    evidence = getattr(state, "water_flow_context_by_circuit", {}).get(circuit_id, {})
+    if not isinstance(evidence, dict):
+        return False
+    return evidence.get("status") in {
+        "possible_flow_without_load",
+        "possible_load_without_flow",
+        "possible_sensor_problem",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticBinarySensorDescription:
     """Description for one diagnostic binary sensor entity."""
@@ -153,6 +169,7 @@ BINARY_SENSOR_ICONS = {
     "data_quality_problem": "mdi:database-alert-outline",
     "maintenance": "mdi:wrench-clock",
     "running": "mdi:power-cycle",
+    "water_flow_mismatch": "mdi:pipe-leak",
 }
 
 
@@ -180,6 +197,13 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         name_suffix="Running",
         value_fn=is_appliance_running,
         device_class="running",
+        entity_category=None,
+    ),
+    DiagnosticBinarySensorDescription(
+        key="water_flow_mismatch",
+        name_suffix="Water Flow Mismatch",
+        value_fn=has_water_flow_mismatch,
+        device_class="problem",
         entity_category=None,
     ),
 )
@@ -282,6 +306,13 @@ def binary_sensor_description_applies(
     circuit: Any,
 ) -> bool:
     """Return whether a binary sensor is useful for this circuit."""
+    if description.key == "water_flow_mismatch":
+        return _appliance_profile(getattr(circuit, "appliance_profile", None)) in {
+            ApplianceProfile.WATER_PUMP,
+            ApplianceProfile.WELL_PUMP,
+            ApplianceProfile.WATER_HEATER,
+            ApplianceProfile.WASHER,
+        }
     if description.key != "running":
         return True
     return (

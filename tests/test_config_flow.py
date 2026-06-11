@@ -15,11 +15,14 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
 )
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
 from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
@@ -201,6 +204,31 @@ def test_validate_setup_input_preserves_outdoor_temperature_entity() -> None:
         validated[CONF_OUTDOOR_TEMPERATURE_ENTITY]
         == "sensor.outdoor_temperature"
     )
+
+
+def test_validate_setup_input_preserves_water_context_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_setup_input,
+    )
+
+    validated = validate_setup_input(
+        {
+            CONF_SOURCE_ENTITIES: ["sensor.sump_pump_watts"],
+            CONF_RAIN_SENSOR_ENTITY: " binary_sensor.rain ",
+            CONF_RAIN_INTENSITY_ENTITY: " sensor.precipitation_rate ",
+            CONF_WATER_FLOW_SENSOR_ENTITIES: [
+                " binary_sensor.water_flow ",
+                "binary_sensor.hot_water_flow",
+            ],
+        }
+    )
+
+    assert validated[CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
+    assert validated[CONF_RAIN_INTENSITY_ENTITY] == "sensor.precipitation_rate"
+    assert validated[CONF_WATER_FLOW_SENSOR_ENTITIES] == [
+        "binary_sensor.water_flow",
+        "binary_sensor.hot_water_flow",
+    ]
 
 
 def test_validate_options_input_parses_source_entity_values() -> None:
@@ -591,6 +619,16 @@ def test_setup_schema_exposes_outdoor_temperature_entity() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
     assert CONF_OUTDOOR_TEMPERATURE_ENTITY in _schema_keys(config_flow.DATA_SCHEMA)
+
+
+def test_setup_schema_exposes_water_context_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    keys = _schema_keys(config_flow.DATA_SCHEMA)
+
+    assert CONF_RAIN_SENSOR_ENTITY in keys
+    assert CONF_RAIN_INTENSITY_ENTITY in keys
+    assert CONF_WATER_FLOW_SENSOR_ENTITIES in keys
 
 
 @pytest.mark.asyncio
@@ -1767,6 +1805,50 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert "leg_imbalance_warning_ratio" not in _schema_keys(schema)
     assert "balance_negative_tolerance_w" not in _schema_keys(schema)
     assert "solar_export_tolerance_w" not in _schema_keys(schema)
+
+
+def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema(
+        {
+            "linked_flow_sensor_entities": ["binary_sensor.water_flow"],
+            "flow_mismatch_threshold_minutes": 8,
+        },
+        {
+            "circuit_id": "sump_pump",
+            "name": "Sump Pump",
+            "appliance_profile": ApplianceProfile.SUMP_PUMP.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert "water_context_settings" in _schema_section_keys(schema)
+    assert _schema_default(schema, "rain_response_window_minutes") == 120
+    assert _schema_default(schema, "rain_activity_delta_threshold_pct") == 25.0
+    assert "water_flow_correlation_enabled" not in _schema_keys(schema)
+
+    washer_schema = _advanced_settings_schema(
+        {"linked_flow_sensor_entities": ["binary_sensor.water_flow"]},
+        {
+            "circuit_id": "washer",
+            "name": "Washer",
+            "appliance_profile": ApplianceProfile.WASHER.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert "water_context_settings" in _schema_section_keys(washer_schema)
+    assert _schema_default(washer_schema, "expects_water_flow") is True
+    assert _schema_default(washer_schema, "linked_flow_sensor_entities") == [
+        "binary_sensor.water_flow"
+    ]
 
 
 def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls(

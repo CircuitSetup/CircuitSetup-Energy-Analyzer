@@ -4,7 +4,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
-from .const import CONF_OUTDOOR_TEMPERATURE_ENTITY, DOMAIN
+from .const import (
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_SENSOR_ENTITY,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DOMAIN,
+)
 from .entity import (
     CircuitAnalyzerEntity,
     EntityCategory,
@@ -320,6 +326,20 @@ _WEATHER_CONTEXT_STATUS_LABELS = {
     "weather_correlated": "Weather Correlated",
     "above_weather_adjusted_range": "Above Weather-Adjusted Range",
 }
+_WATER_CONTEXT_STATUS_LABELS = {
+    "unconfigured": "Unconfigured",
+    "learning": "Learning",
+    "normal": "Normal",
+    "rain_explained": "Rain Explained",
+    "compressor_explained": "Compressor Explained",
+    "weather_explained": "Weather Explained",
+    "possible_excess_pump_activity": "Possible Excess Pump Activity",
+    "possible_missing_pump_activity": "Possible Missing Pump Activity",
+    "possible_flow_without_load": "Possible Flow Without Load",
+    "possible_load_without_flow": "Possible Load Without Flow",
+    "possible_sensor_problem": "Possible Sensor Problem",
+    "sensor_unavailable": "Sensor Unavailable",
+}
 
 
 def weather_context_value(state: Any, circuit_id: str) -> str:
@@ -368,6 +388,43 @@ def outdoor_temperature_attributes(state: Any, circuit_id: str) -> dict[str, Any
     return attributes
 
 
+def rain_pump_correlation_value(state: Any, circuit_id: str) -> str:
+    """Return a friendly rain/pump correlation status."""
+    evidence = getattr(state, "rain_pump_context_by_circuit", {}).get(circuit_id)
+    status = _water_context_status(evidence)
+    return _WATER_CONTEXT_STATUS_LABELS.get(status, friendly_feature_name(status))
+
+
+def rain_pump_correlation_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return rain/pump evidence attributes."""
+    evidence = getattr(state, "rain_pump_context_by_circuit", {}).get(circuit_id)
+    return dict(evidence) if isinstance(evidence, Mapping) else {}
+
+
+def water_flow_correlation_value(state: Any, circuit_id: str) -> str:
+    """Return a friendly water-flow correlation status."""
+    evidence = getattr(state, "water_flow_context_by_circuit", {}).get(circuit_id)
+    status = _water_context_status(evidence)
+    return _WATER_CONTEXT_STATUS_LABELS.get(status, friendly_feature_name(status))
+
+
+def water_flow_correlation_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+    """Return water-flow evidence attributes."""
+    evidence = getattr(state, "water_flow_context_by_circuit", {}).get(circuit_id)
+    return dict(evidence) if isinstance(evidence, Mapping) else {}
+
+
+def water_flow_mismatch_minutes_value(state: Any, circuit_id: str) -> float:
+    """Return current flow/appliance mismatch duration in minutes."""
+    evidence = getattr(state, "water_flow_context_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    if not isinstance(evidence, Mapping):
+        return 0.0
+    return float(evidence.get("mismatch_minutes", 0.0) or 0.0)
+
+
 def _outdoor_temperature_unit_from_evidence(evidence: Mapping[str, Any]) -> str:
     unit = str(
         evidence.get("temperature_unit")
@@ -391,6 +448,17 @@ def _weather_context_status(evidence: Any) -> str:
     if isinstance(evidence, str):
         return evidence
     return "no_temperature_source"
+
+
+def _water_context_status(evidence: Any) -> str:
+    if isinstance(evidence, Mapping):
+        return str(evidence.get("status") or "unconfigured")
+    status = getattr(evidence, "status", None)
+    if status:
+        return str(status)
+    if isinstance(evidence, str):
+        return evidence
+    return "unconfigured"
 
 
 def _numeric_value(value: Any) -> float | None:
@@ -1239,6 +1307,9 @@ SENSOR_ICONS: Mapping[str, str] = {
     "nilm_topology_status": "mdi:source-branch",
     "weather_context": "mdi:thermometer-lines",
     "outdoor_temperature": "mdi:thermometer",
+    "rain_pump_correlation": "mdi:weather-rainy",
+    "water_flow_correlation": "mdi:water-sync",
+    "water_flow_mismatch_minutes": "mdi:pipe-leak",
     "daily_energy_usage": "mdi:counter",
     "energy_usage_share": "mdi:chart-pie",
     "energy_usage_status": "mdi:lightning-bolt-outline",
@@ -1464,6 +1535,26 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         native_unit_of_measurement=None,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=outdoor_temperature_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="rain_pump_correlation",
+        name_suffix="Rain Pump Correlation",
+        value_fn=rain_pump_correlation_value,
+        attributes_fn=rain_pump_correlation_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="water_flow_correlation",
+        name_suffix="Water Flow Correlation",
+        value_fn=water_flow_correlation_value,
+        attributes_fn=water_flow_correlation_attributes,
+    ),
+    DiagnosticSensorDescription(
+        key="water_flow_mismatch_minutes",
+        name_suffix="Water Flow Mismatch Minutes",
+        value_fn=water_flow_mismatch_minutes_value,
+        native_unit_of_measurement="min",
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes_fn=water_flow_correlation_attributes,
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
@@ -1854,6 +1945,8 @@ _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     "daily_energy_usage",
     "weather_context",
     "outdoor_temperature",
+    "rain_pump_correlation",
+    "water_flow_correlation",
 }
 _NORMAL_ENTITY_SENSOR_KEYS = {
     "health_summary",
@@ -1864,6 +1957,9 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "daily_energy_usage",
     "weather_context",
     "outdoor_temperature",
+    "rain_pump_correlation",
+    "water_flow_correlation",
+    "water_flow_mismatch_minutes",
     "energy_usage_share",
     "energy_usage_status",
     "energy_goal_usage",
@@ -2025,11 +2121,27 @@ _STANDBY_SENSOR_KEYS = {
     "always_on_limit_usage",
 }
 _WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context", "outdoor_temperature"}
+_RAIN_PUMP_CONTEXT_SENSOR_KEYS = {"rain_pump_correlation"}
+_WATER_FLOW_CONTEXT_SENSOR_KEYS = {
+    "water_flow_correlation",
+    "water_flow_mismatch_minutes",
+}
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
     ApplianceProfile.HVAC_BLOWER,
     ApplianceProfile.ELECTRIC_HEAT,
+}
+_RAIN_PUMP_CONTEXT_PROFILES = {
+    ApplianceProfile.SUMP_PUMP,
+    ApplianceProfile.WATER_PUMP,
+    ApplianceProfile.WELL_PUMP,
+}
+_WATER_FLOW_CONTEXT_PROFILES = {
+    ApplianceProfile.WATER_PUMP,
+    ApplianceProfile.WELL_PUMP,
+    ApplianceProfile.WATER_HEATER,
+    ApplianceProfile.WASHER,
 }
 _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.REFRIGERATOR,
@@ -2352,6 +2464,14 @@ def sensor_description_applies(
         return profile in _WEATHER_CONTEXT_PROFILES and _has_temperature_source(
             coordinator,
         )
+    if key in _RAIN_PUMP_CONTEXT_SENSOR_KEYS:
+        return profile in _RAIN_PUMP_CONTEXT_PROFILES and _has_rain_context_source(
+            coordinator,
+        )
+    if key in _WATER_FLOW_CONTEXT_SENSOR_KEYS:
+        return profile in _WATER_FLOW_CONTEXT_PROFILES and _has_water_flow_source(
+            coordinator,
+        )
     return False
 
 
@@ -2476,6 +2596,22 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
 def _has_temperature_source(coordinator: Any) -> bool:
     value = _coordinator_config_value(coordinator, CONF_OUTDOOR_TEMPERATURE_ENTITY)
     return value is not None and bool(str(value).strip())
+
+
+def _has_rain_context_source(coordinator: Any) -> bool:
+    return any(
+        bool(str(_coordinator_config_value(coordinator, key) or "").strip())
+        for key in (CONF_RAIN_SENSOR_ENTITY, CONF_RAIN_INTENSITY_ENTITY)
+    )
+
+
+def _has_water_flow_source(coordinator: Any) -> bool:
+    value = _coordinator_config_value(coordinator, CONF_WATER_FLOW_SENSOR_ENTITIES)
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set)):
+        return any(bool(str(item).strip()) for item in value)
+    return False
 
 
 def _coordinator_config_value(coordinator: Any, key: str) -> Any:

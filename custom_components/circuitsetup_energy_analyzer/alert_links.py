@@ -46,6 +46,10 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         (SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),
     (
+        ("rain_pump", "water_flow", "pump", "flow"),
+        (SensorRole.REAL_POWER, SensorRole.CURRENT, SensorRole.ENERGY),
+    ),
+    (
         ("voltage", "sag", "swell"),
         (SensorRole.VOLTAGE, SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),

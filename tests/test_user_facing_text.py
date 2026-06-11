@@ -17,6 +17,9 @@ EXPECTED_FLOW_LABELS = {
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "outdoor_temperature_entity": "Outdoor Temperature Entity",
+    "rain_sensor_entity": "Rain Sensor",
+    "rain_intensity_entity": "Rain Intensity Sensor",
+    "water_flow_sensor_entities": "Water Flow Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -26,6 +29,9 @@ EXPECTED_OPTIONS_LABELS = {
     "extra_source_entities": "Extra Source Entities",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "outdoor_temperature_entity": "Outdoor Temperature Entity",
+    "rain_sensor_entity": "Rain Sensor",
+    "rain_intensity_entity": "Rain Intensity Sensor",
+    "water_flow_sensor_entities": "Water Flow Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -75,6 +81,13 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "standby_threshold_w": "Standby Threshold W",
     "always_on_alert_w": "Always On Alert W",
     "standby_min_samples": "Standby Minimum Samples",
+    "rain_pump_correlation_enabled": "Rain and Pump Correlation",
+    "rain_response_window_minutes": "Rain Response Window Minutes",
+    "rain_activity_delta_threshold_pct": "Rain Activity Threshold Percent",
+    "water_flow_correlation_enabled": "Water Flow Correlation",
+    "linked_flow_sensor_entities": "Linked Flow Sensors",
+    "expects_water_flow": "Expects Water Flow",
+    "flow_mismatch_threshold_minutes": "Flow Mismatch Threshold Minutes",
     "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
     "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
     "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
@@ -94,6 +107,7 @@ EXPECTED_ADVANCED_SECTION_LABELS = {
     "billing_cost_settings": "Billing And Cost",
     "demand_capacity_settings": "Demand And Capacity",
     "standby_settings": "Always On And Standby",
+    "water_context_settings": "Water Context",
     "dual_phase_settings": "Dual-Phase Leg Imbalance",
     "power_quality_settings": "Power Metric Consistency",
     "mains_balance_settings": "Mains Balance",
@@ -441,6 +455,8 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",
         "sensor.mains_nilm_utility_comparison_status",
+        "sensor.water_heater_water_flow_correlation",
+        "sensor.washer_water_flow_correlation",
     }
     hidden_sensor_keys = {
         description.key
@@ -635,7 +651,9 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     dashboard = yaml.safe_load(dashboard_text)
 
-    section_titles = [section.get("title") for section in _dashboard_sections(dashboard)]
+    section_titles = [
+        section.get("title") for section in _dashboard_sections(dashboard)
+    ]
     assert section_titles == [
         "Appliance Status",
         "Mains, Solar, and NILM",
@@ -643,9 +661,13 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
         "HVAC Weather Context",
     ]
 
-    mains_section = yaml.safe_dump(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+    mains_section = yaml.safe_dump(
+        _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    )
     energy_section = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
-    weather_section = yaml.safe_dump(_dashboard_section(dashboard, "HVAC Weather Context"))
+    weather_section = yaml.safe_dump(
+        _dashboard_section(dashboard, "HVAC Weather Context")
+    )
 
     assert "Unknown Load Inventory" in mains_section
     assert "Unknown load signals" in mains_section
@@ -725,6 +747,8 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",
         "sensor.mains_nilm_utility_comparison_status",
+        "sensor.water_heater_water_flow_correlation",
+        "sensor.washer_water_flow_correlation",
     }
     assert expected_entities <= refs
     assert not any(ref.endswith("_health_summary") for ref in refs)
@@ -1035,36 +1059,15 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         "docs/images/readme/integration-overview.png",
         "docs/images/readme/options-menu.png",
         "docs/images/readme/assignment-editor.png",
-        "docs/images/readme/mains-sensors.png",
         "docs/images/readme/advanced-settings.png",
-        "docs/images/readme/circuit-modes.png",
-        "docs/images/readme/power-flow.png",
-        "docs/images/readme/energy-usage-spikes.png",
-        "docs/images/readme/daily-energy-goals.png",
-        "docs/images/readme/run-cycle-diagnostics.png",
-        "docs/images/readme/recent-activity-timeline.png",
-        "docs/images/readme/billing-cycle-forecasts.png",
-        "docs/images/readme/cost-time-of-use.png",
-        "docs/images/readme/history-csv-export.png",
-        "docs/images/readme/peak-demand-tracking.png",
-        "docs/images/readme/circuit-capacity-tracking.png",
-        "docs/images/readme/dual-phase-leg-imbalance.png",
-        "docs/images/readme/power-metric-consistency.png",
-        "docs/images/readme/mains-balance.png",
-        "docs/images/readme/solar-flow-diagnostics.png",
-        "docs/images/readme/utility-comparison.png",
-        "docs/images/readme/always-on-standby.png",
-        "docs/images/readme/experimental-nilm.png",
-        "docs/images/readme/alert-philosophy.png",
         "docs/images/readme/notifications-panel.png",
         "docs/images/readme/notifications-repairs.png",
         "docs/images/readme/demo-dashboard.png",
     }
 
     assert expected <= set(refs)
+    assert "### Screenshots" not in readme_text
     focused_native_refs = {
-        "docs/images/readme/energy-usage-spikes.png",
-        "docs/images/readme/daily-energy-goals.png",
         "docs/images/readme/notifications-panel.png",
     }
     for ref in sorted(set(refs)):
