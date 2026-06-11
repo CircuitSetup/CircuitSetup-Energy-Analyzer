@@ -1188,6 +1188,311 @@ def test_mains_balance_processor_updates_state_for_mains_circuit() -> None:
     }
 
 
+def test_solar_flow_processor_updates_flow_and_load_shift_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+    pool_pump = CircuitConfig(
+        circuit_id="pool",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    water_heater = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda circuit_id: (
+            store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
+        ),
+    )
+
+    result = processor.process(
+        [
+            (mains, sample("mains", -500.0)),
+            (solar, sample("solar", 2000.0)),
+            (pool_pump, sample("pool", 800.0)),
+            (water_heater, sample("water_heater", 0.0)),
+        ],
+        context,
+    )
+
+    assert result.alerts == []
+    assert result.notifications == []
+    assert result.store_dirty is False
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("solar_generation_w_by_circuit", "mains")] == 2000.0
+    assert updates[("solar_grid_import_w_by_circuit", "mains")] == 0.0
+    assert updates[("solar_grid_export_w_by_circuit", "mains")] == 500.0
+    assert updates[("solar_self_consumption_percent_by_circuit", "mains")] == 75.0
+    assert updates[("solar_powered_percent_by_circuit", "mains")] == 100.0
+    assert updates[("solar_surplus_w_by_circuit", "mains")] == 500.0
+    assert updates[("solar_load_shift_w_by_circuit", "mains")] == 500.0
+    assert updates[("solar_flexible_load_power_w_by_circuit", "mains")] == 800.0
+    assert updates[
+        ("solar_flexible_load_coverage_percent_by_circuit", "mains")
+    ] == 100.0
+    assert updates[("solar_flow_status_by_circuit", "mains")] == "exporting"
+    assert updates[("solar_surplus_status_by_circuit", "mains")] == (
+        "surplus_available"
+    )
+    assert updates[("solar_load_shift_status_by_circuit", "mains")] == (
+        "active_solar_supported"
+    )
+    assert updates[("solar_flow_evidence_by_circuit", "mains")] == {
+        "mains_net_power_w": -500.0,
+        "solar_generation_w": 2000.0,
+        "grid_import_w": 0.0,
+        "grid_export_w": 500.0,
+        "site_consumption_w": 1500.0,
+        "solar_used_on_site_w": 1500.0,
+        "self_consumption_percent": 75.0,
+        "solar_powered_percent": 100.0,
+        "solar_surplus_w": 500.0,
+        "load_shift_available_w": 500.0,
+        "solar_surplus_threshold_w": 500.0,
+        "high_solar_surplus_threshold_w": 1500.0,
+        "generation_circuit_count": 1.0,
+        "status": "exporting",
+        "solar_surplus_status": "surplus_available",
+    }
+    assert updates[("solar_load_shift_evidence_by_circuit", "mains")][
+        "candidate_loads"
+    ] == [
+        {
+            "circuit_id": "pool",
+            "name": "Pool Pump",
+            "appliance_profile": "pool_pump",
+            "current_power_w": 800.0,
+            "state": "active",
+        },
+        {
+            "circuit_id": "water_heater",
+            "name": "Water Heater",
+            "appliance_profile": "water_heater",
+            "current_power_w": 0.0,
+            "state": "idle",
+        },
+    ]
+
+
+def test_solar_flow_processor_ignores_batches_without_mains() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="solar",
+        real_power=1800.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+    processor = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda _circuit_id: {},
+    )
+
+    result = processor.process([(solar, sample)], context)
+
+    assert result.state_updates == []
+    assert result.alerts == []
+    assert result.notifications == []
+
+
+def test_solar_flow_processor_respects_selection_and_settings_overrides() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        solar_flow_settings_by_circuit={
+            "mains": {
+                "solar_surplus_threshold_w": 700.0,
+                "high_solar_surplus_threshold_w": 900.0,
+                "flexible_load_running_threshold_w": 900.0,
+            },
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar_by_profile = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+    )
+    pool_pump = CircuitConfig(
+        circuit_id="pool",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    microwave = CircuitConfig(
+        circuit_id="microwave",
+        name="Microwave",
+        appliance_profile=ApplianceProfile.MICROWAVE,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda circuit_id: (
+            store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
+        ),
+    )
+
+    result = processor.process(
+        [
+            (mains, sample("mains", -800.0)),
+            (solar_by_profile, sample("solar", 1600.0)),
+            (pool_pump, sample("pool", 800.0)),
+            (microwave, sample("microwave", 1000.0)),
+        ],
+        context,
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("solar_generation_w_by_circuit", "mains")] == 1600.0
+    assert updates[("solar_grid_export_w_by_circuit", "mains")] == 800.0
+    assert updates[("solar_surplus_w_by_circuit", "mains")] == 800.0
+    assert updates[("solar_surplus_status_by_circuit", "mains")] == (
+        "surplus_available"
+    )
+    assert updates[("solar_load_shift_w_by_circuit", "mains")] == 800.0
+    assert updates[("solar_flexible_load_power_w_by_circuit", "mains")] == 0.0
+    assert updates[("solar_load_shift_status_by_circuit", "mains")] == (
+        "surplus_candidate"
+    )
+
+    flow_evidence = updates[("solar_flow_evidence_by_circuit", "mains")]
+    assert flow_evidence["solar_surplus_threshold_w"] == 700.0
+    assert flow_evidence["high_solar_surplus_threshold_w"] == 900.0
+    assert flow_evidence["generation_circuit_count"] == 1.0
+
+    load_shift_evidence = updates[("solar_load_shift_evidence_by_circuit", "mains")]
+    assert load_shift_evidence["candidate_loads"] == [
+        {
+            "circuit_id": "pool",
+            "name": "Pool Pump",
+            "appliance_profile": "pool_pump",
+            "current_power_w": 800.0,
+            "state": "idle",
+        },
+    ]
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

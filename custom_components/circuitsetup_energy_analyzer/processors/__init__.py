@@ -14,6 +14,7 @@ from .leg_imbalance import LegImbalanceProcessor
 from .mains_balance import MainsBalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
 from .power_quality import PowerQualityProcessor
+from .solar_flow import SolarFlowProcessor
 from .standby import StandbyProcessor
 from .utility_comparison import UtilityComparisonProcessor
 
@@ -34,6 +35,7 @@ __all__ = [
     "ProcessingContext",
     "PowerQualityProcessor",
     "RunCycleProcessor",
+    "SolarFlowProcessor",
     "StandbyProcessor",
     "StateUpdate",
     "UtilityComparisonProcessor",
