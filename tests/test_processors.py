@@ -27,6 +27,13 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     SensorRole,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    NormalizedCircuitSample,
+)
+from custom_components.circuitsetup_energy_analyzer.phase_balance import (
+    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+)
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
 
@@ -986,3 +993,189 @@ def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() ->
             "current_amps": 34.0,
         },
     ]
+
+
+def test_leg_imbalance_processor_updates_state_and_returns_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="hvac",
+        real_power=3600.0,
+        current=30.0,
+        voltage=240.0,
+        reactive_power=0.0,
+        apparent_power=3600.0,
+        power_factor=1.0,
+        frequency=60.0,
+        energy=0.0,
+        leg_a_real_power=2400.0,
+        leg_b_real_power=1200.0,
+        leg_a_current=20.0,
+        leg_b_current=10.0,
+        leg_a_voltage=121.0,
+        leg_b_voltage=119.0,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.LegImbalanceProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.store_dirty is False
+    assert len(result.state_updates) == 3
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert policy.observations[0].feature == "dual_phase_leg_imbalance"
+    assert policy.observations[0].observed_value == 0.667
+    assert policy.observations[0].baseline_value == DEFAULT_LEG_IMBALANCE_WARNING_RATIO
+    assert "Possible issue: HVAC split-phase legs are imbalanced" in (
+        result.alerts[0].message
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("leg_imbalance_percent_by_circuit", "hvac")] == 66.7
+    assert updates[("leg_imbalance_status_by_circuit", "hvac")] == "imbalanced"
+    assert updates[("leg_imbalance_evidence_by_circuit", "hvac")] == {
+        "status": "imbalanced",
+        "leg_imbalance_ratio": 0.667,
+        "leg_imbalance_percent": 66.7,
+        "threshold_ratio": DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+        "threshold_percent": 50.0,
+        "minimum_total_power_w": DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+        "left_real_power_w": 2400.0,
+        "right_real_power_w": 1200.0,
+        "left_current_a": 20.0,
+        "right_current_a": 10.0,
+        "left_voltage_v": 121.0,
+        "right_voltage_v": 119.0,
+        "voltage_difference_v": 2.0,
+        "dominant_leg": "a",
+    }
+
+
+def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = processors.LegImbalanceProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.alerts == []
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("leg_imbalance_percent_by_circuit", "fridge")] == 0.0
+    assert updates[("leg_imbalance_status_by_circuit", "fridge")] == "not_dual_phase"
+    assert updates[("leg_imbalance_evidence_by_circuit", "fridge")]["status"] == (
+        "not_dual_phase"
+    )
+
+
+def test_leg_imbalance_processor_uses_store_settings_override() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            leg_imbalance_settings_by_circuit={
+                "hvac": {
+                    "warning_ratio": 0.75,
+                    "minimum_total_power_w": 4000.0,
+                }
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="hvac",
+        real_power=3600.0,
+        current=30.0,
+        voltage=240.0,
+        reactive_power=0.0,
+        apparent_power=3600.0,
+        power_factor=1.0,
+        frequency=60.0,
+        energy=0.0,
+        leg_a_real_power=2400.0,
+        leg_b_real_power=1200.0,
+    )
+    processor = processors.LegImbalanceProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert result.alerts == []
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("leg_imbalance_evidence_by_circuit", "hvac")]
+    assert evidence["status"] == "idle"
+    assert evidence["threshold_ratio"] == 0.75
+    assert evidence["threshold_percent"] == 75.0
+    assert evidence["minimum_total_power_w"] == 4000.0
