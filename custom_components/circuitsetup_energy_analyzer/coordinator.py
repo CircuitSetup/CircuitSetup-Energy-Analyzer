@@ -77,8 +77,6 @@ from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
 from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-    FlexibleLoadInput,
-    evaluate_solar_load_shift,
 )
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -128,6 +126,7 @@ from .processors import (
     PowerQualityProcessor,
     ProcessingContext,
     RunCycleProcessor,
+    SolarFlowProcessor,
     StandbyProcessor,
     UtilityComparisonProcessor,
 )
@@ -146,8 +145,6 @@ from .solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
-    SolarFlowInput,
-    calculate_solar_flow,
 )
 from .standby import StandbySettings
 from .storage import RETENTION_WINDOWS, FeatureStoreData
@@ -178,15 +175,6 @@ from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
 
-FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
-    {
-        ApplianceProfile.EV_CHARGER,
-        ApplianceProfile.HVAC,
-        ApplianceProfile.HVAC_COMPRESSOR,
-        ApplianceProfile.POOL_PUMP,
-        ApplianceProfile.WATER_HEATER,
-    }
-)
 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
 WATER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
@@ -748,6 +736,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.balance_settings_by_circuit.get(circuit_id, {})
             ),
         )
+        self._solar_flow_processor = SolarFlowProcessor(
+            settings_for_circuit=lambda circuit_id: (
+                self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
+            ),
+        )
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -1107,7 +1100,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
         self._refresh_balance_state(samples, now)
-        self._refresh_solar_flow_state(samples)
+        self._refresh_solar_flow_state(samples, now)
         alerts.extend(await self._observe_utility_comparisons(now))
 
         process_events_into_state(self.state, events, alerts)
@@ -4188,115 +4181,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _refresh_solar_flow_state(
         self: Self,
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
+        now: datetime,
     ) -> None:
-        mains_items = [
-            (config, sample)
-            for config, sample in samples
-            if config.mode is CircuitMode.MAINS_NILM
-            or config.appliance_profile is ApplianceProfile.MAINS_NILM
-        ]
-        if not mains_items:
-            return
-
-        generation = [
-            SolarFlowInput(
-                circuit_id=config.circuit_id,
-                real_power_w=sample.real_power,
-            )
-            for config, sample in samples
-            if config.power_flow is PowerFlowMode.GENERATION
-            or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
-        ]
-        flexible_loads = [
-            FlexibleLoadInput(
-                circuit_id=config.circuit_id,
-                name=config.name,
-                appliance_profile=config.appliance_profile.value,
-                real_power_w=sample.real_power,
-            )
-            for config, sample in samples
-            if _is_flexible_solar_load(config)
-        ]
-        for config, sample in mains_items:
-            settings = self.store_data.solar_flow_settings_by_circuit.get(
-                config.circuit_id,
-                {},
-            )
-            result = calculate_solar_flow(
-                mains=SolarFlowInput(
-                    circuit_id=config.circuit_id,
-                    real_power_w=sample.real_power,
-                ),
-                generation=generation,
-                export_tolerance_w=_nonnegative_float_value(
-                    settings.get("export_tolerance_w"),
-                    default=EXPORT_TOLERANCE_W,
-                ),
-                solar_surplus_threshold_w=_nonnegative_float_value(
-                    settings.get("solar_surplus_threshold_w"),
-                    default=SOLAR_SURPLUS_THRESHOLD_W,
-                ),
-                high_solar_surplus_threshold_w=_nonnegative_float_value(
-                    settings.get("high_solar_surplus_threshold_w"),
-                    default=HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-                ),
-            )
-            load_shift = evaluate_solar_load_shift(
-                solar_load_shift_available_w=result.load_shift_available_w,
-                solar_surplus_status=result.solar_surplus_status,
-                grid_import_w=result.grid_import_w,
-                flexible_loads=flexible_loads,
-                running_threshold_w=_nonnegative_float_value(
-                    settings.get("flexible_load_running_threshold_w"),
-                    default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-                ),
-            )
-            circuit_id = config.circuit_id
-            self.state.solar_generation_w_by_circuit[circuit_id] = (
-                result.solar_generation_w
-            )
-            self.state.solar_site_consumption_w_by_circuit[circuit_id] = (
-                result.site_consumption_w
-            )
-            self.state.solar_grid_import_w_by_circuit[circuit_id] = (
-                result.grid_import_w
-            )
-            self.state.solar_grid_export_w_by_circuit[circuit_id] = (
-                result.grid_export_w
-            )
-            self.state.solar_self_consumption_percent_by_circuit[circuit_id] = (
-                result.self_consumption_percent
-            )
-            self.state.solar_powered_percent_by_circuit[circuit_id] = (
-                result.solar_powered_percent
-            )
-            self.state.solar_surplus_w_by_circuit[circuit_id] = (
-                result.solar_surplus_w
-            )
-            self.state.solar_load_shift_w_by_circuit[circuit_id] = (
-                result.load_shift_available_w
-            )
-            self.state.solar_flexible_load_power_w_by_circuit[circuit_id] = (
-                load_shift.active_flexible_load_power_w
-            )
-            self.state.solar_flexible_load_coverage_percent_by_circuit[circuit_id] = (
-                load_shift.solar_coverage_percent
-            )
-            self.state.solar_flow_status_by_circuit[circuit_id] = result.status
-            self.state.solar_surplus_status_by_circuit[circuit_id] = (
-                result.solar_surplus_status
-            )
-            self.state.solar_load_shift_status_by_circuit[circuit_id] = (
-                load_shift.status
-            )
-            self.state.solar_flow_evidence_by_circuit[circuit_id] = {
-                **result.features,
-                "status": result.status,
-                "solar_surplus_status": result.solar_surplus_status,
-            }
-            self.state.solar_load_shift_evidence_by_circuit[circuit_id] = (
-                load_shift.features
-            )
+        result = self._solar_flow_processor.process(
+            samples,
+            self._build_processing_context(now),
+        )
+        for update in result.state_updates:
+            _apply_state_update(self.state, update.path, update.value)
 
     async def _observe_utility_comparisons(
         self: Self,
@@ -5349,14 +5241,6 @@ def _water_context_alert_message(
     if summary:
         return f"Possible issue: {circuit_name} water context changed. {summary}"
     return f"Possible issue: {circuit_name} water context changed: {status_label}."
-
-
-def _is_flexible_solar_load(config: CircuitConfig) -> bool:
-    return (
-        config.power_flow is PowerFlowMode.LOAD
-        and config.mode is not CircuitMode.MAINS_NILM
-        and config.appliance_profile in FLEXIBLE_SOLAR_LOAD_PROFILES
-    )
 
 
 def _format_kwh(value: float) -> str:
