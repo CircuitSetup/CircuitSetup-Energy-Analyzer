@@ -23,6 +23,7 @@ from .entity import (
     sync_entity_registry_categories,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name
 
 try:
@@ -1081,7 +1082,13 @@ def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] 
     def attributes(state: Any, circuit_id: str) -> dict[str, Any] | None:
         value = getattr(state, field_name, {}).get(circuit_id)
         if isinstance(value, Mapping):
-            return dict(value)
+            attributes = dict(value)
+            if field_name in {
+                "demand_evidence_by_circuit",
+                "capacity_evidence_by_circuit",
+            }:
+                return with_electrical_safety_notice(attributes)
+            return attributes
         return None
 
     return attributes

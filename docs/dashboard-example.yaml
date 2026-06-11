@@ -313,7 +313,9 @@ views:
           - type: markdown
             title: Alert Philosophy
             content: >
-              Notifications and repairs: appliance alerts use persistent
-              notifications with observed evidence. Repairs are reserved for
-              setup, configuration, missing sensors, stale data, or other
-              data-quality problems.
+                Notifications and repairs: appliance alerts use persistent
+                notifications with observed evidence. Repairs are reserved for
+                setup, configuration, missing sensors, stale data, or other
+                data-quality problems. Demand and capacity findings are
+                operational evidence from energy measurements, not electrical
+                safety verification, code compliance, or breaker sizing advice.
