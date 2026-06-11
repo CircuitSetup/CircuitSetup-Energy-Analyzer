@@ -4,7 +4,10 @@ from typing import Any
 
 from .const import (
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_SENSOR_ENTITY,
     CONF_SOURCE_ENTITIES,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
     PLATFORMS,
 )
@@ -96,6 +99,24 @@ def _source_entities_for_entry(
     ).strip()
     if outdoor_temperature_entity:
         entity_ids.append(outdoor_temperature_entity)
+    for key in (CONF_RAIN_SENSOR_ENTITY, CONF_RAIN_INTENSITY_ENTITY):
+        entity_id = str(
+            entry_options.get(key, entry_data.get(key, ""))
+            or ""
+        ).strip()
+        if entity_id:
+            entity_ids.append(entity_id)
+    flow_entities = entry_options.get(
+        CONF_WATER_FLOW_SENSOR_ENTITIES,
+        entry_data.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
+    )
+    if isinstance(flow_entities, str):
+        if flow_entities:
+            entity_ids.append(flow_entities)
+    elif isinstance(flow_entities, (list, tuple, set)):
+        entity_ids.extend(
+            entity_id for entity_id in flow_entities if isinstance(entity_id, str)
+        )
     for config in getattr(coordinator, "circuit_configs", ()):
         for sensor in getattr(config, "sensors", ()):
             entity_ids.append(sensor.entity_id)

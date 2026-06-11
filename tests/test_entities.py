@@ -1045,6 +1045,8 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "daily_energy_usage",
         "weather_context",
         "outdoor_temperature",
+        "rain_pump_correlation",
+        "water_flow_correlation",
     }
     enabled_by_default = {
         description.key
@@ -1062,6 +1064,9 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "daily_energy_usage",
         "weather_context",
         "outdoor_temperature",
+        "rain_pump_correlation",
+        "water_flow_correlation",
+        "water_flow_mismatch_minutes",
         "energy_usage_share",
         "energy_usage_status",
         "energy_goal_usage",
@@ -1121,7 +1126,11 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         assert descriptions[key].entity_category == expected_category
 
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    circuit = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile="refrigerator",
+    )
     normal_entity = CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
@@ -1146,7 +1155,11 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    circuit = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile="refrigerator",
+    )
 
     expected_icons = {
         "health_summary": "mdi:heart-pulse",
@@ -1211,8 +1224,8 @@ def test_weather_context_sensor_exposes_readable_status_and_evidence() -> None:
 
 def test_outdoor_temperature_sensor_exposes_graphable_display_temperature() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
-        CircuitAnalyzerSensor,
         SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
         outdoor_temperature_attributes,
         outdoor_temperature_value,
     )
@@ -1240,7 +1253,11 @@ def test_outdoor_temperature_sensor_exposes_graphable_display_temperature() -> N
     entity = CircuitAnalyzerSensor(
         SimpleNamespace(data=state),
         entry_id="entry-1",
-        circuit=SimpleNamespace(circuit_id="hvac", name="HVAC"),
+        circuit=SimpleNamespace(
+            circuit_id="hvac",
+            name="HVAC",
+            appliance_profile="hvac",
+        ),
         description=description,
     )
 
@@ -1257,7 +1274,7 @@ def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     description = descriptions["weather_context"]
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC")
+    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC", appliance_profile="hvac")
 
     entity = CircuitAnalyzerSensor(
         coordinator,
@@ -1282,7 +1299,7 @@ def test_outdoor_temperature_sensor_metadata_is_graphable_and_visible() -> None:
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     description = descriptions["outdoor_temperature"]
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC")
+    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC", appliance_profile="hvac")
 
     entity = CircuitAnalyzerSensor(
         coordinator,
@@ -1387,7 +1404,11 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit_without_sources = SimpleNamespace(circuit_id="spare", name="Spare")
+    circuit_without_sources = SimpleNamespace(
+        circuit_id="spare",
+        name="Spare",
+        appliance_profile="mixed",
+    )
     mixed_circuit = SimpleNamespace(
         circuit_id="mixed",
         name="Mixed",
@@ -1437,7 +1458,11 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
         solar_flow_status_by_circuit={"pool": "inconsistent_export"},
     )
     coordinator = SimpleNamespace(data=state)
-    circuit = SimpleNamespace(circuit_id="pool", name="Pool Pump")
+    circuit = SimpleNamespace(
+        circuit_id="pool",
+        name="Pool Pump",
+        appliance_profile="pool_pump",
+    )
 
     metric_status = CircuitAnalyzerSensor(
         coordinator,
@@ -1490,7 +1515,7 @@ def test_energy_usage_sensors_explain_waiting_for_delta() -> None:
     )
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
-    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC")
+    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC", appliance_profile="hvac")
     coordinator = SimpleNamespace(
         data=AnalyzerState(
             energy_usage_evidence_by_circuit={
@@ -1580,7 +1605,11 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
         description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
     }
     coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    circuit = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile="refrigerator",
+    )
 
     expected_icons = {
         "learning": "mdi:school-outline",
@@ -1739,7 +1768,11 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         standby_evidence_by_circuit={"fridge": standby_evidence},
     )
     coordinator = SimpleNamespace(data=state)
-    circuit = SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+    circuit = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile="refrigerator",
+    )
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
 
     def assert_status_attributes(

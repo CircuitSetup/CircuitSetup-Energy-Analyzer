@@ -227,6 +227,25 @@ views:
                 name: Car charger
               - entity: sensor.mains_nilm_electrical_health
                 name: Mains
+          - type: conditional
+            conditions:
+              - entity: sensor.water_heater_water_flow_correlation
+                state_not: unavailable
+              - entity: sensor.water_heater_water_flow_correlation
+                state_not: unknown
+              - entity: sensor.washer_water_flow_correlation
+                state_not: unavailable
+              - entity: sensor.washer_water_flow_correlation
+                state_not: unknown
+            card:
+              type: glance
+              title: Water flow context
+              columns: 2
+              entities:
+                - entity: sensor.water_heater_water_flow_correlation
+                  name: Water heater
+                - entity: sensor.washer_water_flow_correlation
+                  name: Washer
           - type: horizontal-stack
             title: Settings and exports
             cards:

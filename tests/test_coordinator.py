@@ -9,13 +9,21 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
+    CONF_WATER_FLOW_CORRELATION_ENABLED,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -53,6 +61,34 @@ def _settings_recommendation(advisor: Any, **overrides: Any) -> Any:
     }
     values.update(overrides)
     return advisor.SettingRecommendation(**values)
+
+
+def _hass_with_states(
+    states: dict[str, Any],
+    *,
+    now: datetime,
+) -> SimpleNamespace:
+    class FakeStates:
+        def get(self, entity_id: str) -> Any:
+            value = states.get(entity_id)
+            if value is None:
+                return None
+            if isinstance(value, tuple):
+                state, changed_minutes = value
+                return SimpleNamespace(
+                    state=str(state),
+                    attributes={},
+                    last_changed=now - timedelta(minutes=changed_minutes),
+                    last_updated=now,
+                )
+            return SimpleNamespace(
+                state=str(value),
+                attributes={},
+                last_changed=now,
+                last_updated=now,
+            )
+
+    return SimpleNamespace(states=FakeStates(), config=SimpleNamespace())
 
 
 def test_process_events_into_state_tracks_latest_event_per_circuit() -> None:
@@ -160,6 +196,123 @@ def test_process_events_into_state_replaces_active_alert_set() -> None:
 
     assert updated.active_alerts_by_circuit == {}
     assert updated.anomaly_score_by_circuit == {"fridge": 0.0}
+
+
+def test_coordinator_refreshes_rain_pump_context_from_rain_and_hvac() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {
+                "binary_sensor.rain": "on",
+                "sensor.precipitation_rate": "0.35",
+            },
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC Compressor",
+                    "appliance_profile": "hvac_compressor",
+                    "mode": "dual_phase",
+                },
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain",
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.precipitation_rate",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {
+                    CONF_RAIN_PUMP_CORRELATION_ENABLED: True,
+                    CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT: 25.0,
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (
+                            now - timedelta(days=index + 1)
+                        ).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 27 * 60
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["hvac"] = 32 * 60
+    coordinator.state.run_cycle_duty_cycle_by_circuit["hvac"] = 55.0
+
+    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["status"] == "weather_explained"
+    assert evidence["expected_runtime_minutes"] >= 27.0
+    assert evidence["hvac_compressor_runtime_minutes"] == 32.0
+
+
+def test_coordinator_refreshes_water_flow_context_for_flow_without_load() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({"binary_sensor.water_flow": ("on", 14)}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_WATER_FLOW_CORRELATION_ENABLED: True,
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+                    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES: 5,
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {
+                        "timestamp": (
+                            now - timedelta(days=index + 1)
+                        ).isoformat(),
+                        "flow_status": "normal",
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+
+    evidence = coordinator.state.water_flow_context_by_circuit["washer"]
+    assert evidence["status"] == "possible_flow_without_load"
+    assert evidence["mismatch_minutes"] == 14.0
+    assert evidence["flow_sensor_entities"] == ["binary_sensor.water_flow"]
 
 
 @pytest.mark.asyncio

@@ -123,18 +123,33 @@ from .const import (
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
+    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+    CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
+    CONF_WATER_FLOW_CORRELATION_ENABLED,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+    DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+    DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
+    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DEFAULT_RETENTION_MODE,
     DEFAULT_SENSITIVITY,
+    DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
 )
 from .discovery import (
@@ -257,6 +272,7 @@ SECTION_DUAL_PHASE_SETTINGS = "dual_phase_settings"
 SECTION_POWER_QUALITY_SETTINGS = "power_quality_settings"
 SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
 SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
+SECTION_WATER_CONTEXT_SETTINGS = "water_context_settings"
 _ADVANCED_SECTION_KEYS = {
     SECTION_ANALYSIS_SETTINGS,
     SECTION_ENERGY_SETTINGS,
@@ -268,6 +284,7 @@ _ADVANCED_SECTION_KEYS = {
     SECTION_POWER_QUALITY_SETTINGS,
     SECTION_MAINS_BALANCE_SETTINGS,
     SECTION_SOLAR_FLOW_SETTINGS,
+    SECTION_WATER_CONTEXT_SETTINGS,
 }
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
@@ -284,6 +301,7 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.DRYER.value,
     ApplianceProfile.POOL_PUMP.value,
     ApplianceProfile.WATER_PUMP.value,
+    ApplianceProfile.WELL_PUMP.value,
     ApplianceProfile.SUMP_PUMP.value,
     ApplianceProfile.EV_CHARGER.value,
     ApplianceProfile.SOLAR_INVERTER.value,
@@ -427,6 +445,19 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     outdoor_temperature_entity = str(
         user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
     ).strip()
+    rain_sensor_entity = str(user_input.get(CONF_RAIN_SENSOR_ENTITY) or "").strip()
+    rain_intensity_entity = str(
+        user_input.get(CONF_RAIN_INTENSITY_ENTITY) or ""
+    ).strip()
+    water_flow_sensor_entities = _strict_string_list(
+        user_input.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
+        invalid_error_key="invalid_water_flow_sensor_entities",
+    )
+    water_flow_sensor_entities = [
+        entity_id.strip()
+        for entity_id in water_flow_sensor_entities
+        if entity_id.strip()
+    ]
 
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
@@ -447,6 +478,12 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     }
     if outdoor_temperature_entity:
         validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
+    if rain_sensor_entity:
+        validated[CONF_RAIN_SENSOR_ENTITY] = rain_sensor_entity
+    if rain_intensity_entity:
+        validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
+    if water_flow_sensor_entities:
+        validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     return validated
 
 
@@ -463,6 +500,19 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     outdoor_temperature_entity = str(
         user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
     ).strip()
+    rain_sensor_entity = str(user_input.get(CONF_RAIN_SENSOR_ENTITY) or "").strip()
+    rain_intensity_entity = str(
+        user_input.get(CONF_RAIN_INTENSITY_ENTITY) or ""
+    ).strip()
+    water_flow_sensor_entities = _strict_string_list(
+        user_input.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
+        invalid_error_key="invalid_water_flow_sensor_entities",
+    )
+    water_flow_sensor_entities = [
+        entity_id.strip()
+        for entity_id in water_flow_sensor_entities
+        if entity_id.strip()
+    ]
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
@@ -481,6 +531,12 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     }
     if outdoor_temperature_entity:
         validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
+    if rain_sensor_entity:
+        validated[CONF_RAIN_SENSOR_ENTITY] = rain_sensor_entity
+    if rain_intensity_entity:
+        validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
+    if water_flow_sensor_entities:
+        validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     merged_source_entities = list(extra_source_entities)
     if CONF_SOURCE_ENTITIES in user_input:
         source_entities = _strict_string_list(
@@ -648,6 +704,30 @@ def _temperature_entity_selector() -> Any:
     )
 
 
+def _binary_sensor_entity_selector(*, multiple: bool = False) -> Any:
+    return _selector(
+        {
+            "entity": {
+                "multiple": multiple,
+                "filter": [{"domain": "binary_sensor"}],
+            }
+        },
+        str,
+    )
+
+
+def _single_sensor_entity_selector() -> Any:
+    return _selector(
+        {
+            "entity": {
+                "multiple": False,
+                "filter": [{"domain": "sensor"}],
+            }
+        },
+        str,
+    )
+
+
 def _checklist_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     return _selector(
         {
@@ -738,6 +818,18 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
                 default="",
             ): _temperature_entity_selector(),
+            vol.Optional(
+                CONF_RAIN_SENSOR_ENTITY,
+                default="",
+            ): _binary_sensor_entity_selector(),
+            vol.Optional(
+                CONF_RAIN_INTENSITY_ENTITY,
+                default="",
+            ): _single_sensor_entity_selector(),
+            vol.Optional(
+                CONF_WATER_FLOW_SENSOR_ENTITIES,
+                default=[],
+            ): _binary_sensor_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=DEFAULT_SENSITIVITY,
@@ -1026,6 +1118,12 @@ def _advanced_settings_schema(
             SECTION_STANDBY_SETTINGS,
             _standby_fields(settings),
         )
+    if _advanced_show_water_context_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_WATER_CONTEXT_SETTINGS,
+            _water_context_fields(settings, circuit_context),
+        )
     if _advanced_show_dual_phase_settings(circuit_context):
         _add_advanced_section(
             schema,
@@ -1186,6 +1284,87 @@ def _standby_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
             default=int(settings.get("min_samples", 24)),
         ): _number_selector(minimum=1, maximum=720, step=1),
     }
+
+
+def _water_context_fields(
+    settings: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[Any, Any]:
+    profile = context.get("profile", "")
+    expects_flow_default = profile in {
+        ApplianceProfile.WATER_PUMP.value,
+        ApplianceProfile.WELL_PUMP.value,
+        ApplianceProfile.WATER_HEATER.value,
+        ApplianceProfile.WASHER.value,
+    }
+    fields: dict[Any, Any] = {
+        vol.Optional(
+            CONF_RAIN_PUMP_CORRELATION_ENABLED,
+            default=bool(
+                settings.get(
+                    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+                    DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
+                )
+            ),
+        ): bool,
+        vol.Optional(
+            CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+            default=int(
+                settings.get(
+                    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+                    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
+                )
+            ),
+        ): _number_selector(minimum=15, maximum=360, step=1),
+        vol.Optional(
+            CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+            default=float(
+                settings.get(
+                    CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+                    DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+                )
+            ),
+        ): _number_selector(minimum=5.0, maximum=200.0, step=1),
+    }
+    if profile in {
+        ApplianceProfile.WATER_PUMP.value,
+        ApplianceProfile.WELL_PUMP.value,
+        ApplianceProfile.WATER_HEATER.value,
+        ApplianceProfile.WASHER.value,
+    }:
+        fields.update(
+            {
+                vol.Optional(
+                    CONF_WATER_FLOW_CORRELATION_ENABLED,
+                    default=bool(
+                        settings.get(
+                            CONF_WATER_FLOW_CORRELATION_ENABLED,
+                            DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+                        )
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES,
+                    default=list(settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES, [])),
+                ): _binary_sensor_entity_selector(multiple=True),
+                vol.Optional(
+                    CONF_EXPECTS_WATER_FLOW,
+                    default=bool(
+                        settings.get(CONF_EXPECTS_WATER_FLOW, expects_flow_default)
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+                    default=int(
+                        settings.get(
+                            CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+                            DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
+                        )
+                    ),
+                ): _number_selector(minimum=1, maximum=120, step=1),
+            }
+        )
+    return fields
 
 
 def _dual_phase_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
@@ -1357,6 +1536,16 @@ def _advanced_show_demand_capacity_settings(context: Mapping[str, str]) -> bool:
 
 def _advanced_show_standby_settings(context: Mapping[str, str]) -> bool:
     return _is_advanced_load_appliance_context(context)
+
+
+def _advanced_show_water_context_settings(context: Mapping[str, str]) -> bool:
+    return context.get("profile") in {
+        ApplianceProfile.SUMP_PUMP.value,
+        ApplianceProfile.WATER_PUMP.value,
+        ApplianceProfile.WELL_PUMP.value,
+        ApplianceProfile.WATER_HEATER.value,
+        ApplianceProfile.WASHER.value,
+    }
 
 
 def _advanced_show_dual_phase_settings(context: Mapping[str, str]) -> bool:
@@ -3110,6 +3299,18 @@ def _options_schema(
         CONF_OUTDOOR_TEMPERATURE_ENTITY,
         data.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, ""),
     )
+    rain_sensor_entity = options.get(
+        CONF_RAIN_SENSOR_ENTITY,
+        data.get(CONF_RAIN_SENSOR_ENTITY, ""),
+    )
+    rain_intensity_entity = options.get(
+        CONF_RAIN_INTENSITY_ENTITY,
+        data.get(CONF_RAIN_INTENSITY_ENTITY, ""),
+    )
+    water_flow_sensor_entities = options.get(
+        CONF_WATER_FLOW_SENSOR_ENTITIES,
+        data.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
+    )
     extra_source_entities = options.get(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
@@ -3146,6 +3347,18 @@ def _options_schema(
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
                 default=str(outdoor_temperature_entity or ""),
             ): _temperature_entity_selector(),
+            vol.Optional(
+                CONF_RAIN_SENSOR_ENTITY,
+                default=str(rain_sensor_entity or ""),
+            ): _binary_sensor_entity_selector(),
+            vol.Optional(
+                CONF_RAIN_INTENSITY_ENTITY,
+                default=str(rain_intensity_entity or ""),
+            ): _single_sensor_entity_selector(),
+            vol.Optional(
+                CONF_WATER_FLOW_SENSOR_ENTITIES,
+                default=water_flow_sensor_entities,
+            ): _binary_sensor_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=options.get(
@@ -3221,6 +3434,27 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
             )
             or ""
         ).strip(),
+        CONF_RAIN_SENSOR_ENTITY: str(
+            options.get(
+                CONF_RAIN_SENSOR_ENTITY,
+                data.get(CONF_RAIN_SENSOR_ENTITY, ""),
+            )
+            or ""
+        ).strip(),
+        CONF_RAIN_INTENSITY_ENTITY: str(
+            options.get(
+                CONF_RAIN_INTENSITY_ENTITY,
+                data.get(CONF_RAIN_INTENSITY_ENTITY, ""),
+            )
+            or ""
+        ).strip(),
+        CONF_WATER_FLOW_SENSOR_ENTITIES: _strict_string_list(
+            options.get(
+                CONF_WATER_FLOW_SENSOR_ENTITIES,
+                data.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_water_flow_sensor_entities",
+        ),
         CONF_SENSITIVITY: str(
             options.get(
                 CONF_SENSITIVITY,
@@ -3542,6 +3776,18 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     _set_optional_float(settings, user_input, FIELD_SOLAR_SURPLUS_THRESHOLD_W)
     _set_optional_float(settings, user_input, FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W)
     _set_optional_float(settings, user_input, FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W)
+    _set_optional_bool(settings, user_input, CONF_RAIN_PUMP_CORRELATION_ENABLED)
+    _set_optional_bool(settings, user_input, CONF_WATER_FLOW_CORRELATION_ENABLED)
+    _set_optional_bool(settings, user_input, CONF_EXPECTS_WATER_FLOW)
+    _set_optional_int(settings, user_input, CONF_RAIN_RESPONSE_WINDOW_MINUTES)
+    _set_optional_float(settings, user_input, CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT)
+    _set_optional_int(settings, user_input, CONF_FLOW_MISMATCH_THRESHOLD_MINUTES)
+    _set_optional_string_list(
+        settings,
+        user_input,
+        CONF_LINKED_FLOW_SENSOR_ENTITIES,
+        invalid_error_key="invalid_water_flow_sensor_entities",
+    )
     return settings
 
 
@@ -3566,6 +3812,30 @@ def _set_optional_string(
     text = str(value).strip()
     if text:
         settings[key] = text
+
+
+def _set_optional_bool(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+) -> None:
+    if key in user_input:
+        settings[key] = bool(user_input[key])
+
+
+def _set_optional_string_list(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+    *,
+    invalid_error_key: str,
+) -> None:
+    if key not in user_input:
+        return
+    settings[key] = _strict_string_list(
+        user_input.get(key, []),
+        invalid_error_key=invalid_error_key,
+    )
 
 
 def _set_optional_int(

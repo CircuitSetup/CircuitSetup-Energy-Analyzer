@@ -11,6 +11,9 @@
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "outdoor_temperature_entity": "Outdoor Temperature Entity",
+          "rain_sensor_entity": "Rain Sensor",
+          "rain_intensity_entity": "Rain Intensity Sensor",
+          "water_flow_sensor_entities": "Water Flow Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -20,6 +23,9 @@
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
+          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
+          "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
+          "water_flow_sensor_entities": "Optional boolean water-flow sensors used to compare water movement with washer, well pump, water pump, and water heater activity.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -88,7 +94,8 @@
       "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
-      "invalid_known_load_circuits": "Known load circuits must be selected from configured appliance circuits."
+      "invalid_known_load_circuits": "Known load circuits must be selected from configured appliance circuits.",
+      "invalid_water_flow_sensor_entities": "Water flow sensor entity IDs must be text values."
     }
   },
   "options": {
@@ -114,6 +121,9 @@
           "extra_source_entities": "Extra Source Entities",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "outdoor_temperature_entity": "Outdoor Temperature Entity",
+          "rain_sensor_entity": "Rain Sensor",
+          "rain_intensity_entity": "Rain Intensity Sensor",
+          "water_flow_sensor_entities": "Water Flow Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -122,6 +132,9 @@
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
+          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
+          "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
+          "water_flow_sensor_entities": "Optional boolean water-flow sensors used to compare water movement with washer, well pump, water pump, and water heater activity.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -294,6 +307,28 @@
               "standby_min_samples": "Minimum retained samples before standby and always-on estimates are considered ready."
             }
           },
+          "water_context_settings": {
+            "name": "Water Context",
+            "description": "Rain, HVAC condensate, and optional flow-sensor context for pump and water-using appliances.",
+            "data": {
+              "rain_pump_correlation_enabled": "Rain and Pump Correlation",
+              "rain_response_window_minutes": "Rain Response Window Minutes",
+              "rain_activity_delta_threshold_pct": "Rain Activity Threshold Percent",
+              "water_flow_correlation_enabled": "Water Flow Correlation",
+              "linked_flow_sensor_entities": "Linked Flow Sensors",
+              "expects_water_flow": "Expects Water Flow",
+              "flow_mismatch_threshold_minutes": "Flow Mismatch Threshold Minutes"
+            },
+            "data_description": {
+              "rain_pump_correlation_enabled": "Compare pump activity with rain and HVAC compressor activity before flagging unusual pump runtime.",
+              "rain_response_window_minutes": "Minutes after rain starts or continues where higher pump activity may be expected.",
+              "rain_activity_delta_threshold_pct": "Percent above the weather-adjusted expected pump runtime before repeated possible-issue evidence can be raised.",
+              "water_flow_correlation_enabled": "Compare boolean water-flow sensors with mapped water-using appliances.",
+              "linked_flow_sensor_entities": "Optional flow sensors to use for this appliance. Leave blank to use the global water-flow sensors.",
+              "expects_water_flow": "Turn this off for appliances or pumps that should not correspond to the selected flow sensors.",
+              "flow_mismatch_threshold_minutes": "Minutes of unexplained flow or appliance activity before the mismatch is considered evidence."
+            }
+          },
           "dual_phase_settings": {
             "name": "Dual-Phase Leg Imbalance",
             "description": "Split-phase imbalance thresholds for 240 V circuits.",
@@ -455,6 +490,15 @@
       },
       "outdoor_temperature": {
         "name": "Outdoor Temperature"
+      },
+      "rain_pump_correlation": {
+        "name": "Rain pump correlation"
+      },
+      "water_flow_correlation": {
+        "name": "Water flow correlation"
+      },
+      "water_flow_mismatch_minutes": {
+        "name": "Water flow mismatch minutes"
       },
       "daily_energy_usage": {
         "name": "Daily energy usage"
@@ -622,6 +666,12 @@
       },
       "maintenance": {
         "name": "Maintenance"
+      },
+      "running": {
+        "name": "Running"
+      },
+      "water_flow_mismatch": {
+        "name": "Water flow mismatch"
       }
     }
   },

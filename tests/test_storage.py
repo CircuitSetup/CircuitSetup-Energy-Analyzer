@@ -214,6 +214,40 @@ def test_feature_store_round_trips_weather_context() -> None:
     )
 
 
+def test_feature_store_round_trips_water_correlation_state() -> None:
+    data = FeatureStoreData(
+        rain_pump_context_by_circuit={
+            "sump_pump": {
+                "status": "rain_explained",
+                "pump_runtime_minutes": 18.0,
+            }
+        },
+        water_flow_context_by_circuit={
+            "washer": {
+                "status": "possible_flow_without_load",
+                "mismatch_minutes": 14.0,
+            }
+        },
+        water_context_history_by_circuit={
+            "sump_pump": [
+                {
+                    "timestamp": "2026-06-10T12:00:00+00:00",
+                    "rain_status": "rain_explained",
+                }
+            ]
+        },
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.rain_pump_context_by_circuit == data.rain_pump_context_by_circuit
+    assert restored.water_flow_context_by_circuit == data.water_flow_context_by_circuit
+    assert (
+        restored.water_context_history_by_circuit
+        == data.water_context_history_by_circuit
+    )
+
+
 def test_event_round_trip_serialization_uses_current_shape() -> None:
     event = CircuitEvent(
         timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),

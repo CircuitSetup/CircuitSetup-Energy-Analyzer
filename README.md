@@ -15,6 +15,8 @@ It is designed for the [CircuitSetup Expandable 6 Channel ESP32 Energy Meter Mai
 - Apparent power
 - Power factor
 
+**CircuitSetup-first, not CircuitSetup-only:** the integration is optimized for the CircuitSetup meter layout, but other compatible meters can be used when they expose power, current, voltage, energy, frequency, reactive power, apparent power, or power factor entities with usable Home Assistant metadata.
+
 The integration does **not** replace Home Assistant's Energy Dashboard. Use the Energy Dashboard for long-term energy history, tariffs, costs, device hierarchies, and normal energy cards. Use CircuitSetup Energy Analyzer when you want to understand what your circuits and appliances are doing, whether their behavior has changed, and whether your meter data looks trustworthy.
 
 ## What you can use it for
@@ -58,6 +60,8 @@ You need:
 - Current sensors, or power plus voltage, if you want capacity/amp checks.
 - Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
 - An outdoor temperature sensor if you want HVAC weather context.
+- A rain sensor if you want sump, well, or water-pump activity compared with rainfall and HVAC condensate context.
+- A boolean water-flow sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity.
 
 The integration works best when each important appliance or circuit has a clean group of related source sensors.
 
@@ -95,12 +99,29 @@ During setup, you choose:
 | **Extra Source Entities** | Individual sensors that are not attached to a selected source device, or sensors you want to add manually. |
 | **Mains Source Entities** | Optional whole-panel or aggregate sensors used for mains balance, experimental Mains NILM, solar-flow, and utility comparison. |
 | **Outdoor Temperature Entity** | Optional outdoor temperature source used only for HVAC weather context. |
+| **Rain Sensor** | Optional boolean rain sensor used to explain expected sump, well-pump, or water-pump activity. |
+| **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |
+| **Water Flow Sensors** | Optional boolean water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. |
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
 | **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
 
 ![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
 
 ![Circuit assignment editor showing circuit mode and power flow controls](docs/images/readme/assignment-editor.png)
+
+## Using The Integration
+
+Use the integration in this order:
+
+- **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Review Circuit Assignments**.
+- **Classify circuits deliberately**: choose the appliance type, circuit mode, power-flow mode, and source sensors before trusting appliance evidence.
+- **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
+- **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
+- **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
+- **When an alert appears**: read the notification, open the evidence graph if available, check `status_explanation`, and verify source data before treating it as an appliance problem.
+- **Common setup states**: learning, waiting for energy change, missing metrics, not dual phase, missing mains, and unconfigured optional checks usually mean the analyzer needs more data or a better assignment.
+
+You do not need to enable every diagnostic entity. For behavior alerts, let the analyzer learn for at least 7 days or enough appliance cycles before tuning thresholds.
 
 ## First-time setup checklist
 
@@ -110,17 +131,19 @@ During setup, you choose:
 4. Leave **Mains Source Entities** empty unless you have whole-panel or aggregate measurements.
 5. Add mains sources if you want Mains NILM, mains balance, solar-flow, or utility/Opower comparison.
 6. Add an outdoor temperature entity if you want HVAC activity compared with outdoor conditions.
-7. Open **Review Circuit Assignments**.
-8. For each detected group, confirm:
+7. Add a rain sensor if you want sump, well, or water-pump activity adjusted for rainfall.
+8. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
+9. Open **Review Circuit Assignments**.
+10. For each detected group, confirm:
    - Whether to include the circuit.
    - The circuit name.
    - The appliance type.
    - The circuit mode.
    - The power-flow mode.
    - The selected source sensors.
-9. Save the configuration.
-10. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
-11. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, or other feature settings.
+11. Save the configuration.
+12. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
+13. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, or other feature settings.
 
 ## Classify circuits carefully
 
@@ -162,6 +185,7 @@ Recommended appliance types include:
 - `dryer`
 - `pool_pump`
 - `water_pump`
+- `well_pump`
 - `sump_pump`
 - `ev_charger`
 - `solar_inverter`
@@ -169,11 +193,9 @@ Recommended appliance types include:
 - `resistive_load`
 - `mixed`
 
-`well_pump` is accepted as a legacy alias for `water_pump`.
-
 Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works.
 
-## Start with the summary entities
+## Summary-First Diagnostics
 
 Most users should build dashboards from the summary entities first. Detailed diagnostic entities are still available, but many are hidden by default so dashboards stay readable.
 
@@ -188,6 +210,8 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh when a cumulative energy source is available. |
 | **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Hidden by default. |
+
+Use summary sensors for dashboards and automations. Use advanced detail entities only when a summary changes or when you are investigating setup/data-quality evidence such as Metric Consistency Status.
 
 For power-meter interpretation:
 
@@ -222,6 +246,58 @@ A good dashboard order is:
 3. **Energy tracking**: Daily Energy Usage and Energy Summary.
 4. **Electrical review**: Electrical Health, plus detailed diagnostics only when needed.
 5. **Setup/data quality**: Repairs, notifications, and entity attributes.
+
+### Appliance Drilldown Pattern
+
+When a single appliance needs review, use this pattern:
+
+1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Daily Energy Usage.
+2. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
+3. **Energy tracking**: Daily Energy Usage, Energy Usage Status, goals, billing, and cost where those features are enabled.
+4. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
+5. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
+
+### Screenshots
+
+![Mains sensor selection panel](docs/images/readme/mains-sensors.png)
+
+![Circuit modes selector](docs/images/readme/circuit-modes.png)
+
+![Power-flow selector](docs/images/readme/power-flow.png)
+
+![Energy usage spike settings](docs/images/readme/energy-usage-spikes.png)
+
+![Daily energy goal settings](docs/images/readme/daily-energy-goals.png)
+
+![Run-cycle diagnostics](docs/images/readme/run-cycle-diagnostics.png)
+
+![Recent activity timeline](docs/images/readme/recent-activity-timeline.png)
+
+![Billing-cycle forecast settings](docs/images/readme/billing-cycle-forecasts.png)
+
+![Cost and Time-of-Use settings](docs/images/readme/cost-time-of-use.png)
+
+![History CSV export controls](docs/images/readme/history-csv-export.png)
+
+![Peak demand tracking](docs/images/readme/peak-demand-tracking.png)
+
+![Circuit capacity tracking](docs/images/readme/circuit-capacity-tracking.png)
+
+![Dual-phase leg imbalance](docs/images/readme/dual-phase-leg-imbalance.png)
+
+![Power metric consistency](docs/images/readme/power-metric-consistency.png)
+
+![Mains balance](docs/images/readme/mains-balance.png)
+
+![Solar flow diagnostics](docs/images/readme/solar-flow-diagnostics.png)
+
+![Utility comparison](docs/images/readme/utility-comparison.png)
+
+![Always On and standby tracking](docs/images/readme/always-on-standby.png)
+
+![Experimental NILM](docs/images/readme/experimental-nilm.png)
+
+![Alert philosophy](docs/images/readme/alert-philosophy.png)
 
 ## Let the analyzer learn
 
@@ -270,6 +346,7 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 - Solar-flow thresholds
 - Standby and Always On settings
 - Activity-alert sensitivity
+- Rain, pump, and water-flow context
 
 Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
@@ -279,6 +356,8 @@ Most users should configure these options from the Home Assistant UI. Developer 
 | **Daily energy goals** | Lets you set a per-circuit daily kWh goal and receive repeated goal notices. | Cumulative energy sensor. |
 | **Run-cycle diagnostics** | Tracks start count, runtime, duty cycle, and running state for appliance-style circuits. | Real-power data and enough cycles. |
 | **HVAC weather context** | Compares HVAC runtime with similar outdoor temperatures before treating runtime as unusual. | HVAC-like circuit plus outdoor temperature sensor. |
+| **Rain and pump correlation** | Compares pump runtime with rain, optional rain intensity, and HVAC compressor activity before flagging unusual pump behavior. | Sump pump, water pump, or well pump plus rain sensor. |
+| **Water-flow correlation** | Compares boolean water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
 | **Recent activity timeline** | Keeps recent start/stop/steady-window events and recent possible-issue evidence. | Configured circuit with retained evidence. |
 | **Billing-cycle forecasts** | Tracks current-cycle kWh and projected end-of-cycle usage. | Cumulative energy sensor. |
 | **Cost and Time-of-Use estimates** | Estimates current-cycle and projected cost from configured rates. | Cumulative energy sensor and configured rates. |
@@ -333,6 +412,30 @@ This is useful for refrigerators, freezers, pumps, HVAC, washers, dryers, and ot
 HVAC runtime depends strongly on outdoor temperature. A compressor running longer on a very hot afternoon may be normal, while the same runtime on a mild day may deserve review.
 
 Add an outdoor temperature entity during setup or later from **Configure**. Use a real outdoor sensor, weather-station sensor, or reliable outdoor helper. Indoor thermostat temperature is usually not a good source for this feature.
+
+### Rain and pump correlation
+
+Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares recent pump runtime with the learned dry-weather baseline, current rain state, optional rain intensity, and recent HVAC compressor activity.
+
+This matters because a sump pump may run more during rain, and it may also run more when an AC compressor is removing humidity and sending condensate to a drain or sump. When both rain and AC activity are present, higher pump activity can be expected instead of automatically becoming a possible issue.
+
+Configure the global rain source during setup or later from **Configure**. Tune the per-circuit rain response window and activity threshold from:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+The analyzer can report weather-explained pump activity, possible excess pump activity, or possible missing pump activity. Treat those as prompts to inspect the pump, sensor mapping, discharge path, or recent weather conditions.
+
+### Water-flow correlation
+
+Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one boolean water-flow sensor is configured.
+
+The analyzer compares how long the water-flow sensor has been active with recent mapped appliance runtime. It can report:
+
+- Flow without a matching water-using appliance, which can point to an unmapped load, leak, running faucet, irrigation, or sensor mapping problem.
+- Appliance activity without expected flow, which can point to a stuck sensor, closed valve, dry-running pump, or assignment problem.
+- A likely sensor problem when both mismatch directions repeat.
+
+Configure global flow sensors during setup or later from **Configure**. Use **Advanced Circuit Settings** to link specific flow sensors to a specific appliance, turn off flow expectations for an appliance, or adjust the mismatch-minute threshold.
 
 ### Billing, cost, and Time-of-Use
 
@@ -503,6 +606,12 @@ When an alert appears:
 6. Use Repairs for configuration and data-quality problems.
 7. If work is planned on an appliance or circuit, use maintenance or pause-alert actions before service begins.
 
+Persistent notifications include a Markdown link to **Open evidence graph** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`.
+
+The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. Companion App notifications can use the same target through `clickAction`.
+
+For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
+
 ![Home Assistant notification drawer showing a CircuitSetup Energy Analyzer possible-issue notification](docs/images/readme/notifications-panel.png)
 
 ![Dynamic Energy Analyzer evidence graph opened from a notification link](docs/images/readme/notifications-repairs.png)
@@ -632,6 +741,13 @@ These are the sensors you select during setup. The analyzer does not require eve
 | **Reactive Power** | Motor, compressor, pump, and power-quality drift evidence. |
 | **Apparent Power** | VA relationship checks with watts and power factor. |
 
+Example source entity names commonly look like this:
+
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
+|---|---|---|---|---|
+| Energy | `sensor.<appliance>_energy` | Cumulative kWh source used for daily usage, billing, goals, and utility comparison. | Source entity selected by the user. | Increasing kWh total |
+| Active Power | `sensor.<appliance>_active_power` or `sensor.<appliance>_watts` | Instantaneous real power used for activity, demand, NILM, balance, and run-cycle checks. | Source entity selected by the user. | Watts, including signed watts when the meter reports export |
+
 For single-phase appliances, use one matching set of source entities.
 
 For dual-phase appliances, use L1/L2 or leg A/B source entities where possible.
@@ -661,24 +777,26 @@ The analyzer creates entities based on the circuit mode, appliance profile, sour
 
 In the patterns below, `<circuit>` is the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, `solar`, or `mains`.
 
-### Core appliance status sensors
+### Core Appliance Status Sensors
 
 Start with these on dashboards.
 
-| Friendly name | Entity pattern | What it means | When you see it | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Health Summary** | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
-| **Activity Summary** | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
-| **Electrical Health** | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
-| **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
-| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from a cumulative energy source. | Visible when usable energy data exists. | `0.0 kWh` and higher daily totals |
-| **Running** | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Visible for appliance circuits with active-power sensors. | `on`, `off` |
+| Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
+| Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
+| Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
+| Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
+| Daily Energy Usage | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from a cumulative energy source. | Visible when usable energy data exists. | `0.0 kWh` and higher daily totals |
+| Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Visible for appliance circuits with active-power sensors. | `on`, `off` |
+
+Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` when the analyzer has not observed a cumulative kWh increase yet.
 
 ### Core diagnostic and evidence sensors
 
 These help explain why a summary changed. They are useful for troubleshooting, automations, and temporary diagnostic dashboards.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values as evidence accumulates |
 | **Last Event** | `sensor.<circuit>_last_event` | Latest retained event type. | Advanced diagnostic, hidden by default. | `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, `unknown` |
@@ -696,7 +814,7 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 
 These are most useful for dedicated appliance circuits such as refrigerators, freezers, HVAC, electric heat, water heaters, ovens, washers, dryers, pumps, EV chargers, motor loads, and resistive loads. Mixed circuits may expose fewer appliance-specific signals.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Advanced diagnostic, hidden by default. | `0.0` when quiet; higher values when relationships drift |
 | **Power Quality Evidence** | `sensor.<circuit>_power_quality_evidence` | Text evidence for the latest power-quality observation. | Advanced diagnostic, hidden by default. | Blank text, baseline/learning text, or possible-issue evidence |
@@ -709,6 +827,9 @@ These are most useful for dedicated appliance circuits such as refrigerators, fr
 | **Run Cycle Status** | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and the Running binary sensor. | Advanced diagnostic, hidden by default. | `running`, `idle`, `no_activity` |
 | **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Visible for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
 | **Outdoor Temperature** | `sensor.<circuit>_outdoor_temperature` | Graphable outdoor temperature value used by HVAC weather context. | Visible for HVAC-like circuits when outdoor temperature context is configured. | Numeric temperature in `°F` or `°C` |
+| **Rain Pump Correlation** | `sensor.<circuit>_rain_pump_correlation` | Pump runtime compared with rain, optional rain intensity, HVAC compressor context, and learned dry-weather runtime. Attributes include rain source, rain activity, compressor context, observed runtime, dry baseline, and explanation. | Visible for sump pump, water pump, and well pump circuits when a rain source is configured. | `Unconfigured`, `Learning`, `Normal`, `Rain Explained`, `Compressor Explained`, `Weather Explained`, `Possible Excess Pump Activity`, `Possible Missing Pump Activity` |
+| **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
+| **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | Minutes |
 | **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, hidden by default. | Percentage mismatch |
 | **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, hidden by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
 
@@ -716,7 +837,7 @@ These are most useful for dedicated appliance circuits such as refrigerators, fr
 
 These require cumulative energy inputs. Use Home Assistant's Energy Dashboard for normal energy history; these entities exist for analyzer evidence, alerts, and per-circuit summaries.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Default visible when energy data exists. | `kWh` |
 | **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Normal entity when energy tracking exists. | Percentage values |
@@ -738,7 +859,7 @@ These are aimed at high-power circuits such as HVAC, electric heat, water heater
 
 Capacity sensors require either current sensors or real power plus voltage, and a configured breaker or capacity value.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Current Demand** | `sensor.<circuit>_current_demand` | Current rolling average demand. | Normal entity when demand tracking exists. | Watts |
 | **Peak Demand** | `sensor.<circuit>_peak_demand` | Highest rolling demand observed today. | Normal entity when demand tracking exists. | Watts |
@@ -755,14 +876,14 @@ Capacity sensors require either current sensors or real power plus voltage, and 
 
 These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with solar generation, and homes using utility or Opower comparison data.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **NILM Discovered Signatures** | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Normal entity for Mains NILM circuits. | Integer counts |
 | **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes can include likely type, voltage class, dominant leg, W/VAR/VA/PF, confidence, first/last seen, running state, runtime, kWh estimates, and ambiguity evidence. | Normal entity for Mains NILM circuits. | `0`, `1`, or higher counts |
 | **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Advanced diagnostic, hidden by default. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
 | **Balance Power** | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. Positive values usually mean unmonitored load; strongly negative values can suggest mapping or sign issues. | Normal entity for mains circuits. | Watts |
 | **Monitored Power** | `sensor.<circuit>_monitored_power` | Sum of directly monitored non-generation load circuits. | Normal entity for mains circuits. | Watts |
-| **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Percent of current mains power explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Normal entity for mains circuits. | Percentage values |
+| **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Normal entity for mains circuits. | Percentage values |
 | **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, hidden by default. | `missing_mains`, `tracking`, `negative_balance` |
 | **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Normal entity for solar/generation circuits. | Watts |
 | **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Normal entity for solar/generation circuits. | Watts |
@@ -784,7 +905,7 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 
 These apply to non-mains load circuits with real-power data. They are useful for refrigerators, freezers, pumps, HVAC blower circuits, motor loads, electronics, and appliances with known standby behavior.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Always On Power** | `sensor.<circuit>_always_on_power` | Lowest retained power level in the standby window. | Normal entity for non-mains load circuits. | Watts |
 | **Standby Threshold** | `sensor.<circuit>_standby_threshold` | Configured watts threshold separating off, standby, and on behavior. | Normal entity for non-mains load circuits. | Watts |
@@ -795,14 +916,15 @@ These apply to non-mains load circuits with real-power data. They are useful for
 
 Diagnostic binary sensors are created for configured circuits. Operational binary sensors appear only when the circuit has the required profile and source data.
 
-| Friendly name | Entity pattern | What it means | Visibility | Common outputs |
+| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Advanced diagnostic, hidden by default. | `on`, `off` |
 | **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, hidden by default. | `on`, `off` |
 | **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, hidden by default. | `on`, `off` |
 | **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Default visible for appliance circuits. | `on`, `off` |
+| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Default visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `on`, `off` |
 
-## Status glossary
+## Status Glossary
 
 Common status values include:
 
@@ -845,7 +967,12 @@ Common status values include:
 | Over Goal | `over_goal` | Daily energy usage is over the configured goal. |
 | Over Limit | `over_limit` | The measured value is above a configured limit. |
 | Over Threshold | `over_threshold` | The measured value is above a configured threshold. |
+| Possible Excess Pump Activity | `possible_excess_pump_activity` | Pump activity is above the weather-adjusted expected range. |
+| Possible Flow Without Load | `possible_flow_without_load` | Water flow has been active without matching mapped appliance activity. |
 | Possible Issue | `possible_issue` | Repeated evidence crossed an alert threshold. |
+| Possible Load Without Flow | `possible_load_without_flow` | A mapped water-using appliance appears active without matching water-flow sensor activity. |
+| Possible Missing Pump Activity | `possible_missing_pump_activity` | Rain or HVAC condensate context suggests pump activity may be expected but has not been observed. |
+| Possible Sensor Problem | `possible_sensor_problem` | Flow and appliance evidence conflict in both directions, so the flow sensor or mapping may need review. |
 | Power Factor Mismatch | `power_factor_mismatch` | Reported power factor does not match real power divided by apparent power. |
 | Projected Over Budget | `projected_over_budget` | Current usage projects above the billing-cycle budget. |
 | Ready | `ready` | The analyzer has enough data for this check. |
@@ -854,6 +981,9 @@ Common status values include:
 | Standby | `standby` | Latest power is within the configured standby range. |
 | Surplus Available | `surplus_available` | Solar export is above the configured surplus threshold. |
 | Surplus Candidate | `surplus_candidate` | An idle flexible load could be a candidate while solar surplus is available. |
+| Rain Explained | `rain_explained` | Pump activity is higher than dry baseline and rain context explains the increase. |
+| Compressor Explained | `compressor_explained` | Pump activity is higher than dry baseline and HVAC compressor condensate context explains the increase. |
+| Weather Explained | `weather_explained` | Pump activity is higher than dry baseline and combined rain/HVAC context explains the increase. |
 | Topology Match | `topology_match` | Mains NILM evidence matches the configured circuit mode. |
 | Topology Mismatch | `topology_mismatch` | Mains NILM evidence conflicts with the configured circuit mode. |
 | TOU Peak | `tou_peak` | Current time is inside the configured time-of-use peak period. |
