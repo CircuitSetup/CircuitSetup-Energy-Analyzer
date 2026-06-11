@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -188,6 +189,7 @@ RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
 RECOMMENDATION_DECISIONS_MAX_AGE = timedelta(days=365)
 RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS = 100
+RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION = "sha256:v1"
 HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
@@ -561,6 +563,20 @@ def _material_evidence_key(
     )
 
 
+def _compact_settings_recommendation_episode_key(
+    episode_key: tuple[tuple[str, ...], ...],
+) -> tuple[tuple[str, ...], ...]:
+    """Return a bounded duplicate-suppression key for pending recommendations."""
+    if len(episode_key) <= RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS:
+        return episode_key
+    fingerprint = hashlib.sha256(repr(episode_key).encode("utf-8")).hexdigest()
+    return (
+        ("version", RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION),
+        ("pending_count", str(len(episode_key))),
+        ("fingerprint", fingerprint),
+    )
+
+
 def _replace_if_present(
     target: dict[str, dict[str, Any]],
     circuit_id: str,
@@ -824,9 +840,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ConservativeAlertPolicy,
         ] = {}
         self._notified_alert_ids: set[str] = set()
-        self._settings_recommendation_notification_episode_key = tuple(
-            tuple(str(item) for item in part)
-            for part in self.store_data.settings_recommendation_notification_episode_key
+        self._settings_recommendation_notification_episode_key = (
+            _compact_settings_recommendation_episode_key(
+                tuple(
+                    tuple(str(item) for item in part)
+                    for part in (
+                        self.store_data.settings_recommendation_notification_episode_key
+                    )
+                )
+            )
+        )
+        self.store_data.settings_recommendation_notification_episode_key = (
+            self._settings_recommendation_notification_episode_key
         )
         self._active_repair_issues: set[tuple[str, str]] = set()
         self._store_dirty = False
@@ -1783,7 +1808,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     evidence_key,
                 )
             )
-        return tuple(sorted(parts))
+        return _compact_settings_recommendation_episode_key(tuple(sorted(parts)))
 
     def _set_settings_recommendation_notification_episode_key(
         self: Self,
@@ -4748,9 +4773,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )[:RECOMMENDATION_DECISIONS_MAX_ITEMS]
         )
         self.store_data.settings_recommendation_notification_episode_key = (
-            self.store_data.settings_recommendation_notification_episode_key[
-                :RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
-            ]
+            _compact_settings_recommendation_episode_key(
+                self.store_data.settings_recommendation_notification_episode_key
+            )
         )
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:

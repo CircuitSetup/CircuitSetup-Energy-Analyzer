@@ -1475,6 +1475,7 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
         RECOMMENDATION_DECISIONS_MAX_ITEMS,
         RECOMMENDATION_HISTORY_MAX_ITEMS,
+        RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION,
         RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS,
         EnergyAnalyzerCoordinator,
     )
@@ -1553,9 +1554,16 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         == RECOMMENDATION_DECISIONS_MAX_ITEMS
     )
     assert "hvac:setting:0" in coordinator.store_data.settings_recommendation_decisions
-    assert len(
+    episode_key = (
         coordinator.store_data.settings_recommendation_notification_episode_key
-    ) == RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+    )
+    assert len(episode_key) <= RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+    assert episode_key[0] == (
+        "version",
+        RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION,
+    )
+    assert episode_key[1] == ("pending_count", "110")
+    assert episode_key[2][0] == "fingerprint"
 
 
 @pytest.mark.asyncio
@@ -5899,6 +5907,81 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
 
     assert len(saved) == saved_after_repeat
     assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
+
+
+@pytest.mark.asyncio
+async def test_settings_recommendation_episode_survives_retention_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import (
+        settings_advisor as advisor,
+    )
+
+    notifications: list[dict[str, Any]] = []
+
+    class FakeStore:
+        def __init__(self, data: FeatureStoreData) -> None:
+            self.data = data
+
+        async def async_save(self) -> None:
+            return None
+
+    async def fake_notification(hass, entry_id, *, total_pending):
+        notifications.append(
+            {
+                "entry_id": entry_id,
+                "total_pending": total_pending,
+            }
+        )
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_settings_recommendation_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        settings_recommendations={
+            f"rec-{index}": _settings_recommendation(
+                advisor,
+                recommendation_id=f"rec-{index}",
+                unique_key=f"hvac:setting:{index}",
+                setting_key=f"setting_{index}",
+                created_at=now - timedelta(minutes=index),
+                expires_at=now + timedelta(days=30),
+            )
+            for index in range(
+                coordinator_module.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS + 10
+            )
+        },
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_id="entry-1",
+        store=FakeStore(store_data),
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+    coordinator._refresh_settings_recommendation_state(now)
+    await coordinator._notify_settings_recommendations_if_needed()
+    coordinator._apply_retention(now)
+
+    reloaded = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_id="entry-1",
+        store=FakeStore(store_data),
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+    reloaded._refresh_settings_recommendation_state(now)
+    await reloaded._notify_settings_recommendations_if_needed()
+
+    assert notifications == [{"entry_id": "entry-1", "total_pending": 110}]
 
 
 @pytest.mark.asyncio
