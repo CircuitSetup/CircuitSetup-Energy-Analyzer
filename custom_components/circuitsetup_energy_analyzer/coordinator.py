@@ -137,6 +137,7 @@ from .power_quality import (
     score_power_quality_features,
     select_power_quality_evidence,
 )
+from .processors import CircuitEventProcessor, FeatureResult, ProcessingContext
 from .profiles import get_profile_definition
 from .settings_advisor import (
     AdvisorCircuitContext,
@@ -596,6 +597,24 @@ def _replace_if_present_as(
         target[circuit_id] = values
 
 
+def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
+    """Apply a processor-requested update to AnalyzerState."""
+    if not path:
+        msg = "State update path must not be empty"
+        raise ValueError(msg)
+    target = state
+    for segment in path[:-1]:
+        if isinstance(target, dict):
+            target = target.setdefault(segment, {})
+        else:
+            target = getattr(target, segment)
+    final_segment = path[-1]
+    if isinstance(target, dict):
+        target[final_segment] = value
+        return
+    setattr(target, final_segment, value)
+
+
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     """Runtime coordinator for source sensor updates and analyzer state."""
 
@@ -645,6 +664,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             config.circuit_id: CircuitEventDetector()
             for config in self.circuit_configs
         }
+        self._event_processor = CircuitEventProcessor(self._detectors)
         self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
         self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
@@ -880,9 +900,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Handle Home Assistant source state changes."""
         await self.async_process_update()
 
+    def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
+        """Build immutable runtime context for feature processors."""
+        return ProcessingContext(
+            now=now,
+            hass=self.hass,
+            state=self.state,
+            store_data=self.store_data,
+            options=self.options,
+            entry_data=self.entry_data,
+            known_load_circuit_ids=self._known_load_circuit_ids,
+            sensitivity=self._sensitivity,
+        )
+
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
+        context = self._build_processing_context(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
@@ -894,15 +928,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._refresh_latest_real_power_state(config, sample)
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
-            detector = self._detectors.setdefault(
-                config.circuit_id,
-                CircuitEventDetector(),
+            event_result = self._event_processor.process(sample, config, context)
+            new_events, _ = await self._apply_feature_result(
+                event_result,
             )
-            new_events = detector.process(sample)
             events.extend(new_events)
-            if new_events:
-                self.store_data.events.extend(new_events)
-                self._mark_store_dirty()
 
             alert = self._observe_power_quality(config, sample, now)
             if alert is not None:
@@ -4853,6 +4883,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _mark_store_dirty(self: Self) -> None:
         self._store_dirty = True
+
+    async def _apply_feature_result(
+        self: Self,
+        result: FeatureResult,
+    ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
+        """Apply processor output to coordinator-owned state and side effects."""
+        if result.events:
+            self.store_data.events.extend(result.events)
+        if result.alerts:
+            self.store_data.alerts.extend(result.alerts)
+        for update in result.state_updates:
+            _apply_state_update(self.state, update.path, update.value)
+        for alert in result.notifications:
+            await self._notify_alert(alert)
+        if (
+            result.store_dirty
+            or result.events
+            or result.alerts
+            or result.state_updates
+        ):
+            self._mark_store_dirty()
+        return list(result.events), list(result.alerts)
 
     async def _async_save_store(self: Self, now: datetime) -> None:
         if self._store is None or not self._store_dirty:
