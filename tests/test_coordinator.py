@@ -3900,6 +3900,7 @@ async def test_relearn_clears_nilm_topology_state_and_policy() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
+    from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     alert = AlertEvidence(
@@ -3919,7 +3920,7 @@ async def test_relearn_clears_nilm_topology_state_and_policy() -> None:
         "status": "topology_mismatch"
     }
     coordinator._nilm_topology_alert_policy_for_circuit("fridge").observe(
-        coordinator_module.Observation(
+        Observation(
             circuit_id="fridge",
             feature="nilm_topology_mismatch",
             score=1.0,

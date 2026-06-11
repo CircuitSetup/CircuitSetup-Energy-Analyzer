@@ -1603,6 +1603,67 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
     assert "balanced_240v" in result.alerts[0].message
 
 
+def test_water_context_alert_processor_returns_flow_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    state = AnalyzerState()
+    state.water_flow_context_by_circuit["washer"] = {
+        "status": "possible_flow_without_load",
+        "friendly_summary": "Water flow has been active for 14 minutes.",
+        "mismatch_minutes": 14.0,
+        "flow_active_minutes": 14.0,
+        "flow_mismatch_threshold_minutes": 5,
+        "confidence": 0.84,
+    }
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.WaterContextAlertProcessor(
+        alert_policy_for_circuit=lambda circuit_id, feature: policy,
+    )
+
+    result = processor.process(config, context)
+
+    assert result.state_updates == []
+    assert result.store_dirty is False
+    assert len(result.alerts) == 1
+    assert result.notifications == result.alerts
+    assert result.alerts[0].feature == "water_flow_correlation"
+    assert result.alerts[0].message == (
+        "Possible issue: Washer water context changed. "
+        "Water flow has been active for 14 minutes."
+    )
+    assert policy.observations[0].observed_value == 14.0
+    assert policy.observations[0].baseline_value == 5.0
+    assert policy.observations[0].baseline_confidence == 0.84
+    assert policy.observations[0].features == {
+        "mismatch_minutes": 14.0,
+        "flow_active_minutes": 14.0,
+        "confidence": 0.84,
+    }
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

@@ -18,6 +18,7 @@ from .power_quality import PowerQualityProcessor
 from .solar_flow import SolarFlowProcessor
 from .standby import StandbyProcessor
 from .utility_comparison import UtilityComparisonProcessor
+from .water_context import WaterContextAlertProcessor
 
 __all__ = [
     "ActivityAlertProcessor",
@@ -41,4 +42,5 @@ __all__ = [
     "StandbyProcessor",
     "StateUpdate",
     "UtilityComparisonProcessor",
+    "WaterContextAlertProcessor",
 ]
