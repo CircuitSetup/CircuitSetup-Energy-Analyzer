@@ -280,6 +280,35 @@ If something looks confusing, open the entity details and review attributes such
 
 Do this before changing thresholds or assuming an appliance has failed.
 
+## Retained analyzer data
+
+CircuitSetup Energy Analyzer keeps compact diagnostic evidence for its own
+analysis. It does not try to replace Home Assistant's recorder, statistics, or
+Energy Dashboard history.
+
+Retention modes control time-based circuit evidence:
+
+| Retention mode | Time window |
+|---|---:|
+| Lightweight | 14 days |
+| Standard | 45 days |
+| Diagnostic | 180 days |
+
+Additional persisted structures have hard caps so storage cannot grow without
+bound:
+
+| Stored structure | Cap |
+|---|---:|
+| Alert history | 500 items or 180 days |
+| Alert feedback | 500 items or 365 days |
+| Weather context history | 1,008 samples per circuit plus the retention window |
+| Rain/water-flow context history | 1,008 samples per circuit plus the retention window |
+| NILM signatures | 64 signatures per mains circuit |
+| NILM unknown-load inventory | 32 unknown loads per mains circuit |
+| Settings suggestions | 200 recommendations or 180 days, pending suggestions kept first |
+| Settings suggestion decisions | 500 decisions or 365 days |
+| Settings suggestion notification history | 100 notification episode keys |
+
 ## Optional features
 
 Enable and tune optional features from the integration options screen. Manual YAML editing is not required.
