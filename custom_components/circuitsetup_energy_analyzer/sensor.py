@@ -13,6 +13,18 @@ from .const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
+from .demo import (
+    DEMO_SOURCE_ROLE_METADATA as _DEMO_SOURCE_ROLE_METADATA,
+)
+from .demo import (
+    demo_circuit_id_from_entity_id as _demo_circuit_id_from_entity_id,
+)
+from .demo import (
+    demo_source_value as _demo_source_value,
+)
+from .demo import (
+    is_demo_source_entity_id as _is_demo_source_entity_id,
+)
 from .entity import (
     CircuitAnalyzerEntity,
     CoordinatorEntity,
@@ -2338,180 +2350,6 @@ _POWER_QUALITY_ROLES = {
     SensorRole.CURRENT,
     SensorRole.VOLTAGE,
 }
-_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
-_DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
-    "mains_l1": {
-        SensorRole.ENERGY: 868.4,
-        SensorRole.REAL_POWER: 1850.0,
-        SensorRole.CURRENT: 15.4,
-        SensorRole.POWER_FACTOR: 0.96,
-        SensorRole.REACTIVE_POWER: 520.0,
-        SensorRole.APPARENT_POWER: 1927.0,
-        SensorRole.VOLTAGE: 119.6,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "mains_l2": {
-        SensorRole.ENERGY: 852.7,
-        SensorRole.REAL_POWER: 1680.0,
-        SensorRole.CURRENT: 14.1,
-        SensorRole.POWER_FACTOR: 0.95,
-        SensorRole.REACTIVE_POWER: 470.0,
-        SensorRole.APPARENT_POWER: 1768.0,
-        SensorRole.VOLTAGE: 120.3,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "refrigerator": {
-        SensorRole.ENERGY: 52.6,
-        SensorRole.REAL_POWER: 285.0,
-        SensorRole.CURRENT: 2.8,
-        SensorRole.POWER_FACTOR: 0.58,
-        SensorRole.REACTIVE_POWER: 400.0,
-        SensorRole.APPARENT_POWER: 492.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "hvac_l1": {
-        SensorRole.ENERGY: 188.4,
-        SensorRole.REAL_POWER: 3300.0,
-        SensorRole.CURRENT: 28.0,
-        SensorRole.POWER_FACTOR: 0.72,
-        SensorRole.REACTIVE_POWER: 3100.0,
-        SensorRole.APPARENT_POWER: 4580.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "hvac_l2": {
-        SensorRole.ENERGY: 171.9,
-        SensorRole.REAL_POWER: 900.0,
-        SensorRole.CURRENT: 7.4,
-        SensorRole.POWER_FACTOR: 0.95,
-        SensorRole.REACTIVE_POWER: 300.0,
-        SensorRole.APPARENT_POWER: 947.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "water_heater_l1": {
-        SensorRole.ENERGY: 84.3,
-        SensorRole.REAL_POWER: 2050.0,
-        SensorRole.CURRENT: 17.2,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 210.0,
-        SensorRole.APPARENT_POWER: 2071.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "water_heater_l2": {
-        SensorRole.ENERGY: 84.1,
-        SensorRole.REAL_POWER: 2050.0,
-        SensorRole.CURRENT: 17.1,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 205.0,
-        SensorRole.APPARENT_POWER: 2071.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "washer": {
-        SensorRole.ENERGY: 14.2,
-        SensorRole.REAL_POWER: 420.0,
-        SensorRole.CURRENT: 4.2,
-        SensorRole.POWER_FACTOR: 0.83,
-        SensorRole.REACTIVE_POWER: 280.0,
-        SensorRole.APPARENT_POWER: 506.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "dryer_l1": {
-        SensorRole.ENERGY: 63.7,
-        SensorRole.REAL_POWER: 2600.0,
-        SensorRole.CURRENT: 21.8,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 260.0,
-        SensorRole.APPARENT_POWER: 2626.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "dryer_l2": {
-        SensorRole.ENERGY: 63.1,
-        SensorRole.REAL_POWER: 2550.0,
-        SensorRole.CURRENT: 21.2,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 250.0,
-        SensorRole.APPARENT_POWER: 2576.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "car_charger_l1": {
-        SensorRole.ENERGY: 151.4,
-        SensorRole.REAL_POWER: 4600.0,
-        SensorRole.CURRENT: 38.5,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 460.0,
-        SensorRole.APPARENT_POWER: 4646.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "car_charger_l2": {
-        SensorRole.ENERGY: 150.8,
-        SensorRole.REAL_POWER: 4550.0,
-        SensorRole.CURRENT: 37.9,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 450.0,
-        SensorRole.APPARENT_POWER: 4596.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "pool_pump": {
-        SensorRole.ENERGY: 77.6,
-        SensorRole.REAL_POWER: 950.0,
-        SensorRole.CURRENT: 10.1,
-        SensorRole.POWER_FACTOR: 0.86,
-        SensorRole.REACTIVE_POWER: 580.0,
-        SensorRole.APPARENT_POWER: 1105.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-}
-_DEMO_SOURCE_ROLE_METADATA: dict[SensorRole, dict[str, str]] = {
-    SensorRole.ENERGY: {
-        "device_class": "energy",
-        "state_class": "total_increasing",
-        "unit": "kWh",
-        "icon": "mdi:counter",
-    },
-    SensorRole.REAL_POWER: {
-        "device_class": "power",
-        "state_class": "measurement",
-        "unit": "W",
-        "icon": "mdi:flash",
-    },
-    SensorRole.CURRENT: {
-        "device_class": "current",
-        "state_class": "measurement",
-        "unit": "A",
-        "icon": "mdi:current-ac",
-    },
-    SensorRole.POWER_FACTOR: {
-        "device_class": "power_factor",
-        "state_class": "measurement",
-        "unit": "",
-        "icon": "mdi:cosine-wave",
-    },
-    SensorRole.REACTIVE_POWER: {
-        "device_class": "reactive_power",
-        "state_class": "measurement",
-        "unit": "var",
-        "icon": "mdi:flash-triangle-outline",
-    },
-    SensorRole.APPARENT_POWER: {
-        "device_class": "apparent_power",
-        "state_class": "measurement",
-        "unit": "VA",
-        "icon": "mdi:flash-outline",
-    },
-    SensorRole.VOLTAGE: {
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "unit": "V",
-        "icon": "mdi:sine-wave",
-    },
-    SensorRole.FREQUENCY: {
-        "device_class": "frequency",
-        "state_class": "measurement",
-        "unit": "Hz",
-        "icon": "mdi:sine-wave",
-    },
-}
-
-
 def sensor_description_applies(
     description: DiagnosticSensorDescription,
     circuit: Any,
@@ -3522,37 +3360,8 @@ def _sensor_ref_or_none(sensor: Any) -> SensorRef | None:
     return SensorRef(entity_id, sensor_role, leg=leg, unit=unit)
 
 
-def _is_demo_source_entity_id(entity_id: str) -> bool:
-    return entity_id.startswith(_DEMO_SOURCE_ENTITY_PREFIX)
-
-
 def _coerce_sensor_role(role: Any) -> SensorRole:
     return role if isinstance(role, SensorRole) else SensorRole(role)
-
-
-def _demo_circuit_id_from_entity_id(entity_id: str) -> str:
-    object_id = entity_id.removeprefix("sensor.cs_energy_analyzer_demo_")
-    suffixes = (
-        "_reactive_power",
-        "_apparent_power",
-        "_power_factor",
-        "_active_power",
-        "_frequency",
-        "_voltage",
-        "_current",
-        "_energy",
-    )
-    for suffix in suffixes:
-        if object_id.endswith(suffix):
-            return object_id[: -len(suffix)]
-    return object_id
-
-
-def _demo_source_value(circuit_id: str, role: SensorRole) -> float | None:
-    circuit_values = _DEMO_SOURCE_VALUES.get(circuit_id, {})
-    if role in circuit_values:
-        return circuit_values[role]
-    return _DEMO_SOURCE_VALUES.get("pool_pump", {}).get(role)
 
 
 def _title_from_object_id(object_id: str) -> str:

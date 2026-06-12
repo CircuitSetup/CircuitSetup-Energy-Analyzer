@@ -157,6 +157,7 @@ from .const import (
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
+from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
     async_discover_energy_source_entities,
@@ -368,28 +369,6 @@ _CIRCUIT_MODE_LABELS = {
     CircuitMode.MIXED.value: "Mixed",
     CircuitMode.MAINS_NILM.value: "Mains NILM",
 }
-_DEMO_SOURCE_METRICS = (
-    "energy",
-    "active_power",
-    "current",
-    "power_factor",
-    "reactive_power",
-    "apparent_power",
-)
-_DEMO_SOURCE_ENTITY_IDS = tuple(
-    f"sensor.cs_energy_analyzer_demo_{leg}_{metric}"
-    for leg in ("mains_l1", "mains_l2")
-    for metric in (*_DEMO_SOURCE_METRICS, "voltage")
-) + tuple(
-    f"sensor.cs_energy_analyzer_demo_{circuit}_{metric}"
-    for circuit in ("refrigerator", "washer", "pool_pump")
-    for metric in _DEMO_SOURCE_METRICS
-) + tuple(
-    f"sensor.cs_energy_analyzer_demo_{circuit}_{leg}_{metric}"
-    for circuit in ("hvac", "water_heater", "dryer", "car_charger")
-    for leg in ("l1", "l2")
-    for metric in _DEMO_SOURCE_METRICS
-)
 _OPTIONS_FLOW_BASE = getattr(
     config_entries,
     "OptionsFlowWithReload",

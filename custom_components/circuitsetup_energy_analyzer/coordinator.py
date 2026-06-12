@@ -71,6 +71,27 @@ from .cycles import (
 from .demand import (
     DemandSettings,
 )
+from .demo import (
+    DEMO_HISTORY_SEED_VERSION as _DEMO_HISTORY_SEED_VERSION,
+)
+from .demo import (
+    demo_baseline as _demo_baseline,
+)
+from .demo import (
+    demo_circuit_key as _demo_circuit_key,
+)
+from .demo import (
+    demo_prior_usage as _demo_prior_usage,
+)
+from .demo import (
+    demo_today_usage as _demo_today_usage,
+)
+from .demo import (
+    is_demo_config as _is_demo_config,
+)
+from .demo import (
+    is_demo_source_entity_id as _is_demo_source_entity_id,
+)
 from .energy_dashboard import (
     evaluate_energy_dashboard_readiness,
     readiness_payload,
@@ -89,7 +110,6 @@ from .metric_consistency import (
 from .models import (
     AlertEvidence,
     ApplianceProfile,
-    BaselineStats,
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
@@ -214,31 +234,6 @@ FLOW_WATER_CONTEXT_PROFILES = frozenset(
         ApplianceProfile.WASHER,
     }
 )
-_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
-_DEMO_HISTORY_SEED_VERSION = 1
-_DEMO_PRIOR_DAILY_USAGE_KWH: dict[str, tuple[float, ...]] = {
-    "refrigerator": (1.1, 1.2, 1.3, 1.1, 1.4, 1.2, 1.3),
-    "hvac": (24.0, 28.5, 31.2, 27.8, 33.1, 29.4, 30.6),
-    "water_heater": (5.8, 6.1, 5.9, 6.4, 6.0, 6.2, 5.7),
-    "washer": (0.7, 0.9, 0.6, 1.1, 0.8, 1.0, 0.7),
-    "dryer": (2.7, 3.2, 2.9, 3.5, 3.0, 3.4, 2.8),
-    "pool_pump": (4.2, 4.4, 4.1, 4.5, 4.3, 4.6, 4.2),
-    "car_charger": (9.6, 12.4, 10.1, 14.8, 8.5, 13.2, 11.1),
-    "mains_nilm": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
-    "mains": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
-}
-_DEMO_TODAY_USAGE_KWH: dict[str, float] = {
-    "refrigerator": 2.6,
-    "hvac": 62.0,
-    "water_heater": 10.8,
-    "washer": 1.8,
-    "dryer": 6.7,
-    "pool_pump": 7.4,
-    "car_charger": 26.0,
-    "mains_nilm": 78.0,
-    "mains": 78.0,
-}
-
 try:
     from homeassistant.components.recorder.statistics import (
         statistics_during_period as _ha_statistics_during_period,
@@ -5214,52 +5209,6 @@ def _sum_optional_values(*raw_values: Any) -> float | None:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
-
-
-def _is_demo_source_entity_id(entity_id: str) -> bool:
-    return str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
-
-
-def _is_demo_config(config: CircuitConfig) -> bool:
-    return any(_is_demo_source_entity_id(sensor.entity_id) for sensor in config.sensors)
-
-
-def _demo_circuit_key(config: CircuitConfig) -> str:
-    if (
-        config.mode is CircuitMode.MAINS_NILM
-        or config.appliance_profile is ApplianceProfile.MAINS_NILM
-    ):
-        return "mains_nilm"
-    return str(config.circuit_id).removeprefix("cs_energy_analyzer_demo_")
-
-
-def _demo_prior_usage(circuit_key: str, window_days: int) -> tuple[float, ...]:
-    template = _DEMO_PRIOR_DAILY_USAGE_KWH.get(
-        circuit_key,
-        _DEMO_PRIOR_DAILY_USAGE_KWH["refrigerator"],
-    )
-    return tuple(float(template[index % len(template)]) for index in range(window_days))
-
-
-def _demo_today_usage(circuit_key: str, energy_kwh: float) -> float:
-    preferred = _DEMO_TODAY_USAGE_KWH.get(circuit_key, max(energy_kwh * 0.15, 0.5))
-    if energy_kwh <= preferred:
-        return round(max(energy_kwh * 0.2, 0.001), 3)
-    return round(float(preferred), 3)
-
-
-def _demo_baseline(feature: str, value: float) -> BaselineStats:
-    spread_floor = 0.01 if "ratio" in feature or "factor" in feature else 5.0
-    spread = max(abs(float(value)) * 0.05, spread_floor)
-    return BaselineStats(
-        feature=feature,
-        sample_count=20,
-        median=float(value),
-        mad=spread,
-        p10=float(value) - spread,
-        p90=float(value) + spread,
-        confidence=1.0,
-    )
 
 
 def _format_kwh(value: float) -> str:
