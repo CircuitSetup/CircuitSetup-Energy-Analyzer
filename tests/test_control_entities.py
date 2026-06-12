@@ -55,14 +55,45 @@ def _circuit() -> CircuitConfig:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+
+
+def _power_only_circuit() -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="garage_freezer",
+        name="Garage Freezer",
+        appliance_profile=ApplianceProfile.FREEZER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.garage_freezer_power", SensorRole.REAL_POWER),),
+    )
+
+
+def _mains_circuit() -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_energy", SensorRole.ENERGY),
+        ),
     )
 
 
 class _FakeCoordinator:
-    def __init__(self) -> None:
-        self.data = AnalyzerState(sensitivity_by_circuit={"fridge": "quiet"})
-        self.circuit_configs = (_circuit(),)
+    def __init__(
+        self,
+        *,
+        circuits: tuple[CircuitConfig, ...] | None = None,
+        state: AnalyzerState | None = None,
+    ) -> None:
+        self.data = state or AnalyzerState(sensitivity_by_circuit={"fridge": "quiet"})
+        self.circuit_configs = circuits or (_circuit(),)
         self.options = {CONF_ENTITY_DETAIL_LEVEL: "standard"}
         self.entry_data = {}
         self.store_data = SimpleNamespace(
@@ -220,6 +251,66 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
 
 
 @pytest.mark.asyncio
+async def test_button_setup_skips_inapplicable_controls_and_keeps_single_globals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator(circuits=(_circuit(), _mains_circuit()))
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+
+    assert "entry-1_fridge_pause_alerts" in unique_ids
+    assert "entry-1_mains_pause_alerts" not in unique_ids
+    assert "entry-1_mains_relearn_baseline" not in unique_ids
+    assert {
+        "entry-1_run_mapping_checks",
+        "entry-1_recalculate_suggestions",
+        "entry-1_create_dashboard",
+    } <= unique_ids
+    create_dashboard_entities = [
+        entity
+        for entity in added_entities
+        if entity.unique_id.endswith("create_dashboard")
+    ]
+    assert len(create_dashboard_entities) == 1
+
+
+@pytest.mark.asyncio
+async def test_button_availability_tracks_maintenance_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    state = AnalyzerState(
+        maintenance_by_circuit={"fridge": {"active": True}},
+        sensitivity_by_circuit={"fridge": "quiet"},
+    )
+    coordinator = _FakeCoordinator(state=state)
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+
+    assert by_unique_id["entry-1_fridge_start_maintenance"].available is False
+    assert by_unique_id["entry-1_fridge_end_maintenance"].available is True
+
+
+@pytest.mark.asyncio
 async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -308,3 +399,53 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     assert coordinator.calls == [
         ("async_set_energy_goal_settings", ("fridge", 6.25, None))
     ]
+
+
+@pytest.mark.asyncio
+async def test_number_setup_skips_daily_energy_goal_without_energy_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    _disable_registry_pruning(monkeypatch, number)
+    coordinator = _FakeCoordinator(circuits=(_power_only_circuit(),))
+    coordinator.store_data = SimpleNamespace(energy_goal_settings_by_circuit={})
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
+
+
+@pytest.mark.asyncio
+async def test_button_press_raises_clear_error_when_coordinator_method_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(_circuit(),),
+        hass=None,
+    )
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    relearn = next(
+        entity
+        for entity in added_entities
+        if entity.unique_id == "entry-1_fridge_relearn_baseline"
+    )
+
+    with pytest.raises(button.HomeAssistantError, match="relearn baseline"):
+        await relearn.async_press()

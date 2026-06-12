@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,9 @@ from .services import (
     ATTR_SIGNATURE_ID,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
+    SERVICE_DENY_SETTING_RECOMMENDATION,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
+    SERVICE_END_MAINTENANCE,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_ALERT_EXPECTED,
@@ -239,16 +241,27 @@ def _actions_for_context(
 
     if circuit_id:
         circuit_data = {ATTR_CIRCUIT_ID: circuit_id}
+        if _maintenance_active(coordinator, circuit_id):
+            maintenance_action = {
+                "end_maintenance": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_END_MAINTENANCE,
+                    "data": circuit_data,
+                }
+            }
+        else:
+            maintenance_action = {
+                "start_maintenance": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_START_MAINTENANCE,
+                    "data": circuit_data,
+                }
+            }
         actions.update(
             {
                 "pause_alerts": {
                     "domain": DOMAIN,
                     "service": SERVICE_PAUSE_ALERTS,
-                    "data": circuit_data,
-                },
-                "start_maintenance": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_START_MAINTENANCE,
                     "data": circuit_data,
                 },
                 "relearn_baseline": {
@@ -262,6 +275,7 @@ def _actions_for_context(
                 },
             }
         )
+        actions.update(maintenance_action)
 
     recommendations = _setting_recommendations_for_circuit(
         coordinator,
@@ -278,6 +292,11 @@ def _actions_for_context(
         actions["apply_setting_recommendation"] = {
             "domain": DOMAIN,
             "service": SERVICE_APPLY_SETTING_RECOMMENDATION,
+            "data": recommendation_data,
+        }
+        actions["deny_setting_recommendation"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_DENY_SETTING_RECOMMENDATION,
             "data": recommendation_data,
         }
         actions["dismiss_setting_recommendation"] = {
@@ -310,26 +329,61 @@ def _setting_recommendations_for_circuit(
         by_circuit,
         dict,
     ) else ()
-    return [_recommendation_payload(item) for item in _iter_items(recommendations)]
+    return [
+        _recommendation_payload(item, coordinator=coordinator)
+        for item in _iter_items(recommendations)
+    ]
 
 
-def _recommendation_payload(item: Any) -> dict[str, Any]:
+def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
     if isinstance(item, dict):
-        return dict(item)
-    payload: dict[str, Any] = {}
-    for key in (
-        ATTR_RECOMMENDATION_ID,
-        "title",
-        "summary",
-        "feature",
-        "current_value",
-        "suggested_value",
-        "reason",
-    ):
-        value = getattr(item, key, None)
-        if value is not None:
-            payload[key] = value
+        payload = dict(item)
+    else:
+        payload = {}
+        for key in (
+            ATTR_RECOMMENDATION_ID,
+            "title",
+            "summary",
+            "feature",
+            "current_value",
+            "suggested_value",
+            "reason",
+        ):
+            value = getattr(item, key, None)
+            if value is not None:
+                payload[key] = value
+
+    recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
+    if isinstance(recommendation_id, str) and recommendation_id:
+        payload["actions"] = _recommendation_actions(coordinator, recommendation_id)
     return payload
+
+
+def _recommendation_actions(
+    coordinator: Any,
+    recommendation_id: str,
+) -> dict[str, dict[str, Any]]:
+    data: dict[str, Any] = {ATTR_RECOMMENDATION_ID: recommendation_id}
+    entry_id = getattr(coordinator, "entry_id", None)
+    if isinstance(entry_id, str) and entry_id:
+        data[ATTR_ENTRY_ID] = entry_id
+    return {
+        "apply": {
+            "domain": DOMAIN,
+            "service": SERVICE_APPLY_SETTING_RECOMMENDATION,
+            "data": dict(data),
+        },
+        "deny": {
+            "domain": DOMAIN,
+            "service": SERVICE_DENY_SETTING_RECOMMENDATION,
+            "data": dict(data),
+        },
+        "dismiss": {
+            "domain": DOMAIN,
+            "service": SERVICE_DISMISS_SETTING_RECOMMENDATION,
+            "data": dict(data),
+        },
+    }
 
 
 def _first_recommendation_id(recommendations: list[dict[str, Any]]) -> str | None:
@@ -354,6 +408,7 @@ def _nilm_payload_for_circuit(
                 "actions": _nilm_actions_for_signature(
                     circuit_id,
                     str(signature[ATTR_SIGNATURE_ID]),
+                    signatures,
                 ),
             }
             for signature in signatures
@@ -396,6 +451,7 @@ def _nilm_signatures_for_circuit(
 def _nilm_actions_for_signature(
     circuit_id: str,
     signature_id: str,
+    signatures: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
     return {
@@ -420,8 +476,68 @@ def _nilm_actions_for_signature(
             "service": "merge_nilm_signatures",
             "data": {ATTR_CIRCUIT_ID: circuit_id, "source_signature_id": signature_id},
             "requires": ["target_signature_id"],
+            "target_options": _nilm_merge_target_options(signatures, signature_id),
         },
     }
+
+
+def _nilm_merge_target_options(
+    signatures: Iterable[dict[str, Any]],
+    source_signature_id: str,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for signature in signatures:
+        signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        if not signature_id or signature_id == source_signature_id:
+            continue
+        options.append(
+            {
+                "value": signature_id,
+                "label": _nilm_signature_label(signature, signature_id),
+            }
+        )
+    return options
+
+
+def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
+    label = (
+        str(signature.get("display_name") or "").strip()
+        or str(signature.get("likely_type") or "").strip()
+        or fallback
+    )
+    parts = [label]
+    typical_watts = signature.get("typical_watts")
+    if isinstance(typical_watts, (int, float)) and typical_watts > 0:
+        parts.append(_format_power_label(float(typical_watts)))
+    confidence = signature.get("confidence")
+    if isinstance(confidence, (int, float)):
+        parts.append(f"confidence {round(float(confidence) * 100):.0f}%")
+    first_seen = _format_first_seen_label(signature.get("first_seen"))
+    if first_seen:
+        parts.append(f"first seen {first_seen}")
+    return ", ".join(parts)
+
+
+def _format_power_label(typical_watts: float) -> str:
+    if typical_watts >= 1000:
+        return f"{round(typical_watts / 1000, 1):.1f} kW"
+    return f"{round(typical_watts):.0f} W"
+
+
+def _format_first_seen_label(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text.split("T", 1)[0]
+
+
+def _maintenance_active(coordinator: Any, circuit_id: str) -> bool:
+    state = getattr(coordinator, "state", None)
+    maintenance_by_circuit = getattr(state, "maintenance_by_circuit", {})
+    if not isinstance(maintenance_by_circuit, dict):
+        return False
+    maintenance = maintenance_by_circuit.get(circuit_id)
+    return isinstance(maintenance, Mapping) and maintenance.get("active") is True
 
 
 def _iter_items(value: Any) -> Iterable[Any]:

@@ -8,5 +8,6 @@ __pycache__/
 htmlcov/
 /.codex
 /docs/superpowers
+/docs/qa/
 /.vscode
 *.egg-info/

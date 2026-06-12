@@ -715,6 +715,38 @@
       "title": "Energy Analyzer source sensor is stale",
       "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit."
     },
+    "missing_energy_source": {
+      "title": "Energy Analyzer circuit needs cumulative energy data",
+      "description": "A configured circuit has power data but no usable cumulative kWh source. Add a cumulative energy sensor, or create one with Home Assistant's Integration helper."
+    },
+    "missing_mains_source": {
+      "title": "Energy Analyzer feature needs a mains source",
+      "description": "A mains-dependent feature is enabled, but no mains or whole-home source is configured. Add a mains source before using mains balance, NILM, or solar-flow checks."
+    },
+    "missing_electrical_metrics": {
+      "title": "Energy Analyzer circuit needs matching electrical metrics",
+      "description": "A configured circuit is missing the supporting watts, amps, voltage, apparent power, or power factor inputs needed for metric-consistency checks."
+    },
+    "check_ct_direction": {
+      "title": "Energy Analyzer found a power-flow or CT direction problem",
+      "description": "Analyzer evidence suggests reversed CT orientation, an unexpected export sign, or a power-flow mapping mismatch. Review CT direction and the configured power-flow mode."
+    },
+    "dual_phase_missing_leg": {
+      "title": "Energy Analyzer dual-phase circuit is missing one leg",
+      "description": "A dual-phase circuit cannot compare both split-phase legs because one leg is missing or unavailable. Review the selected leg A and leg B source sensors for this circuit."
+    },
+    "missing_rain_context_source": {
+      "title": "Energy Analyzer rain context needs a rain source",
+      "description": "Rain-pump correlation is enabled for a pump circuit, but no rain or rain-intensity source is configured. Add a rain sensor or disable rain-pump context for this circuit."
+    },
+    "missing_water_flow_source": {
+      "title": "Energy Analyzer water-flow context needs a flow source",
+      "description": "Water-flow correlation is enabled for a water-using circuit, but no linked or global water-flow source is configured. Add a flow sensor or disable water-flow context for this circuit."
+    },
+    "utility_comparison_source_mismatch": {
+      "title": "Energy Analyzer utility comparison needs source settings",
+      "description": "Utility comparison is enabled, but the utility source, measured kWh source, or recorder period cannot be compared. Review the utility comparison settings for this circuit."
+    },
     "unexpected_negative_real_power": {
       "title": "Energy Analyzer sees negative load power",
       "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected."

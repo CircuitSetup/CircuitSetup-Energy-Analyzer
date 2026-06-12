@@ -29,10 +29,14 @@ from .ux import friendly_sensitivity_label, normalize_sensitivity
 
 try:
     from homeassistant.components.select import SelectEntity
+    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class SelectEntity:
         """Fallback select base for tests without Home Assistant."""
+
+    class HomeAssistantError(Exception):
+        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 SENSITIVITY_OPTIONS = ["Quiet", "Balanced", "Sensitive"]
@@ -120,9 +124,10 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Persist a new sensitivity preset."""
         preset = normalize_sensitivity(option)
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             "async_set_circuit_sensitivity",
+            self.entity_description.name_suffix,
             self.circuit_id,
             preset,
         )
@@ -188,9 +193,10 @@ class EntityDetailLevelSelect(SelectEntity):
         """Persist and apply a new entity detail profile."""
         if option not in ENTITY_DETAIL_LEVELS:
             return
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             "async_set_entity_detail_level",
+            "entity detail level",
             option,
         )
 
@@ -262,9 +268,10 @@ class DashboardLayoutSelect(SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Persist a new recommended-dashboard layout."""
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             "async_set_dashboard_layout",
+            "dashboard layout",
             normalize_dashboard_layout(option),
         )
 
@@ -310,10 +317,18 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     async_add_entities(entities)
 
 
-async def _call_if_present(target: Any, method_name: str, *args: Any) -> None:
+async def _call_or_raise(
+    target: Any,
+    method_name: str,
+    action_label: str,
+    *args: Any,
+) -> None:
     method = getattr(target, method_name, None)
-    if method is None:
-        return
+    if not callable(method):
+        raise HomeAssistantError(
+            f"Cannot set {action_label.strip().lower()} right now because the "
+            "analyzer action is unavailable."
+        )
     result = method(*args)
     if inspect.isawaitable(result):
         await result

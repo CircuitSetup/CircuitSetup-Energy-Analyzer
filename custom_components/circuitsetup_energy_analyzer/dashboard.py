@@ -8,6 +8,7 @@ from .const import (
     DASHBOARD_LAYOUT_STANDARD,
     DASHBOARD_LAYOUTS,
     DEFAULT_DASHBOARD_LAYOUT,
+    DOMAIN,
 )
 
 DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
@@ -15,39 +16,40 @@ DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
 EVIDENCE_PANEL_PATH = "/circuitsetup-energy-analyzer-evidence"
 
-CORE_SENSOR_SUFFIXES = (
-    "health_summary",
-    "activity_summary",
-    "electrical_health",
-    "energy_summary",
-    "daily_energy_usage",
+CORE_ENTITY_SPECS = (
+    ("sensor", "health_summary", "Health Summary"),
+    ("sensor", "activity_summary", "Activity Summary"),
+    ("sensor", "electrical_health", "Electrical Health"),
+    ("sensor", "energy_summary", "Energy Summary"),
+    ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+    ("binary_sensor", "running", "Running"),
 )
-STANDARD_SENSOR_SUFFIXES = (
-    "energy_usage_status",
-    "energy_goal_status",
-    "run_cycle_status",
-    "weather_context",
-    "rain_pump_correlation",
-    "water_flow_correlation",
-    "demand_status",
-    "capacity_status",
-    "leg_imbalance_status",
-    "metric_consistency_status",
-    "balance_status",
-    "solar_flow_status",
-    "utility_comparison_status",
-    "standby_status",
-    "nilm_unknown_loads",
+STANDARD_ENTITY_SPECS = (
+    ("sensor", "energy_usage_status", "Energy Usage Status"),
+    ("sensor", "energy_goal_status", "Energy Goal Status"),
+    ("sensor", "run_cycle_status", "Run Cycle Status"),
+    ("sensor", "weather_context", "Weather Context"),
+    ("sensor", "rain_pump_correlation", "Rain Pump Correlation"),
+    ("sensor", "water_flow_correlation", "Water Flow Correlation"),
+    ("sensor", "demand_status", "Demand Status"),
+    ("sensor", "capacity_status", "Capacity Status"),
+    ("sensor", "leg_imbalance_status", "Leg Imbalance Status"),
+    ("sensor", "metric_consistency_status", "Metric Consistency Status"),
+    ("sensor", "balance_status", "Balance Status"),
+    ("sensor", "solar_flow_status", "Solar Flow Status"),
+    ("sensor", "utility_comparison_status", "Utility Comparison Status"),
+    ("sensor", "standby_status", "Standby Status"),
+    ("sensor", "nilm_unknown_loads", "NILM Unknown Loads"),
 )
-EXPERT_SENSOR_SUFFIXES = (
-    "alert_evidence",
-    "power_quality_evidence",
-    "energy_dashboard_status",
-    "data_quality_checklist",
-    "readiness",
-    "learning_progress",
-    "recent_activity",
-    "settings_suggestions",
+EXPERT_ENTITY_SPECS = (
+    ("sensor", "alert_evidence", "Alert Evidence"),
+    ("sensor", "power_quality_evidence", "Power Quality Evidence"),
+    ("sensor", "energy_dashboard_status", "Energy Dashboard Status"),
+    ("sensor", "data_quality_checklist", "Data Quality Checklist"),
+    ("sensor", "readiness", "Readiness"),
+    ("sensor", "learning_progress", "Learning Progress"),
+    ("sensor", "recent_activity", "Recent Activity"),
+    ("sensor", "settings_suggestions", "Settings Suggestions"),
 )
 
 
@@ -59,7 +61,13 @@ def normalize_dashboard_layout(value: Any) -> str:
     return DEFAULT_DASHBOARD_LAYOUT
 
 
-def build_recommended_dashboard(circuits: Iterable[Any], layout: Any) -> dict[str, Any]:
+def build_recommended_dashboard(
+    circuits: Iterable[Any],
+    layout: Any,
+    *,
+    hass: Any | None = None,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
     normalized_layout = normalize_dashboard_layout(layout)
     circuit_list = [
@@ -67,14 +75,24 @@ def build_recommended_dashboard(circuits: Iterable[Any], layout: Any) -> dict[st
         for circuit in circuits
         if str(getattr(circuit, "circuit_id", "")).strip()
     ]
+    registry_lookup = _registry_entity_lookup(hass, entry_id)
     cards: list[dict[str, Any]] = [
         _markdown_card(
             "Use this dashboard as a starting point. It shows analyzer-created "
-            "entities only; Home Assistant will hide cards whose entities do not exist."
+            "entities only. If analyzer entities are missing or disabled, the "
+            "dashboard will show a note with the next thing to check."
         )
     ]
     for circuit in circuit_list:
-        cards.append(_circuit_card(circuit, normalized_layout))
+        cards.append(
+            _circuit_card(
+                circuit,
+                normalized_layout,
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+        )
     if normalized_layout == DASHBOARD_LAYOUT_EXPERT:
         cards.append(
             _markdown_card(
@@ -103,7 +121,13 @@ def build_recommended_dashboard(circuits: Iterable[Any], layout: Any) -> dict[st
     }
 
 
-def dashboard_storage_payload(circuits: Iterable[Any], layout: Any) -> dict[str, Any]:
+def dashboard_storage_payload(
+    circuits: Iterable[Any],
+    layout: Any,
+    *,
+    hass: Any | None = None,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
     """Return the payload used to create/update a Home Assistant dashboard."""
     return {
         "url_path": DASHBOARD_URL_PATH,
@@ -112,7 +136,12 @@ def dashboard_storage_payload(circuits: Iterable[Any], layout: Any) -> dict[str,
         "icon": DASHBOARD_ICON,
         "show_in_sidebar": True,
         "require_admin": False,
-        "config": build_recommended_dashboard(circuits, layout),
+        "config": build_recommended_dashboard(
+            circuits,
+            layout,
+            hass=hass,
+            entry_id=entry_id,
+        ),
     }
 
 
@@ -124,27 +153,146 @@ def _layout_title(layout: str) -> str:
     return "Simple Energy Analyzer"
 
 
-def _circuit_card(circuit: Any, layout: str) -> dict[str, Any]:
+def _circuit_card(
+    circuit: Any,
+    layout: str,
+    *,
+    registry_lookup: dict[str, Any],
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
     circuit_id = str(getattr(circuit, "circuit_id", "")).strip()
     name = str(getattr(circuit, "name", "") or circuit_id).strip() or circuit_id
-    entities = [_sensor_entity(circuit_id, suffix) for suffix in CORE_SENSOR_SUFFIXES]
-    entities.append(f"binary_sensor.{circuit_id}_running")
+    specs = list(CORE_ENTITY_SPECS)
     if layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}:
-        entities.extend(
-            _sensor_entity(circuit_id, suffix)
-            for suffix in STANDARD_SENSOR_SUFFIXES
-        )
+        specs.extend(STANDARD_ENTITY_SPECS)
     if layout == DASHBOARD_LAYOUT_EXPERT:
-        entities.extend(
-            _sensor_entity(circuit_id, suffix) for suffix in EXPERT_SENSOR_SUFFIXES
-        )
+        specs.extend(EXPERT_ENTITY_SPECS)
 
+    entities, notes = _resolved_entity_ids(
+        circuit_id,
+        specs,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    cards: list[dict[str, Any]] = []
+    if notes:
+        cards.append(_markdown_card(_circuit_note(name, notes)))
+    if entities:
+        cards.append(
+            {
+                "type": "entities",
+                "title": name,
+                "show_header_toggle": False,
+                "entities": [{"entity": entity_id} for entity_id in _dedupe(entities)],
+            }
+        )
+    if len(cards) == 1:
+        return cards[0]
     return {
-        "type": "entities",
+        "type": "vertical-stack",
         "title": name,
-        "show_header_toggle": False,
-        "entities": [{"entity": entity_id} for entity_id in _dedupe(entities)],
+        "cards": cards,
     }
+
+
+def _resolved_entity_ids(
+    circuit_id: str,
+    specs: Iterable[tuple[str, str, str]],
+    *,
+    registry_lookup: dict[str, Any],
+    hass: Any | None,
+    entry_id: str | None,
+) -> tuple[list[str], list[str]]:
+    if not entry_id or not registry_lookup:
+        return [
+            _guessed_entity_id(circuit_id, entity_domain, entity_key)
+            for entity_domain, entity_key, _label in specs
+        ], []
+
+    entity_ids: list[str] = []
+    missing_labels: list[str] = []
+    disabled_labels: list[str] = []
+    unavailable_labels: list[str] = []
+    for entity_domain, entity_key, label in specs:
+        unique_id = _expected_unique_id(entry_id, circuit_id, entity_key)
+        entry = registry_lookup.get(unique_id)
+        if entry is None:
+            missing_labels.append(label)
+            continue
+        if getattr(entry, "disabled_by", None):
+            disabled_labels.append(label)
+            continue
+        entity_id = str(getattr(entry, "entity_id", "")).strip()
+        if not entity_id:
+            missing_labels.append(label)
+            continue
+        if not entity_id.startswith(f"{entity_domain}."):
+            missing_labels.append(label)
+            continue
+        if _entity_is_unavailable(hass, entity_id):
+            unavailable_labels.append(label)
+            continue
+        entity_ids.append(entity_id)
+
+    notes: list[str] = []
+    if disabled_labels:
+        notes.append(f"disabled: {', '.join(disabled_labels)}")
+    if missing_labels:
+        notes.append(f"missing: {', '.join(missing_labels)}")
+    if unavailable_labels:
+        notes.append(f"unavailable: {', '.join(unavailable_labels)}")
+    return entity_ids, notes
+
+
+def _registry_entity_lookup(hass: Any | None, entry_id: str | None) -> dict[str, Any]:
+    if hass is None or not entry_id:
+        return {}
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        registry = getattr(hass, "entity_registry", None)
+    else:
+        registry = er.async_get(hass)
+    if registry is None:
+        return {}
+
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    return {
+        unique_id: entry
+        for entry in values
+        if getattr(entry, "config_entry_id", None) == entry_id
+        and getattr(entry, "platform", None) == DOMAIN
+        and (unique_id := str(getattr(entry, "unique_id", "")).strip())
+    }
+
+
+def _entity_is_unavailable(hass: Any | None, entity_id: str) -> bool:
+    states = getattr(hass, "states", None)
+    if states is None:
+        return False
+    get_state = getattr(states, "get", None)
+    if not callable(get_state):
+        return False
+    state = get_state(entity_id)
+    state_value = str(getattr(state, "state", "")).strip().lower()
+    return state_value == "unavailable"
+
+
+def _circuit_note(name: str, notes: Iterable[str]) -> str:
+    lines = [f"**{name} dashboard note**"]
+    lines.extend(note for note in notes if note)
+    return "\n".join(lines)
+
+
+def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
+    return f"{entry_id}_{circuit_id}_{entity_key}"
+
+
+def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> str:
+    return f"{entity_domain}.{circuit_id}_{entity_key}"
 
 
 def _sensor_entity(circuit_id: str, suffix: str) -> str:

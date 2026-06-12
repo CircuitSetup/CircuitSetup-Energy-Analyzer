@@ -9,8 +9,10 @@ const ACTION_SERVICE_NAMES = {
   mark_unhelpful: "mark_alert_unhelpful",
   pause_alerts: "pause_alerts",
   start_maintenance: "start_maintenance",
+  end_maintenance: "end_maintenance",
   relearn_baseline: "relearn_baseline",
   apply_setting_recommendation: "apply_setting_recommendation",
+  deny_setting_recommendation: "deny_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
 };
 const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
@@ -232,8 +234,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.label = label;
     }
     if (actionKey === "merge") {
-      const target = window.prompt("Merge into signature ID");
+      const targetSelector = this.shadowRoot.querySelector(`#nilm_merge_target_${index}`);
+      const target = targetSelector ? targetSelector.value : "";
       if (!target) {
+        this._error = "Choose a merge target before merging NILM signatures.";
+        this._render();
         return;
       }
       data.target_signature_id = target;
@@ -246,6 +251,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._hass.callService(action.domain, action.service, data);
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      await this._loadEvidence({ routeKey: this._routeKey() });
+    } catch (error) {
+      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._busyAction = "";
+      this._render();
+    }
+  }
+
+  async _callRecommendationAction(index, actionKey) {
+    const recommendations = this._payload && this._payload.setting_recommendations;
+    const recommendation = recommendations && recommendations[index];
+    const action = recommendation && recommendation.actions && recommendation.actions[actionKey];
+    if (!action || !this._hass || !this._hass.callService) {
+      return;
+    }
+    const busyKey = `recommendation_${index}_${actionKey}`;
+    this._busyAction = busyKey;
+    this._render();
+    try {
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, action.data || {});
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
       await this._loadEvidence({ routeKey: this._routeKey() });
     } catch (error) {
@@ -441,10 +470,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#start_maintenance", () => this._callAction("start_maintenance"));
+    this._listen("#end_maintenance", () => this._callAction("end_maintenance"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
-    this._listen("#apply_setting_recommendation", () => this._callAction("apply_setting_recommendation"));
-    this._listen("#dismiss_setting_recommendation", () => this._callAction("dismiss_setting_recommendation"));
+    for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.recommendationIndex, 10);
+        this._callRecommendationAction(index, button.dataset.recommendationAction);
+      });
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-action]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -501,12 +535,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${this._actionButton("mark_unhelpful", "Not Helpful", true)}
           ${this._actionButton("pause_alerts", "Pause Alerts", true)}
           ${this._actionButton("start_maintenance", "Start Maintenance", true)}
+          ${this._actionButton("end_maintenance", "End Maintenance", true)}
           ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
           ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
-          ${this._actionButton("apply_setting_recommendation", "Apply Suggested Setting", true)}
-          ${this._actionButton("dismiss_setting_recommendation", "Dismiss Suggestion", true)}
         </div>
       </section>
+      ${this._renderRecommendations()}
       ${this._renderNilmActions()}
     `;
   }
@@ -538,15 +572,61 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>${this._escape(signature.display_name || signature.likely_type || signature.signature_id)}</span>
             <strong>${this._escape(signature.signature_id)}</strong>
+            ${this._renderNilmMergeTarget(signature, index)}
             <div class="actions">
               ${this._nilmActionButton(index, "label", "Label")}
               ${this._nilmActionButton(index, "ignore", "Ignore", true)}
               ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
-              ${this._nilmActionButton(index, "merge", "Merge", true)}
+              ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
             </div>
           </div>
         `).join("")}
       </section>
+    `;
+  }
+
+  _renderRecommendations() {
+    const recommendations = this._payload && this._payload.setting_recommendations;
+    if (!recommendations || !recommendations.length) {
+      return "";
+    }
+    return `
+      <section class="panel">
+        <h2>Suggested Settings</h2>
+        <div class="entity-list">
+          ${recommendations.map((recommendation, index) => `
+            <div class="metric">
+              <span>${this._escape(recommendation.feature || "Suggested setting")}</span>
+              <strong>${this._escape(recommendation.title || recommendation.recommendation_id || "Recommendation")}</strong>
+              ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
+              ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
+              <div class="entity-list">
+                ${recommendation.current_value !== undefined ? `<code>Current: ${this._escape(recommendation.current_value)}</code>` : ""}
+                ${recommendation.suggested_value !== undefined ? `<code>Suggested: ${this._escape(recommendation.suggested_value)}</code>` : ""}
+              </div>
+              <div class="actions">
+                ${this._recommendationActionButton(index, "apply", "Apply")}
+                ${this._recommendationActionButton(index, "deny", "Deny", true)}
+                ${this._recommendationActionButton(index, "dismiss", "Dismiss", true)}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  _renderNilmMergeTarget(signature, index) {
+    const options = signature && signature.actions && signature.actions.merge && signature.actions.merge.target_options;
+    if (!options || !options.length) {
+      return `<p class="muted">No other signature is available to merge into yet.</p>`;
+    }
+    return `
+      <label class="muted" for="nilm_merge_target_${index}">Merge into</label>
+      <select id="nilm_merge_target_${index}">
+        <option value="">Choose target signature</option>
+        ${options.map((option) => `<option value="${this._escape(option.value)}">${this._escape(option.label)}</option>`).join("")}
+      </select>
     `;
   }
 
@@ -704,9 +784,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `<button id="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(actionKey)}>${this._escape(label)}</button>`;
   }
 
-  _nilmActionButton(index, actionKey, label, secondary = false) {
+  _nilmActionButton(index, actionKey, label, secondary = false, disabled = false) {
     const busyKey = `nilm_${index}_${actionKey}`;
-    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(busyKey)}>${this._escape(label)}</button>`;
+    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : this._disabled(busyKey)}>${this._escape(label)}</button>`;
+  }
+
+  _recommendationActionButton(index, actionKey, label, secondary = false) {
+    const busyKey = `recommendation_${index}_${actionKey}`;
+    return `<button data-recommendation-index="${index}" data-recommendation-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(busyKey)}>${this._escape(label)}</button>`;
   }
 
   _changeSummary(alert) {

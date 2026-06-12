@@ -471,6 +471,13 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
     assert "Downstairs HVAC" in summary
     assert "Daily Spike Ratio" in summary
     assert "0.5 -> 0.3" in summary
+    assert "Current value: 0.5" in summary
+    assert "Default value: 0.25" in summary
+    assert "Suggested value: 0.3" in summary
+    assert (
+        "Expected effect: Tune this setting toward the observed history without "
+        "requiring manual threshold math."
+    ) in summary
     assert "Recent daily usage has been stable." in summary
     assert "Observed Daily Spike Ratio: 0.28" in summary
     assert "source_entities" not in summary

@@ -2543,6 +2543,409 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
 
 
 @pytest.mark.asyncio
+async def test_runtime_missing_energy_source_creates_setup_health_repair(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_power"
+            return SimpleNamespace(
+                state="180",
+                attributes={
+                    "unit_of_measurement": "W",
+                    "device_class": "power",
+                    "state_class": "measurement",
+                },
+                last_updated=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+
+    await coordinator.async_process_update()
+
+    assert ("fridge", "missing_energy_source") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_missing_mains_source_creates_setup_health_repair(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.state.balance_status_by_circuit["mains"] = "missing_mains"
+    coordinator.state.energy_dashboard_status_by_circuit["mains"] = "ready"
+
+    await coordinator._sync_setup_health_repairs("mains")
+
+    assert ("mains", "missing_mains_source") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_missing_electrical_metrics_creates_setup_health_repair(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.state.metric_consistency_status_by_circuit["hvac"] = "missing_metrics"
+
+    await coordinator._sync_setup_health_repairs("hvac")
+
+    assert ("hvac", "missing_electrical_metrics") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_ct_direction_setup_health_issue_creates_repair(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.state.solar_flow_status_by_circuit["solar"] = "inconsistent_export"
+
+    await coordinator._sync_setup_health_repairs("solar")
+
+    assert ("solar", "check_ct_direction") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            if entity_id == "sensor.hvac_l2_power":
+                return None
+            assert entity_id == "sensor.hvac_l1_power"
+            return SimpleNamespace(
+                state="2400",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.hvac_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.hvac_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.leg_imbalance_status_by_circuit["hvac"] == (
+        "missing_leg_power"
+    )
+    assert ("hvac", "dual_phase_missing_leg") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_enabled_rain_context_without_source_creates_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.sump_power"
+            return SimpleNamespace(
+                state="650",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "mode": "single_phase",
+                    "appliance_profile": "sump_pump",
+                    "sensors": [
+                        {"entity_id": "sensor.sump_power", "role": "real_power"}
+                    ],
+                }
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert ("sump_pump", "missing_rain_context_source") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.washer_power"
+            return SimpleNamespace(
+                state="700",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "mode": "single_phase",
+                    "appliance_profile": "washer",
+                    "sensors": [
+                        {"entity_id": "sensor.washer_power", "role": "real_power"}
+                    ],
+                }
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True}
+            },
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert ("washer", "missing_water_flow_source") in issues
+
+
+@pytest.mark.asyncio
 async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -8222,6 +8625,130 @@ async def test_runtime_handles_unavailable_recorder_statistics(
     assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
         "utility_source_type"
     ] == "statistics"
+
+
+@pytest.mark.asyncio
+async def test_runtime_utility_comparison_setup_issue_creates_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        issues.append((circuit_id, problem))
+
+    def broken_statistics_during_period(*args, **kwargs):
+        raise RuntimeError("recorder is not available")
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        broken_statistics_during_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.mains_power"
+            return SimpleNamespace(
+                state="1000",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {
+                    "utility_statistic_id": "opower:utility_elec_consumption",
+                    "utility_source_type": "statistics",
+                    "measured_energy_entities": ["sensor.mains_import_energy"],
+                    "tolerance_percent": 10.0,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert ("mains", "utility_comparison_source_mismatch") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    deleted: list[tuple[str, str]] = []
+
+    async def fake_delete(hass, circuit_id, problem) -> None:
+        deleted.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_delete_circuit_issue",
+        fake_delete,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
+    )
+    coordinator._active_repair_issues.add(
+        ("mains", "utility_comparison_source_mismatch")
+    )
+    coordinator.state.utility_comparison_status_by_circuit["mains"] = "tracking"
+
+    await coordinator._sync_setup_health_repairs("mains")
+
+    assert deleted == [("mains", "utility_comparison_source_mismatch")]
 
 
 @pytest.mark.asyncio

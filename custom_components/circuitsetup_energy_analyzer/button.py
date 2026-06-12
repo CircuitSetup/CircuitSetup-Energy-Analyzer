@@ -14,13 +14,18 @@ from .entity import (
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
 )
+from .models import ApplianceProfile, SensorRole
 
 try:
     from homeassistant.components.button import ButtonEntity
+    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class ButtonEntity:
         """Fallback button base for tests without Home Assistant."""
+
+    class HomeAssistantError(Exception):
+        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,11 +154,35 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         """Return the purpose-specific icon for fallback tests."""
         return self._attr_icon
 
+    @property
+    def available(self) -> bool:
+        """Return whether the action is currently usable."""
+        return _button_availability_reason(
+            self.entity_description.key,
+            self.circuit_id,
+            self.coordinator_state,
+            self.coordinator,
+        ) is None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose why a daily action is unavailable when relevant."""
+        reason = _button_availability_reason(
+            self.entity_description.key,
+            self.circuit_id,
+            self.coordinator_state,
+            self.coordinator,
+        )
+        if reason is None:
+            return None
+        return {"availability_reason": reason}
+
     async def async_press(self) -> None:
         """Run the circuit action."""
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
+            self.entity_description.name_suffix,
             *self.entity_description.args_fn(self.circuit_id),
         )
 
@@ -202,6 +231,13 @@ class GlobalAnalyzerButton(ButtonEntity):
         return self._attr_icon
 
     @property
+    def available(self) -> bool:
+        """Return whether the global action can currently run."""
+        return callable(
+            getattr(self.coordinator, self.entity_description.method_name, None)
+        )
+
+    @property
     def device_info(self) -> dict[str, Any]:
         """Group global controls under one integration device."""
         return {
@@ -212,9 +248,10 @@ class GlobalAnalyzerButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Run the integration-wide action."""
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
+            self.entity_description.name,
             *self.entity_description.args,
         )
 
@@ -237,6 +274,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 description=description,
             )
             for description in CIRCUIT_BUTTON_DESCRIPTIONS
+            if button_description_applies(description, raw_circuit, coordinator)
         )
 
     entities.extend(
@@ -262,10 +300,107 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     async_add_entities(entities)
 
 
-async def _call_if_present(target: Any, method_name: str, *args: Any) -> None:
+def button_description_applies(
+    description: CircuitButtonDescription,
+    circuit: Any,
+    coordinator: Any | None = None,
+) -> bool:
+    """Return whether a daily button is useful for this circuit."""
+    del coordinator
+    if description.key not in {
+        "relearn_baseline",
+        "start_maintenance",
+        "end_maintenance",
+        "pause_alerts",
+    }:
+        return True
+    return _supports_daily_circuit_actions(circuit)
+
+
+def _supports_daily_circuit_actions(circuit: Any) -> bool:
+    profile = _appliance_profile(getattr(circuit, "appliance_profile", None))
+    if profile in {
+        ApplianceProfile.MAINS_NILM,
+        ApplianceProfile.SOLAR_INVERTER,
+        ApplianceProfile.MIXED,
+    }:
+        return False
+    return _has_real_power_sensor(circuit)
+
+
+def _button_availability_reason(
+    button_key: str,
+    circuit_id: str,
+    state: Any,
+    coordinator: Any,
+) -> str | None:
+    method_name = next(
+        (
+            description.method_name
+            for description in CIRCUIT_BUTTON_DESCRIPTIONS
+            if description.key == button_key
+        ),
+        None,
+    )
+    if method_name is not None and not callable(
+        getattr(coordinator, method_name, None)
+    ):
+        return "action_unavailable"
+
+    if button_key == "start_maintenance" and _maintenance_active(state, circuit_id):
+        return "maintenance_active"
+    if button_key == "end_maintenance" and not _maintenance_active(state, circuit_id):
+        return "maintenance_inactive"
+    return None
+
+
+def _maintenance_active(state: Any, circuit_id: str) -> bool:
+    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
+    return isinstance(maintenance, Mapping) and maintenance.get("active") is True
+
+
+def _has_real_power_sensor(circuit: Any) -> bool:
+    return any(
+        _sensor_role(sensor) is SensorRole.REAL_POWER
+        for sensor in getattr(circuit, "sensors", ()) or ()
+    )
+
+
+def _sensor_role(sensor: Any) -> SensorRole | None:
+    role = (
+        sensor.get("role")
+        if isinstance(sensor, dict)
+        else getattr(sensor, "role", None)
+    )
+    if isinstance(role, SensorRole):
+        return role
+    try:
+        return SensorRole(str(role))
+    except (TypeError, ValueError):
+        return None
+
+
+def _appliance_profile(value: Any) -> ApplianceProfile | None:
+    if isinstance(value, ApplianceProfile):
+        return value
+    try:
+        return ApplianceProfile(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _call_or_raise(
+    target: Any,
+    method_name: str,
+    action_label: str,
+    *args: Any,
+) -> None:
     method = getattr(target, method_name, None)
-    if method is None:
-        return
+    if not callable(method):
+        raise HomeAssistantError(
+            f"Cannot {action_label.strip().lower()} right now because the "
+            "analyzer action is unavailable."
+        )
     result = method(*args)
     if inspect.isawaitable(result):
         await result
