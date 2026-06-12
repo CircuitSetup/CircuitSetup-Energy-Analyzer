@@ -38,6 +38,8 @@ class CircuitNumberDescription:
     native_max_value: float
     native_step: float
     native_unit_of_measurement: str
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
 
 
 CIRCUIT_NUMBER_DESCRIPTIONS: tuple[CircuitNumberDescription, ...] = (

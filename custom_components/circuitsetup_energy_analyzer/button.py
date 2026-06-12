@@ -30,6 +30,8 @@ class CircuitButtonDescription:
     method_name: str
     args_fn: Callable[[str], tuple[Any, ...]]
     icon: str
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,8 @@ class GlobalButtonDescription:
     method_name: str
     args: tuple[Any, ...]
     icon: str
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
 
 
 CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (

@@ -161,6 +161,9 @@ async def test_button_setup_entry_adds_circuit_and_global_controls() -> None:
         by_unique_id["entry-1_run_mapping_checks"].suggested_object_id
         == "circuitsetup_energy_analyzer_run_mapping_checks"
     )
+    for entity in added_entities:
+        assert entity.entity_description.entity_registry_enabled_default is True
+        assert entity.entity_description.entity_registry_visible_default is True
 
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
@@ -210,6 +213,8 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls() -
     assert sensitivity.suggested_object_id == "fridge_alert_sensitivity"
     assert sensitivity.options == ["quiet", "balanced", "sensitive"]
     assert sensitivity.current_option == "quiet"
+    assert sensitivity.entity_description.entity_registry_enabled_default is True
+    assert sensitivity.entity_description.entity_registry_visible_default is True
 
     detail_level = by_unique_id["entry-1_entity_detail_level"]
     assert detail_level.name == "CircuitSetup Energy Analyzer Entity Detail Level"
@@ -249,6 +254,8 @@ async def test_number_setup_entry_adds_daily_energy_goal_control() -> None:
     assert goal.native_min_value == 0.0
     assert goal.native_step == 0.1
     assert goal.native_unit_of_measurement == "kWh"
+    assert goal.entity_description.entity_registry_enabled_default is True
+    assert goal.entity_description.entity_registry_visible_default is True
 
     await goal.async_set_native_value(6.25)
 

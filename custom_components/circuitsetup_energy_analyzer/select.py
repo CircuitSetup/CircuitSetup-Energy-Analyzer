@@ -34,6 +34,8 @@ class CircuitSelectDescription:
     key: str
     name_suffix: str
     icon: str
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
 
 
 CIRCUIT_SELECT_DESCRIPTIONS: tuple[CircuitSelectDescription, ...] = (
