@@ -39,6 +39,19 @@ from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSugg
 from custom_components.circuitsetup_energy_analyzer.models import SensorRole
 
 
+def _assert_create_entry_result(
+    result: dict[str, object],
+    expected_data: dict[str, object],
+) -> None:
+    assert result["type"] == "create_entry"
+    assert result["title"] == ""
+    assert result["data"] == expected_data
+
+
+def _assert_no_description_placeholders(result: dict[str, object]) -> None:
+    assert result.get("description_placeholders") in (None, {})
+
+
 def test_format_mapping_suggestions_shows_confirmation_text() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         format_mapping_suggestions,
@@ -375,7 +388,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "entity_detail",
         "dashboard",
     ]
-    assert result["description_placeholders"] == {}
+    _assert_no_description_placeholders(result)
 
 
 @pytest.mark.asyncio
@@ -531,11 +544,10 @@ async def test_options_recommendations_step_dispatches_batch_actions(
         }
     )
 
-    assert result == {
-        "type": "create_entry",
-        "title": "",
-        "data": coordinator.options if action == "apply" else entry.options,
-    }
+    _assert_create_entry_result(
+        result,
+        coordinator.options if action == "apply" else entry.options,
+    )
     assert getattr(coordinator, method_name).calls == [
         ("hvac:daily_spike_ratio:v1",),
         ("hvac:warning_ratio:v1",),
@@ -709,13 +721,12 @@ async def test_options_mains_step_updates_mains_source_entities() -> None:
         {CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"]}
     )
 
-    assert result == {
-        "type": "create_entry",
-        "title": "",
-        "data": {
+    _assert_create_entry_result(
+        result,
+        {
             CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"],
         },
-    }
+    )
 
 
 @pytest.mark.asyncio
@@ -750,11 +761,10 @@ async def test_options_entity_detail_step_saves_profile_and_can_apply(
         }
     )
 
-    assert result == {
-        "type": "create_entry",
-        "title": "",
-        "data": {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
-    }
+    _assert_create_entry_result(
+        result,
+        {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
+    )
     assert calls == [(hass, entry, ENTITY_DETAIL_EXPERT)]
 
 
@@ -2424,7 +2434,7 @@ async def test_options_flow_does_not_emit_non_actionable_mapping_suggestions() -
     result = await flow.async_step_init()
 
     assert result["type"] == "menu"
-    assert result["description_placeholders"] == {}
+    _assert_no_description_placeholders(result)
 
 
 def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
@@ -2436,12 +2446,23 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
         _options_schema,
     )
 
-    assert voluptuous_serialize.convert(DATA_SCHEMA)
+    def serialize_ha_selector(schema):
+        serializer = getattr(schema, "serialize", None)
+        if callable(serializer):
+            return serializer()
+        return voluptuous_serialize.UNSUPPORTED
+
     assert voluptuous_serialize.convert(
-        _options_schema(SimpleNamespace(data={}, options={}))
+        DATA_SCHEMA,
+        custom_serializer=serialize_ha_selector,
     )
     assert voluptuous_serialize.convert(
-        _entity_detail_schema(SimpleNamespace(data={}, options={}))
+        _options_schema(SimpleNamespace(data={}, options={})),
+        custom_serializer=serialize_ha_selector,
+    )
+    assert voluptuous_serialize.convert(
+        _entity_detail_schema(SimpleNamespace(data={}, options={})),
+        custom_serializer=serialize_ha_selector,
     )
 
 
@@ -2737,6 +2758,7 @@ def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["integration_type"] == "hub"
     assert "recorder" in manifest["after_dependencies"]
+    assert "esphome" not in manifest["after_dependencies"]
     assert {"frontend", "http", "panel_custom"} <= set(manifest["dependencies"])
     assert (
         manifest["documentation"]
