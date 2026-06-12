@@ -454,6 +454,24 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert all(card.get("period") == "day" for card in statistics_cards)
 
 
+def test_dashboard_example_graphs_daily_energy_totals_with_max_stat() -> None:
+    dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    statistics_cards = [
+        card
+        for card in _dashboard_cards(dashboard)
+        if card.get("type") == "statistics-graph"
+        and any(
+            str(
+                entity.get("entity", "") if isinstance(entity, dict) else entity
+            ).endswith("_daily_energy_usage")
+            for entity in card.get("entities", [])
+        )
+    ]
+
+    assert statistics_cards
+    assert all(card.get("stat_types") == ["max"] for card in statistics_cards)
+
+
 def test_dashboard_example_omits_hidden_default_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,

@@ -175,7 +175,7 @@ views:
             days_to_show: 7
             period: day
             stat_types:
-              - mean
+              - max
             entities:
               - entity: sensor.mains_nilm_daily_energy_usage
 
@@ -187,7 +187,7 @@ views:
             days_to_show: 7
             period: day
             stat_types:
-              - mean
+              - max
             entities:
               - entity: sensor.refrigerator_daily_energy_usage
               - entity: sensor.hvac_daily_energy_usage
@@ -280,7 +280,7 @@ views:
               days_to_show: 7
               period: day
               stat_types:
-                - mean
+                - max
               entities:
                 - entity: sensor.hvac_daily_energy_usage
                   name: Daily Energy Usage
