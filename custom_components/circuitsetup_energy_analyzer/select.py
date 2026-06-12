@@ -5,7 +5,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .const import DOMAIN
+from .const import (
+    CONF_DASHBOARD_LAYOUT,
+    DASHBOARD_LAYOUT_EXPERT,
+    DASHBOARD_LAYOUT_SIMPLE,
+    DASHBOARD_LAYOUT_STANDARD,
+    DEFAULT_DASHBOARD_LAYOUT,
+    DOMAIN,
+)
+from .dashboard import normalize_dashboard_layout
 from .entity import (
     ENTITY_DETAIL_LEVELS,
     CircuitAnalyzerEntity,
@@ -17,7 +25,7 @@ from .entity import (
     prune_stale_entity_registry_entries,
 )
 from .sensor import sensitivity_value
-from .ux import normalize_sensitivity
+from .ux import friendly_sensitivity_label, normalize_sensitivity
 
 try:
     from homeassistant.components.select import SelectEntity
@@ -27,7 +35,13 @@ except ModuleNotFoundError:
         """Fallback select base for tests without Home Assistant."""
 
 
-SENSITIVITY_OPTIONS = ["quiet", "balanced", "sensitive"]
+SENSITIVITY_OPTIONS = ["Quiet", "Balanced", "Sensitive"]
+DASHBOARD_LAYOUT_OPTIONS = ["Simple", "Standard", "Expert"]
+DASHBOARD_LAYOUT_LABELS = {
+    DASHBOARD_LAYOUT_SIMPLE: "Simple",
+    DASHBOARD_LAYOUT_STANDARD: "Standard",
+    DASHBOARD_LAYOUT_EXPERT: "Expert",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +108,7 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
     @property
     def current_option(self) -> str:
         """Return the active sensitivity preset."""
-        return normalize_sensitivity(
+        return friendly_sensitivity_label(
             sensitivity_value(self.coordinator_state, self.circuit_id)
         )
 
@@ -181,6 +195,80 @@ class EntityDetailLevelSelect(SelectEntity):
         )
 
 
+class DashboardLayoutSelect(SelectEntity):
+    """Select entity for the recommended dashboard layout."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_options = DASHBOARD_LAYOUT_OPTIONS
+    _attr_icon = "mdi:view-dashboard-edit-outline"
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        self.coordinator = coordinator
+        self._entry_id = entry_id
+        self._attr_name = "CircuitSetup Energy Analyzer Dashboard Layout"
+        self._attr_unique_id = f"{entry_id}_dashboard_layout"
+        self._attr_suggested_object_id = (
+            "circuitsetup_energy_analyzer_dashboard_layout"
+        )
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def options(self) -> list[str]:
+        """Return supported recommended-dashboard layouts."""
+        return list(self._attr_options)
+
+    @property
+    def current_option(self) -> str:
+        """Return the selected recommended-dashboard layout."""
+        options = getattr(self.coordinator, "options", {}) or {}
+        return DASHBOARD_LAYOUT_LABELS[
+            normalize_dashboard_layout(
+                getattr(
+                    self.coordinator,
+                    "dashboard_layout",
+                    options.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT),
+                )
+            )
+        ]
+
+    @property
+    def icon(self) -> str | None:
+        """Return the purpose-specific icon for fallback tests."""
+        return self._attr_icon
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group global controls under one integration device."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "CircuitSetup Energy Analyzer",
+            "manufacturer": "CircuitSetup",
+        }
+
+    async def async_select_option(self, option: str) -> None:
+        """Persist a new recommended-dashboard layout."""
+        await _call_if_present(
+            self.coordinator,
+            "async_set_dashboard_layout",
+            normalize_dashboard_layout(option),
+        )
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up select entities for daily circuit and integration controls."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -201,7 +289,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in CIRCUIT_SELECT_DESCRIPTIONS
         )
 
-    entities.append(EntityDetailLevelSelect(coordinator, entry_id=entry_id))
+    entities.extend(
+        (
+            EntityDetailLevelSelect(coordinator, entry_id=entry_id),
+            DashboardLayoutSelect(coordinator, entry_id=entry_id),
+        )
+    )
 
     prune_stale_entity_registry_entries(
         hass,

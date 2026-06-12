@@ -232,7 +232,19 @@ For power-meter interpretation:
 
 ## Build a useful dashboard
 
-Start with one simple card per important appliance:
+The fastest path is to let the integration create a starter dashboard:
+
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Create Or Update Dashboard**
+
+Choose one layout:
+
+1. **Simple**: Health, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and Running.
+2. **Standard**: Simple plus configured feature-status entities.
+3. **Expert**: Standard plus diagnostic entities and evidence links.
+
+You can also choose the layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, then press `button.circuitsetup_energy_analyzer_create_dashboard`.
+
+For manual dashboards, start with one simple card per important appliance:
 
 1. Activity Summary
 2. Electrical Health
@@ -241,7 +253,7 @@ Start with one simple card per important appliance:
 
 Add the Running binary sensor where you want automations, such as washer finished, dryer finished, pump running, or microwave activity.
 
-For more detail, use the included example dashboard:
+For YAML reference, an example dashboard is still included:
 
 ```text
 docs/dashboard-example.yaml
@@ -362,6 +374,7 @@ Integration-level controls are grouped on the CircuitSetup Energy Analyzer devic
 - `button.circuitsetup_energy_analyzer_recalculate_suggestions`
 - `button.circuitsetup_energy_analyzer_create_dashboard`
 - `select.circuitsetup_energy_analyzer_entity_detail_level`
+- `select.circuitsetup_energy_analyzer_dashboard_layout`
 
 ## Normal User Paths
 
@@ -843,7 +856,7 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 | **Alert Evidence** | `sensor.<circuit>_alert_evidence` | Feature behind the latest active alert evidence. | Advanced diagnostic, disabled by default. | Feature names such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`; blank when quiet |
 | **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, disabled by default. | `No recent activity`, `start`, `stop`, issue summary text |
 | **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, disabled by default. | Integer counts |
-| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `standard`, `high`, `low`, or another stored preset |
+| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `Quiet`, `Balanced`, or `Sensitive` |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Feature-specific; enabled in Standard/Expert when applicable. | `0`, `1`, or higher counts |
 
 ### Appliance behavior and power-quality sensors

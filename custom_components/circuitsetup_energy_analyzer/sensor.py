@@ -44,7 +44,7 @@ from .entity import (
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .safety import with_electrical_safety_notice
-from .ux import friendly_feature_name
+from .ux import friendly_feature_name, friendly_sensitivity_label
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -251,7 +251,7 @@ def recent_activity_count_value(state: Any, circuit_id: str) -> int:
 
 def sensitivity_value(state: Any, circuit_id: str) -> str:
     """Return the active sensitivity preset for a circuit."""
-    return str(
+    return friendly_sensitivity_label(
         getattr(state, "sensitivity_by_circuit", {}).get(circuit_id, "balanced")
     )
 

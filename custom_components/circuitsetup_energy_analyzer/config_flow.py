@@ -122,6 +122,7 @@ from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
+    CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
@@ -143,6 +144,10 @@ from .const import (
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DASHBOARD_LAYOUT_EXPERT,
+    DASHBOARD_LAYOUT_SIMPLE,
+    DASHBOARD_LAYOUT_STANDARD,
+    DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
     DEFAULT_ENTITY_DETAIL_LEVEL,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
@@ -157,6 +162,7 @@ from .const import (
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
+from .dashboard import normalize_dashboard_layout
 from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
@@ -201,17 +207,24 @@ from .utility_comparison import (
     VALID_UTILITY_SOURCE_TYPES,
     VALID_UTILITY_STATISTIC_PERIODS,
 )
+from .ux import SENSITIVITY_LABELS, normalize_sensitivity
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
-_SENSITIVITY_OPTIONS = ("standard", "high", "low")
-_SENSITIVITY_LABELS = {
-    "standard": "Standard",
-    "high": "High",
-    "low": "Low",
+_SENSITIVITY_OPTIONS = ("quiet", "balanced", "sensitive")
+_SENSITIVITY_LABELS = SENSITIVITY_LABELS
+_DASHBOARD_LAYOUT_OPTIONS = (
+    DASHBOARD_LAYOUT_SIMPLE,
+    DASHBOARD_LAYOUT_STANDARD,
+    DASHBOARD_LAYOUT_EXPERT,
+)
+_DASHBOARD_LAYOUT_LABELS = {
+    DASHBOARD_LAYOUT_SIMPLE: "Simple",
+    DASHBOARD_LAYOUT_STANDARD: "Standard",
+    DASHBOARD_LAYOUT_EXPERT: "Expert",
 }
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_REMOVE_FROM_ANALYSIS = "remove_from_analysis"
@@ -466,7 +479,9 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
         ),
-        CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
+        CONF_SENSITIVITY: normalize_sensitivity(
+            user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
+        ),
         CONF_RETENTION_MODE: retention_mode,
     }
     if outdoor_temperature_entity:
@@ -522,7 +537,9 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
         ),
-        CONF_SENSITIVITY: str(user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)),
+        CONF_SENSITIVITY: normalize_sensitivity(
+            user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
+        ),
         CONF_RETENTION_MODE: _validate_retention_mode(user_input),
     }
     validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
@@ -783,6 +800,13 @@ def sensitivity_options() -> list[dict[str, str]]:
     ]
 
 
+def dashboard_layout_options() -> list[dict[str, str]]:
+    return [
+        {"value": value, "label": _DASHBOARD_LAYOUT_LABELS[value]}
+        for value in _DASHBOARD_LAYOUT_OPTIONS
+    ]
+
+
 def retention_mode_options() -> list[dict[str, str]]:
     return [
         {"value": value, "label": _RETENTION_MODE_LABELS[value]}
@@ -877,7 +901,7 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             ): _water_flow_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
-                default=DEFAULT_SENSITIVITY,
+                default=normalize_sensitivity(DEFAULT_SENSITIVITY),
             ): _select_selector(sensitivity_options()),
             vol.Optional(
                 CONF_RETENTION_MODE,
@@ -1135,7 +1159,9 @@ def _advanced_settings_schema(
         {
             vol.Optional(
                 FIELD_PRESET,
-                default=str(settings.get(FIELD_PRESET, DEFAULT_SENSITIVITY)),
+                default=normalize_sensitivity(
+                    settings.get(FIELD_PRESET, DEFAULT_SENSITIVITY)
+                ),
             ): _select_selector(sensitivity_options()),
         },
         collapsed=False,
@@ -2732,6 +2758,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "advanced",
                     "recommendations",
                     "entity_detail",
+                    "dashboard",
                 ],
             )
 
@@ -3069,6 +3096,41 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         return self.async_show_form(
             step_id="entity_detail",
             data_schema=_entity_detail_schema(self._config_entry),
+            errors={},
+        )
+
+    async def async_step_dashboard(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Create or update the recommended dashboard."""
+        if user_input is not None:
+            layout = normalize_dashboard_layout(
+                user_input.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
+            )
+            coordinator = _options_flow_coordinator(self)
+            if coordinator is not None:
+                set_layout = getattr(coordinator, "async_set_dashboard_layout", None)
+                if callable(set_layout):
+                    result = set_layout(layout)
+                    if hasattr(result, "__await__"):
+                        await result
+                create_dashboard = getattr(coordinator, "async_create_dashboard", None)
+                if callable(create_dashboard):
+                    result = create_dashboard()
+                    if hasattr(result, "__await__"):
+                        await result
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {CONF_DASHBOARD_LAYOUT: layout},
+                ),
+            )
+
+        return self.async_show_form(
+            step_id="dashboard",
+            data_schema=_dashboard_schema(self._config_entry),
             errors={},
         )
 
@@ -3487,9 +3549,11 @@ def _options_schema(
             ): _water_flow_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
-                default=options.get(
-                    CONF_SENSITIVITY,
-                    data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+                default=normalize_sensitivity(
+                    options.get(
+                        CONF_SENSITIVITY,
+                        data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+                    )
                 ),
             ): _select_selector(sensitivity_options()),
             vol.Optional(
@@ -3521,6 +3585,20 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
                 FIELD_APPLY_ENTITY_DETAIL_PROFILE,
                 default=False,
             ): bool,
+        }
+    )
+
+
+def _dashboard_schema(config_entry: config_entries.ConfigEntry) -> Any:
+    layout = normalize_dashboard_layout(
+        _entry_value(config_entry, CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
+    )
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_DASHBOARD_LAYOUT,
+                default=layout,
+            ): _select_selector(dashboard_layout_options()),
         }
     )
 
@@ -3609,10 +3687,16 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
             ),
             invalid_error_key="invalid_water_flow_sensor_entities",
         ),
-        CONF_SENSITIVITY: str(
+        CONF_SENSITIVITY: normalize_sensitivity(
             options.get(
                 CONF_SENSITIVITY,
                 data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+            )
+        ),
+        CONF_DASHBOARD_LAYOUT: normalize_dashboard_layout(
+            options.get(
+                CONF_DASHBOARD_LAYOUT,
+                data.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT),
             )
         ),
         CONF_RETENTION_MODE: _validate_retention_mode(
@@ -3968,7 +4052,7 @@ def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     user_input = _flatten_advanced_settings_input(user_input)
     settings: dict[str, Any] = {}
-    preset = str(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY).strip()
+    preset = normalize_sensitivity(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY)
     if preset not in _SENSITIVITY_OPTIONS:
         raise SetupValidationError("invalid_sensitivity")
     settings[FIELD_PRESET] = preset

@@ -32,6 +32,7 @@ from .capacity import (
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
+    CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
@@ -51,6 +52,7 @@ from .const import (
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
     DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
@@ -67,6 +69,12 @@ from .cycles import (
     cycle_baseline_feature_values,
     cycle_summary_payload,
     summarize_circuit_cycles,
+)
+from .dashboard import (
+    DASHBOARD_TITLE,
+    DASHBOARD_URL_PATH,
+    dashboard_storage_payload,
+    normalize_dashboard_layout,
 )
 from .demand import (
     DemandSettings,
@@ -655,10 +663,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 CONF_KNOWN_LOAD_CIRCUITS,
             )
         )
-        self._sensitivity = str(
+        self._sensitivity = normalize_sensitivity(
             self.options.get(
                 CONF_SENSITIVITY,
                 self.entry_data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+            )
+        )
+        self.dashboard_layout = normalize_dashboard_layout(
+            self.options.get(
+                CONF_DASHBOARD_LAYOUT,
+                self.entry_data.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT),
             )
         )
         self._apply_config_entry_settings()
@@ -2547,11 +2561,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
 
     async def async_create_dashboard(self: Self) -> None:
-        """Record and announce a dashboard creation request."""
+        """Create or update the recommended Home Assistant dashboard."""
+        layout = normalize_dashboard_layout(self.dashboard_layout)
+        dashboard_payload = dashboard_storage_payload(self.circuit_configs, layout)
+        action = await self._async_create_or_update_lovelace_dashboard(
+            dashboard_payload
+        )
         payload = {
             "entry_id": self.entry_id,
-            "dashboard_path": "docs/dashboard-example.yaml",
-            "title": "CircuitSetup Energy Analyzer",
+            "dashboard_path": f"/{DASHBOARD_URL_PATH}",
+            "title": DASHBOARD_TITLE,
+            "layout": layout,
+            "action": action,
         }
         self.last_dashboard_create_request = payload
         bus = getattr(self.hass, "bus", None)
@@ -2559,6 +2580,63 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if fire is not None:
             fire(f"{DOMAIN}_create_dashboard", payload)
         self.async_set_updated_data(self.state)
+
+    async def async_set_dashboard_layout(self: Self, layout: str) -> None:
+        """Persist the selected recommended-dashboard layout."""
+        normalized = normalize_dashboard_layout(layout)
+        self.dashboard_layout = normalized
+        self.options[CONF_DASHBOARD_LAYOUT] = normalized
+        entry = self._config_entry
+        if entry is not None:
+            options = dict(getattr(entry, "options", {}) or {})
+            options[CONF_DASHBOARD_LAYOUT] = normalized
+            update_entry = getattr(
+                getattr(self.hass, "config_entries", None),
+                "async_update_entry",
+                None,
+            )
+            if callable(update_entry):
+                update_entry(entry, options=options)
+        self.async_set_updated_data(self.state)
+
+    async def _async_create_or_update_lovelace_dashboard(
+        self: Self,
+        payload: Mapping[str, Any],
+    ) -> str:
+        collection = (
+            getattr(self.hass, "data", {})
+            .get("lovelace", {})
+            .get("dashboards_collection")
+        )
+        if collection is None:
+            return "unavailable"
+
+        items_method = getattr(collection, "async_items", None)
+        create_method = getattr(collection, "async_create_item", None)
+        update_method = getattr(collection, "async_update_item", None)
+        if not callable(items_method) or not callable(create_method):
+            return "unavailable"
+
+        items = await items_method()
+        existing = next(
+            (
+                item
+                for item in items
+                if isinstance(item, Mapping)
+                and item.get("url_path") == payload.get("url_path")
+            ),
+            None,
+        )
+        if existing is not None and callable(update_method):
+            item_id = str(existing.get("id") or existing.get("url_path"))
+            update_payload = {
+                key: value for key, value in payload.items() if key != "url_path"
+            }
+            await update_method(item_id, update_payload)
+            return "updated"
+
+        await create_method(dict(payload))
+        return "created"
 
     async def async_label_nilm_signature(
         self: Self,

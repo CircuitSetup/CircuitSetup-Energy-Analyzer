@@ -858,7 +858,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert alert_evidence_value(state, "fridge") == "Reactive Power"
     assert recent_activity_value(state, "fridge") == "Possible issue: Cycle Duration"
     assert recent_activity_count_value(state, "fridge") == 2
-    assert sensitivity_value(state, "fridge") == "quiet"
+    assert sensitivity_value(state, "fridge") == "Quiet"
     assert circuit_mode_value(state, "fridge") == "Dual Phase"
     assert power_flow_value(state, "fridge") == "Generation / Solar Export"
     assert activity_summary_value(state, "fridge") == "Idle"
@@ -956,7 +956,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert alert_evidence_value(state, "unknown") == ""
     assert recent_activity_value(state, "unknown") == "No recent activity"
     assert recent_activity_count_value(state, "unknown") == 0
-    assert sensitivity_value(state, "unknown") == "balanced"
+    assert sensitivity_value(state, "unknown") == "Balanced"
     assert activity_summary_value(state, "unknown") == "No Activity"
     assert electrical_health_value(state, "unknown") == "Needs Metrics"
     assert energy_summary_value(state, "unknown") == "Needs Energy Data"
@@ -2356,7 +2356,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["sensitivity"],
-    ).extra_state_attributes == {"preset": "quiet"}
+    ).extra_state_attributes == {"preset": "Quiet"}
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",

@@ -36,6 +36,11 @@ POLICY_SENSITIVITY_ALIASES = {
     "balanced": "standard",
     "sensitive": "high",
 }
+SENSITIVITY_LABELS = {
+    "quiet": "Quiet",
+    "balanced": "Balanced",
+    "sensitive": "Sensitive",
+}
 REQUIRED_ROLES = {SensorRole.REAL_POWER}
 OPTIONAL_ROLES = {
     SensorRole.VOLTAGE,
@@ -74,6 +79,11 @@ def normalize_sensitivity(value: Any) -> str:
 def alert_policy_name_for_sensitivity(value: Any) -> str:
     """Return the existing alert policy name for a friendly sensitivity value."""
     return POLICY_SENSITIVITY_ALIASES[normalize_sensitivity(value)]
+
+
+def friendly_sensitivity_label(value: Any) -> str:
+    """Return the user-facing label for a friendly or legacy sensitivity value."""
+    return SENSITIVITY_LABELS[normalize_sensitivity(value)]
 
 
 def friendly_feature_name(value: Any) -> str:

@@ -26,7 +26,7 @@
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
-          "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
+          "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -100,7 +100,7 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, NILM settings, utility comparison, entity detail level, or advanced circuit settings.",
+        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, NILM settings, utility comparison, recommended dashboard, entity detail level, or advanced circuit settings.",
         "menu_options": {
           "assign": "Review Circuit Assignments",
           "sources": "Edit Source Selection",
@@ -109,7 +109,8 @@
           "utility": "Utility / Opower Comparison",
           "advanced": "Advanced Circuit Settings",
           "recommendations": "Review Suggested Settings",
-          "entity_detail": "Entity Detail Level"
+          "entity_detail": "Entity Detail Level",
+          "dashboard": "Create Or Update Dashboard"
         }
       },
       "sources": {
@@ -134,7 +135,7 @@
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
-          "sensitivity": "Controls how quickly possible issue alerts are raised. Low is quieter, Standard is balanced, and High is more responsive.",
+          "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -192,6 +193,16 @@
         "data_description": {
           "entity_detail_level": "Simple enables summary entities only. Standard also enables configured feature status entities. Expert enables detailed diagnostic entities for troubleshooting and custom dashboards.",
           "apply_entity_detail_profile": "Apply the selected profile to current analyzer entities. Entities you manually disabled remain disabled."
+        }
+      },
+      "dashboard": {
+        "title": "Recommended Dashboard",
+        "description": "Create or update a CircuitSetup Energy Analyzer dashboard using the selected layout.",
+        "data": {
+          "dashboard_layout": "Dashboard Layout"
+        },
+        "data_description": {
+          "dashboard_layout": "Simple shows core health, activity, electrical health, energy summary, daily energy, and running state. Standard adds configured feature status entities. Expert adds diagnostics and evidence links."
         }
       },
       "select_assignment": {

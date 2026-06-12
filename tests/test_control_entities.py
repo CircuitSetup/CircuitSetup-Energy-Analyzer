@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ENTITY_DETAIL_LEVEL,
+    DASHBOARD_LAYOUT_EXPERT,
     DOMAIN,
     PLATFORMS,
 )
@@ -112,6 +113,9 @@ class _FakeCoordinator:
 
     async def async_create_dashboard(self) -> None:
         self.calls.append(("async_create_dashboard", ()))
+
+    async def async_set_dashboard_layout(self, layout: str) -> None:
+        self.calls.append(("async_set_dashboard_layout", (layout,)))
 
     async def async_set_circuit_sensitivity(
         self,
@@ -236,14 +240,15 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
     by_unique_id = {entity.unique_id: entity for entity in added_entities}
     assert set(by_unique_id) == {
         "entry-1_fridge_alert_sensitivity",
+        "entry-1_dashboard_layout",
         "entry-1_entity_detail_level",
     }
 
     sensitivity = by_unique_id["entry-1_fridge_alert_sensitivity"]
     assert sensitivity.name == "Kitchen Fridge Alert Sensitivity"
     assert sensitivity.suggested_object_id == "fridge_alert_sensitivity"
-    assert sensitivity.options == ["quiet", "balanced", "sensitive"]
-    assert sensitivity.current_option == "quiet"
+    assert sensitivity.options == ["Quiet", "Balanced", "Sensitive"]
+    assert sensitivity.current_option == "Quiet"
     _assert_base_description_defaults(sensitivity.entity_description)
     assert sensitivity.entity_description.options is None
 
@@ -252,12 +257,19 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
     assert detail_level.options == ["simple", "standard", "expert"]
     assert detail_level.current_option == "standard"
 
-    await sensitivity.async_select_option("sensitive")
+    dashboard_layout = by_unique_id["entry-1_dashboard_layout"]
+    assert dashboard_layout.name == "CircuitSetup Energy Analyzer Dashboard Layout"
+    assert dashboard_layout.options == ["Simple", "Standard", "Expert"]
+    assert dashboard_layout.current_option == "Simple"
+
+    await sensitivity.async_select_option("Sensitive")
     await detail_level.async_select_option("expert")
+    await dashboard_layout.async_select_option("Expert")
 
     assert coordinator.calls == [
         ("async_set_circuit_sensitivity", ("fridge", "sensitive")),
         ("async_set_entity_detail_level", ("expert",)),
+        ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
     ]
 
 

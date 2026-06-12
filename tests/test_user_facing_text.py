@@ -182,7 +182,8 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "power, voltage, current" in descriptions["extra_source_entities"].lower()
     assert "power factor" in descriptions["extra_source_entities"].lower()
     assert "optional" in descriptions["mains_source_entities"].lower()
-    assert "quieter" in descriptions["sensitivity"].lower()
+    assert "fewer alerts" in descriptions["sensitivity"].lower()
+    assert "balanced is the default" in descriptions["sensitivity"].lower()
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
@@ -211,6 +212,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "advanced": "Advanced Circuit Settings",
         "recommendations": "Review Suggested Settings",
         "entity_detail": "Entity Detail Level",
+        "dashboard": "Create Or Update Dashboard",
     }
     assert all("_" not in label for label in init_step["menu_options"].values())
     assert "choose" in init_step["description"].lower()
@@ -221,7 +223,8 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert all("_" not in label for label in data.values())
     assert all(description.endswith(".") for description in descriptions.values())
     assert all(20 <= len(description) <= 260 for description in descriptions.values())
-    assert "quieter" in descriptions["sensitivity"].lower()
+    assert "fewer alerts" in descriptions["sensitivity"].lower()
+    assert "balanced is the default" in descriptions["sensitivity"].lower()
     assert "more responsive" in descriptions["sensitivity"].lower()
     assert "storage" in descriptions["retention_mode"].lower()
     assert "diagnostic evidence" in descriptions["retention_mode"].lower()
@@ -441,6 +444,29 @@ def test_readme_documents_normal_user_action_paths() -> None:
         "Setup/data-quality fix -> Repairs flow",
     ):
         assert phrase in normalized_text
+
+
+def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    translations = json.loads(
+        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+    )
+
+    combined = "\n".join(
+        [
+            readme_text,
+            json.dumps(strings, sort_keys=True),
+            json.dumps(translations, sort_keys=True),
+        ]
+    )
+    assert "Quiet" in combined
+    assert "Balanced" in combined
+    assert "Sensitive" in combined
+    assert "Low is quieter" not in combined
+    assert "Standard is balanced" not in combined
+    assert "High is more responsive" not in combined
+    assert "`standard`, `high`, `low`" not in readme_text
 
 
 def test_cost_rate_selectors_allow_any_decimal_precision() -> None:

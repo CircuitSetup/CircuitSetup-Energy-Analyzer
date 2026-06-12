@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
+    CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXTRA_SOURCE_ENTITIES,
@@ -25,7 +26,10 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DASHBOARD_LAYOUT_EXPERT,
+    DASHBOARD_LAYOUT_STANDARD,
     DEFAULT_ENTITY_DETAIL_LEVEL,
+    DOMAIN,
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
@@ -164,7 +168,7 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
     assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_EXTRA_SOURCE_ENTITIES]
     assert validated[CONF_ENABLE_EXPERIMENTAL_NILM] is True
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
-    assert validated[CONF_SENSITIVITY] == "high"
+    assert validated[CONF_SENSITIVITY] == "sensitive"
     assert validated[CONF_RETENTION_MODE] == "diagnostic"
     assert "circuits" not in validated
     assert "known_load_circuits" not in validated
@@ -369,6 +373,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "advanced",
         "recommendations",
         "entity_detail",
+        "dashboard",
     ]
     assert result["description_placeholders"] == {}
 
@@ -896,7 +901,7 @@ async def test_options_advanced_step_saves_existing_setting_families() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_ADVANCED_SETTINGS]["refrigerator"] == {
-        "preset": "high",
+        "preset": "sensitive",
         "window_days": 14,
         "daily_spike_ratio": 0.35,
         "daily_goal_kwh": 2.5,
@@ -984,6 +989,62 @@ async def test_options_flow_preserves_valid_options() -> None:
     assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
         "sensor.main_l1_power",
         "sensor.main_l2_power",
+    ]
+    assert result["data"][CONF_SENSITIVITY] == "sensitive"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_creates_recommended_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def async_set_dashboard_layout(self, layout: str) -> None:
+            self.calls.append(("async_set_dashboard_layout", (layout,)))
+
+        async def async_create_dashboard(self) -> None:
+            self.calls.append(("async_create_dashboard", ()))
+
+    coordinator = Coordinator()
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    form = await flow.async_step_dashboard()
+    result = await flow.async_step_dashboard(
+        {CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT}
+    )
+
+    assert form["type"] == "form"
+    assert _schema_default(form["data_schema"], CONF_DASHBOARD_LAYOUT) == (
+        DASHBOARD_LAYOUT_STANDARD
+    )
+    assert _schema_validator(form["data_schema"], CONF_DASHBOARD_LAYOUT) == {
+        "select": {
+            "options": [
+                {"value": "simple", "label": "Simple"},
+                {"value": "standard", "label": "Standard"},
+                {"value": "expert", "label": "Expert"},
+            ]
+        }
+    }
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_DASHBOARD_LAYOUT] == DASHBOARD_LAYOUT_EXPERT
+    assert coordinator.calls == [
+        ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
+        ("async_create_dashboard", ()),
     ]
 
 
@@ -1151,7 +1212,7 @@ def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
         CONF_SOURCE_DEVICES: ["meter-device"],
         CONF_EXTRA_SOURCE_ENTITIES: [],
         CONF_ENABLE_EXPERIMENTAL_NILM: True,
-        CONF_SENSITIVITY: "standard",
+        CONF_SENSITIVITY: "balanced",
         CONF_RETENTION_MODE: "standard",
     }
 
@@ -2198,7 +2259,7 @@ def test_advanced_settings_from_sectioned_input_saves_flat_settings() -> None:
     )
 
     assert settings == {
-        "preset": "high",
+        "preset": "sensitive",
         "window_days": 14,
         "daily_spike_ratio": 0.35,
         "daily_goal_kwh": 2.5,
@@ -2402,9 +2463,9 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
     assert _schema_validator(setup_schema, CONF_SENSITIVITY) == {
         "select": {
             "options": [
-                {"value": "standard", "label": "Standard"},
-                {"value": "high", "label": "High"},
-                {"value": "low", "label": "Low"},
+                {"value": "quiet", "label": "Quiet"},
+                {"value": "balanced", "label": "Balanced"},
+                {"value": "sensitive", "label": "Sensitive"},
             ]
         }
     }
@@ -2423,9 +2484,9 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
     assert _schema_validator(advanced_schema, "preset") == {
         "select": {
             "options": [
-                {"value": "standard", "label": "Standard"},
-                {"value": "high", "label": "High"},
-                {"value": "low", "label": "Low"},
+                {"value": "quiet", "label": "Quiet"},
+                {"value": "balanced", "label": "Balanced"},
+                {"value": "sensitive", "label": "Sensitive"},
             ]
         }
     }
