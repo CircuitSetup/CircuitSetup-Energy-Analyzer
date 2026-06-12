@@ -2030,6 +2030,21 @@ def test_settings_suggestions_attributes_are_bounded_and_slim() -> None:
     assert "apply_payload" not in attrs["recommendations"][0]
 
 
+def test_settings_suggestions_helpers_are_feature_module_exports() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities import (
+        settings_suggestions as feature_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        settings_suggestions_attributes as sensor_attributes,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        settings_suggestions_value as sensor_value,
+    )
+
+    assert feature_module.settings_suggestions_value is sensor_value
+    assert feature_module.settings_suggestions_attributes is sensor_attributes
+
+
 def test_status_sensor_entities_explain_machine_status_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
