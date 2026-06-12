@@ -168,3 +168,11 @@ def test_strings_include_service_repair_problem_keys() -> None:
     )
 
     assert "missing_source_entities" in strings["issues"]
+    assert "missing_energy_source" in strings["issues"]
+    assert "missing_mains_source" in strings["issues"]
+    assert "missing_electrical_metrics" in strings["issues"]
+    assert "check_ct_direction" in strings["issues"]
+    assert "dual_phase_missing_leg" in strings["issues"]
+    assert "missing_rain_context_source" in strings["issues"]
+    assert "missing_water_flow_source" in strings["issues"]
+    assert "utility_comparison_source_mismatch" in strings["issues"]

@@ -76,6 +76,41 @@ def _entity_refs(config: dict[str, object]) -> set[str]:
     return refs
 
 
+def _markdown_contents(config: dict[str, object]) -> list[str]:
+    contents: list[str] = []
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "markdown" and isinstance(
+                value.get("content"),
+                str,
+            ):
+                contents.append(value["content"])
+            for nested in value.values():
+                walk(nested)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(config)
+    return contents
+
+
+def _registry_entry(
+    entity_id: str,
+    unique_id: str,
+    *,
+    disabled_by: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        entity_id=entity_id,
+        unique_id=unique_id,
+        config_entry_id="entry-1",
+        platform="circuitsetup_energy_analyzer",
+        disabled_by=disabled_by,
+    )
+
+
 def test_simple_dashboard_layout_uses_core_appliance_entities() -> None:
     dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_SIMPLE)
     refs = _entity_refs(dashboard)
@@ -117,6 +152,90 @@ def test_expert_dashboard_layout_adds_diagnostics_and_evidence_links() -> None:
         "sensor.fridge_energy_dashboard_status",
     } <= refs
     assert "/circuitsetup-energy-analyzer-evidence" in markdown
+
+
+def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.kitchen_fridge_health": _registry_entry(
+                        "sensor.kitchen_fridge_health",
+                        "entry-1_fridge_health_summary",
+                    ),
+                    "sensor.kitchen_fridge_activity": _registry_entry(
+                        "sensor.kitchen_fridge_activity",
+                        "entry-1_fridge_activity_summary",
+                    ),
+                    "sensor.kitchen_fridge_electrical": _registry_entry(
+                        "sensor.kitchen_fridge_electrical",
+                        "entry-1_fridge_electrical_health",
+                    ),
+                    "sensor.kitchen_fridge_energy": _registry_entry(
+                        "sensor.kitchen_fridge_energy",
+                        "entry-1_fridge_energy_summary",
+                    ),
+                    "sensor.kitchen_fridge_daily_kwh": _registry_entry(
+                        "sensor.kitchen_fridge_daily_kwh",
+                        "entry-1_fridge_daily_energy_usage",
+                    ),
+                    "binary_sensor.kitchen_fridge_running_now": _registry_entry(
+                        "binary_sensor.kitchen_fridge_running_now",
+                        "entry-1_fridge_running",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+
+    assert {
+        "sensor.kitchen_fridge_health",
+        "sensor.kitchen_fridge_activity",
+        "sensor.kitchen_fridge_electrical",
+        "sensor.kitchen_fridge_energy",
+        "sensor.kitchen_fridge_daily_kwh",
+        "binary_sensor.kitchen_fridge_running_now",
+    } <= refs
+    assert "sensor.fridge_health_summary" not in refs
+    assert "binary_sensor.fridge_running" not in refs
+
+
+def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.kitchen_fridge_health": _registry_entry(
+                        "sensor.kitchen_fridge_health",
+                        "entry-1_fridge_health_summary",
+                    ),
+                    "sensor.kitchen_fridge_activity": _registry_entry(
+                        "sensor.kitchen_fridge_activity",
+                        "entry-1_fridge_activity_summary",
+                        disabled_by="integration",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "sensor.kitchen_fridge_health" in refs
+    assert "sensor.kitchen_fridge_activity" not in refs
+    assert "Refrigerator dashboard note" in markdown
+    assert "disabled: Activity Summary" in markdown
+    assert (
+        "missing: Electrical Health, Energy Summary, Daily Energy Usage, Running"
+        in markdown
+    )
 
 
 class _FakeDashboardsCollection:

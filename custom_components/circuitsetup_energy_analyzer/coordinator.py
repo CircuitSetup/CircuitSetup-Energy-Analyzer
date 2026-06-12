@@ -203,6 +203,25 @@ from .water_correlations import (
 from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
+_DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
+    {
+        "missing_required_sensor",
+        "stale_source_sensor",
+        "unexpected_negative_real_power",
+    }
+)
+_SETUP_HEALTH_REPAIR_PROBLEMS = frozenset(
+    {
+        "missing_energy_source",
+        "missing_mains_source",
+        "missing_electrical_metrics",
+        "check_ct_direction",
+        "dual_phase_missing_leg",
+        "missing_rain_context_source",
+        "missing_water_flow_source",
+        "utility_comparison_source_mismatch",
+    }
+)
 
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
@@ -1232,6 +1251,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
             self._refresh_ux_state(config, sample, now)
+            await self._sync_setup_health_repairs(config.circuit_id)
             water_context_alert = self._observe_water_context(config, now)
             if water_context_alert is not None:
                 alerts.append(water_context_alert)
@@ -2563,7 +2583,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_create_dashboard(self: Self) -> None:
         """Create or update the recommended Home Assistant dashboard."""
         layout = normalize_dashboard_layout(self.dashboard_layout)
-        dashboard_payload = dashboard_storage_payload(self.circuit_configs, layout)
+        dashboard_payload = dashboard_storage_payload(
+            self.circuit_configs,
+            layout,
+            hass=self.hass,
+            entry_id=self.entry_id,
+        )
         action = await self._async_create_or_update_lovelace_dashboard(
             dashboard_payload
         )
@@ -3741,15 +3766,157 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state.data_quality_by_circuit.pop(circuit_id, None)
 
         current = {
-            issue for issue in self._active_repair_issues if issue[0] == circuit_id
+            issue
+            for issue in self._active_repair_issues
+            if issue[0] == circuit_id and issue[1] in _DATA_QUALITY_REPAIR_PROBLEMS
         }
         for issue in current - desired:
-            await repairs.async_delete_data_quality_issue(self.hass, issue[0], issue[1])
+            await repairs.async_delete_data_quality_issue(
+                self.hass,
+                issue[0],
+                issue[1],
+            )
             self._active_repair_issues.discard(issue)
 
         for issue in desired - self._active_repair_issues:
-            await repairs.async_create_data_quality_issue(self.hass, issue[0], issue[1])
+            await repairs.async_create_data_quality_issue(
+                self.hass,
+                issue[0],
+                issue[1],
+            )
             self._active_repair_issues.add(issue)
+
+    async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
+        desired: set[tuple[str, str]] = set()
+        dashboard_status = self.state.energy_dashboard_status_by_circuit.get(circuit_id)
+        if dashboard_status in {"needs_energy_source", "power_ready"}:
+            desired.add((circuit_id, "missing_energy_source"))
+        if (
+            self._setup_health_has_missing_mains_status(circuit_id)
+            and not self._has_mains_source_configured()
+        ):
+            desired.add((circuit_id, "missing_mains_source"))
+        if (
+            self.state.metric_consistency_status_by_circuit.get(circuit_id)
+            == "missing_metrics"
+        ):
+            desired.add((circuit_id, "missing_electrical_metrics"))
+        if self._setup_health_has_ct_direction_status(circuit_id):
+            desired.add((circuit_id, "check_ct_direction"))
+        if (
+            self.state.leg_imbalance_status_by_circuit.get(circuit_id)
+            == "missing_leg_power"
+        ):
+            desired.add((circuit_id, "dual_phase_missing_leg"))
+        if self._setup_health_has_missing_rain_context_source(circuit_id):
+            desired.add((circuit_id, "missing_rain_context_source"))
+        if self._setup_health_has_missing_water_flow_source(circuit_id):
+            desired.add((circuit_id, "missing_water_flow_source"))
+        if self._setup_health_has_utility_comparison_setup_status(circuit_id):
+            desired.add((circuit_id, "utility_comparison_source_mismatch"))
+
+        current = {
+            issue
+            for issue in self._active_repair_issues
+            if issue[0] == circuit_id and issue[1] in _SETUP_HEALTH_REPAIR_PROBLEMS
+        }
+        for issue in current - desired:
+            await repairs.async_delete_circuit_issue(self.hass, issue[0], issue[1])
+            self._active_repair_issues.discard(issue)
+
+        for issue in desired - self._active_repair_issues:
+            await repairs.async_create_circuit_issue(self.hass, issue[0], issue[1])
+            self._active_repair_issues.add(issue)
+
+    def _setup_health_has_missing_mains_status(self: Self, circuit_id: str) -> bool:
+        for field_name in (
+            "balance_status_by_circuit",
+            "solar_flow_status_by_circuit",
+            "solar_surplus_status_by_circuit",
+        ):
+            if getattr(self.state, field_name, {}).get(circuit_id) == "missing_mains":
+                return True
+        return False
+
+    def _setup_health_has_ct_direction_status(self: Self, circuit_id: str) -> bool:
+        for field_name in (
+            "balance_status_by_circuit",
+            "solar_flow_status_by_circuit",
+            "solar_surplus_status_by_circuit",
+        ):
+            if getattr(self.state, field_name, {}).get(circuit_id) in {
+                "inconsistent_export",
+                "negative_balance",
+            }:
+                return True
+        return False
+
+    def _setup_health_has_missing_rain_context_source(
+        self: Self,
+        circuit_id: str,
+    ) -> bool:
+        config = self._config_for_circuit(circuit_id)
+        if (
+            config is None
+            or config.appliance_profile not in PUMP_WATER_CONTEXT_PROFILES
+        ):
+            return False
+        advanced_settings = self._advanced_settings_for_circuit(circuit_id)
+        if not bool(
+            advanced_settings.get(
+                CONF_RAIN_PUMP_CORRELATION_ENABLED,
+                DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
+            )
+        ):
+            return False
+        return not self._has_rain_context_source_configured()
+
+    def _setup_health_has_missing_water_flow_source(
+        self: Self,
+        circuit_id: str,
+    ) -> bool:
+        config = self._config_for_circuit(circuit_id)
+        if (
+            config is None
+            or config.appliance_profile not in FLOW_WATER_CONTEXT_PROFILES
+        ):
+            return False
+        advanced_settings = self._advanced_settings_for_circuit(circuit_id)
+        if not bool(
+            advanced_settings.get(
+                CONF_WATER_FLOW_CORRELATION_ENABLED,
+                DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+            )
+        ):
+            return False
+        if not bool(advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)):
+            return False
+        return not self._flow_entities_for_circuit(advanced_settings)
+
+    def _setup_health_has_utility_comparison_setup_status(
+        self: Self,
+        circuit_id: str,
+    ) -> bool:
+        return self.state.utility_comparison_status_by_circuit.get(circuit_id) in {
+            "unconfigured",
+            "missing_utility",
+            "missing_measured",
+        }
+
+    def _has_rain_context_source_configured(self: Self) -> bool:
+        return bool(
+            self._configured_context_entity(CONF_RAIN_SENSOR_ENTITY)
+            or self._configured_context_entity(CONF_RAIN_INTENSITY_ENTITY)
+        )
+
+    def _has_mains_source_configured(self: Self) -> bool:
+        return bool(
+            _string_list_from_sources(
+                self.entry_data,
+                self.options,
+                CONF_MAINS_SOURCE_ENTITIES,
+            )
+        )
 
     def _process_nilm_sample(
         self: Self,
@@ -4258,6 +4425,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 continue
             result = await self._utility_comparison_processor.process(config, context)
             _, new_alerts = await self._apply_feature_result(result)
+            await self._sync_setup_health_repairs(circuit_id)
             alerts.extend(new_alerts)
         return alerts
 

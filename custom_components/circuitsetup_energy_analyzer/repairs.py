@@ -21,6 +21,21 @@ async def async_create_data_quality_issue(
     severity: Severity | str = Severity.WARNING,
 ) -> None:
     """Create a Home Assistant Repairs issue for data quality/config problems."""
+    await async_create_circuit_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=severity,
+    )
+
+
+async def async_create_circuit_issue(
+    hass: Any,
+    circuit_id: str,
+    problem: str,
+    severity: Severity | str = Severity.WARNING,
+) -> None:
+    """Create a Home Assistant Repairs issue for one circuit problem."""
     try:
         from homeassistant.helpers import issue_registry as ir
     except ModuleNotFoundError:
@@ -49,6 +64,15 @@ async def async_delete_data_quality_issue(
     problem: str,
 ) -> None:
     """Delete a Home Assistant Repairs issue for a resolved data-quality problem."""
+    await async_delete_circuit_issue(hass, circuit_id, problem)
+
+
+async def async_delete_circuit_issue(
+    hass: Any,
+    circuit_id: str,
+    problem: str,
+) -> None:
+    """Delete a Home Assistant Repairs issue for a resolved circuit problem."""
     try:
         from homeassistant.helpers import issue_registry as ir
     except ModuleNotFoundError:

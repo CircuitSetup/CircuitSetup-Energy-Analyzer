@@ -43,8 +43,20 @@ from .entity import (
     sync_entity_registry_categories,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .profiles import get_profile_definition
 from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name, friendly_sensitivity_label
+
+SETTINGS_SUGGESTIONS_ATTRIBUTE_MAX_ITEMS = 5
+SETTINGS_SUGGESTIONS_ATTRIBUTE_FIELDS = (
+    "recommendation_id",
+    "setting_key",
+    "setting_label",
+    "current_value",
+    "suggested_value",
+    "unit",
+    "confidence",
+)
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -273,10 +285,43 @@ def settings_suggestions_attributes(state: Any, circuit_id: str) -> dict[str, An
         "settings_recommendations_by_circuit",
         {},
     ).get(circuit_id, [])
+    recommendation_items = (
+        list(recommendations)
+        if isinstance(recommendations, Iterable)
+        and not isinstance(recommendations, (str, bytes))
+        else []
+    )
+    shown_recommendations = [
+        _setting_recommendation_attribute_preview(recommendation)
+        for recommendation in recommendation_items[
+            :SETTINGS_SUGGESTIONS_ATTRIBUTE_MAX_ITEMS
+        ]
+    ]
     return {
         "pending_count": settings_suggestions_value(state, circuit_id),
-        "recommendations": list(recommendations),
+        "shown_count": len(shown_recommendations),
+        "has_more": len(recommendation_items) > len(shown_recommendations),
+        "recommendations": shown_recommendations,
     }
+
+
+def _setting_recommendation_attribute_preview(
+    recommendation: Any,
+) -> dict[str, Any]:
+    """Return a stable, bounded recommendation preview for entity attributes."""
+    return {
+        field: value
+        for field in SETTINGS_SUGGESTIONS_ATTRIBUTE_FIELDS
+        if (value := _recommendation_attribute_value(recommendation, field))
+        is not None
+    }
+
+
+def _recommendation_attribute_value(recommendation: Any, field: str) -> Any:
+    """Read a recommendation value from dicts or advisor dataclasses."""
+    if isinstance(recommendation, Mapping):
+        return recommendation.get(field)
+    return getattr(recommendation, field, None)
 
 
 def circuit_mode_value(state: Any, circuit_id: str) -> str:
@@ -2764,32 +2809,27 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
         )
         if energy_usage_status == "waiting_for_delta":
             issues.append(
-                _setup_health_issue(
-                    "Let analyzer learn",
-                    f"Let analyzer learn {circuit.name} energy changes",
+                _setup_health_learning_issue(
+                    state,
                     circuit,
-                    (
-                        "A cumulative kWh source is present, but no increase has "
-                        "been observed yet."
-                    ),
-                    issue="learning",
+                    energy_usage_status=energy_usage_status,
                 )
             )
-
-        readiness = readiness_value(state, circuit_id) if state is not None else "ready"
-        if readiness == "learning" or _setup_health_learning_in_progress(
-            state,
-            circuit_id,
-        ):
-            issues.append(
-                _setup_health_issue(
-                    "Let analyzer learn",
-                    f"Let analyzer learn {circuit.name}",
-                    circuit,
-                    "The analyzer is still collecting baseline evidence.",
-                    issue="learning",
-                )
+        else:
+            readiness = (
+                readiness_value(state, circuit_id) if state is not None else "ready"
             )
+            if readiness == "learning" or _setup_health_learning_in_progress(
+                state,
+                circuit_id,
+            ):
+                issues.append(
+                    _setup_health_learning_issue(
+                        state,
+                        circuit,
+                        energy_usage_status=energy_usage_status,
+                    )
+                )
 
         if _setup_health_needs_capacity_settings(coordinator, raw_circuit):
             issues.append(
@@ -3027,6 +3067,107 @@ def _setup_health_mapping_value(state: Any, field_name: str, circuit_id: str) ->
 def _setup_health_learning_in_progress(state: Any, circuit_id: str) -> bool:
     progress = _setup_health_mapping(state, "learning_progress_by_circuit", circuit_id)
     return progress is not None and progress.get("alert_ready") is False
+
+
+def _setup_health_learning_issue(
+    state: Any,
+    circuit: Any,
+    *,
+    energy_usage_status: str | None = None,
+) -> dict[str, Any]:
+    recommended_action, reason = _setup_health_learning_guidance(
+        state,
+        circuit,
+        energy_usage_status=energy_usage_status,
+    )
+    return _setup_health_issue(
+        "Let analyzer learn",
+        recommended_action,
+        circuit,
+        reason,
+        issue="learning",
+    )
+
+
+def _setup_health_learning_guidance(
+    state: Any,
+    circuit: Any,
+    *,
+    energy_usage_status: str | None = None,
+) -> tuple[str, str]:
+    circuit_name = str(
+        getattr(circuit, "name", "")
+        or getattr(circuit, "circuit_id", "this circuit")
+    )
+    if energy_usage_status == "waiting_for_delta":
+        return (
+            f"Waiting for first positive kWh increase on {circuit_name}",
+            (
+                "A cumulative kWh source is present, but no increase has "
+                "been observed yet."
+            ),
+        )
+
+    progress = _setup_health_mapping(
+        state,
+        "learning_progress_by_circuit",
+        getattr(circuit, "circuit_id", ""),
+    )
+    if isinstance(progress, Mapping):
+        baseline_age_days = _numeric_count(progress.get("baseline_age_days"))
+        minimum_days = _minimum_learning_days_for_circuit(circuit)
+        if baseline_age_days > 0 and baseline_age_days < minimum_days:
+            completed_days = min(int(baseline_age_days), minimum_days)
+            return (
+                (
+                    f"Learning: {completed_days} of {minimum_days} days complete "
+                    f"for {circuit_name}"
+                ),
+                (
+                    f"The analyzer has observed {completed_days} of {minimum_days} "
+                    "minimum learning days so far."
+                ),
+            )
+
+        cycle_count = int(_numeric_count(progress.get("cycle_count")))
+        minimum_cycles = _minimum_cycles_for_circuit(circuit)
+        if cycle_count > 0 and cycle_count < minimum_cycles:
+            remaining_cycles = minimum_cycles - cycle_count
+            return (
+                (
+                    f"Learning: {remaining_cycles} more run cycles needed for "
+                    f"{circuit_name}"
+                ),
+                (
+                    f"The analyzer has observed {cycle_count} of {minimum_cycles} "
+                    "minimum run cycles so far."
+                ),
+            )
+
+    return (
+        f"Let analyzer learn {circuit_name}",
+        "The analyzer is still collecting baseline evidence.",
+    )
+
+
+def _minimum_learning_days_for_circuit(circuit: Any) -> int:
+    profile = _appliance_profile(circuit)
+    if profile is None:
+        return 7
+    try:
+        return max(get_profile_definition(profile).minimum_learning_days, 1)
+    except KeyError:
+        return 7
+
+
+def _minimum_cycles_for_circuit(circuit: Any) -> int:
+    profile = _appliance_profile(circuit)
+    if profile is None:
+        return 0
+    try:
+        return max(get_profile_definition(profile).minimum_cycles, 0)
+    except KeyError:
+        return 0
 
 
 def _setup_health_needs_capacity_settings(coordinator: Any, circuit: Any) -> bool:

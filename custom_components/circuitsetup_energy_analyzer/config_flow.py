@@ -200,6 +200,7 @@ from .solar_flow import (
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
 )
+from .usage import DEFAULT_DAILY_USAGE_SPIKE_RATIO
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_SOURCE_TYPE,
@@ -3336,9 +3337,29 @@ def _recommendation_summary(recommendations: Iterable[Any]) -> str:
     ]
     for recommendation in recommendation_list:
         lines.append(f"- {_recommendation_label(recommendation)}")
+        unit = _recommendation_value(recommendation, "unit")
+        current_value = _recommendation_value(recommendation, "current_value")
+        suggested_value = _recommendation_value(recommendation, "suggested_value")
+        lines.append(
+            "  Current value: "
+            f"{_format_recommendation_value(current_value, unit)}"
+        )
+        default_value = _recommendation_default_value(recommendation)
+        if default_value is not None:
+            lines.append(
+                "  Default value: "
+                f"{_format_recommendation_value(default_value, unit)}"
+            )
+        lines.append(
+            "  Suggested value: "
+            f"{_format_recommendation_value(suggested_value, unit)}"
+        )
         reason = str(_recommendation_value(recommendation, "reason") or "").strip()
         if reason:
             lines.append(f"  Reason: {reason}")
+        expected_effect = _recommendation_expected_effect(recommendation)
+        if expected_effect:
+            lines.append(f"  Expected effect: {expected_effect}")
         evidence = _recommendation_evidence_text(recommendation)
         if evidence:
             lines.append(f"  Evidence: {evidence}")
@@ -3398,6 +3419,31 @@ def _recommendation_evidence_text(recommendation: Any) -> str:
         if len(parts) >= 4:
             break
     return "; ".join(parts)
+
+
+def _recommendation_default_value(recommendation: Any) -> Any:
+    setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
+    defaults = {
+        FIELD_DAILY_SPIKE_RATIO: DEFAULT_DAILY_USAGE_SPIKE_RATIO,
+    }
+    return defaults.get(setting_key)
+
+
+def _recommendation_expected_effect(recommendation: Any) -> str:
+    setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
+    effects = {
+        FIELD_DAILY_SPIKE_RATIO: (
+            "Tune this setting toward the observed history without requiring "
+            "manual threshold math."
+        ),
+    }
+    return effects.get(
+        setting_key,
+        (
+            "Tune this setting toward the observed history without requiring "
+            "manual threshold math."
+        ),
+    )
 
 
 def _is_hidden_recommendation_evidence_key(key: str) -> bool:

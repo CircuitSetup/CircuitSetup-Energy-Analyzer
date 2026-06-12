@@ -857,7 +857,7 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 | **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. | Advanced diagnostic, disabled by default. | `No recent activity`, `start`, `stop`, issue summary text |
 | **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. | Advanced diagnostic, disabled by default. | Integer counts |
 | **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `Quiet`, `Balanced`, or `Sensitive` |
-| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes include recommendation IDs, suggested values, and evidence. | Feature-specific; enabled in Standard/Expert when applicable. | `0`, `1`, or higher counts |
+| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes show a bounded preview of up to five suggestions with IDs, setting labels, current values, and suggested values. Open Review Suggested Settings or the evidence panel for full evidence and actions. | Feature-specific; enabled in Standard/Expert when applicable. | `0`, `1`, or higher counts |
 
 ### Appliance behavior and power-quality sensors
 

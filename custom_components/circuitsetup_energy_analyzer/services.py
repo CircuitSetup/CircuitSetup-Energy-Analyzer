@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from .const import DOMAIN
+from .ux import normalize_sensitivity
 
 try:
     from homeassistant.exceptions import HomeAssistantError
@@ -47,6 +48,7 @@ SERVICE_DENY_SETTING_RECOMMENDATION = "deny_setting_recommendation"
 SERVICE_DISMISS_SETTING_RECOMMENDATION = "dismiss_setting_recommendation"
 
 ATTR_CIRCUIT_ID = "circuit_id"
+ATTR_ENTITY_ID = "entity_id"
 ATTR_DURATION = "duration"
 ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
@@ -131,27 +133,52 @@ def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> C
     return vol.Schema(fields, extra=vol.ALLOW_EXTRA)
 
 
-CIRCUIT_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID,))
-SENSITIVITY_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID, ATTR_PRESET))
+def _circuit_schema(*optional: str) -> Callable:
+    return _schema(optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, *optional))
+
+
+CIRCUIT_SERVICE_SCHEMA = _circuit_schema()
+SENSITIVITY_SERVICE_SCHEMA = _schema(
+    required=(ATTR_PRESET,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_WINDOW_DAYS, ATTR_DAILY_SPIKE_RATIO),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_WINDOW_DAYS,
+        ATTR_DAILY_SPIKE_RATIO,
+    ),
 )
 ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_DAILY_GOAL_KWH, ATTR_GOAL_ALERT_RATIO),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_DAILY_GOAL_KWH,
+        ATTR_GOAL_ALERT_RATIO,
+    ),
 )
 ACTIVITY_ALERT_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_MAX_ACTIVE_MINUTES, ATTR_MAX_IDLE_MINUTES),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_MAX_ACTIVE_MINUTES,
+        ATTR_MAX_IDLE_MINUTES,
+    ),
 )
 BILLING_CYCLE_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_CYCLE_START_DAY, ATTR_BUDGET_KWH, ATTR_BUDGET_ALERT_RATIO),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_CYCLE_START_DAY,
+        ATTR_BUDGET_KWH,
+        ATTR_BUDGET_ALERT_RATIO,
+    ),
 )
 COST_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
     optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
         ATTR_CYCLE_START_DAY,
         ATTR_DEFAULT_RATE_PER_KWH,
         ATTR_TOU_RATE_PER_KWH,
@@ -162,32 +189,45 @@ COST_SETTINGS_SERVICE_SCHEMA = _schema(
     ),
 )
 DEMAND_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_WINDOW_MINUTES, ATTR_DEMAND_LIMIT_W),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_WINDOW_MINUTES,
+        ATTR_DEMAND_LIMIT_W,
+    ),
 )
 CAPACITY_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_BREAKER_AMPS, ATTR_WARNING_RATIO),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_BREAKER_AMPS,
+        ATTR_WARNING_RATIO,
+    ),
 )
 LEG_IMBALANCE_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_WARNING_RATIO, ATTR_MINIMUM_TOTAL_POWER_W),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_WARNING_RATIO,
+        ATTR_MINIMUM_TOTAL_POWER_W,
+    ),
 )
 METRIC_CONSISTENCY_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
     optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
         ATTR_APPARENT_POWER_TOLERANCE_PERCENT,
         ATTR_POWER_FACTOR_TOLERANCE,
         ATTR_MINIMUM_APPARENT_POWER_VA,
     ),
 )
 MAINS_BALANCE_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_NEGATIVE_TOLERANCE_W,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_NEGATIVE_TOLERANCE_W),
 )
 SOLAR_FLOW_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
     optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
         ATTR_EXPORT_TOLERANCE_W,
         ATTR_SOLAR_SURPLUS_THRESHOLD_W,
         ATTR_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
@@ -195,12 +235,18 @@ SOLAR_FLOW_SETTINGS_SERVICE_SCHEMA = _schema(
     ),
 )
 STANDBY_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_WINDOW_HOURS, ATTR_STANDBY_THRESHOLD_W, ATTR_ALWAYS_ON_ALERT_W),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_WINDOW_HOURS,
+        ATTR_STANDBY_THRESHOLD_W,
+        ATTR_ALWAYS_ON_ALERT_W,
+    ),
 )
 UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
     optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
         ATTR_UTILITY_ENERGY_ENTITY,
         ATTR_UTILITY_STATISTIC_ID,
         ATTR_UTILITY_SOURCE_TYPE,
@@ -210,26 +256,33 @@ UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA = _schema(
     ),
 )
 MAINTENANCE_START_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_NOTE, ATTR_DURATION, ATTR_RELEARN_ON_END),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_NOTE,
+        ATTR_DURATION,
+        ATTR_RELEARN_ON_END,
+    ),
 )
 MAINTENANCE_END_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID,),
-    optional=(ATTR_RELEARN,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_RELEARN),
 )
 ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(required=(ATTR_ALERT_ID,))
 NILM_LABEL_SERVICE_SCHEMA = _schema(
-    required=(ATTR_CIRCUIT_ID, ATTR_SIGNATURE_ID, ATTR_LABEL)
+    required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
-NILM_SIGNATURE_SERVICE_SCHEMA = _schema(required=(ATTR_CIRCUIT_ID, ATTR_SIGNATURE_ID))
+NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SIGNATURE_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 NILM_MERGE_SERVICE_SCHEMA = _schema(
-    required=(
-        ATTR_CIRCUIT_ID,
-        ATTR_SOURCE_SIGNATURE_ID,
-        ATTR_TARGET_SIGNATURE_ID,
-    )
+    required=(ATTR_SOURCE_SIGNATURE_ID, ATTR_TARGET_SIGNATURE_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
-RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA = _schema(optional=(ATTR_CIRCUIT_ID,))
+RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA = _schema(
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 RECOMMENDATION_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_RECOMMENDATION_ID,),
     optional=(ATTR_ENTRY_ID,),
@@ -326,8 +379,6 @@ def _service_handler(hass: Any, service: str) -> Callable[[Any], Any]:
 
 
 async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> None:
-    circuit_id = data.get(ATTR_CIRCUIT_ID)
-
     if service == SERVICE_RUN_MAPPING_CHECKS:
         for coordinator in _loaded_coordinators(hass):
             await _call_if_present(coordinator, "async_run_mapping_checks")
@@ -352,6 +403,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS:
+        circuit_id = _service_circuit_id(hass, data, required=False)
         coordinators = (
             _target_coordinators(hass, circuit_id)
             if circuit_id is not None
@@ -408,6 +460,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_LABEL_NILM_SIGNATURE:
+        circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
             hass,
             circuit_id,
@@ -423,6 +476,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_IGNORE_NILM_SIGNATURE:
+        circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
             hass,
             circuit_id,
@@ -437,6 +491,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
+        circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
             hass,
             circuit_id,
@@ -451,6 +506,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_MERGE_NILM_SIGNATURES:
+        circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
             hass,
             circuit_id,
@@ -466,6 +522,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         return
 
+    circuit_id = _service_circuit_id(hass, data)
     for coordinator in _target_coordinators(hass, circuit_id):
         if service == SERVICE_RELEARN_BASELINE:
             await _call_if_present(coordinator, "async_relearn_baseline", circuit_id)
@@ -485,7 +542,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 coordinator,
                 "async_set_circuit_sensitivity",
                 circuit_id,
-                data.get(ATTR_PRESET),
+                normalize_sensitivity(data.get(ATTR_PRESET)),
             )
         elif service == SERVICE_SET_ENERGY_USAGE_SETTINGS:
             await _call_if_present(
@@ -620,6 +677,109 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_RELEARN, False),
             )
+
+
+def _service_circuit_id(
+    hass: Any,
+    data: Mapping[str, Any],
+    *,
+    required: bool = True,
+) -> str | None:
+    circuit_id = data.get(ATTR_CIRCUIT_ID)
+    if isinstance(circuit_id, str):
+        normalized = circuit_id.strip()
+        if normalized:
+            return normalized
+
+    entity_ids = _service_entity_ids(data)
+    if entity_ids:
+        return _circuit_id_from_service_entity_ids(hass, entity_ids)
+
+    if required:
+        raise HomeAssistantError("Missing circuit_id.")
+    return None
+
+
+def _service_entity_ids(data: Mapping[str, Any]) -> tuple[str, ...]:
+    entity_id = data.get(ATTR_ENTITY_ID)
+    if isinstance(entity_id, str):
+        normalized = entity_id.strip()
+        return (normalized,) if normalized else ()
+    if isinstance(entity_id, Iterable) and not isinstance(entity_id, (str, bytes)):
+        values = [
+            str(value).strip()
+            for value in entity_id
+            if str(value).strip()
+        ]
+        return tuple(dict.fromkeys(values))
+    return ()
+
+
+def _circuit_id_from_service_entity_ids(hass: Any, entity_ids: Iterable[str]) -> str:
+    resolved_circuit_ids = {
+        _circuit_id_from_analyzer_entity_id(hass, entity_id)
+        for entity_id in entity_ids
+    }
+    if len(resolved_circuit_ids) == 1:
+        return next(iter(resolved_circuit_ids))
+    if resolved_circuit_ids:
+        ordered = ", ".join(sorted(resolved_circuit_ids))
+        raise HomeAssistantError(
+            "entity_id target resolved to multiple circuits: "
+            f"{ordered}. Pass circuit_id explicitly."
+        )
+    raise HomeAssistantError("Missing circuit_id.")
+
+
+def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
+    object_id = str(entity_id).strip().split(".", 1)[-1]
+    if not object_id:
+        raise HomeAssistantError(
+            f"Could not derive circuit_id from entity_id '{entity_id}'."
+        )
+
+    known_suffixes = _known_analyzer_entity_suffixes()
+    matches: list[str] = []
+    for circuit_id in sorted(
+        _all_known_circuit_ids(hass),
+        key=lambda value: (-len(value), value),
+    ):
+        prefix = f"{circuit_id}_"
+        if not object_id.startswith(prefix):
+            continue
+        suffix = object_id[len(prefix) :]
+        if suffix in known_suffixes:
+            matches.append(circuit_id)
+
+    if len(matches) == 1:
+        return matches[0]
+    raise HomeAssistantError(
+        f"Could not derive circuit_id from entity_id '{entity_id}'."
+    )
+
+
+def _all_known_circuit_ids(hass: Any) -> set[str]:
+    return {
+        known_circuit_id
+        for coordinator in _loaded_coordinators(hass)
+        for known_circuit_id in _known_circuit_ids(coordinator)
+    }
+
+
+def _known_analyzer_entity_suffixes() -> set[str]:
+    from .binary_sensor import BINARY_SENSOR_ENTITY_TIER_BY_KEY
+    from .button import CIRCUIT_BUTTON_DESCRIPTIONS
+    from .number import CIRCUIT_NUMBER_DESCRIPTIONS
+    from .select import CIRCUIT_SELECT_DESCRIPTIONS
+    from .sensor import SENSOR_ENTITY_TIER_BY_KEY
+
+    return {
+        *SENSOR_ENTITY_TIER_BY_KEY,
+        *BINARY_SENSOR_ENTITY_TIER_BY_KEY,
+        *(description.key for description in CIRCUIT_BUTTON_DESCRIPTIONS),
+        *(description.key for description in CIRCUIT_SELECT_DESCRIPTIONS),
+        *(description.key for description in CIRCUIT_NUMBER_DESCRIPTIONS),
+    }
 
 
 def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:

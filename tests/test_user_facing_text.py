@@ -1137,6 +1137,19 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "Advanced diagnostic, hidden by default." not in readme_text
 
 
+def test_readme_describes_bounded_settings_suggestion_attributes() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        "Attributes show a bounded preview of up to five suggestions with IDs, "
+        "setting labels, current values, and suggested values"
+    ) in readme_text
+    old_attribute_text = (
+        "Attributes include recommendation IDs, suggested values, and evidence"
+    )
+    assert old_attribute_text not in readme_text
+
+
 def test_readme_explains_compatible_meter_support_and_links_product() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 

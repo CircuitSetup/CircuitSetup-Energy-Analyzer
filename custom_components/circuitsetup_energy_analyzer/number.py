@@ -14,10 +14,12 @@ from .entity import (
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
 )
+from .models import SensorRole
 
 try:
     from homeassistant.components.number import NumberEntity
     from homeassistant.const import UnitOfEnergy
+    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class NumberEntity:
@@ -27,6 +29,9 @@ except ModuleNotFoundError:
         """Fallback energy unit constants."""
 
         KILO_WATT_HOUR = "kWh"
+
+    class HomeAssistantError(Exception):
+        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,9 +138,10 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Persist the new daily kWh goal."""
-        await _call_if_present(
+        await _call_or_raise(
             self.coordinator,
             "async_set_energy_goal_settings",
+            self.entity_description.name_suffix,
             self.circuit_id,
             float(value),
             None,
@@ -160,6 +166,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 description=description,
             )
             for description in CIRCUIT_NUMBER_DESCRIPTIONS
+            if number_description_applies(description, raw_circuit, coordinator)
         )
 
     prune_stale_entity_registry_entries(
@@ -189,10 +196,61 @@ def _daily_energy_goal_value(coordinator: Any, circuit_id: str) -> float:
     return 0.0
 
 
-async def _call_if_present(target: Any, method_name: str, *args: Any) -> None:
+def number_description_applies(
+    description: CircuitNumberDescription,
+    circuit: Any,
+    coordinator: Any | None = None,
+) -> bool:
+    """Return whether a number control is useful for this circuit."""
+    if description.key != "daily_energy_goal":
+        return True
+    circuit_id = str(getattr(circuit, "circuit_id", "") or "")
+    if _has_energy_sensor(circuit):
+        return True
+    store_data = getattr(coordinator, "store_data", None)
+    settings_by_circuit = getattr(store_data, "energy_goal_settings_by_circuit", {})
+    if isinstance(settings_by_circuit, Mapping) and circuit_id in settings_by_circuit:
+        return True
+    state = getattr(coordinator, "data", None)
+    if circuit_id in getattr(state, "daily_energy_usage_by_circuit", {}):
+        return True
+    evidence = getattr(state, "energy_usage_evidence_by_circuit", {}).get(circuit_id)
+    return isinstance(evidence, Mapping) and bool(evidence)
+
+
+def _has_energy_sensor(circuit: Any) -> bool:
+    return any(
+        _sensor_role(sensor) is SensorRole.ENERGY
+        for sensor in getattr(circuit, "sensors", ()) or ()
+    )
+
+
+def _sensor_role(sensor: Any) -> SensorRole | None:
+    role = (
+        sensor.get("role")
+        if isinstance(sensor, dict)
+        else getattr(sensor, "role", None)
+    )
+    if isinstance(role, SensorRole):
+        return role
+    try:
+        return SensorRole(str(role))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _call_or_raise(
+    target: Any,
+    method_name: str,
+    action_label: str,
+    *args: Any,
+) -> None:
     method = getattr(target, method_name, None)
-    if method is None:
-        return
+    if not callable(method):
+        raise HomeAssistantError(
+            f"Cannot {action_label.strip().lower()} right now because the "
+            "analyzer action is unavailable."
+        )
     result = method(*args)
     if inspect.isawaitable(result):
         await result

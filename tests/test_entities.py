@@ -922,6 +922,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert settings_suggestions_value(state, "fridge") == 2
     assert settings_suggestions_attributes(state, "fridge") == {
         "pending_count": 2,
+        "shown_count": 2,
+        "has_more": False,
         "recommendations": [
             {
                 "recommendation_id": "fridge:daily_spike_ratio:v1",
@@ -1015,6 +1017,8 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert settings_suggestions_value(state, "unknown") == 0
     assert settings_suggestions_attributes(state, "unknown") == {
         "pending_count": 0,
+        "shown_count": 0,
+        "has_more": False,
         "recommendations": [],
     }
 
@@ -1268,6 +1272,54 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
     assert setup_health_attributes(missing_mains)["recommended_action"] == (
         "Add a mains or whole-home source"
     )
+
+
+def test_setup_health_learning_next_step_uses_specific_progress_reason() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    waiting_for_delta = SimpleNamespace(
+        data=AnalyzerState(
+            energy_usage_evidence_by_circuit={"fridge": {"status": "waiting_for_delta"}}
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+            ),
+        ),
+        store_data=FeatureStoreData(),
+        options={},
+    )
+    waiting_attrs = setup_health_attributes(waiting_for_delta)
+    assert waiting_attrs["next_step"] == (
+        "Waiting for first positive kWh increase on Kitchen Fridge"
+    )
+
+    cycle_learning = SimpleNamespace(
+        data=AnalyzerState(
+            learning_progress_by_circuit={
+                "washer": {"cycle_count": 5, "alert_ready": False}
+            }
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="washer",
+                name="Washer",
+                appliance_profile=ApplianceProfile.WASHER,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+        store_data=FeatureStoreData(),
+        options={},
+    )
+    cycle_attrs = setup_health_attributes(cycle_learning)
+    assert cycle_attrs["next_step"] == "Learning: 3 more run cycles needed for Washer"
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -1936,6 +1988,46 @@ def test_settings_suggestions_sensor_has_translation_entry() -> None:
     assert strings["entity"]["sensor"]["settings_suggestions"] == {
         "name": "Settings suggestions"
     }
+
+
+def test_settings_suggestions_attributes_are_bounded_and_slim() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        settings_suggestions_attributes,
+    )
+
+    recommendations = [
+        {
+            "recommendation_id": f"fridge:setting_{index}:v1",
+            "setting_key": f"setting_{index}",
+            "setting_label": f"Setting {index}",
+            "current_value": index,
+            "suggested_value": index + 1,
+            "reason": "Retained evidence suggests an adjustment.",
+            "evidence": {"large": list(range(50))},
+            "apply_payload": {f"setting_{index}": index + 1},
+        }
+        for index in range(8)
+    ]
+    state = AnalyzerState(
+        settings_recommendation_count_by_circuit={"fridge": len(recommendations)},
+        settings_recommendations_by_circuit={"fridge": recommendations},
+    )
+
+    attrs = settings_suggestions_attributes(state, "fridge")
+
+    assert attrs["pending_count"] == 8
+    assert attrs["shown_count"] == 5
+    assert attrs["has_more"] is True
+    assert len(attrs["recommendations"]) == 5
+    assert attrs["recommendations"][0] == {
+        "recommendation_id": "fridge:setting_0:v1",
+        "setting_key": "setting_0",
+        "setting_label": "Setting 0",
+        "current_value": 0,
+        "suggested_value": 1,
+    }
+    assert "evidence" not in attrs["recommendations"][0]
+    assert "apply_payload" not in attrs["recommendations"][0]
 
 
 def test_status_sensor_entities_explain_machine_status_values() -> None:
