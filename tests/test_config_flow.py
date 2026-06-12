@@ -976,21 +976,15 @@ async def test_options_flow_preserves_valid_options() -> None:
 
     result = await flow.async_step_sources(user_input)
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "assign"
-    assert _schema_keys(result["data_schema"]) == {
-        "include_circuit",
-        "included_sensors",
-        "circuit_name",
-        "appliance_profile",
-        "circuit_mode",
-        "power_flow",
-        "circuit_retention_mode",
-    }
-    assert result["description_placeholders"]["assignment_progress"] == "1 of 1"
-    assert result["description_placeholders"]["current_sensors"] == (
-        "sensor.fridge_power\nsensor.fridge_current"
-    )
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.fridge_power",
+        "sensor.fridge_current",
+    ]
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1034,13 +1028,8 @@ async def test_options_sources_step_preserves_existing_mains_sources() -> None:
         }
     )
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "assign"
-    assert result["description_placeholders"]["assignment_progress"] == "1 of 2"
-    assert result["description_placeholders"]["current_sensors"] == (
-        "sensor.fridge_power"
-    )
-    assert flow._pending_config[CONF_MAINS_SOURCE_ENTITIES] == [
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
@@ -1073,11 +1062,6 @@ async def test_options_assignment_review_preserves_outdoor_temperature_entity() 
 @pytest.mark.asyncio
 async def test_options_assignment_review_saves_optional_rain_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        FIELD_CIRCUIT_MODE,
-        FIELD_CIRCUIT_NAME,
-        FIELD_CIRCUIT_RETENTION_MODE,
-        FIELD_INCLUDED_SENSORS,
-        FIELD_POWER_FLOW,
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
 
@@ -1100,25 +1084,9 @@ async def test_options_assignment_review_saves_optional_rain_entities() -> None:
         }
     )
 
-    assert result["type"] == "form"
-    assert flow._pending_config[CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
-    assert flow._pending_config[CONF_RAIN_INTENSITY_ENTITY] == (
-        "sensor.precipitation_rate"
-    )
-
-    final = await flow.async_step_assign(
-        {
-            FIELD_CIRCUIT_NAME: "Sump Pump",
-            FIELD_CIRCUIT_MODE: "single_phase",
-            FIELD_POWER_FLOW: "load",
-            FIELD_CIRCUIT_RETENTION_MODE: "standard",
-            FIELD_INCLUDED_SENSORS: ["sensor.sump_pump_power"],
-        }
-    )
-
-    assert final["type"] == "create_entry"
-    assert final["data"][CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
-    assert final["data"][CONF_RAIN_INTENSITY_ENTITY] == "sensor.precipitation_rate"
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_RAIN_SENSOR_ENTITY] == "binary_sensor.rain"
+    assert result["data"][CONF_RAIN_INTENSITY_ENTITY] == "sensor.precipitation_rate"
 
 
 @pytest.mark.asyncio
@@ -1148,33 +1116,21 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "included_sensors",
         "circuit_name",
         "appliance_profile",
-        "circuit_mode",
-        "power_flow",
         "circuit_retention_mode",
     }
     assert _schema_default(result["data_schema"], "circuit_name") == (
         "Garage Vehicle Charging"
     )
     assert _schema_default(result["data_schema"], "appliance_profile") == "ev_charger"
-    assert _schema_default(result["data_schema"], "circuit_mode") == "dual_phase"
-    assert _schema_default(result["data_schema"], "power_flow") == "load"
     assert _schema_default(result["data_schema"], "circuit_retention_mode") == (
         "standard"
     )
     assert _schema_default(result["data_schema"], "include_circuit") is True
     assert result["description_placeholders"] == {
-        "assignment_progress": "1 of 1",
         "circuit_name": "Garage Vehicle Charging",
         "appliance_profile": "ev_charger",
         "circuit_mode": "dual_phase",
-        "current_sensors": "\n".join(
-            [
-                "sensor.garage_vehicle_charging_l1_active_power",
-                "sensor.garage_vehicle_charging_l2_active_power",
-                "sensor.garage_vehicle_charging_l1_current",
-                "sensor.garage_vehicle_charging_l2_current",
-            ]
-        ),
+        "power_flow": "load",
     }
 
 
@@ -1282,15 +1238,12 @@ async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> 
             "include_circuit": True,
             "circuit_name": "HVAC Blower",
             "appliance_profile": "hvac_blower",
-            "circuit_mode": "single_phase",
-            "power_flow": "load",
             "circuit_retention_mode": "diagnostic",
         }
     )
 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
-    assert result["description_placeholders"]["assignment_progress"] == "2 of 2"
     assert _schema_default(result["data_schema"], "circuit_name") == "Sump Pump"
     assert _schema_default(result["data_schema"], "appliance_profile") == "sump_pump"
 
@@ -1299,8 +1252,6 @@ async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> 
             "include_circuit": True,
             "circuit_name": "Sump Pump",
             "appliance_profile": "sump_pump",
-            "circuit_mode": "single_phase",
-            "power_flow": "load",
             "circuit_retention_mode": "standard",
         }
     )
@@ -1376,15 +1327,11 @@ async def test_assignment_step_allows_manual_override_before_saving() -> None:
     assert _schema_default(result["data_schema"], "appliance_profile") == (
         "hvac_compressor"
     )
-    assert _schema_default(result["data_schema"], "circuit_mode") == "dual_phase"
-
     result = await flow.async_step_assign(
         {
             "include_circuit": True,
             "circuit_name": "Garage HVAC System",
             "appliance_profile": "hvac",
-            "circuit_mode": "dual_phase",
-            "power_flow": "load",
             "circuit_retention_mode": "standard",
         }
     )
@@ -1428,7 +1375,6 @@ async def test_setup_utility_step_saves_opower_comparison_settings() -> None:
             "included_sensors": ["sensor.refrigerator_energy"],
             "circuit_name": "Refrigerator",
             "appliance_profile": "refrigerator",
-            "circuit_mode": "single_phase",
         }
     )
     assert result["type"] == "form"
@@ -1486,8 +1432,6 @@ async def test_setup_nilm_step_saves_known_load_circuits_with_selector() -> None
             "included_sensors": ["sensor.refrigerator_active_power"],
             "circuit_name": "Refrigerator",
             "appliance_profile": "refrigerator",
-            "circuit_mode": "single_phase",
-            "power_flow": "load",
             "circuit_retention_mode": "standard",
         }
     )
@@ -1503,8 +1447,6 @@ async def test_setup_nilm_step_saves_known_load_circuits_with_selector() -> None
             ],
             "circuit_name": "HVAC",
             "appliance_profile": "hvac",
-            "circuit_mode": "dual_phase",
-            "power_flow": "load",
             "circuit_retention_mode": "diagnostic",
         }
     )
@@ -1603,20 +1545,18 @@ async def test_options_assignment_step_prefills_saved_classification() -> None:
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
 
-    result = await flow.async_step_sources(
-        {
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.air_handler_active_power",
-                "sensor.air_handler_current",
-            ],
-        }
+    result = await flow.async_step_assign()
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "hvac_blower"}
     )
 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "circuit_name") == "HVAC Blower"
     assert _schema_default(result["data_schema"], "appliance_profile") == "hvac_blower"
-    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
 
 
 @pytest.mark.asyncio
@@ -1667,7 +1607,6 @@ async def test_options_assignment_step_starts_from_saved_sources() -> None:
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "circuit_name") == "HVAC Blower"
     assert _schema_default(result["data_schema"], "appliance_profile") == "hvac_blower"
-    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
 
 
 @pytest.mark.asyncio
@@ -1750,13 +1689,11 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
             ],
             "circuit_name": "Downstairs Heat Pump",
             "appliance_profile": "hvac",
-            "circuit_mode": "dual_phase",
         }
     )
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "select_assignment"
-    assert entry.options[CONF_CIRCUITS] == [
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [
         circuits[0],
         {
             "circuit_id": "downstairs_hvac",
@@ -1840,11 +1777,10 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
 
     result = await flow.async_step_assign({"remove_from_analysis": True})
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "select_assignment"
-    assert entry.options[CONF_CIRCUITS] == [circuits[0]]
-    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
-    assert entry.options[CONF_EXTRA_SOURCE_ENTITIES] == [
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [circuits[0]]
+    assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == [
         "sensor.refrigerator_power",
         "sensor.microwave_power",
     ]
@@ -1889,11 +1825,10 @@ async def test_options_assignment_review_can_remove_last_appliance() -> None:
 
     result = await flow.async_step_assign({"remove_from_analysis": True})
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "select_assignment"
-    assert entry.options[CONF_CIRCUITS] == []
-    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.microwave_power"]
-    assert entry.options[CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.microwave_power"]
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == []
+    assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.microwave_power"]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.microwave_power"]
 
 
 def test_circuit_mode_options_use_human_labels() -> None:
@@ -1941,15 +1876,13 @@ async def test_assignment_step_exposes_power_flow_for_solar_and_mains() -> None:
     assert _schema_default(result["data_schema"], "appliance_profile") == (
         "solar_inverter"
     )
-    assert _schema_default(result["data_schema"], "power_flow") == "generation"
+    assert "power_flow" not in _schema_keys(result["data_schema"])
 
     result = await flow.async_step_assign(
         {
             "include_circuit": True,
             "circuit_name": "Roof Solar",
             "appliance_profile": "solar_inverter",
-            "circuit_mode": "single_phase",
-            "power_flow": "generation",
         }
     )
     assert result["type"] == "form"
@@ -1982,7 +1915,7 @@ async def test_assignment_step_auto_suggests_washer_profile() -> None:
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "appliance_profile") == "washer"
-    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+    assert "circuit_mode" not in _schema_keys(result["data_schema"])
 
 
 @pytest.mark.asyncio
@@ -2005,7 +1938,7 @@ async def test_assignment_step_auto_suggests_microwave_profile() -> None:
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "appliance_profile") == "microwave"
-    assert _schema_default(result["data_schema"], "circuit_mode") == "single_phase"
+    assert "circuit_mode" not in _schema_keys(result["data_schema"])
 
 
 @pytest.mark.asyncio
@@ -2349,7 +2282,6 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
             "include_circuit": True,
             "circuit_name": "Upstairs HVAC",
             "appliance_profile": "hvac",
-            "circuit_mode": "dual_phase",
             "included_sensors": [
                 "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
                 "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
@@ -2357,12 +2289,11 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
         }
     )
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "select_assignment"
-    assert entry.options[CONF_CIRCUITS][0]["circuit_id"] == (
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == (
         "cs_energy_analyzer_demo_hvac"
     )
-    assert entry.options[CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
+    assert result["data"][CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
 
 
 @pytest.mark.asyncio
@@ -2396,7 +2327,6 @@ async def test_assignment_step_allows_sensor_level_inclusion() -> None:
             "include_circuit": True,
             "circuit_name": "Refrigerator",
             "appliance_profile": "refrigerator",
-            "circuit_mode": "single_phase",
             "included_sensors": [
                 "sensor.refrigerator_active_power",
                 "sensor.refrigerator_power_factor",

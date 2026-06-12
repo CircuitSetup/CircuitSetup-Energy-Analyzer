@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Configure CircuitSetup Energy Analyzer",
-        "description": "Step 1: select source devices or extra source sensors. Submit opens review circuit assignments before settings are saved.",
+        "description": "Step 1: select source devices or extra source sensors. Submit saves these source settings.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
@@ -32,15 +32,13 @@
       },
       "assign": {
         "title": "Assign Circuit Appliances",
-        "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
+        "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Include Circuit",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
-          "circuit_mode": "Circuit Mode",
-          "power_flow": "Power Flow",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -49,8 +47,6 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
-          "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -118,7 +114,7 @@
       },
       "sources": {
         "title": "Edit Source Selection",
-        "description": "Tune source devices, extra source sensors, diagnostics, and NILM. Submit opens review circuit assignments before settings are saved.",
+        "description": "Tune source devices, extra source sensors, diagnostics, and NILM. Submit saves these source settings.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
@@ -412,15 +408,13 @@
       },
       "assign": {
         "title": "Assign Circuit Appliances",
-        "description": "Review detected circuit {assignment_progress}. The form is prefilled from automatic classification or your saved assignment. Current classification: {appliance_profile} / {circuit_mode}. Selected sensors:\n{current_sensors}",
+        "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Include Circuit",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
           "appliance_profile": "Appliance Type",
-          "circuit_mode": "Circuit Mode",
-          "power_flow": "Power Flow",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -429,8 +423,6 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_mode": "Choose Single Phase, Dual Phase, Mixed, or Mains NILM. Mains NILM should only be selected for whole-home mains or feed circuits.",
-          "power_flow": "Choose Load for normal consuming circuits, Generation for solar/export circuits, or Mains Net for signed import/export feeds.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }

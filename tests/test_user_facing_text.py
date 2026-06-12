@@ -191,7 +191,7 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
-    assert "review circuit assignments" in strings["config"]["step"]["user"][
+    assert "saves these source settings" in strings["config"]["step"]["user"][
         "description"
     ].lower()
 
@@ -230,7 +230,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
-    assert "review circuit assignments" in strings["options"]["step"]["sources"][
+    assert "saves these source settings" in strings["options"]["step"]["sources"][
         "description"
     ].lower()
     entity_detail = strings["options"]["step"]["entity_detail"]
@@ -317,8 +317,6 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
-            "circuit_mode": "Circuit Mode",
-            "power_flow": "Power Flow",
             "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
@@ -329,10 +327,6 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
-        assert "mains nilm" in descriptions["circuit_mode"].lower()
-        assert "only" in descriptions["circuit_mode"].lower()
-        assert "mains" in descriptions["circuit_mode"].lower()
-        assert "solar" in descriptions["power_flow"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("14 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]

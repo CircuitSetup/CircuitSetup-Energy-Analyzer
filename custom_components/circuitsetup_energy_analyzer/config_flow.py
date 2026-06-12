@@ -906,14 +906,6 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=str(group.get("appliance_profile") or ApplianceProfile.MIXED),
             ): _select_selector(appliance_profile_options()),
             vol.Required(
-                FIELD_CIRCUIT_MODE,
-                default=str(group.get("mode") or CircuitMode.MIXED),
-            ): _select_selector(circuit_mode_options()),
-            vol.Required(
-                FIELD_POWER_FLOW,
-                default=_default_assignment_power_flow(group),
-            ): _select_selector(power_flow_options()),
-            vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
                 default=str(group.get("retention_mode") or DEFAULT_RETENTION_MODE),
             ): _select_selector(retention_mode_options()),
@@ -1704,11 +1696,12 @@ def friendly_circuit_mode_label(mode: str) -> str:
 
 
 def _default_assignment_power_flow(group: Mapping[str, Any]) -> str:
-    raw = str(group.get("power_flow") or "").strip()
-    if raw:
-        return _normalize_power_flow(raw)
     profile = str(group.get("appliance_profile") or "").strip()
     mode = str(group.get("mode") or "").strip()
+    return _default_power_flow_for_assignment(profile, mode)
+
+
+def _default_power_flow_for_assignment(profile: str, mode: str = "") -> str:
     if profile == ApplianceProfile.SOLAR_INVERTER.value:
         return PowerFlowMode.GENERATION.value
     if (
@@ -1717,6 +1710,25 @@ def _default_assignment_power_flow(group: Mapping[str, Any]) -> str:
     ):
         return PowerFlowMode.MAINS_NET.value
     return PowerFlowMode.LOAD.value
+
+
+def _default_mode_for_assignment_profile(profile: str) -> str:
+    if profile == ApplianceProfile.MAINS_NILM.value:
+        return CircuitMode.MAINS_NILM.value
+    if profile == ApplianceProfile.MIXED.value:
+        return CircuitMode.MIXED.value
+    if profile in {
+        ApplianceProfile.HVAC.value,
+        ApplianceProfile.HVAC_COMPRESSOR.value,
+        ApplianceProfile.ELECTRIC_HEAT.value,
+        ApplianceProfile.WATER_HEATER.value,
+        ApplianceProfile.OVEN.value,
+        ApplianceProfile.DRYER.value,
+        ApplianceProfile.POOL_PUMP.value,
+        ApplianceProfile.EV_CHARGER.value,
+    }:
+        return CircuitMode.DUAL_PHASE.value
+    return CircuitMode.SINGLE_PHASE.value
 
 
 def assignment_groups_from_sources(
@@ -1901,14 +1913,14 @@ def _assignment_description_placeholders(
     index: int,
     total: int,
 ) -> dict[str, str]:
+    profile = str(group.get("appliance_profile") or "")
+    mode = _default_mode_for_assignment_profile(profile)
+    power_flow = _default_power_flow_for_assignment(profile, mode)
     return {
-        "assignment_progress": f"{index + 1} of {total}" if total else "0 of 0",
         "circuit_name": str(group.get("name") or ""),
-        "appliance_profile": str(group.get("appliance_profile") or ""),
-        "circuit_mode": str(group.get("mode") or ""),
-        "current_sensors": "\n".join(
-            str(entity_id) for entity_id in group.get("entity_ids", ())
-        ),
+        "appliance_profile": profile,
+        "circuit_mode": mode,
+        "power_flow": power_flow,
     }
 
 
@@ -2002,20 +2014,8 @@ def _circuit_from_assignment_group(
             or ApplianceProfile.MIXED.value
         )
     )
-    mode = _normalize_assignment_mode(
-        str(
-            user_input.get(FIELD_CIRCUIT_MODE)
-            or group.get("mode")
-            or CircuitMode.MIXED.value
-        )
-    )
-    power_flow = _normalize_power_flow(
-        str(
-            user_input.get(FIELD_POWER_FLOW)
-            or group.get("power_flow")
-            or _default_assignment_power_flow(group)
-        )
-    )
+    mode = _default_mode_for_assignment_profile(profile)
+    power_flow = _default_power_flow_for_assignment(profile, mode)
     retention_mode = _normalize_retention_mode(
         str(
             user_input.get(FIELD_CIRCUIT_RETENTION_MODE)
@@ -2748,10 +2748,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 )
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            return _start_assignment_review(
-                self,
-                validated,
-                existing_circuits=_options_existing_circuits(self._config_entry),
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(self._config_entry, validated),
             )
 
         return await self._async_show_options_form()
@@ -2786,10 +2785,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 return assignment_result
             final_config = assignment_result
             if bool(getattr(self, "_assignment_update_existing", False)):
-                return await _async_save_assignment_edit_and_return_to_picker(
-                    self,
-                    final_config,
-                )
+                return self.async_create_entry(title="", data=final_config)
             return self.async_create_entry(title="", data=final_config)
 
         return _assignment_review_form(self)
