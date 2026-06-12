@@ -254,8 +254,9 @@ views:
                 icon: mdi:tune-variant
                 tap_action:
                   action: call-service
-                  service: circuitsetup_energy_analyzer.recalculate_setting_recommendations
-                  data: {}
+                  service: button.press
+                  target:
+                    entity_id: button.circuitsetup_energy_analyzer_recalculate_suggestions
               - type: button
                 name: Export refrigerator history CSV
                 icon: mdi:file-delimited-outline

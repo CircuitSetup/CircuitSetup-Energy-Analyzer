@@ -419,6 +419,30 @@ def test_service_fields_have_human_readable_names_and_descriptions() -> None:
             assert 20 <= len(field["description"]) <= 160
 
 
+def test_services_are_labeled_as_advanced_script_paths() -> None:
+    services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
+
+    for service_name, service in services.items():
+        description = service["description"]
+        assert description.startswith("Advanced/script action:"), service_name
+        assert "normal user path" in description.lower(), service_name
+
+
+def test_readme_documents_normal_user_action_paths() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_text = " ".join(readme_text.split())
+
+    assert "## Normal User Paths" in readme_text
+    for phrase in (
+        "Circuit action -> button/select/number entity",
+        "Alert action -> evidence panel button",
+        "NILM signature action -> NILM/evidence panel button",
+        "Recommendation action -> Suggested Settings UI button",
+        "Setup/data-quality fix -> Repairs flow",
+    ):
+        assert phrase in normalized_text
+
+
 def test_cost_rate_selectors_allow_any_decimal_precision() -> None:
     services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
     fields = services["set_cost_settings"]["fields"]

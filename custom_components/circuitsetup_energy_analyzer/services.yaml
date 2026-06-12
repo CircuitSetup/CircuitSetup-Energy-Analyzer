@@ -1,6 +1,6 @@
 relearn_baseline:
   name: Relearn baseline
-  description: Relearn the baseline for a configured circuit.
+  description: "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -11,7 +11,7 @@ relearn_baseline:
         text:
 pause_alerts:
   name: Pause alerts
-  description: Pause alert notifications for a configured circuit.
+  description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause Alerts button entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -29,7 +29,7 @@ pause_alerts:
         text:
 acknowledge_alert:
   name: Acknowledge alert
-  description: Acknowledge an alert evidence notification.
+  description: "Advanced/script action: acknowledge an alert evidence notification. The normal user path is the Acknowledge button in the evidence panel."
   fields:
     alert_id:
       name: Alert ID
@@ -40,7 +40,7 @@ acknowledge_alert:
         text:
 export_diagnostics:
   name: Export diagnostics
-  description: Export diagnostics for a configured circuit.
+  description: "Advanced/script action: export diagnostics for a configured circuit. The normal user path is the evidence panel and entity details."
   fields:
     circuit_id:
       name: Circuit ID
@@ -51,7 +51,7 @@ export_diagnostics:
         text:
 export_history_csv:
   name: Export history CSV
-  description: Export retained analyzer history for a configured circuit.
+  description: "Advanced/script action: export retained analyzer history for a configured circuit. The normal user path is the dashboard/export card or automation."
   fields:
     circuit_id:
       name: Circuit ID
@@ -62,11 +62,11 @@ export_history_csv:
         text:
 run_mapping_checks:
   name: Run mapping checks
-  description: Run configured source-entity mapping checks.
+  description: "Advanced/script action: run configured source-entity mapping checks. The normal user path is the integration Run Mapping Checks button entity."
   fields: {}
 label_nilm_signature:
   name: Label NILM signature
-  description: Label a detected NILM signature for a mains circuit.
+  description: "Advanced/script action: label a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
       name: Circuit ID
@@ -91,7 +91,7 @@ label_nilm_signature:
         text:
 ignore_nilm_signature:
   name: Ignore NILM signature
-  description: Ignore a detected NILM signature for a mains circuit.
+  description: "Advanced/script action: ignore a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
       name: Circuit ID
@@ -109,7 +109,7 @@ ignore_nilm_signature:
         text:
 set_circuit_sensitivity:
   name: Set circuit sensitivity
-  description: Set the alert sensitivity preset for one configured circuit.
+  description: "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -131,7 +131,7 @@ set_circuit_sensitivity:
             - sensitive
 set_energy_usage_settings:
   name: Set energy usage settings
-  description: Set daily energy usage spike tracking for one configured circuit.
+  description: "Advanced/script action: set daily energy usage spike tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -163,7 +163,7 @@ set_energy_usage_settings:
           mode: box
 set_energy_goal_settings:
   name: Set energy goal settings
-  description: Set daily kWh goal tracking for one configured circuit.
+  description: "Advanced/script action: set daily kWh goal tracking for one configured circuit. The normal user path is the circuit Daily Energy Goal number entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -196,7 +196,7 @@ set_energy_goal_settings:
           mode: box
 set_demand_settings:
   name: Set demand settings
-  description: Set rolling demand tracking for one configured circuit.
+  description: "Advanced/script action: set rolling demand tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -227,7 +227,7 @@ set_demand_settings:
           mode: box
 set_capacity_settings:
   name: Set capacity settings
-  description: Set breaker amp capacity tracking for one configured circuit.
+  description: "Advanced/script action: set breaker amp capacity tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -260,7 +260,7 @@ set_capacity_settings:
           mode: box
 set_leg_imbalance_settings:
   name: Set leg imbalance settings
-  description: Set split-phase leg imbalance thresholds for one circuit.
+  description: "Advanced/script action: set split-phase leg imbalance thresholds for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -293,7 +293,7 @@ set_leg_imbalance_settings:
           mode: box
 set_metric_consistency_settings:
   name: Set metric consistency settings
-  description: Set W, VA, and power-factor consistency thresholds for one circuit.
+  description: "Advanced/script action: set W, VA, and power-factor consistency thresholds for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -337,7 +337,7 @@ set_metric_consistency_settings:
           mode: box
 set_mains_balance_settings:
   name: Set mains balance settings
-  description: Set mains-minus-monitored balance thresholds for a mains circuit.
+  description: "Advanced/script action: set mains-minus-monitored balance thresholds for a mains circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -359,7 +359,7 @@ set_mains_balance_settings:
           mode: box
 set_solar_flow_settings:
   name: Set solar flow settings
-  description: Set solar export and flexible-load thresholds for a mains circuit.
+  description: "Advanced/script action: set solar export and flexible-load thresholds for a mains circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -414,7 +414,7 @@ set_solar_flow_settings:
           mode: box
 set_activity_alert_settings:
   name: Set activity alert settings
-  description: Set user-configured activity alert limits for one circuit.
+  description: "Advanced/script action: set user-configured activity alert limits for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -445,7 +445,7 @@ set_activity_alert_settings:
           mode: box
 set_billing_cycle_settings:
   name: Set billing cycle settings
-  description: Set billing-cycle usage forecasting for one configured circuit.
+  description: "Advanced/script action: set billing-cycle usage forecasting for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -487,7 +487,7 @@ set_billing_cycle_settings:
           mode: box
 set_cost_settings:
   name: Set cost settings
-  description: Set flat-rate and Time-of-Use cost tracking for one circuit.
+  description: "Advanced/script action: set flat-rate and Time-of-Use cost tracking for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -558,7 +558,7 @@ set_cost_settings:
         text:
 set_standby_settings:
   name: Set standby settings
-  description: Set Always On and standby tracking for one configured circuit.
+  description: "Advanced/script action: set Always On and standby tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -599,7 +599,7 @@ set_standby_settings:
           mode: box
 set_utility_comparison_settings:
   name: Set utility comparison settings
-  description: Compare utility-reported kWh with a mains kWh sensor or summed circuit kWh sensors.
+  description: "Advanced/script action: compare utility-reported kWh with mains or summed circuit kWh sensors. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
       name: Circuit ID
@@ -668,7 +668,7 @@ set_utility_comparison_settings:
           mode: box
 start_maintenance:
   name: Start maintenance
-  description: Pause appliance alert notifications while a circuit is being serviced.
+  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Start Maintenance button entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -700,7 +700,7 @@ start_maintenance:
         boolean:
 end_maintenance:
   name: End maintenance
-  description: Resume appliance alert notifications for a serviced circuit.
+  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit End Maintenance button entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -718,7 +718,7 @@ end_maintenance:
         boolean:
 mark_alert_expected:
   name: Mark alert expected
-  description: Mark an alert pattern as expected so repeated notifications are suppressed.
+  description: "Advanced/script action: mark an alert pattern as expected so repeated notifications are suppressed. The normal user path is the evidence panel button."
   fields:
     alert_id:
       name: Alert ID
@@ -729,7 +729,7 @@ mark_alert_expected:
         text:
 mark_alert_unhelpful:
   name: Mark alert unhelpful
-  description: Mark an alert pattern as unhelpful so repeated notifications are suppressed.
+  description: "Advanced/script action: mark an alert pattern as unhelpful so repeated notifications are suppressed. The normal user path is the evidence panel button."
   fields:
     alert_id:
       name: Alert ID
@@ -740,7 +740,7 @@ mark_alert_unhelpful:
         text:
 mark_nilm_signature_expected:
   name: Mark NILM signature expected
-  description: Mark an experimental NILM signature as an expected load pattern.
+  description: "Advanced/script action: mark an experimental NILM signature as an expected load pattern. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
       name: Circuit ID
@@ -758,7 +758,7 @@ mark_nilm_signature_expected:
         text:
 merge_nilm_signatures:
   name: Merge NILM signatures
-  description: Merge two experimental NILM signatures that represent the same load.
+  description: "Advanced/script action: merge two experimental NILM signatures that represent the same load. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
       name: Circuit ID
@@ -783,7 +783,7 @@ merge_nilm_signatures:
         text:
 recalculate_setting_recommendations:
   name: Recalculate setting recommendations
-  description: Recalculate advanced setting recommendations. Most users should review suggestions in the options flow; this service is useful for automation and script workflows.
+  description: "Advanced/script action: recalculate advanced setting recommendations. The normal user path is the Recalculate Suggestions button entity and Suggested Settings UI."
   fields:
     circuit_id:
       name: Circuit ID
@@ -794,7 +794,7 @@ recalculate_setting_recommendations:
         text:
 apply_setting_recommendation:
   name: Apply setting recommendation
-  description: Apply an advanced setting recommendation by ID. Most users should review suggestions in the options flow before applying them; this service is useful for automation and script workflows.
+  description: "Advanced/script action: apply an advanced setting recommendation by ID. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID
@@ -812,7 +812,7 @@ apply_setting_recommendation:
         text:
 deny_setting_recommendation:
   name: Deny setting recommendation
-  description: Deny an advanced setting recommendation by ID. Most users should review suggestions in the options flow; this service is useful for automation and script workflows that record a decision.
+  description: "Advanced/script action: deny an advanced setting recommendation by ID. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID
@@ -830,7 +830,7 @@ deny_setting_recommendation:
         text:
 dismiss_setting_recommendation:
   name: Dismiss setting recommendation
-  description: Dismiss an advanced setting recommendation by ID without applying it. Most users should review suggestions in the options flow; this service is useful for automation and script workflows.
+  description: "Advanced/script action: dismiss an advanced setting recommendation by ID without applying it. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID

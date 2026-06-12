@@ -363,6 +363,22 @@ Integration-level controls are grouped on the CircuitSetup Energy Analyzer devic
 - `button.circuitsetup_energy_analyzer_create_dashboard`
 - `select.circuitsetup_energy_analyzer_entity_detail_level`
 
+## Normal User Paths
+
+The integration still exposes service actions for scripts, blueprints, dashboards, backups, and Developer Tools. Those actions intentionally keep fields such as `circuit_id`, `alert_id`, `signature_id`, and `recommendation_id` for backwards compatibility and automation use.
+
+For day-to-day use, prefer these paths instead:
+
+| User intent | Normal path |
+|---|---|
+| Circuit action | Circuit action -> button/select/number entity |
+| Alert action | Alert action -> evidence panel button |
+| NILM signature action | NILM signature action -> NILM/evidence panel button |
+| Recommendation action | Recommendation action -> Suggested Settings UI button |
+| Setup/data-quality fix | Setup/data-quality fix -> Repairs flow |
+
+This keeps IDs inside the integration wherever possible. You should not need to copy `circuit_id`, `alert_id`, `signature_id`, or `recommendation_id` from attributes into Developer Tools for ordinary setup, tuning, alert review, or appliance maintenance.
+
 | Feature | What it does | Needs |
 |---|---|---|
 | **Energy usage spikes** | Compares today's kWh with a learned rolling window and reports repeated high-usage evidence. | Cumulative energy sensor. |
