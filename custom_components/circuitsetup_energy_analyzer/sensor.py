@@ -2830,11 +2830,13 @@ def _setup_health_attributes_for_issues(
     primary: Mapping[str, Any],
 ) -> dict[str, Any]:
     affected_circuits = _setup_health_issue_circuits(issues)
+    ready = not issues
     return {
         "blocking_issue_count": len(issues),
         "issue_count": len(issues),
         "warning_count": 0,
-        "next_step": primary["state"],
+        "ready": ready,
+        "next_step": primary["recommended_action"],
         "recommended_action": primary["recommended_action"],
         "affected_circuit": primary["affected_circuit"],
         "affected_circuit_name": primary["affected_circuit_name"],
@@ -2886,6 +2888,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                 "Review circuit assignments",
                 None,
                 "No circuit assignments are configured.",
+                issue="missing_circuit_assignments",
             )
         ]
 
@@ -2908,6 +2911,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     f"Add a cumulative kWh sensor to {circuit.name}",
                     circuit,
                     "Daily Energy Usage needs a cumulative energy source.",
+                    issue="missing_energy_source",
                 )
             )
 
@@ -2926,6 +2930,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "A cumulative kWh source is present, but no increase has "
                         "been observed yet."
                     ),
+                    issue="learning",
                 )
             )
 
@@ -2940,6 +2945,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     f"Let analyzer learn {circuit.name}",
                     circuit,
                     "The analyzer is still collecting baseline evidence.",
+                    issue="learning",
                 )
             )
 
@@ -2950,6 +2956,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     f"Configure breaker amps for {circuit.name}",
                     circuit,
                     "Capacity tracking needs the circuit breaker or capacity value.",
+                    issue="missing_capacity_setting",
                 )
             )
 
@@ -2960,6 +2967,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     f"Add an outdoor temperature source for {circuit.name}",
                     circuit,
                     "HVAC weather context needs an outdoor temperature source.",
+                    issue="missing_temperature_source",
                 )
             )
 
@@ -2977,6 +2985,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "A dual-phase check is running on a circuit that is not "
                         "dual phase."
                     ),
+                    issue="circuit_mode_mismatch",
                 )
             )
 
@@ -2994,6 +3003,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "Power Metric Consistency needs matching real power, apparent "
                         "power, voltage, current, or power factor sensors."
                     ),
+                    issue="missing_electrical_metrics",
                 )
             )
 
@@ -3007,6 +3017,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     "Add a mains or whole-home source",
                     circuit,
                     "Mains balance, NILM, or solar-flow checks need a mains source.",
+                    issue="missing_mains_source",
                 )
             )
 
@@ -3020,6 +3031,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "Signed power evidence suggests export, reversed CT "
                         "orientation, or a mapping mismatch."
                     ),
+                    issue="check_ct_direction",
                 )
             )
 
@@ -3046,15 +3058,25 @@ def _setup_health_issue(
     recommended_action: str,
     circuit: Any | None,
     reason: str,
+    *,
+    issue: str | None = None,
 ) -> dict[str, Any]:
+    circuit_id = getattr(circuit, "circuit_id", None)
     return {
         "state": state,
         "recommended_action": recommended_action,
-        "affected_circuit": getattr(circuit, "circuit_id", None),
+        "affected_circuit": circuit_id,
         "affected_circuit_name": getattr(circuit, "name", None),
+        "circuit_id": circuit_id,
+        "issue": issue or _setup_health_issue_key(state),
+        "fix": recommended_action,
         "open_path": SETUP_HEALTH_OPEN_PATH,
         "reason": reason,
     }
+
+
+def _setup_health_issue_key(state: str) -> str:
+    return str(state).strip().lower().replace(" ", "_").replace("-", "_")
 
 
 def _setup_health_data_quality_issue(
@@ -3088,6 +3110,7 @@ def _setup_health_data_quality_issue(
                 "A load circuit is reporting sustained negative real power. "
                 "That can mean export or a reversed CT."
             ),
+            issue="check_ct_direction",
         )
     if checklist is None:
         return None
@@ -3097,6 +3120,7 @@ def _setup_health_data_quality_issue(
             f"Fix stale source sensor data for {circuit.name}",
             circuit,
             "One or more selected source sensors have not updated recently.",
+            issue="stale_source",
         )
     if (
         checklist.get("required_sensors_present") is False
@@ -3107,6 +3131,7 @@ def _setup_health_data_quality_issue(
             f"Review source sensors for {circuit.name}",
             circuit,
             "A configured circuit is missing a required source sensor.",
+            issue="missing_source_sensor",
         )
     if (
         checklist.get("numeric_states_valid") is False
@@ -3118,6 +3143,7 @@ def _setup_health_data_quality_issue(
             f"Fix unavailable or non-numeric source data for {circuit.name}",
             circuit,
             "One or more selected source sensors are unavailable or non-numeric.",
+            issue="invalid_source_state",
         )
     if quality_issues:
         return _setup_health_issue(
@@ -3125,6 +3151,7 @@ def _setup_health_data_quality_issue(
             f"Review source data for {circuit.name}",
             circuit,
             "A configured circuit has source-data quality issues.",
+            issue="source_data_quality",
         )
     return None
 

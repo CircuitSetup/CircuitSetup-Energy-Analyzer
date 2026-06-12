@@ -7,6 +7,11 @@ const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
   mark_unhelpful: "mark_alert_unhelpful",
+  pause_alerts: "pause_alerts",
+  start_maintenance: "start_maintenance",
+  relearn_baseline: "relearn_baseline",
+  apply_setting_recommendation: "apply_setting_recommendation",
+  dismiss_setting_recommendation: "dismiss_setting_recommendation",
 };
 const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
 
@@ -186,18 +191,76 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data: { alert_id: fallbackAlert && fallbackAlert.alert_id },
     };
     if (!action || !this._hass || !this._hass.callService) {
+      if (action && action.path) {
+        this._navigate(action.path);
+      }
+      return;
+    }
+    if (action.path) {
+      this._navigate(action.path);
       return;
     }
     this._busyAction = actionKey;
     this._render();
     try {
-      await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, action.data || {});
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
+      }
       await this._loadEvidence({ routeKey: this._routeKey() });
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
       this._render();
     }
+  }
+
+  async _callNilmAction(index, actionKey) {
+    const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
+    const signature = signatures && signatures[index];
+    const action = signature && signature.actions && signature.actions[actionKey];
+    if (!action || !this._hass || !this._hass.callService) {
+      return;
+    }
+    const data = Object.assign({}, action.data || {});
+    if (actionKey === "label") {
+      const label = window.prompt("Label this NILM signature");
+      if (!label) {
+        return;
+      }
+      data.label = label;
+    }
+    if (actionKey === "merge") {
+      const target = window.prompt("Merge into signature ID");
+      if (!target) {
+        return;
+      }
+      data.target_signature_id = target;
+    }
+    const busyKey = `nilm_${index}_${actionKey}`;
+    this._busyAction = busyKey;
+    this._render();
+    try {
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, data);
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      await this._loadEvidence({ routeKey: this._routeKey() });
+    } catch (error) {
+      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._busyAction = "";
+      this._render();
+    }
+  }
+
+  _navigate(path) {
+    if (!path) {
+      return;
+    }
+    history.pushState(null, "", path);
+    window.dispatchEvent(new Event("location-changed"));
   }
 
   _routeKey() {
@@ -349,6 +412,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           border-color: var(--error-color, #db4437);
           color: var(--error-color, #db4437);
         }
+        .entity-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        code {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 4px;
+          padding: 2px 5px;
+        }
       </style>
       <main class="shell">
         <section class="panel">
@@ -366,6 +439,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#acknowledge", () => this._callAction("acknowledge"));
     this._listen("#mark_expected", () => this._callAction("mark_expected"));
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
+    this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
+    this._listen("#start_maintenance", () => this._callAction("start_maintenance"));
+    this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
+    this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
+    this._listen("#apply_setting_recommendation", () => this._callAction("apply_setting_recommendation"));
+    this._listen("#dismiss_setting_recommendation", () => this._callAction("dismiss_setting_recommendation"));
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmIndex, 10);
+        this._callNilmAction(index, button.dataset.nilmAction);
+      });
+    }
   }
 
   _renderAlert(alert, circuit) {
@@ -387,6 +472,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>Why It Matters</h2>
         <p>${this._escape(alert.why_it_matters || "Repeated analyzer evidence means this circuit is no longer matching its recent learned or configured behavior.")}</p>
       </section>
+      <section class="panel">
+        <h2>What Changed</h2>
+        <p>${this._escape(this._changeSummary(alert))}</p>
+      </section>
       <section class="panel summary">
         ${this._metric("Expected", alert.expected_value)}
         ${this._metric("Threshold", alert.threshold)}
@@ -395,6 +484,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric("Last Seen", alert.last_seen)}
         ${this._metric("Check First", alert.what_to_check_first)}
       </section>
+      ${this._renderSourceEntities(alert)}
       <section class="panel">
         <h2>Evidence Window</h2>
         <p>${this._escape(alert.graph_window_start)} to ${this._escape(alert.graph_window_end)}</p>
@@ -406,10 +496,56 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <section class="panel">
         <h2>Actions</h2>
         <div class="actions">
-          <button id="acknowledge" ${this._disabled("acknowledge")}>Acknowledge</button>
-          <button id="mark_expected" class="secondary" ${this._disabled("mark_expected")}>Mark Expected</button>
-          <button id="mark_unhelpful" class="secondary" ${this._disabled("mark_unhelpful")}>Mark Unhelpful</button>
+          ${this._actionButton("acknowledge", "Acknowledge")}
+          ${this._actionButton("mark_expected", "Mark Expected", true)}
+          ${this._actionButton("mark_unhelpful", "Not Helpful", true)}
+          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
+          ${this._actionButton("start_maintenance", "Start Maintenance", true)}
+          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
+          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
+          ${this._actionButton("apply_setting_recommendation", "Apply Suggested Setting", true)}
+          ${this._actionButton("dismiss_setting_recommendation", "Dismiss Suggestion", true)}
         </div>
+      </section>
+      ${this._renderNilmActions()}
+    `;
+  }
+
+  _renderSourceEntities(alert) {
+    const entities = alert.source_entities || [];
+    if (!entities.length) {
+      return "";
+    }
+    return `
+      <section class="panel">
+        <h2>Source Entities</h2>
+        <div class="entity-list">
+          ${entities.map((entityId) => `<code>${this._escape(entityId)}</code>`).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  _renderNilmActions() {
+    const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
+    if (!signatures || !signatures.length) {
+      return "";
+    }
+    return `
+      <section class="panel">
+        <h2>NILM Review</h2>
+        ${signatures.map((signature, index) => `
+          <div class="metric">
+            <span>${this._escape(signature.display_name || signature.likely_type || signature.signature_id)}</span>
+            <strong>${this._escape(signature.signature_id)}</strong>
+            <div class="actions">
+              ${this._nilmActionButton(index, "label", "Label")}
+              ${this._nilmActionButton(index, "ignore", "Ignore", true)}
+              ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
+              ${this._nilmActionButton(index, "merge", "Merge", true)}
+            </div>
+          </div>
+        `).join("")}
       </section>
     `;
   }
@@ -558,6 +694,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(value === null || value === undefined ? "Unknown" : value)}</strong></div>`;
+  }
+
+  _actionButton(actionKey, label, secondary = false) {
+    const actions = this._payload && this._payload.actions;
+    if (!actions || !actions[actionKey]) {
+      return "";
+    }
+    return `<button id="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(actionKey)}>${this._escape(label)}</button>`;
+  }
+
+  _nilmActionButton(index, actionKey, label, secondary = false) {
+    const busyKey = `nilm_${index}_${actionKey}`;
+    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(busyKey)}>${this._escape(label)}</button>`;
+  }
+
+  _changeSummary(alert) {
+    if (alert.percent_change !== null && alert.percent_change !== undefined) {
+      return `${alert.feature_name || this._friendlyFeature(alert.feature)} changed by ${alert.percent_change}%.`;
+    }
+    const metrics = alert.contributing_metrics || {};
+    const keys = Object.keys(metrics);
+    if (keys.length) {
+      return `Changed metrics: ${keys.join(", ")}.`;
+    }
+    return alert.what_happened || alert.message || "The analyzer found a repeated change.";
   }
 
   _disabled(actionKey) {

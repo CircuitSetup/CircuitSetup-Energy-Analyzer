@@ -33,6 +33,7 @@ from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
@@ -1341,6 +1342,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
+    async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
+        """Persist and apply the default entity detail profile."""
+        from .binary_sensor import BINARY_SENSOR_ENTITY_TIER_BY_KEY
+        from .entity import (
+            apply_entity_profile_to_registry,
+            normalize_entity_detail_level,
+        )
+        from .sensor import SENSOR_ENTITY_TIER_BY_KEY
+
+        level = normalize_entity_detail_level(detail_level)
+        self.options[CONF_ENTITY_DETAIL_LEVEL] = level
+        await self._async_persist_config_entry_options()
+        self.last_entity_detail_profile_plan = {
+            "sensor": apply_entity_profile_to_registry(
+                self.hass,
+                entry_id=self.entry_id,
+                entity_domain="sensor",
+                tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
+                detail_level=level,
+            ),
+            "binary_sensor": apply_entity_profile_to_registry(
+                self.hass,
+                entry_id=self.entry_id,
+                entity_domain="binary_sensor",
+                tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
+                detail_level=level,
+            ),
+        }
+        self.async_set_updated_data(self.state)
+
     async def async_set_energy_usage_settings(
         self: Self,
         circuit_id: str,
@@ -2518,6 +2549,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     "missing_required_sensor",
                 )
             self._refresh_ux_state(config, None, self._now_fn())
+        self.async_set_updated_data(self.state)
+
+    async def async_create_dashboard(self: Self) -> None:
+        """Record and announce a dashboard creation request."""
+        payload = {
+            "entry_id": self.entry_id,
+            "dashboard_path": "docs/dashboard-example.yaml",
+            "title": "CircuitSetup Energy Analyzer",
+        }
+        self.last_dashboard_create_request = payload
+        bus = getattr(self.hass, "bus", None)
+        fire = getattr(bus, "async_fire", None)
+        if fire is not None:
+            fire(f"{DOMAIN}_create_dashboard", payload)
         self.async_set_updated_data(self.state)
 
     async def async_label_nilm_signature(

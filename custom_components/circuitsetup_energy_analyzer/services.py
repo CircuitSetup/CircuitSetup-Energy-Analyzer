@@ -407,6 +407,65 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         return
 
+    if service == SERVICE_LABEL_NILM_SIGNATURE:
+        for coordinator in _target_nilm_signature_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_SIGNATURE_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_label_nilm_signature",
+                circuit_id,
+                data.get(ATTR_SIGNATURE_ID),
+                data.get(ATTR_LABEL),
+            )
+        return
+
+    if service == SERVICE_IGNORE_NILM_SIGNATURE:
+        for coordinator in _target_nilm_signature_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_SIGNATURE_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_ignore_nilm_signature",
+                circuit_id,
+                data.get(ATTR_SIGNATURE_ID),
+            )
+        return
+
+    if service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
+        for coordinator in _target_nilm_signature_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_SIGNATURE_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_mark_nilm_signature_expected",
+                circuit_id,
+                data.get(ATTR_SIGNATURE_ID),
+            )
+        return
+
+    if service == SERVICE_MERGE_NILM_SIGNATURES:
+        for coordinator in _target_nilm_signature_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_SOURCE_SIGNATURE_ID),
+            data.get(ATTR_TARGET_SIGNATURE_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_merge_nilm_signatures",
+                circuit_id,
+                data.get(ATTR_SOURCE_SIGNATURE_ID),
+                data.get(ATTR_TARGET_SIGNATURE_ID),
+            )
+        return
+
     for coordinator in _target_coordinators(hass, circuit_id):
         if service == SERVICE_RELEARN_BASELINE:
             await _call_if_present(coordinator, "async_relearn_baseline", circuit_id)
@@ -421,21 +480,6 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             await _call_if_present(coordinator, "async_export_diagnostics", circuit_id)
         elif service == SERVICE_EXPORT_HISTORY_CSV:
             await _call_if_present(coordinator, "async_export_history_csv", circuit_id)
-        elif service == SERVICE_LABEL_NILM_SIGNATURE:
-            await _call_if_present(
-                coordinator,
-                "async_label_nilm_signature",
-                circuit_id,
-                data.get(ATTR_SIGNATURE_ID),
-                data.get(ATTR_LABEL),
-            )
-        elif service == SERVICE_IGNORE_NILM_SIGNATURE:
-            await _call_if_present(
-                coordinator,
-                "async_ignore_nilm_signature",
-                circuit_id,
-                data.get(ATTR_SIGNATURE_ID),
-            )
         elif service == SERVICE_SET_CIRCUIT_SENSITIVITY:
             await _call_if_present(
                 coordinator,
@@ -576,21 +620,6 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_RELEARN, False),
             )
-        elif service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
-            await _call_if_present(
-                coordinator,
-                "async_mark_nilm_signature_expected",
-                circuit_id,
-                data.get(ATTR_SIGNATURE_ID),
-            )
-        elif service == SERVICE_MERGE_NILM_SIGNATURES:
-            await _call_if_present(
-                coordinator,
-                "async_merge_nilm_signatures",
-                circuit_id,
-                data.get(ATTR_SOURCE_SIGNATURE_ID),
-                data.get(ATTR_TARGET_SIGNATURE_ID),
-            )
 
 
 def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
@@ -687,21 +716,150 @@ def _target_recommendation_coordinators(
     entry_id: Any = None,
 ) -> list[Any]:
     domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
-    if not isinstance(domain_data, dict) or not isinstance(recommendation_id, str):
+    if not isinstance(domain_data, dict):
         return []
+    if not isinstance(recommendation_id, str) or not recommendation_id:
+        raise HomeAssistantError("Missing recommendation_id.")
 
     if isinstance(entry_id, str) and entry_id:
         coordinator = domain_data.get(entry_id)
-        if coordinator is not None and hasattr(coordinator, "async_set_updated_data"):
-            return [coordinator]
-        return []
+        if coordinator is None or not hasattr(coordinator, "async_set_updated_data"):
+            raise HomeAssistantError(f"Unknown entry_id '{entry_id}'.")
+        if not _coordinator_has_recommendation(coordinator, recommendation_id):
+            raise HomeAssistantError(
+                f"Unknown recommendation_id '{recommendation_id}' "
+                f"for entry_id '{entry_id}'."
+            )
+        return [coordinator]
 
     matches = [
         coordinator
         for coordinator in _loaded_coordinators(hass)
         if _coordinator_has_recommendation(coordinator, recommendation_id)
     ]
-    return matches if len(matches) == 1 else []
+    if len(matches) == 1:
+        return matches
+    if len(matches) > 1:
+        raise HomeAssistantError(
+            f"recommendation_id '{recommendation_id}' matched multiple loaded "
+            "analyzer entries; pass entry_id."
+        )
+    raise HomeAssistantError(f"Unknown recommendation_id '{recommendation_id}'.")
+
+
+def _target_nilm_signature_coordinators(
+    hass: Any,
+    circuit_id: Any,
+    *signature_ids: Any,
+) -> list[Any]:
+    if not isinstance(circuit_id, str) or not circuit_id:
+        raise HomeAssistantError("Missing circuit_id.")
+    target_coordinators = _target_coordinators(hass, circuit_id)
+    required_signature_ids = [
+        signature_id
+        for signature_id in signature_ids
+        if isinstance(signature_id, str) and signature_id
+    ]
+    if not required_signature_ids:
+        raise HomeAssistantError("Missing signature_id.")
+
+    matches = [
+        coordinator
+        for coordinator in target_coordinators
+        if all(
+            signature_id in _known_nilm_signature_ids(coordinator, circuit_id)
+            for signature_id in required_signature_ids
+        )
+    ]
+    if matches:
+        return matches
+
+    missing_signature_id = next(
+        (
+            signature_id
+            for signature_id in required_signature_ids
+            if not any(
+                signature_id in _known_nilm_signature_ids(coordinator, circuit_id)
+                for coordinator in target_coordinators
+            )
+        ),
+        required_signature_ids[0],
+    )
+    raise HomeAssistantError(
+        _unknown_nilm_signature_message(
+            circuit_id,
+            missing_signature_id,
+            target_coordinators,
+        )
+    )
+
+
+def _unknown_nilm_signature_message(
+    circuit_id: str,
+    signature_id: str,
+    coordinators: list[Any],
+) -> str:
+    known_signature_ids = sorted(
+        {
+            known_signature_id
+            for coordinator in coordinators
+            for known_signature_id in _known_nilm_signature_ids(
+                coordinator,
+                circuit_id,
+            )
+        }
+    )
+    if known_signature_ids:
+        return (
+            f"Unknown signature_id '{signature_id}'. Known signature IDs for "
+            f"{circuit_id}: {', '.join(known_signature_ids)}."
+        )
+    return f"Unknown signature_id '{signature_id}' for circuit_id '{circuit_id}'."
+
+
+def _known_nilm_signature_ids(coordinator: Any, circuit_id: str) -> set[str]:
+    signature_ids: set[str] = set()
+    store_data = getattr(coordinator, "store_data", None)
+    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
+    _collect_signature_ids(signatures_by_circuit, circuit_id, signature_ids)
+
+    state = getattr(coordinator, "state", None)
+    unknown_loads_by_circuit = getattr(state, "nilm_unknown_loads_by_circuit", {})
+    inventory = (
+        unknown_loads_by_circuit.get(circuit_id)
+        if isinstance(unknown_loads_by_circuit, Mapping)
+        else None
+    )
+    if isinstance(inventory, Mapping):
+        _collect_signature_ids(
+            {circuit_id: inventory.get("unknown_loads", ())},
+            circuit_id,
+            signature_ids,
+        )
+    return signature_ids
+
+
+def _collect_signature_ids(
+    signatures_by_circuit: Any,
+    circuit_id: str,
+    signature_ids: set[str],
+) -> None:
+    if not isinstance(signatures_by_circuit, Mapping):
+        return
+    signatures = signatures_by_circuit.get(circuit_id, ())
+    if isinstance(signatures, (str, bytes)):
+        return
+    try:
+        iterator = iter(signatures)
+    except TypeError:
+        return
+    for signature in iterator:
+        if isinstance(signature, Mapping):
+            signature_id = signature.get(ATTR_SIGNATURE_ID)
+        else:
+            signature_id = getattr(signature, ATTR_SIGNATURE_ID, None)
+        if signature_id:
+            signature_ids.add(str(signature_id))
 
 
 def _coordinator_has_recommendation(coordinator: Any, recommendation_id: str) -> bool:

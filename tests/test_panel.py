@@ -103,6 +103,104 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     }
     assert payload["actions"]["mark_expected"]["service"] == "mark_alert_expected"
     assert payload["actions"]["mark_unhelpful"]["service"] == "mark_alert_unhelpful"
+    assert payload["actions"]["pause_alerts"] == {
+        "domain": DOMAIN,
+        "service": "pause_alerts",
+        "data": {"circuit_id": "hvac"},
+    }
+    assert payload["actions"]["start_maintenance"]["data"] == {"circuit_id": "hvac"}
+    assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "hvac"}
+    assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
+        "/config/integrations/"
+    )
+
+
+def test_alert_evidence_payload_includes_setting_recommendation_actions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    coordinator = _coordinator(alert)
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:daily_spike_ratio:v1",
+                "title": "Raise daily spike threshold",
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["setting_recommendations"] == [
+        {
+            "recommendation_id": "hvac:daily_spike_ratio:v1",
+            "title": "Raise daily spike threshold",
+        }
+    ]
+    assert payload["actions"]["apply_setting_recommendation"] == {
+        "domain": DOMAIN,
+        "service": "apply_setting_recommendation",
+        "data": {
+            "recommendation_id": "hvac:daily_spike_ratio:v1",
+            "entry_id": "entry-1",
+        },
+    }
+    assert payload["actions"]["dismiss_setting_recommendation"]["data"] == {
+        "recommendation_id": "hvac:daily_spike_ratio:v1",
+        "entry_id": "entry-1",
+    }
+
+
+def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="nilm_unknown_load")
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(alert, config=config)
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_1",
+                    "display_name": "Motor-like load",
+                    "likely_type": "motor",
+                }
+            ]
+        }
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["nilm"]["signatures"][0]["signature_id"] == "signature_1"
+    assert payload["nilm"]["signatures"][0]["actions"]["label"]["service"] == (
+        "label_nilm_signature"
+    )
+    assert payload["nilm"]["signatures"][0]["actions"]["ignore"] == {
+        "domain": DOMAIN,
+        "service": "ignore_nilm_signature",
+        "data": {"circuit_id": "mains", "signature_id": "signature_1"},
+    }
+    assert payload["nilm"]["signatures"][0]["actions"]["mark_expected"]["data"] == {
+        "circuit_id": "mains",
+        "signature_id": "signature_1",
+    }
 
 
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:

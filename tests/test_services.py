@@ -506,6 +506,14 @@ async def test_circuit_services_fail_fast_for_unknown_circuit_id() -> None:
     class FakeCoordinator:
         def __init__(self) -> None:
             self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.store_data = SimpleNamespace(
+                nilm_signatures={
+                    "mains": [
+                        {"signature_id": "signature_1"},
+                        {"signature_id": "signature_2"},
+                    ]
+                }
+            )
 
         def async_set_updated_data(self, data) -> None:
             return None
@@ -592,6 +600,7 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_APPLY_SETTING_RECOMMENDATION,
+        HomeAssistantError,
         async_setup_services,
     )
 
@@ -630,12 +639,27 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
 
     await async_setup_services(hass)
     handler = hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)]
-    await handler(
-        SimpleNamespace(data={"recommendation_id": "duplicate:daily_spike_ratio:v1"})
-    )
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="recommendation_id 'duplicate:daily_spike_ratio:v1' matched multiple",
+    ):
+        await handler(
+            SimpleNamespace(
+                data={"recommendation_id": "duplicate:daily_spike_ratio:v1"}
+            )
+        )
 
     assert first.calls == []
     assert second.calls == []
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="Unknown recommendation_id 'missing:daily_spike_ratio:v1'",
+    ):
+        await handler(
+            SimpleNamespace(data={"recommendation_id": "missing:daily_spike_ratio:v1"})
+        )
 
     await handler(
         SimpleNamespace(
@@ -652,6 +676,104 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
             "async_apply_setting_recommendation",
             ("duplicate:daily_spike_ratio:v1",),
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_IGNORE_NILM_SIGNATURE,
+        SERVICE_MERGE_NILM_SIGNATURES,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.store_data = SimpleNamespace(
+                nilm_signatures={
+                    "mains": [
+                        {"signature_id": "signature_1"},
+                        {"signature_id": "signature_2"},
+                    ]
+                }
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_ignore_nilm_signature(
+            self,
+            circuit_id: str,
+            signature_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_ignore_nilm_signature", (circuit_id, signature_id))
+            )
+
+        async def async_merge_nilm_signatures(
+            self,
+            circuit_id: str,
+            source_signature_id: str,
+            target_signature_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_merge_nilm_signatures",
+                    (circuit_id, source_signature_id, target_signature_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="Unknown signature_id 'missing'. Known signature IDs for mains: "
+        "signature_1, signature_2.",
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
+            SimpleNamespace(data={"circuit_id": "mains", "signature_id": "missing"})
+        )
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="Unknown signature_id 'missing-target'. Known signature IDs for mains: "
+        "signature_1, signature_2.",
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "source_signature_id": "signature_1",
+                    "target_signature_id": "missing-target",
+                }
+            )
+        )
+
+    await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
+        SimpleNamespace(data={"circuit_id": "mains", "signature_id": "signature_1"})
+    )
+
+    assert coordinator.calls == [
+        ("async_ignore_nilm_signature", ("mains", "signature_1"))
     ]
 
 
@@ -692,6 +814,14 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     class FakeCoordinator:
         def __init__(self) -> None:
             self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.store_data = SimpleNamespace(
+                nilm_signatures={
+                    "mains": [
+                        {"signature_id": "signature_1"},
+                        {"signature_id": "signature_2"},
+                    ]
+                }
+            )
 
         def async_set_updated_data(self, data) -> None:
             return None

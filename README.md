@@ -347,6 +347,22 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 
 Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
+Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions:
+
+- `button.<circuit>_relearn_baseline`
+- `button.<circuit>_start_maintenance`
+- `button.<circuit>_end_maintenance`
+- `button.<circuit>_pause_alerts`
+- `select.<circuit>_alert_sensitivity`
+- `number.<circuit>_daily_energy_goal`
+
+Integration-level controls are grouped on the CircuitSetup Energy Analyzer device:
+
+- `button.circuitsetup_energy_analyzer_run_mapping_checks`
+- `button.circuitsetup_energy_analyzer_recalculate_suggestions`
+- `button.circuitsetup_energy_analyzer_create_dashboard`
+- `select.circuitsetup_energy_analyzer_entity_detail_level`
+
 | Feature | What it does | Needs |
 |---|---|---|
 | **Energy usage spikes** | Compares today's kWh with a learned rolling window and reports repeated high-usage evidence. | Cumulative energy sensor. |
@@ -786,7 +802,7 @@ Start with these on dashboards.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, and learning readiness. Attributes include `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list. | Default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source` |
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, and `fix`. | Default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source` |
 | Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |

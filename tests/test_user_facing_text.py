@@ -895,6 +895,11 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "acknowledge_alert",
         "mark_alert_expected",
         "mark_alert_unhelpful",
+        "pause_alerts",
+        "start_maintenance",
+        "relearn_baseline",
+        "apply_setting_recommendation",
+        "dismiss_setting_recommendation",
         "Alert evidence chart",
         "<svg",
         "No history samples",
@@ -907,13 +912,14 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_friendlyFeature",
         "Safety Notice",
         "alert.safety_notice",
+        "Source Entities",
+        "NILM Review",
     ):
         assert expected in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset
     assert "iframe" not in asset
     assert "Graph entities" not in asset
     assert "Graphed Sources" not in asset
-    assert "Source Entities" not in asset
     assert "_entityList" not in asset
 
 

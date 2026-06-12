@@ -10,9 +10,21 @@ from .models import AlertEvidence, CircuitConfig
 from .notifications import notification_id_for_alert
 from .services import (
     ATTR_ALERT_ID,
+    ATTR_CIRCUIT_ID,
+    ATTR_ENTRY_ID,
+    ATTR_RECOMMENDATION_ID,
+    ATTR_SIGNATURE_ID,
     SERVICE_ACKNOWLEDGE_ALERT,
+    SERVICE_APPLY_SETTING_RECOMMENDATION,
+    SERVICE_DISMISS_SETTING_RECOMMENDATION,
+    SERVICE_IGNORE_NILM_SIGNATURE,
+    SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
+    SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+    SERVICE_PAUSE_ALERTS,
+    SERVICE_RELEARN_BASELINE,
+    SERVICE_START_MAINTENANCE,
 )
 from .ux import alert_evidence_detail
 
@@ -20,7 +32,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260611-entity-detail-drilldown"
+PANEL_MODULE_VERSION = "20260612-guided-actions"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -137,7 +149,22 @@ def alert_evidence_payload(
                     "requested_circuit_id": requested_circuit_id,
                     "alert": dict(detail),
                     "circuit": _circuit_payload(config),
-                    "actions": _actions_for_alert_id(detail.get("alert_id")),
+                    "actions": _actions_for_context(
+                        coordinator,
+                        config=config,
+                        alert_id=detail.get("alert_id"),
+                        circuit_id=requested_circuit_id,
+                    ),
+                    "setting_recommendations": (
+                        _setting_recommendations_for_circuit(
+                            coordinator,
+                            requested_circuit_id,
+                        )
+                    ),
+                    "nilm": _nilm_payload_for_circuit(
+                        coordinator,
+                        requested_circuit_id,
+                    ),
                 }
 
     return {
@@ -166,31 +193,244 @@ def _payload_for_alert(
         "requested_circuit_id": requested_circuit_id,
         "alert": detail,
         "circuit": _circuit_payload(config),
-        "actions": _actions_for_alert_id(detail["alert_id"]),
+        "actions": _actions_for_context(
+            coordinator,
+            config=config,
+            alert_id=detail["alert_id"],
+            circuit_id=alert.circuit_id,
+        ),
+        "setting_recommendations": _setting_recommendations_for_circuit(
+            coordinator,
+            alert.circuit_id,
+        ),
+        "nilm": _nilm_payload_for_circuit(coordinator, alert.circuit_id),
     }
 
 
-def _actions_for_alert_id(alert_id: Any) -> dict[str, dict[str, Any]]:
-    if not isinstance(alert_id, str) or not alert_id:
-        return {}
-    data = {ATTR_ALERT_ID: alert_id}
-    return {
-        "acknowledge": {
+def _actions_for_context(
+    coordinator: Any,
+    *,
+    config: CircuitConfig | None,
+    alert_id: Any,
+    circuit_id: str | None,
+) -> dict[str, dict[str, Any]]:
+    actions: dict[str, dict[str, Any]] = {}
+    if isinstance(alert_id, str) and alert_id:
+        alert_data = {ATTR_ALERT_ID: alert_id}
+        actions.update(
+            {
+                "acknowledge": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_ACKNOWLEDGE_ALERT,
+                    "data": alert_data,
+                },
+                "mark_expected": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_MARK_ALERT_EXPECTED,
+                    "data": alert_data,
+                },
+                "mark_unhelpful": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_MARK_ALERT_UNHELPFUL,
+                    "data": alert_data,
+                },
+            }
+        )
+
+    if circuit_id:
+        circuit_data = {ATTR_CIRCUIT_ID: circuit_id}
+        actions.update(
+            {
+                "pause_alerts": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_PAUSE_ALERTS,
+                    "data": circuit_data,
+                },
+                "start_maintenance": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_START_MAINTENANCE,
+                    "data": circuit_data,
+                },
+                "relearn_baseline": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_RELEARN_BASELINE,
+                    "data": circuit_data,
+                },
+                "open_advanced_circuit_settings": {
+                    "type": "navigate",
+                    "path": _advanced_circuit_settings_path(config),
+                },
+            }
+        )
+
+    recommendations = _setting_recommendations_for_circuit(
+        coordinator,
+        circuit_id,
+    )
+    recommendation_id = _first_recommendation_id(recommendations)
+    if recommendation_id:
+        recommendation_data: dict[str, Any] = {
+            ATTR_RECOMMENDATION_ID: recommendation_id
+        }
+        entry_id = getattr(coordinator, "entry_id", None)
+        if isinstance(entry_id, str) and entry_id:
+            recommendation_data[ATTR_ENTRY_ID] = entry_id
+        actions["apply_setting_recommendation"] = {
             "domain": DOMAIN,
-            "service": SERVICE_ACKNOWLEDGE_ALERT,
-            "data": data,
+            "service": SERVICE_APPLY_SETTING_RECOMMENDATION,
+            "data": recommendation_data,
+        }
+        actions["dismiss_setting_recommendation"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_DISMISS_SETTING_RECOMMENDATION,
+            "data": recommendation_data,
+        }
+
+    return actions
+
+
+def _advanced_circuit_settings_path(config: CircuitConfig | None) -> str:
+    if config is None:
+        return "/config/integrations/integration/circuitsetup_energy_analyzer"
+    return (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+        f"?circuit_id={config.circuit_id}"
+    )
+
+
+def _setting_recommendations_for_circuit(
+    coordinator: Any,
+    circuit_id: str | None,
+) -> list[dict[str, Any]]:
+    if not circuit_id:
+        return []
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
+    recommendations = by_circuit.get(circuit_id, ()) if isinstance(
+        by_circuit,
+        dict,
+    ) else ()
+    return [_recommendation_payload(item) for item in _iter_items(recommendations)]
+
+
+def _recommendation_payload(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return dict(item)
+    payload: dict[str, Any] = {}
+    for key in (
+        ATTR_RECOMMENDATION_ID,
+        "title",
+        "summary",
+        "feature",
+        "current_value",
+        "suggested_value",
+        "reason",
+    ):
+        value = getattr(item, key, None)
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def _first_recommendation_id(recommendations: list[dict[str, Any]]) -> str | None:
+    for recommendation in recommendations:
+        recommendation_id = recommendation.get(ATTR_RECOMMENDATION_ID)
+        if isinstance(recommendation_id, str) and recommendation_id:
+            return recommendation_id
+    return None
+
+
+def _nilm_payload_for_circuit(
+    coordinator: Any,
+    circuit_id: str | None,
+) -> dict[str, Any]:
+    if not circuit_id:
+        return {"signatures": []}
+    signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
+    return {
+        "signatures": [
+            {
+                **signature,
+                "actions": _nilm_actions_for_signature(
+                    circuit_id,
+                    str(signature[ATTR_SIGNATURE_ID]),
+                ),
+            }
+            for signature in signatures
+            if signature.get(ATTR_SIGNATURE_ID)
+        ]
+    }
+
+
+def _nilm_signatures_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    state = getattr(coordinator, "state", None)
+    inventory_by_circuit = getattr(state, "nilm_unknown_loads_by_circuit", {})
+    inventory = (
+        inventory_by_circuit.get(circuit_id)
+        if isinstance(inventory_by_circuit, dict)
+        else None
+    )
+    if isinstance(inventory, dict):
+        unknown_loads = [
+            dict(item)
+            for item in _iter_items(inventory.get("unknown_loads", ()))
+            if isinstance(item, dict)
+        ]
+        if unknown_loads:
+            return unknown_loads
+
+    store_data = getattr(coordinator, "store_data", None)
+    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
+    if not isinstance(signatures_by_circuit, dict):
+        return []
+    return [
+        dict(item)
+        for item in _iter_items(signatures_by_circuit.get(circuit_id, ()))
+        if isinstance(item, dict)
+    ]
+
+
+def _nilm_actions_for_signature(
+    circuit_id: str,
+    signature_id: str,
+) -> dict[str, dict[str, Any]]:
+    data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
+    return {
+        "label": {
+            "domain": DOMAIN,
+            "service": SERVICE_LABEL_NILM_SIGNATURE,
+            "data": dict(data),
+            "requires": ["label"],
+        },
+        "ignore": {
+            "domain": DOMAIN,
+            "service": SERVICE_IGNORE_NILM_SIGNATURE,
+            "data": dict(data),
         },
         "mark_expected": {
             "domain": DOMAIN,
-            "service": SERVICE_MARK_ALERT_EXPECTED,
-            "data": data,
+            "service": SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+            "data": dict(data),
         },
-        "mark_unhelpful": {
+        "merge": {
             "domain": DOMAIN,
-            "service": SERVICE_MARK_ALERT_UNHELPFUL,
-            "data": data,
+            "service": "merge_nilm_signatures",
+            "data": {ATTR_CIRCUIT_ID: circuit_id, "source_signature_id": signature_id},
+            "requires": ["target_signature_id"],
         },
     }
+
+
+def _iter_items(value: Any) -> Iterable[Any]:
+    if isinstance(value, (str, bytes)) or value is None:
+        return ()
+    try:
+        return tuple(value)
+    except TypeError:
+        return ()
 
 
 def _circuit_payload(config: CircuitConfig | None) -> dict[str, str] | None:

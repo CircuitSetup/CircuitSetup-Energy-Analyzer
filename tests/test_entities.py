@@ -907,7 +907,10 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert setup_attrs["blocking_issue_count"] == 1
     assert setup_attrs["issue_count"] == 1
     assert setup_attrs["warning_count"] == 0
-    assert setup_attrs["next_step"] == "Add cumulative kWh source"
+    assert setup_attrs["ready"] is False
+    assert setup_attrs["next_step"] == (
+        "Add a cumulative kWh sensor to Kitchen Fridge"
+    )
     assert setup_attrs["recommended_action"] == (
         "Add a cumulative kWh sensor to Kitchen Fridge"
     )
@@ -919,6 +922,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert setup_attrs["negative_power_loads"] == []
     assert setup_attrs["issues"][0]["reason"] == (
         "Daily Energy Usage needs a cumulative energy source."
+    )
+    assert setup_attrs["issues"][0]["circuit_id"] == "fridge"
+    assert setup_attrs["issues"][0]["issue"] == "missing_energy_source"
+    assert setup_attrs["issues"][0]["fix"] == (
+        "Add a cumulative kWh sensor to Kitchen Fridge"
     )
 
     ready_coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=())
@@ -2497,6 +2505,9 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     )
     assert setup_health.native_value == "Add cumulative kWh source"
     assert setup_health.extra_state_attributes["blocking_issue_count"] == 1
+    assert setup_health.extra_state_attributes["next_step"] == (
+        "Add a cumulative kWh sensor to Kitchen Fridge"
+    )
     assert not hasattr(setup_health, "device_info")
     assert added_entities[1].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")

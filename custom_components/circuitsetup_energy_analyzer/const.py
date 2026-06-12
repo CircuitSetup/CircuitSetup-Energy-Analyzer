@@ -11,11 +11,20 @@ except ModuleNotFoundError:
 
         SENSOR = "sensor"
         BINARY_SENSOR = "binary_sensor"
+        BUTTON = "button"
+        SELECT = "select"
+        NUMBER = "number"
 
 
 DOMAIN = "circuitsetup_energy_analyzer"
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.SELECT,
+    Platform.NUMBER,
+]
 
 CONF_CIRCUITS = "circuits"
 CONF_CIRCUIT_ASSIGNMENTS = "circuit_assignments"
