@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
+from .appliance_metadata import appliance_icon_for_profile
 from .const import (
     CONF_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
@@ -3178,7 +3179,11 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         self._attr_entity_registry_visible_default = (
             description.entity_registry_visible_default
         )
-        self._attr_icon = description.icon or SENSOR_ICONS.get(description.key)
+        self._attr_icon = (
+            appliance_icon_for_profile(circuit.appliance_profile)
+            if description.key == "activity_summary"
+            else None
+        ) or description.icon or SENSOR_ICONS.get(description.key)
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
 

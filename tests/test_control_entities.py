@@ -180,6 +180,7 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         "identifiers": {(DOMAIN, "entry-1_fridge")},
         "name": "Kitchen Fridge",
         "manufacturer": "CircuitSetup",
+        "suggested_area": "Kitchen",
     }
     assert (
         by_unique_id["entry-1_fridge_relearn_baseline"].suggested_object_id

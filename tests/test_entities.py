@@ -86,7 +86,38 @@ def test_circuit_device_info_uses_only_device_registry_fields() -> None:
         "identifiers": {(DOMAIN, "entry-1_fridge")},
         "name": "Fridge",
         "manufacturer": "CircuitSetup",
+        "suggested_area": "Kitchen",
     }
+    assert "icon" not in entity.device_info
+
+
+def test_circuit_device_info_matches_ranked_existing_area_names(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import entity as entity_module
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        CircuitAnalyzerEntity,
+        CircuitInfo,
+    )
+
+    monkeypatch.setattr(
+        entity_module,
+        "existing_area_names_for_hass",
+        lambda hass: ("Basement", "Garage"),
+    )
+    analyzer_entity = CircuitAnalyzerEntity(
+        SimpleNamespace(data=AnalyzerState(), hass=object()),
+        entry_id="entry-1",
+        circuit=CircuitInfo(
+            circuit_id="mains",
+            name="Mains",
+            appliance_profile=ApplianceProfile.MAINS_NILM.value,
+        ),
+        key="activity_summary",
+        name_suffix="Activity Summary",
+    )
+
+    assert analyzer_entity.device_info["suggested_area"] == "Basement"
 
 
 def test_apply_entity_profile_to_registry_changes_only_integration_owned_rows(
@@ -1629,6 +1660,7 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
     )
 
     expected_icons = {
+        "activity_summary": "mdi:fridge-outline",
         "health_summary": "mdi:heart-pulse",
         "learning_progress": "mdi:school-outline",
         "circuit_mode": "mdi:transmission-tower",

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import (
     CONF_CIRCUITS,
     CONF_ENTITY_DETAIL_LEVEL,
@@ -597,6 +598,7 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
         self._entry_id = entry_id
         self._circuit_id = circuit.circuit_id
         self._circuit_name = circuit.name
+        self._appliance_profile = circuit.appliance_profile
         self._attr_name = f"{circuit.name} {name_suffix}"
         self._attr_unique_id = f"{entry_id}_{circuit.circuit_id}_{key}"
 
@@ -623,11 +625,18 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
     @property
     def device_info(self) -> dict[str, Any]:
         """Group diagnostic entities by analyzed circuit in Home Assistant."""
-        return {
+        device_info: dict[str, Any] = {
             "identifiers": {(DOMAIN, f"{self._entry_id}_{self._circuit_id}")},
             "name": self._circuit_name,
             "manufacturer": "CircuitSetup",
         }
+        suggested_area = suggested_area_for_profile(
+            self._appliance_profile,
+            existing_area_names_for_hass(getattr(self.coordinator, "hass", None)),
+        )
+        if suggested_area:
+            device_info["suggested_area"] = suggested_area
+        return device_info
 
     @property
     def coordinator_state(self) -> Any:
