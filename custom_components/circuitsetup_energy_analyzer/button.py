@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,8 +30,15 @@ class CircuitButtonDescription:
     method_name: str
     args_fn: Callable[[str], tuple[Any, ...]]
     icon: str
+    device_class: Any | None = None
+    entity_category: Any | None = None
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
+    force_update: bool = False
+    has_entity_name: bool = False
+    translation_key: str | None = None
+    translation_placeholders: Mapping[str, str] | None = None
+    unit_of_measurement: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +48,15 @@ class GlobalButtonDescription:
     method_name: str
     args: tuple[Any, ...]
     icon: str
+    device_class: Any | None = None
+    entity_category: Any | None = None
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
+    force_update: bool = False
+    has_entity_name: bool = False
+    translation_key: str | None = None
+    translation_placeholders: Mapping[str, str] | None = None
+    unit_of_measurement: str | None = None
 
 
 CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (

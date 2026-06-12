@@ -23,6 +23,31 @@ def _platform_value(platform: object) -> str:
     return str(getattr(platform, "value", platform))
 
 
+def _assert_base_description_defaults(description: object) -> None:
+    assert description.device_class is None
+    assert description.entity_category is None
+    assert description.entity_registry_enabled_default is True
+    assert description.entity_registry_visible_default is True
+    assert description.force_update is False
+    assert description.has_entity_name is False
+    assert description.translation_key is None
+    assert description.translation_placeholders is None
+    assert description.unit_of_measurement is None
+
+
+def _disable_registry_pruning(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
+    monkeypatch.setattr(
+        module,
+        "prune_stale_entity_registry_entries",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        "prune_stale_device_registry_entries",
+        lambda *args, **kwargs: None,
+    )
+
+
 def _circuit() -> CircuitConfig:
     return CircuitConfig(
         circuit_id="fridge",
@@ -124,15 +149,18 @@ def test_platforms_include_daily_control_entities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_button_setup_entry_adds_circuit_and_global_controls() -> None:
-    from custom_components.circuitsetup_energy_analyzer.button import (
-        async_setup_entry,
+async def test_button_setup_entry_adds_circuit_and_global_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        button,
     )
 
+    _disable_registry_pruning(monkeypatch, button)
     coordinator = _FakeCoordinator()
     added_entities = []
 
-    await async_setup_entry(
+    await button.async_setup_entry(
         _hass_with(coordinator),
         SimpleNamespace(entry_id="entry-1", data={}),
         added_entities.extend,
@@ -162,8 +190,7 @@ async def test_button_setup_entry_adds_circuit_and_global_controls() -> None:
         == "circuitsetup_energy_analyzer_run_mapping_checks"
     )
     for entity in added_entities:
-        assert entity.entity_description.entity_registry_enabled_default is True
-        assert entity.entity_description.entity_registry_visible_default is True
+        _assert_base_description_defaults(entity.entity_description)
 
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
@@ -188,15 +215,18 @@ async def test_button_setup_entry_adds_circuit_and_global_controls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls() -> None:
-    from custom_components.circuitsetup_energy_analyzer.select import (
-        async_setup_entry,
+async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        select,
     )
 
+    _disable_registry_pruning(monkeypatch, select)
     coordinator = _FakeCoordinator()
     added_entities = []
 
-    await async_setup_entry(
+    await select.async_setup_entry(
         _hass_with(coordinator),
         SimpleNamespace(entry_id="entry-1", data={}),
         added_entities.extend,
@@ -213,8 +243,8 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls() -
     assert sensitivity.suggested_object_id == "fridge_alert_sensitivity"
     assert sensitivity.options == ["quiet", "balanced", "sensitive"]
     assert sensitivity.current_option == "quiet"
-    assert sensitivity.entity_description.entity_registry_enabled_default is True
-    assert sensitivity.entity_description.entity_registry_visible_default is True
+    _assert_base_description_defaults(sensitivity.entity_description)
+    assert sensitivity.entity_description.options is None
 
     detail_level = by_unique_id["entry-1_entity_detail_level"]
     assert detail_level.name == "CircuitSetup Energy Analyzer Entity Detail Level"
@@ -231,15 +261,18 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls() -
 
 
 @pytest.mark.asyncio
-async def test_number_setup_entry_adds_daily_energy_goal_control() -> None:
-    from custom_components.circuitsetup_energy_analyzer.number import (
-        async_setup_entry,
+async def test_number_setup_entry_adds_daily_energy_goal_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        number,
     )
 
+    _disable_registry_pruning(monkeypatch, number)
     coordinator = _FakeCoordinator()
     added_entities = []
 
-    await async_setup_entry(
+    await number.async_setup_entry(
         _hass_with(coordinator),
         SimpleNamespace(entry_id="entry-1", data={}),
         added_entities.extend,
@@ -254,8 +287,8 @@ async def test_number_setup_entry_adds_daily_energy_goal_control() -> None:
     assert goal.native_min_value == 0.0
     assert goal.native_step == 0.1
     assert goal.native_unit_of_measurement == "kWh"
-    assert goal.entity_description.entity_registry_enabled_default is True
-    assert goal.entity_description.entity_registry_visible_default is True
+    _assert_base_description_defaults(goal.entity_description)
+    assert goal.entity_description.mode is None
 
     await goal.async_set_native_value(6.25)
 
