@@ -2045,6 +2045,21 @@ def test_settings_suggestions_helpers_are_feature_module_exports() -> None:
     assert feature_module.settings_suggestions_attributes is sensor_attributes
 
 
+def test_setup_health_helpers_are_feature_module_exports() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities import (
+        setup_health as feature_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes as sensor_attributes,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_value as sensor_value,
+    )
+
+    assert feature_module.setup_health_value is sensor_value
+    assert feature_module.setup_health_attributes is sensor_attributes
+
+
 def test_status_sensor_entities_explain_machine_status_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
