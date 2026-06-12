@@ -30,12 +30,33 @@ Use the PR template to call out:
 - Whether a release is needed.
 - Whether Home Assistant requires a restart, reload, or manual live check.
 
+## Review Feedback
+
+Treat ChatGPT Codex connector suggestions like normal PR review feedback.
+
+Before merging:
+
+1. Wait for GitHub Actions and automated review feedback to finish on the latest
+   PR head.
+2. Read each connector suggestion and separate actionable correctness,
+   compatibility, test, and UX feedback from informational comments.
+3. Implement accepted suggestions on the same PR branch.
+4. Add or update tests when the accepted suggestion changes behavior.
+5. Rerun the relevant local checks and push the follow-up commit.
+6. Wait for the updated PR checks to pass.
+7. Leave a reply or note on suggestions that are intentionally not applied,
+   with the technical reason.
+
+Do not merge while there are unresolved actionable connector suggestions.
+
 ## Merging
 
 - Prefer squash merge for small single-purpose PRs.
 - Use a normal merge commit only when preserving multiple commits helps review or audit.
 - Rebase or update the branch before merge when required checks are stale.
 - Keep unrelated work out of release PRs.
+- Delete the remote branch after merge.
+- After syncing `master`, delete the local feature branch once no work depends on it.
 
 ## Required Checks
 
