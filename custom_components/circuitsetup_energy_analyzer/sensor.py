@@ -26,6 +26,10 @@ from .demo import (
 from .demo import (
     is_demo_source_entity_id as _is_demo_source_entity_id,
 )
+from .entities.settings_suggestions import (
+    settings_suggestions_attributes,
+    settings_suggestions_value,
+)
 from .entity import (
     CircuitAnalyzerEntity,
     CoordinatorEntity,
@@ -46,17 +50,6 @@ from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, Sen
 from .profiles import get_profile_definition
 from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name, friendly_sensitivity_label
-
-SETTINGS_SUGGESTIONS_ATTRIBUTE_MAX_ITEMS = 5
-SETTINGS_SUGGESTIONS_ATTRIBUTE_FIELDS = (
-    "recommendation_id",
-    "setting_key",
-    "setting_label",
-    "current_value",
-    "suggested_value",
-    "unit",
-    "confidence",
-)
 
 try:
     from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -266,62 +259,6 @@ def sensitivity_value(state: Any, circuit_id: str) -> str:
     return friendly_sensitivity_label(
         getattr(state, "sensitivity_by_circuit", {}).get(circuit_id, "balanced")
     )
-
-
-def settings_suggestions_value(state: Any, circuit_id: str) -> int:
-    """Return the pending settings recommendation count for a circuit."""
-    return int(
-        getattr(state, "settings_recommendation_count_by_circuit", {}).get(
-            circuit_id,
-            0,
-        )
-    )
-
-
-def settings_suggestions_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
-    """Return pending settings recommendations for dashboard and automation use."""
-    recommendations = getattr(
-        state,
-        "settings_recommendations_by_circuit",
-        {},
-    ).get(circuit_id, [])
-    recommendation_items = (
-        list(recommendations)
-        if isinstance(recommendations, Iterable)
-        and not isinstance(recommendations, (str, bytes))
-        else []
-    )
-    shown_recommendations = [
-        _setting_recommendation_attribute_preview(recommendation)
-        for recommendation in recommendation_items[
-            :SETTINGS_SUGGESTIONS_ATTRIBUTE_MAX_ITEMS
-        ]
-    ]
-    return {
-        "pending_count": settings_suggestions_value(state, circuit_id),
-        "shown_count": len(shown_recommendations),
-        "has_more": len(recommendation_items) > len(shown_recommendations),
-        "recommendations": shown_recommendations,
-    }
-
-
-def _setting_recommendation_attribute_preview(
-    recommendation: Any,
-) -> dict[str, Any]:
-    """Return a stable, bounded recommendation preview for entity attributes."""
-    return {
-        field: value
-        for field in SETTINGS_SUGGESTIONS_ATTRIBUTE_FIELDS
-        if (value := _recommendation_attribute_value(recommendation, field))
-        is not None
-    }
-
-
-def _recommendation_attribute_value(recommendation: Any, field: str) -> Any:
-    """Read a recommendation value from dicts or advisor dataclasses."""
-    if isinstance(recommendation, Mapping):
-        return recommendation.get(field)
-    return getattr(recommendation, field, None)
 
 
 def circuit_mode_value(state: Any, circuit_id: str) -> str:
