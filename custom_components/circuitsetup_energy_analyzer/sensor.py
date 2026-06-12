@@ -33,6 +33,7 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    enable_summary_registry_entries,
     entity_detail_level_for_coordinator,
     entity_enabled_default_for_tier,
     hide_entity_registry_entries,
@@ -2089,6 +2090,8 @@ _SUMMARY_SENSOR_KEYS = {
     "electrical_health",
     "energy_summary",
     "daily_energy_usage",
+    "nilm_signature_count",
+    "nilm_unknown_loads",
 }
 _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     *_SUMMARY_SENSOR_KEYS,
@@ -3403,6 +3406,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entry_id=entry_id,
         entity_domain="sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
+    )
+    enable_summary_registry_entries(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
     )
     hide_entity_registry_entries(
         hass,

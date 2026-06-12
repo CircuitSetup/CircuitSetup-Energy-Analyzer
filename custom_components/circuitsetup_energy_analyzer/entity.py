@@ -162,6 +162,51 @@ def apply_entity_profile_to_registry(
     return plan
 
 
+def enable_summary_registry_entries(
+    hass: Any,
+    *,
+    entry_id: str,
+    entity_domain: str,
+    tier_by_unique_id_suffix: Mapping[str, EntityTier],
+) -> dict[str, Any]:
+    """Re-enable integration-disabled summary entities after tier promotions."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return {
+            "enabled": 0,
+            "left_user_disabled": 0,
+            "unchanged": 0,
+            "ignored": 0,
+            "actions": [],
+        }
+
+    registry = er.async_get(hass)
+    update_entity = getattr(registry, "async_update_entity", None)
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    actions = _summary_registry_actions(
+        values,
+        entry_id=entry_id,
+        entity_domain=entity_domain,
+        tier_by_unique_id_suffix=tier_by_unique_id_suffix,
+    )
+    if callable(update_entity):
+        for action in actions:
+            if action["action"] == "enable":
+                update_entity(action["entity_id"], disabled_by=None)
+
+    return {
+        "enabled": sum(1 for action in actions if action["action"] == "enable"),
+        "left_user_disabled": sum(
+            1 for action in actions if action["action"] == "left_user_disabled"
+        ),
+        "unchanged": sum(1 for action in actions if action["action"] == "unchanged"),
+        "ignored": sum(1 for action in actions if action["action"] == "ignore"),
+        "actions": actions,
+    }
+
+
 def _entity_profile_registry_actions(
     entries: Iterable[Any],
     *,
@@ -211,6 +256,56 @@ def _entity_profile_registry_actions(
                 "disabled_by": actual_disabled_by,
                 "desired_disabled_by": desired_disabled_by,
                 "action": action,
+            }
+        )
+    return actions
+
+
+def _summary_registry_actions(
+    entries: Iterable[Any],
+    *,
+    entry_id: str,
+    entity_domain: str,
+    tier_by_unique_id_suffix: Mapping[str, EntityTier],
+) -> list[dict[str, Any]]:
+    prefix = f"{entity_domain}."
+    suffixes = sorted(tier_by_unique_id_suffix, key=len, reverse=True)
+    actions: list[dict[str, Any]] = []
+    for entry in entries:
+        entity_id = str(getattr(entry, "entity_id", ""))
+        unique_id = str(getattr(entry, "unique_id", ""))
+        if (
+            getattr(entry, "config_entry_id", None) != entry_id
+            or getattr(entry, "platform", None) != DOMAIN
+            or not entity_id.startswith(prefix)
+        ):
+            continue
+        suffix = next(
+            (
+                candidate
+                for candidate in suffixes
+                if unique_id.endswith(f"_{candidate}")
+            ),
+            None,
+        )
+        if suffix is None:
+            continue
+
+        tier = tier_by_unique_id_suffix[suffix]
+        disabled_by = _registry_disabled_by_name(getattr(entry, "disabled_by", None))
+        if tier is not EntityTier.SUMMARY:
+            action = "ignore"
+        elif disabled_by == "integration":
+            action = "enable"
+        elif disabled_by == "user":
+            action = "left_user_disabled"
+        else:
+            action = "unchanged"
+        actions.append(
+            {
+                "action": action,
+                "entity_id": entity_id,
+                "suffix": suffix,
             }
         )
     return actions

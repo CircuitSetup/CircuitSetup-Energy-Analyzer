@@ -194,6 +194,108 @@ def test_apply_entity_profile_to_registry_changes_only_integration_owned_rows(
     ]
 
 
+def test_enable_summary_registry_entries_repairs_newly_promoted_entities(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.mains_nilm_nilm_unknown_loads": SimpleNamespace(
+                    entity_id="sensor.mains_nilm_nilm_unknown_loads",
+                    unique_id="entry-1_mains_nilm_unknown_loads",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="integration",
+                ),
+                "sensor.mains_nilm_nilm_discovered_signatures": SimpleNamespace(
+                    entity_id="sensor.mains_nilm_nilm_discovered_signatures",
+                    unique_id="entry-1_mains_nilm_signature_count",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="integration",
+                ),
+                "sensor.mains_nilm_power_quality_evidence": SimpleNamespace(
+                    entity_id="sensor.mains_nilm_power_quality_evidence",
+                    unique_id="entry-1_mains_power_quality_evidence",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="integration",
+                ),
+                "sensor.mains_nilm_activity_summary": SimpleNamespace(
+                    entity_id="sensor.mains_nilm_activity_summary",
+                    unique_id="entry-1_mains_activity_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="user",
+                ),
+            }
+            self.updated: list[tuple[str, object]] = []
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs.get("disabled_by")))
+            self.entities[entity_id].disabled_by = kwargs.get("disabled_by")
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    plan = entity.enable_summary_registry_entries(
+        SimpleNamespace(entity_registry=FakeRegistry()),
+        entry_id="entry-1",
+        entity_domain="sensor",
+        tier_by_unique_id_suffix={
+            "activity_summary": EntityTier.SUMMARY,
+            "nilm_signature_count": EntityTier.SUMMARY,
+            "nilm_unknown_loads": EntityTier.SUMMARY,
+            "power_quality_evidence": EntityTier.DIAGNOSTIC,
+        },
+    )
+
+    assert plan == {
+        "enabled": 2,
+        "left_user_disabled": 1,
+        "unchanged": 0,
+        "ignored": 1,
+        "actions": [
+            {
+                "action": "enable",
+                "entity_id": "sensor.mains_nilm_nilm_unknown_loads",
+                "suffix": "nilm_unknown_loads",
+            },
+            {
+                "action": "enable",
+                "entity_id": "sensor.mains_nilm_nilm_discovered_signatures",
+                "suffix": "nilm_signature_count",
+            },
+            {
+                "action": "ignore",
+                "entity_id": "sensor.mains_nilm_power_quality_evidence",
+                "suffix": "power_quality_evidence",
+            },
+            {
+                "action": "left_user_disabled",
+                "entity_id": "sensor.mains_nilm_activity_summary",
+                "suffix": "activity_summary",
+            },
+        ],
+    }
+
+
 def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> (
     None
 ):
@@ -1344,6 +1446,8 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "electrical_health",
         "energy_summary",
         "daily_energy_usage",
+        "nilm_signature_count",
+        "nilm_unknown_loads",
         "weather_context",
         "outdoor_temperature",
         "rain_pump_correlation",
@@ -1365,6 +1469,8 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "activity_summary",
         "electrical_health",
         "energy_summary",
+        "nilm_signature_count",
+        "nilm_unknown_loads",
         "settings_suggestions",
         "daily_energy_usage",
         "weather_context",
@@ -1421,6 +1527,8 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert descriptions["settings_suggestions"].entity_registry_visible_default is False
     assert descriptions["health_summary"].entity_tier is EntityTier.SUMMARY
     assert descriptions["daily_energy_usage"].entity_tier is EntityTier.SUMMARY
+    assert descriptions["nilm_signature_count"].entity_tier is EntityTier.SUMMARY
+    assert descriptions["nilm_unknown_loads"].entity_tier is EntityTier.SUMMARY
     assert descriptions["energy_goal_status"].entity_tier is EntityTier.FEATURE
     assert descriptions["power_quality_score"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["power_quality_score"].entity_registry_enabled_default is False
