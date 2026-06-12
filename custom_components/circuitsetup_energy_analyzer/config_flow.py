@@ -822,9 +822,23 @@ def appliance_profile_options() -> list[dict[str, str]]:
 
 def _selectable_source_entity_ids(
     source_entity_ids: Iterable[str] | None,
+    *selected_entity_ids: Iterable[str],
 ) -> tuple[str, ...]:
     return tuple(
-        dict.fromkeys([*list(source_entity_ids or ()), *_DEMO_SOURCE_ENTITY_IDS])
+        dict.fromkeys(
+            [
+                *list(source_entity_ids or ()),
+                *_DEMO_SOURCE_ENTITY_IDS,
+                *[
+                    entity_id
+                    for values in selected_entity_ids
+                    for entity_id in _strict_string_list(
+                        values,
+                        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+                    )
+                ],
+            ]
+        )
     )
 
 
@@ -937,14 +951,17 @@ def _mains_schema(
         [],
     )
     source_entities = _entry_value(config_entry, CONF_SOURCE_ENTITIES, [])
-    selectable_source_entities = [
-        *list(source_entity_ids or ()),
-        *_DEMO_SOURCE_ENTITY_IDS,
-        *_strict_string_list(
+    selectable_source_entities = _selectable_source_entity_ids(
+        source_entity_ids,
+        _strict_string_list(
             source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         ),
-    ]
+        _strict_string_list(
+            mains_source_entities,
+            invalid_error_key="invalid_mains_source_entities",
+        ),
+    )
     return vol.Schema(
         {
             vol.Optional(
@@ -3393,6 +3410,10 @@ def _options_schema(
         CONF_SOURCE_DEVICES,
         data.get(CONF_SOURCE_DEVICES, []),
     )
+    mains_source_entities = options.get(
+        CONF_MAINS_SOURCE_ENTITIES,
+        data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+    )
     outdoor_temperature_entity = options.get(
         CONF_OUTDOOR_TEMPERATURE_ENTITY,
         data.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, ""),
@@ -3413,14 +3434,21 @@ def _options_schema(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
     )
-    selectable_source_entities = [
-        *list(source_entity_ids or ()),
-        *_DEMO_SOURCE_ENTITY_IDS,
-        *_strict_string_list(
+    selectable_source_entities = _selectable_source_entity_ids(
+        source_entity_ids,
+        _strict_string_list(
             source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         ),
-    ]
+        _strict_string_list(
+            extra_source_entities,
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        ),
+        _strict_string_list(
+            mains_source_entities,
+            invalid_error_key="invalid_mains_source_entities",
+        ),
+    )
     return vol.Schema(
         {
             vol.Optional(

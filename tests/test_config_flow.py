@@ -2596,6 +2596,52 @@ def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> N
     )
 
 
+def test_options_schema_includes_saved_demo_entity_ids_with_registry_suffixes(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_mains_l1_energy_2",
+            ],
+        },
+    )
+
+    source_schema = config_flow._options_schema(entry)
+    mains_schema = config_flow._mains_schema(entry)
+
+    extra_include_entities = _schema_validator(
+        source_schema,
+        CONF_EXTRA_SOURCE_ENTITIES,
+    )["entity"]["include_entities"]
+    mains_include_entities = _schema_validator(
+        mains_schema,
+        CONF_MAINS_SOURCE_ENTITIES,
+    )["entity"]["include_entities"]
+
+    assert "sensor.cs_energy_analyzer_demo_refrigerator_energy_2" in (
+        extra_include_entities
+    )
+    assert "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2" in (
+        extra_include_entities
+    )
+    assert "sensor.cs_energy_analyzer_demo_mains_l1_energy_2" in (
+        mains_include_entities
+    )
+
+
 def test_options_source_entities_override_setup_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         _source_entities_for_entry,
