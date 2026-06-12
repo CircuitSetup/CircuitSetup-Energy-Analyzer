@@ -9,3 +9,4 @@ htmlcov/
 /.codex
 /docs/superpowers
 /.vscode
+*.egg-info/
