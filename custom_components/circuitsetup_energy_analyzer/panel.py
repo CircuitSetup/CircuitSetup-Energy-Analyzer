@@ -28,13 +28,13 @@ from .services import (
     SERVICE_RELEARN_BASELINE,
     SERVICE_START_MAINTENANCE,
 )
-from .ux import alert_evidence_detail
+from .ux import alert_evidence_detail, friendly_feature_name
 
 PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260612-action-availability"
+PANEL_MODULE_VERSION = "20260613-friendly-nilm-labels"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -176,6 +176,10 @@ def alert_evidence_payload(
         "alert": None,
         "circuit": None,
         "actions": {},
+        "message": "The requested alert or circuit evidence is no longer available.",
+        "next_step": (
+            "Open a newer notification or review the appliance summary sensors."
+        ),
     }
 
 
@@ -355,9 +359,21 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
                 payload[key] = value
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
+    payload["display_label"] = _recommendation_display_label(payload)
     if isinstance(recommendation_id, str) and recommendation_id:
         payload["actions"] = _recommendation_actions(coordinator, recommendation_id)
     return payload
+
+
+def _recommendation_display_label(payload: Mapping[str, Any]) -> str:
+    for key in ("title", "summary"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    feature = str(payload.get("feature") or "").strip()
+    if feature:
+        return friendly_feature_name(feature)
+    return "Suggested setting"
 
 
 def _recommendation_actions(
@@ -406,6 +422,10 @@ def _nilm_payload_for_circuit(
         "signatures": [
             {
                 **signature,
+                "display_label": _nilm_signature_label(
+                    signature,
+                    str(signature[ATTR_SIGNATURE_ID]),
+                ),
                 "actions": _nilm_actions_for_signature(
                     circuit_id,
                     str(signature[ATTR_SIGNATURE_ID]),
