@@ -3873,8 +3873,50 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._active_repair_issues.discard(issue)
 
         for issue in desired - self._active_repair_issues:
-            await repairs.async_create_circuit_issue(self.hass, issue[0], issue[1])
+            await repairs.async_create_circuit_issue(
+                self.hass,
+                issue[0],
+                issue[1],
+                data=self._setup_health_repair_data(issue[0], issue[1]),
+            )
             self._active_repair_issues.add(issue)
+
+    def _setup_health_repair_data(
+        self: Self,
+        circuit_id: str,
+        problem: str,
+    ) -> dict[str, str]:
+        config = self._config_for_circuit(circuit_id)
+        circuit_name = getattr(config, "name", None) or circuit_id
+        recommended_actions = {
+            "missing_energy_source": (
+                f"Add a cumulative kWh sensor to {circuit_name}"
+            ),
+            "missing_mains_source": "Add a mains or whole-home source",
+            "missing_electrical_metrics": (
+                f"Add matching electrical metrics for {circuit_name}"
+            ),
+            "check_ct_direction": (
+                f"Check CT direction or power-flow mode for {circuit_name}"
+            ),
+            "dual_phase_missing_leg": (
+                f"Review the selected leg sensors for {circuit_name}"
+            ),
+            "missing_rain_context_source": f"Add a rain sensor for {circuit_name}",
+            "missing_water_flow_source": (
+                f"Add a water-flow sensor for {circuit_name}"
+            ),
+            "utility_comparison_source_mismatch": (
+                f"Review utility comparison source settings for {circuit_name}"
+            ),
+        }
+        return {
+            "circuit_name": str(circuit_name),
+            "recommended_action": recommended_actions.get(
+                problem,
+                f"Review setup for {circuit_name}",
+            ),
+        }
 
     def _setup_health_has_missing_mains_status(self: Self, circuit_id: str) -> bool:
         for field_name in (

@@ -159,14 +159,17 @@ def _repair_issue_data(
     source_entities: Iterable[str] = (),
     data: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    fix = _REPAIR_FIXES.get(
+        problem,
+        "Review this circuit in integration options.",
+    )
     issue_data = {
         "circuit_id": circuit_id,
+        "circuit_name": circuit_id,
         "problem": problem,
-        "fix": _REPAIR_FIXES.get(
-            problem,
-            "Review this circuit in integration options.",
-        ),
+        "fix": fix,
         "open_path": REPAIR_OPEN_PATH,
+        "recommended_action": fix,
         "source_entities": _dedupe_strings(source_entities),
     }
     if data is not None:
@@ -183,8 +186,10 @@ def _repair_translation_placeholders(issue_data: Mapping[str, Any]) -> dict[str,
     )
     return {
         "circuit_id": str(issue_data.get("circuit_id", "")),
+        "circuit_name": str(issue_data.get("circuit_name", "")),
         "fix": str(issue_data.get("fix", "")),
         "open_path": str(issue_data.get("open_path", "")),
+        "recommended_action": str(issue_data.get("recommended_action", "")),
         "source_entities": source_text,
     }
 

@@ -214,20 +214,28 @@ async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
         "fridge",
         "missing_energy_source",
         source_entities=("sensor.fridge_power", "sensor.fridge_power"),
+        data={
+            "circuit_name": "Refrigerator",
+            "recommended_action": "Add a cumulative kWh sensor to Refrigerator",
+        },
     )
 
     _, kwargs = calls[0]
     assert kwargs["data"] == {
         "circuit_id": "fridge",
+        "circuit_name": "Refrigerator",
         "problem": "missing_energy_source",
         "fix": "Add a cumulative kWh source for this circuit.",
         "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
+        "recommended_action": "Add a cumulative kWh sensor to Refrigerator",
         "source_entities": ["sensor.fridge_power"],
     }
     assert kwargs["translation_placeholders"] == {
         "circuit_id": "fridge",
+        "circuit_name": "Refrigerator",
         "fix": "Add a cumulative kWh source for this circuit.",
         "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
+        "recommended_action": "Add a cumulative kWh sensor to Refrigerator",
         "source_entities": "sensor.fridge_power",
     }
 
