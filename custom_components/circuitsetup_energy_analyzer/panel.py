@@ -4,10 +4,16 @@ import inspect
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from .const import DOMAIN
 from .models import AlertEvidence, CircuitConfig
 from .notifications import notification_id_for_alert
+from .recommendation_guidance import (
+    recommendation_evidence_preview,
+    recommendation_setting_default_value,
+    recommendation_setting_expected_effect,
+)
 from .services import (
     ATTR_ALERT_ID,
     ATTR_CIRCUIT_ID,
@@ -386,11 +392,16 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
             ATTR_RECOMMENDATION_ID,
             "title",
             "summary",
+            "circuit_id",
+            "setting_key",
             "setting_label",
             "feature",
             "current_value",
             "suggested_value",
+            "unit",
             "reason",
+            "evidence",
+            "confidence",
         ):
             value = getattr(item, key, None)
             if value is not None:
@@ -398,8 +409,13 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
     payload["display_label"] = _recommendation_display_label(payload)
+    _add_recommendation_guidance(payload)
     if isinstance(recommendation_id, str) and recommendation_id:
         payload["actions"] = _recommendation_actions(coordinator, recommendation_id)
+        evidence_path = _recommendation_evidence_path(payload, recommendation_id)
+        if evidence_path:
+            payload["evidence_path"] = evidence_path
+            payload["actions"]["preview"] = {"path": evidence_path}
     return payload
 
 
@@ -439,6 +455,35 @@ def _recommendation_actions(
             "data": dict(data),
         },
     }
+
+
+def _add_recommendation_guidance(payload: dict[str, Any]) -> None:
+    setting_key = str(payload.get("setting_key") or "")
+    default_value = recommendation_setting_default_value(setting_key)
+    if default_value is not None:
+        payload["default_value"] = default_value
+    expected_effect = recommendation_setting_expected_effect(setting_key)
+    if expected_effect:
+        payload["expected_effect"] = expected_effect
+    evidence_preview = recommendation_evidence_preview(payload.get("evidence"))
+    if evidence_preview:
+        payload["evidence_preview"] = evidence_preview
+
+
+def _recommendation_evidence_path(
+    payload: Mapping[str, Any],
+    recommendation_id: str,
+) -> str:
+    circuit_id = str(payload.get("circuit_id") or "").strip()
+    if not circuit_id:
+        return ""
+    query = urlencode(
+        {
+            "circuit_id": circuit_id,
+            ATTR_RECOMMENDATION_ID: recommendation_id,
+        }
+    )
+    return f"/{PANEL_URL_PATH}?{query}"
 
 
 def _first_recommendation_id(recommendations: list[dict[str, Any]]) -> str | None:

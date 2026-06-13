@@ -195,12 +195,16 @@ from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
+from .recommendation_guidance import (
+    is_hidden_recommendation_evidence_key,
+    recommendation_setting_default_value,
+    recommendation_setting_expected_effect,
+)
 from .solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
 )
-from .usage import DEFAULT_DAILY_USAGE_SPIKE_RATIO
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_SOURCE_TYPE,
@@ -3551,35 +3555,16 @@ def _recommendation_evidence_text(recommendation: Any) -> str:
 
 def _recommendation_default_value(recommendation: Any) -> Any:
     setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
-    defaults = {
-        FIELD_DAILY_SPIKE_RATIO: DEFAULT_DAILY_USAGE_SPIKE_RATIO,
-    }
-    return defaults.get(setting_key)
+    return recommendation_setting_default_value(setting_key)
 
 
 def _recommendation_expected_effect(recommendation: Any) -> str:
     setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
-    effects = {
-        FIELD_DAILY_SPIKE_RATIO: (
-            "Tune this setting toward the observed history without requiring "
-            "manual threshold math."
-        ),
-    }
-    return effects.get(
-        setting_key,
-        (
-            "Tune this setting toward the observed history without requiring "
-            "manual threshold math."
-        ),
-    )
+    return recommendation_setting_expected_effect(setting_key)
 
 
 def _is_hidden_recommendation_evidence_key(key: str) -> bool:
-    normalized = key.lower()
-    return (
-        "entity" in normalized
-        or normalized in {"source_entities", "entity_ids", "entities"}
-    )
+    return is_hidden_recommendation_evidence_key(key)
 
 
 def _format_recommendation_value(value: Any, unit: Any) -> str:

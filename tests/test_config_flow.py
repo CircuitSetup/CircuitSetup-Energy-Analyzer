@@ -485,6 +485,51 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
 
 
 @pytest.mark.asyncio
+async def test_options_recommendations_step_guides_capacity_suggestions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "ev_charger": [
+                    {
+                        "recommendation_id": "ev_charger:warning_ratio:v1",
+                        "circuit_id": "ev_charger",
+                        "circuit_name": "EV Charger",
+                        "setting_key": "warning_ratio",
+                        "setting_label": "Capacity Warning Ratio",
+                        "current_value": 0.9,
+                        "suggested_value": 0.75,
+                        "confidence": 0.76,
+                        "reason": "Observed sustained high-current samples.",
+                        "evidence": {
+                            "observed_samples": 8,
+                            "p95_current_amps": 36.4,
+                        },
+                    }
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations()
+
+    summary = result["description_placeholders"]["recommendations"]
+    assert "EV Charger - Capacity Warning Ratio: 0.9 -> 0.75" in summary
+    assert "Default value: 0.8" in summary
+    assert "Expected effect: Warn earlier when usage approaches capacity" in summary
+    assert "Observed Samples: 8" in summary
+    assert "P95 Current Amps: 36.4" in summary
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "method_name"),
     [
