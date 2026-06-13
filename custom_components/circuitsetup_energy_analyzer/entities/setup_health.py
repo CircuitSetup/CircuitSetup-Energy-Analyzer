@@ -111,6 +111,9 @@ def _setup_health_attributes_for_issues(
         "ready": ready,
         "next_step": primary["recommended_action"],
         "recommended_action": primary["recommended_action"],
+        "primary_issue": primary.get("issue"),
+        "primary_severity": primary.get("severity"),
+        "issue_summary": _setup_health_issue_summary(issues, primary),
         "affected_circuit": primary["affected_circuit"],
         "affected_circuit_name": primary["affected_circuit_name"],
         "affected_circuits": affected_circuits,
@@ -201,6 +204,19 @@ def _setup_health_severity_count(
     severity: str,
 ) -> int:
     return sum(1 for issue in issues if issue.get("severity") == severity)
+
+
+def _setup_health_issue_summary(
+    issues: list[dict[str, Any]],
+    primary: Mapping[str, Any],
+) -> str:
+    if not issues:
+        return "Ready"
+    severity = str(primary.get("severity") or "issue")
+    count = len(issues)
+    suffix = "" if count == 1 else "s"
+    more = "" if count == 1 else f" (+{count - 1} more)"
+    return f"{count} {severity}{suffix}: {primary['recommended_action']}{more}"
 
 
 def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:

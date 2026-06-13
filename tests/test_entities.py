@@ -1225,6 +1225,11 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
     assert setup_attrs["recommended_action"] == (
         "Add a cumulative kWh sensor to Kitchen Fridge"
     )
+    assert setup_attrs["primary_issue"] == "missing_energy_source"
+    assert setup_attrs["primary_severity"] == "warning"
+    assert setup_attrs["issue_summary"] == (
+        "1 warning: Add a cumulative kWh sensor to Kitchen Fridge"
+    )
     assert setup_attrs["affected_circuit"] == "fridge"
     assert setup_attrs["affected_circuits"] == ["fridge"]
     assert setup_attrs["missing_energy_sources"] == ["fridge"]
@@ -1590,6 +1595,11 @@ def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
     assert attrs["missing_rain_sources"] == ["sump_pump"]
     assert attrs["missing_water_flow_sources"] == ["washer"]
     assert attrs["utility_comparison_setup_issues"] == ["mains"]
+    assert attrs["primary_issue"] == "missing_rain_context_source"
+    assert attrs["primary_severity"] == "warning"
+    assert attrs["issue_summary"] == (
+        "3 warnings: Add a rain sensor for Sump Pump (+2 more)"
+    )
     assert [issue["issue"] for issue in attrs["issues"]] == [
         "missing_rain_context_source",
         "missing_water_flow_source",
