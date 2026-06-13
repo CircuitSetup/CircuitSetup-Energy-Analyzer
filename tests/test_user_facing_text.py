@@ -1096,6 +1096,23 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         assert "analyzer entity" in fields["entity_id"]["description"]
 
 
+def test_alert_feedback_services_document_entity_targets() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+
+    for service_name in (
+        "acknowledge_alert",
+        "mark_alert_expected",
+        "mark_alert_unhelpful",
+    ):
+        fields = services[service_name]["fields"]
+        assert fields["alert_id"]["required"] is False
+        assert fields["entity_id"]["required"] is False
+        assert "exactly one active alert" in fields["alert_id"]["description"]
+        assert "exactly one active alert" in fields["entity_id"]["description"]
+
+
 def test_readme_includes_status_glossary_for_machine_values() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 

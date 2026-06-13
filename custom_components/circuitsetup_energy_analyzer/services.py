@@ -272,7 +272,7 @@ MAINTENANCE_START_SERVICE_SCHEMA = _schema(
 MAINTENANCE_END_SERVICE_SCHEMA = _schema(
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_RELEARN),
 )
-ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(required=(ATTR_ALERT_ID,))
+ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(optional=(ATTR_ALERT_ID, ATTR_ENTITY_ID))
 NILM_LABEL_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -929,11 +929,19 @@ async def _dispatch_alert_id_action(
     method_name: str,
 ) -> None:
     alert_id = data.get(ATTR_ALERT_ID)
+    target_coordinators = _loaded_coordinators(hass)
+    if isinstance(alert_id, str):
+        alert_id = alert_id.strip()
     if not isinstance(alert_id, str) or not alert_id:
-        raise HomeAssistantError("Missing alert_id.")
+        circuit_id = _service_circuit_id(hass, data)
+        target_coordinators = _target_coordinators(hass, circuit_id)
+        alert_id = _single_active_alert_id_for_circuit(
+            circuit_id,
+            target_coordinators,
+        )
 
     handled = False
-    for coordinator in _loaded_coordinators(hass):
+    for coordinator in target_coordinators:
         result = await _call_if_present(coordinator, method_name, alert_id)
         handled = handled or result is True
 
@@ -942,6 +950,58 @@ async def _dispatch_alert_id_action(
             f"Unknown alert_id '{alert_id}'. Open a newer notification or "
             "review the evidence panel for the current alert."
         )
+
+
+def _single_active_alert_id_for_circuit(
+    circuit_id: str,
+    coordinators: Iterable[Any],
+) -> str:
+    alert_ids = sorted(
+        {
+            alert_id
+            for coordinator in coordinators
+            for alert_id in _active_alert_ids_for_circuit(coordinator, circuit_id)
+        }
+    )
+    if len(alert_ids) == 1:
+        return alert_ids[0]
+    if alert_ids:
+        raise HomeAssistantError(
+            f"entity_id target for circuit_id '{circuit_id}' has multiple "
+            f"active alerts: {', '.join(alert_ids)}. Pass alert_id explicitly."
+        )
+    raise HomeAssistantError(
+        f"entity_id target for circuit_id '{circuit_id}' has no active alerts. "
+        "Pass alert_id explicitly."
+    )
+
+
+def _active_alert_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[str]:
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "active_alerts_by_circuit", {})
+    alerts = by_circuit.get(circuit_id, ()) if isinstance(by_circuit, Mapping) else ()
+    if isinstance(alerts, (str, bytes)):
+        return set()
+    try:
+        iterator = iter(alerts)
+    except TypeError:
+        return set()
+    return {
+        alert_id
+        for alert in iterator
+        if (alert_id := _alert_id_from_alert(alert))
+    }
+
+
+def _alert_id_from_alert(alert: Any) -> str | None:
+    if isinstance(alert, Mapping):
+        alert_id = alert.get(ATTR_ALERT_ID)
+    else:
+        alert_id = getattr(alert, ATTR_ALERT_ID, None)
+    if not isinstance(alert_id, str):
+        return None
+    normalized = alert_id.strip()
+    return normalized or None
 
 
 def _target_recommendation_coordinators(
