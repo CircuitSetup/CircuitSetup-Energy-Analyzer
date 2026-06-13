@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,3 +48,56 @@ def test_release_workflow_uses_dispatch_tag_only() -> None:
     assert 'echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
     assert "github.ref" not in tag_step["run"]
     assert "GITHUB_REF_NAME" not in tag_step["run"]
+
+
+def test_release_workflow_verifies_release_pr_batch() -> None:
+    workflow = _load_release_workflow()
+    release_steps = workflow["jobs"]["release"]["steps"]
+    checkout_step = next(
+        step for step in release_steps if step["name"] == "Check out repository"
+    )
+    guard_step = next(
+        step for step in release_steps if step["name"] == "Verify release PR batch"
+    )
+
+    assert checkout_step["with"]["fetch-depth"] == "0"
+    assert guard_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert guard_step["env"]["RELEASE_TAG"] == "${{ steps.tag.outputs.tag }}"
+    assert guard_step["env"]["MINIMUM_RELEASE_PRS"] == "3"
+    assert "scripts/verify_release_batch.py" in guard_step["run"]
+    assert "--tag \"$RELEASE_TAG\"" in guard_step["run"]
+    assert "--minimum-prs \"$MINIMUM_RELEASE_PRS\"" in guard_step["run"]
+
+
+def _load_release_batch_module():
+    module_path = ROOT / "scripts" / "verify_release_batch.py"
+    spec = importlib.util.spec_from_file_location("verify_release_batch", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_release_batch_guard_counts_distinct_associated_prs() -> None:
+    guard = _load_release_batch_module()
+
+    assert guard.distinct_pull_request_numbers(
+        [
+            [{"number": 66}, {"number": 66}],
+            [{"number": 68}, {"number": "not-an-int"}],
+            [],
+        ]
+    ) == {66, 68}
+
+
+def test_release_batch_guard_requires_more_than_two_prs(capsys) -> None:
+    guard = _load_release_batch_module()
+
+    guard.require_minimum_pull_requests({66, 68, 70}, minimum=3)
+
+    with pytest.raises(SystemExit) as excinfo:
+        guard.require_minimum_pull_requests({68, 70}, minimum=3)
+
+    assert excinfo.value.code == 1
+    assert "at least 3 merged pull requests" in capsys.readouterr().err
