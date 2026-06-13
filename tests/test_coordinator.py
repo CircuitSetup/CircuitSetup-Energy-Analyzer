@@ -2501,7 +2501,13 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
     issues = []
 
-    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
@@ -2542,8 +2548,14 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     issues = []
 
-    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
-        issues.append((circuit_id, problem))
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        source_entities=(),
+    ) -> None:
+        issues.append((circuit_id, problem, tuple(source_entities)))
 
     monkeypatch.setattr(
         coordinator_module.repairs,
@@ -2588,7 +2600,13 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
 
     await coordinator.async_process_update()
 
-    assert issues == [("fridge", "unexpected_negative_real_power")]
+    assert issues == [
+        (
+            "fridge",
+            "unexpected_negative_real_power",
+            ("sensor.fridge_power", "sensor.fridge_current"),
+        )
+    ]
     assert "negative_real_power_load" in coordinator.state.data_quality_by_circuit[
         "fridge"
     ]
@@ -5329,7 +5347,13 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
 
     issues: list[tuple[str, str]] = []
 
-    async def fake_issue(hass, circuit_id, problem, severity=Severity.WARNING) -> None:
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
