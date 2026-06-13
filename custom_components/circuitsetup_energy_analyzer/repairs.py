@@ -195,6 +195,7 @@ def _repair_translation_placeholders(issue_data: Mapping[str, Any]) -> dict[str,
         "circuit_name": str(issue_data.get("circuit_name", "")),
         "fix": str(issue_data.get("fix", "")),
         "open_path": str(issue_data.get("open_path", "")),
+        "reason": str(issue_data.get("reason", "")),
         "recommended_action": str(issue_data.get("recommended_action", "")),
         "source_entities": source_text,
     }
