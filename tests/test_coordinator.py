@@ -9172,6 +9172,7 @@ async def test_runtime_specific_utility_comparison_repair_deletes_legacy_generic
     )
 
     await coordinator._sync_setup_health_repairs("mains")
+    await coordinator._sync_setup_health_repairs("mains")
 
     assert deleted == [("mains", "utility_comparison_source_mismatch")]
     assert created == [("mains", "utility_comparison_missing_measured_source")]
