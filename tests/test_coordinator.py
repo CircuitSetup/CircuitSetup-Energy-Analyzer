@@ -8765,7 +8765,7 @@ async def test_recorder_statistics_use_recorder_executor(
     )
 
     now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
-    recorder_jobs: list[object] = []
+    recorder_jobs: list[tuple[object, tuple[object, ...]]] = []
 
     def fake_statistics_during_period(
         hass: object,
@@ -8781,7 +8781,7 @@ async def test_recorder_statistics_use_recorder_executor(
 
     class FakeRecorder:
         async def async_add_executor_job(self, target, *args):
-            recorder_jobs.append(target)
+            recorder_jobs.append((target, args))
             return target(*args)
 
     def fake_get_instance(hass: object) -> FakeRecorder:
@@ -8815,6 +8815,17 @@ async def test_recorder_statistics_use_recorder_executor(
     )
 
     assert recorder_jobs
+    target, args = recorder_jobs[0]
+    assert target is fake_statistics_during_period
+    assert args == (
+        coordinator.hass,
+        now - timedelta(days=1),
+        now,
+        {"sensor.energy"},
+        "day",
+        {"energy": "kWh"},
+        {"change", "sum", "state"},
+    )
     assert statistics == {"sensor.energy": [{"sum": 12.3}]}
 
 
