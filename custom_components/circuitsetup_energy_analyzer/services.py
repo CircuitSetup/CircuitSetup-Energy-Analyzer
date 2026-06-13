@@ -14,6 +14,11 @@ except ModuleNotFoundError:
     class HomeAssistantError(Exception):
         """Fallback Home Assistant service error for tests without HA installed."""
 
+try:
+    from homeassistant.helpers import entity_registry as er
+except ModuleNotFoundError:
+    er = None
+
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
 SERVICE_PAUSE_ALERTS = "pause_alerts"
 SERVICE_ACKNOWLEDGE_ALERT = "acknowledge_alert"
@@ -732,6 +737,10 @@ def _circuit_id_from_service_entity_ids(hass: Any, entity_ids: Iterable[str]) ->
 
 
 def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
+    registry_circuit_id = _circuit_id_from_entity_registry(hass, entity_id)
+    if registry_circuit_id is not None:
+        return registry_circuit_id
+
     object_id = str(entity_id).strip().split(".", 1)[-1]
     if not object_id:
         raise HomeAssistantError(
@@ -756,6 +765,33 @@ def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
     raise HomeAssistantError(
         f"Could not derive circuit_id from entity_id '{entity_id}'."
     )
+
+
+def _circuit_id_from_entity_registry(hass: Any, entity_id: str) -> str | None:
+    if er is None:
+        return None
+    async_get = getattr(er, "async_get", None)
+    if async_get is None:
+        return None
+    registry = async_get(hass)
+    entry = getattr(registry, "async_get", lambda _entity_id: None)(entity_id)
+    if entry is None or getattr(entry, "platform", None) != DOMAIN:
+        return None
+
+    unique_id = str(getattr(entry, "unique_id", "") or "")
+    return _circuit_id_from_unique_id(unique_id)
+
+
+def _circuit_id_from_unique_id(unique_id: str) -> str | None:
+    known_suffixes = _known_analyzer_entity_suffixes()
+    for suffix in sorted(known_suffixes, key=len, reverse=True):
+        marker = f"_{suffix}"
+        if unique_id.endswith(marker):
+            entry_and_circuit = unique_id[: -len(marker)]
+            _entry_id, separator, circuit_id = entry_and_circuit.partition("_")
+            if separator and circuit_id:
+                return circuit_id
+    return None
 
 
 def _all_known_circuit_ids(hass: Any) -> set[str]:

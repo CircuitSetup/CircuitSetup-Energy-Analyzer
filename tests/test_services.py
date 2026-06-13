@@ -585,6 +585,137 @@ async def test_circuit_services_accept_analyzer_entity_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_circuit_services_accept_renamed_registry_entity_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.services as services
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RELEARN_BASELINE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeEntityRegistry:
+        def async_get(self, entity_id: str):
+            if entity_id == "sensor.kitchen_fridge_status":
+                return SimpleNamespace(
+                    platform=DOMAIN,
+                    unique_id="entry-1_fridge_health_summary",
+                )
+            return None
+
+    class FakeEntityRegistryModule:
+        @staticmethod
+        def async_get(hass):
+            return FakeEntityRegistry()
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_relearn_baseline(self, circuit_id: str) -> None:
+            self.calls.append(("async_relearn_baseline", (circuit_id,)))
+
+    monkeypatch.setattr(services, "er", FakeEntityRegistryModule)
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
+        SimpleNamespace(data={"entity_id": "sensor.kitchen_fridge_status"})
+    )
+
+    assert coordinator.calls == [("async_relearn_baseline", ("fridge",))]
+
+
+@pytest.mark.asyncio
+async def test_circuit_services_reject_ambiguous_renamed_entity_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.services as services
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RELEARN_BASELINE,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeEntityRegistry:
+        def async_get(self, entity_id: str):
+            entries = {
+                "sensor.kitchen_fridge_status": "entry-1_fridge_health_summary",
+                "sensor.hvac_status": "entry-1_hvac_health_summary",
+            }
+            if entity_id in entries:
+                return SimpleNamespace(platform=DOMAIN, unique_id=entries[entity_id])
+            return None
+
+    class FakeEntityRegistryModule:
+        @staticmethod
+        def async_get(hass):
+            return FakeEntityRegistry()
+
+    class FakeCoordinator:
+        circuit_configs = [
+            SimpleNamespace(circuit_id="fridge"),
+            SimpleNamespace(circuit_id="hvac"),
+        ]
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_relearn_baseline(self, circuit_id: str) -> None:
+            raise AssertionError("service should reject ambiguous targets first")
+
+    monkeypatch.setattr(services, "er", FakeEntityRegistryModule)
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="entity_id target resolved to multiple circuits: fridge, hvac",
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
+            SimpleNamespace(
+                data={
+                    "entity_id": [
+                        "sensor.kitchen_fridge_status",
+                        "sensor.hvac_status",
+                    ]
+                }
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_circuit_services_fail_fast_for_unknown_entity_target() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_RELEARN_BASELINE,
