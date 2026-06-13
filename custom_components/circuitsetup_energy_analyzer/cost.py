@@ -184,8 +184,12 @@ def _time_or_none(value: Any) -> time | None:
     if not isinstance(value, str):
         return None
     try:
-        hour, minute = value.split(":", 1)
-        return time(hour=int(hour), minute=int(minute))
+        parts = value.split(":")
+        if len(parts) not in {2, 3}:
+            return None
+        hour, minute = parts[:2]
+        second = parts[2] if len(parts) == 3 else 0
+        return time(hour=int(hour), minute=int(minute), second=int(second))
     except (TypeError, ValueError):
         return None
 

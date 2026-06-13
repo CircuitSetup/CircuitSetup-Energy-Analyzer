@@ -851,9 +851,9 @@ def _setup_health_needs_water_flow_source(coordinator: Any, circuit: Any) -> boo
             CONF_EXPECTS_WATER_FLOW,
             default=True,
         )
+        and not _has_linked_water_flow_source(coordinator, circuit)
         and not _has_any_configured_entity(
             coordinator,
-            CONF_LINKED_FLOW_SENSOR_ENTITIES,
             CONF_WATER_FLOW_SENSOR_ENTITIES,
         )
     )
@@ -1164,6 +1164,17 @@ def _has_any_configured_entity(coordinator: Any, *keys: str) -> bool:
     return False
 
 
+def _has_linked_water_flow_source(coordinator: Any, circuit: Any) -> bool:
+    value = _advanced_settings(coordinator, circuit).get(
+        CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    )
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set)):
+        return any(bool(str(item).strip()) for item in value)
+    return False
+
+
 def _utility_comparison_configured(coordinator: Any, circuit_id: str) -> bool:
     store_data = getattr(coordinator, "store_data", None)
     stored_settings = getattr(
@@ -1184,6 +1195,15 @@ def _utility_comparison_configured(coordinator: Any, circuit_id: str) -> bool:
 
 
 def _coordinator_config_value(coordinator: Any, key: str) -> Any:
+    if key == CONF_UTILITY_COMPARISON_SETTINGS:
+        merged: dict[str, Any] = {}
+        for field_name in ("entry_data", "options"):
+            container = getattr(coordinator, field_name, {})
+            value = container.get(key) if isinstance(container, Mapping) else None
+            if isinstance(value, Mapping):
+                merged.update(value)
+        if merged:
+            return merged
     for field_name in ("options", "entry_data"):
         container = getattr(coordinator, field_name, {})
         if isinstance(container, Mapping) and container.get(key):

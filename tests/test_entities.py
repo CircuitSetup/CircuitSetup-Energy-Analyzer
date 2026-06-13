@@ -1699,6 +1699,39 @@ def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
     ]
 
 
+def test_setup_health_honors_linked_water_flow_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(washer,),
+        entry_data={},
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_WATER_FLOW_CORRELATION_ENABLED: True,
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES: ["binary_sensor.washer_flow"],
+                }
+            }
+        },
+        store_data=FeatureStoreData(),
+    )
+
+    attrs = setup_health_attributes(coordinator)
+
+    assert attrs["missing_water_flow_sources"] == []
+    assert attrs["issues"] == []
+
+
 @pytest.mark.parametrize(
     ("status", "expected_issue", "expected_step", "expected_reason"),
     (
@@ -1757,6 +1790,44 @@ def test_setup_health_reports_specific_utility_comparison_setup_gaps(
     assert attrs["utility_comparison_setup_issues"] == ["mains"]
     assert attrs["issues"][0]["issue"] == expected_issue
     assert attrs["issues"][0]["reason"] == expected_reason
+
+
+def test_setup_health_merges_utility_comparison_config_sources_per_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            utility_comparison_status_by_circuit={"mains": "missing_utility"},
+        ),
+        circuit_configs=(mains,),
+        entry_data={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"},
+            },
+        },
+        options={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "garage": {"utility_energy_entity": "sensor.garage_utility_kwh"},
+            },
+        },
+        store_data=FeatureStoreData(),
+    )
+
+    attrs = setup_health_attributes(coordinator)
+
+    assert attrs["utility_comparison_setup_issues"] == ["mains"]
+    assert attrs["issues"][0]["issue"] == (
+        "utility_comparison_missing_utility_source"
+    )
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -2413,6 +2484,49 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     assert sensor_description_applies(
         descriptions["settings_suggestions"],
         mixed_circuit,
+        coordinator,
+    )
+
+
+def test_utility_comparison_sensors_merge_config_sources_per_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        options={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "garage": {"utility_energy_entity": "sensor.garage_utility_kwh"},
+            },
+        },
+        entry_data={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"},
+            },
+        },
+        store_data=FeatureStoreData(),
+    )
+
+    assert sensor_description_applies(
+        descriptions["utility_comparison_status"],
+        mains,
+        coordinator,
+    )
+    assert sensor_description_applies(
+        descriptions["utility_comparison_difference"],
+        mains,
         coordinator,
     )
 

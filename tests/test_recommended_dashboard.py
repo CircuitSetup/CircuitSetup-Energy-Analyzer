@@ -18,6 +18,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
+    SensorRef,
+    SensorRole,
 )
 
 
@@ -28,7 +30,10 @@ def _circuits() -> tuple[CircuitConfig, ...]:
             name="Refrigerator",
             appliance_profile=ApplianceProfile.REFRIGERATOR,
             mode=CircuitMode.SINGLE_PHASE,
-            sensors=(),
+            sensors=(
+                SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+            ),
         ),
         CircuitConfig(
             circuit_id="mains",
@@ -74,6 +79,33 @@ def _entity_refs(config: dict[str, object]) -> set[str]:
 
     walk(config)
     return refs
+
+
+def _entity_ref_count(config: dict[str, object], entity_id: str) -> int:
+    count = 0
+
+    def walk(value: object) -> None:
+        nonlocal count
+        if isinstance(value, dict):
+            if value.get("entity") == entity_id:
+                count += 1
+            entities = value.get("entities")
+            if isinstance(entities, list):
+                for item in entities:
+                    if item == entity_id:
+                        count += 1
+                    else:
+                        walk(item)
+            for key, nested in value.items():
+                if key == "entities":
+                    continue
+                walk(nested)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(config)
+    return count
 
 
 def _markdown_contents(config: dict[str, object]) -> list[str]:
@@ -286,6 +318,44 @@ def test_dashboard_notes_ambiguous_metadata_matches_without_guessing() -> None:
     )
 
 
+def test_dashboard_does_not_suffix_match_nested_circuit_unique_ids() -> None:
+    dashboard = build_recommended_dashboard(
+        (
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(),
+            ),
+            CircuitConfig(
+                circuit_id="kitchen_fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(),
+            ),
+        ),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.kitchen_fridge_health": _registry_entry(
+                        "sensor.kitchen_fridge_health",
+                        "entry-1_kitchen_fridge_health_summary",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert _entity_ref_count(dashboard, "sensor.kitchen_fridge_health") == 1
+    assert "Fridge dashboard note" in markdown
+    assert "Missing entities: Health Summary" in markdown
+
+
 def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
@@ -423,6 +493,55 @@ def test_dashboard_uses_registry_ids_for_global_and_circuit_controls() -> None:
         "button.fridge_pause_alerts",
     } <= refs
     assert "button.fridge_create_dashboard" not in refs
+
+
+def test_dashboard_omits_unsupported_per_circuit_controls() -> None:
+    dashboard = build_recommended_dashboard(
+        (
+            CircuitConfig(
+                circuit_id="mains",
+                name="Mains NILM",
+                appliance_profile=ApplianceProfile.MAINS_NILM,
+                mode=CircuitMode.MAINS_NILM,
+                sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "select.mains_sensitivity": _registry_entry(
+                        "select.mains_sensitivity",
+                        "entry-1_mains_alert_sensitivity",
+                    ),
+                    "number.mains_kwh_goal": _registry_entry(
+                        "number.mains_kwh_goal",
+                        "entry-1_mains_daily_energy_goal",
+                    ),
+                    "button.mains_relearn": _registry_entry(
+                        "button.mains_relearn",
+                        "entry-1_mains_relearn_baseline",
+                    ),
+                    "button.mains_start_maintenance": _registry_entry(
+                        "button.mains_start_maintenance",
+                        "entry-1_mains_start_maintenance",
+                    ),
+                    "button.mains_pause_alerts": _registry_entry(
+                        "button.mains_pause_alerts",
+                        "entry-1_mains_pause_alerts",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+
+    assert "select.mains_sensitivity" in refs
+    assert "number.mains_kwh_goal" not in refs
+    assert "button.mains_relearn" not in refs
+    assert "button.mains_start_maintenance" not in refs
+    assert "button.mains_pause_alerts" not in refs
 
 
 def test_dashboard_adds_notes_for_missing_disabled_and_unavailable_controls() -> None:

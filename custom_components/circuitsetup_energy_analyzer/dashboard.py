@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .button import CIRCUIT_BUTTON_DESCRIPTIONS, button_description_applies
 from .const import (
     DASHBOARD_LAYOUT_EXPERT,
     DASHBOARD_LAYOUT_STANDARD,
@@ -10,6 +11,7 @@ from .const import (
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
+from .number import CIRCUIT_NUMBER_DESCRIPTIONS, number_description_applies
 
 DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
 DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
@@ -210,6 +212,7 @@ def _circuit_card(
             }
         )
     if control_card := _circuit_controls_card(
+        circuit,
         name,
         circuit_id,
         registry_lookup=registry_lookup,
@@ -307,6 +310,7 @@ def _global_controls_card(
 
 
 def _circuit_controls_card(
+    circuit: Any,
     name: str,
     circuit_id: str,
     *,
@@ -314,9 +318,12 @@ def _circuit_controls_card(
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any] | None:
+    specs = _applicable_circuit_control_specs(circuit)
+    if not specs:
+        return None
     entities, notes = _resolved_entity_ids(
         circuit_id,
-        CIRCUIT_CONTROL_SPECS,
+        specs,
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
@@ -327,6 +334,37 @@ def _circuit_controls_card(
         entities=entities,
         notes=notes,
     )
+
+
+_CIRCUIT_BUTTON_DESCRIPTION_BY_KEY = {
+    description.key: description for description in CIRCUIT_BUTTON_DESCRIPTIONS
+}
+_CIRCUIT_NUMBER_DESCRIPTION_BY_KEY = {
+    description.key: description for description in CIRCUIT_NUMBER_DESCRIPTIONS
+}
+
+
+def _applicable_circuit_control_specs(
+    circuit: Any,
+) -> tuple[tuple[str, str, str], ...]:
+    specs: list[tuple[str, str, str]] = []
+    for entity_domain, entity_key, label in CIRCUIT_CONTROL_SPECS:
+        if entity_domain == "button":
+            description = _CIRCUIT_BUTTON_DESCRIPTION_BY_KEY.get(entity_key)
+            if description is not None and not button_description_applies(
+                description,
+                circuit,
+            ):
+                continue
+        if entity_domain == "number":
+            description = _CIRCUIT_NUMBER_DESCRIPTION_BY_KEY.get(entity_key)
+            if description is not None and not number_description_applies(
+                description,
+                circuit,
+            ):
+                continue
+        specs.append((entity_domain, entity_key, label))
+    return tuple(specs)
 
 
 def _control_card(
@@ -505,7 +543,7 @@ def _registry_entry_for_spec(
         entry
         for entry in registry_lookup.values()
         if _entry_entity_domain(entry) == entity_domain
-        and _entry_matches_circuit_key(entry, circuit_id, entity_key)
+        and _entry_matches_circuit_key(entry, entry_id, circuit_id, entity_key)
     ]
     if len(candidates) == 1:
         return candidates[0], None
@@ -538,7 +576,12 @@ def _registry_entry_for_global_spec(
     return None, None
 
 
-def _entry_matches_circuit_key(entry: Any, circuit_id: str, entity_key: str) -> bool:
+def _entry_matches_circuit_key(
+    entry: Any,
+    entry_id: str,
+    circuit_id: str,
+    entity_key: str,
+) -> bool:
     entry_circuit = _entry_value(entry, "circuit_id", "circuit")
     entry_key = _entry_value(
         entry,
@@ -551,7 +594,7 @@ def _entry_matches_circuit_key(entry: Any, circuit_id: str, entity_key: str) -> 
         return True
 
     unique_id = str(_entry_value(entry, "unique_id") or "").strip()
-    return unique_id.endswith(f"_{circuit_id}_{entity_key}")
+    return unique_id == _expected_unique_id(entry_id, circuit_id, entity_key)
 
 
 def _entry_matches_global_key(entry: Any, entity_key: str) -> bool:

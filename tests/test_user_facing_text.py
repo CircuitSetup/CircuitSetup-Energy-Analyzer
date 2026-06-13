@@ -1229,6 +1229,7 @@ def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
         description = issues[key]["description"]
         assert "{circuit_name}" in description
         assert "{recommended_action}" in description
+        assert "{reason}" in description
 
 
 def test_readme_includes_practical_usage_guide() -> None:
