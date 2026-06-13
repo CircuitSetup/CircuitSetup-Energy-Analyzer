@@ -377,6 +377,7 @@ class _FakeDashboardsCollection:
         self._existing = existing
         self.created: list[dict[str, object]] = []
         self.updated: list[tuple[str, dict[str, object]]] = []
+        self.dashboard_stores: dict[str, _FakeLovelaceStorage] | None = None
 
     async def async_items(self) -> list[dict[str, object]]:
         if not self._existing:
@@ -385,7 +386,10 @@ class _FakeDashboardsCollection:
 
     async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
         self.created.append(data)
-        return {"id": DASHBOARD_URL_PATH, **data}
+        item = {"id": DASHBOARD_URL_PATH, **data}
+        if self.dashboard_stores is not None:
+            self.dashboard_stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(item)
+        return item
 
     async def async_update_item(
         self,
@@ -394,6 +398,15 @@ class _FakeDashboardsCollection:
     ) -> dict[str, object]:
         self.updated.append((item_id, data))
         return {"id": item_id, **data}
+
+
+class _FakeLovelaceStorage:
+    def __init__(self, config: dict[str, object]) -> None:
+        self.config = config
+        self.saved: list[dict[str, object]] = []
+
+    async def async_save(self, config: dict[str, object]) -> None:
+        self.saved.append(config)
 
 
 class _FakeAttributeDashboardsCollection:
@@ -441,7 +454,16 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
     )
 
     collection = _FakeDashboardsCollection(existing=False)
-    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    dashboards: dict[str, _FakeLovelaceStorage] = {}
+    collection.dashboard_stores = dashboards
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": dashboards,
+                "dashboards_collection": collection,
+            }
+        }
+    )
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_data={"circuits": _circuit_dicts()},
@@ -455,7 +477,10 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
     assert created["url_path"] == DASHBOARD_URL_PATH
     assert created["mode"] == "storage"
     assert created["title"] == "CircuitSetup Energy Analyzer"
-    assert "sensor.fridge_metric_consistency_status" in str(created["config"])
+    assert "config" not in created
+    assert "sensor.fridge_metric_consistency_status" in str(
+        dashboards[DASHBOARD_URL_PATH].saved[0]
+    )
     assert coordinator.last_dashboard_create_request["action"] == "created"
     assert (
         coordinator.last_dashboard_create_request["layout"]
@@ -470,7 +495,17 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     )
 
     collection = _FakeDashboardsCollection(existing=True)
-    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    dashboard_store = _FakeLovelaceStorage(
+        {"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}
+    )
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": {DASHBOARD_URL_PATH: dashboard_store},
+                "dashboards_collection": collection,
+            }
+        }
+    )
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_data={"circuits": _circuit_dicts()},
@@ -484,7 +519,8 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     item_id, update = collection.updated[0]
     assert item_id == DASHBOARD_URL_PATH
     assert update["title"] == "CircuitSetup Energy Analyzer"
-    assert "sensor.fridge_alert_evidence" in str(update["config"])
+    assert "config" not in update
+    assert "sensor.fridge_alert_evidence" in str(dashboard_store.saved[0])
     assert coordinator.last_dashboard_create_request["action"] == "updated"
 
 
@@ -495,7 +531,20 @@ async def test_coordinator_updates_attribute_shaped_existing_dashboard() -> None
     )
 
     collection = _FakeAttributeDashboardsCollection()
-    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    dashboard_store = _FakeLovelaceStorage(
+        {
+            "id": "lovelace-circuitsetup-energy-analyzer",
+            "url_path": DASHBOARD_URL_PATH,
+        }
+    )
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": {DASHBOARD_URL_PATH: dashboard_store},
+                "dashboards_collection": collection,
+            }
+        }
+    )
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_data={"circuits": _circuit_dicts()},
@@ -509,6 +558,7 @@ async def test_coordinator_updates_attribute_shaped_existing_dashboard() -> None
     item_id, update = collection.updated[0]
     assert item_id == "lovelace-circuitsetup-energy-analyzer"
     assert update["title"] == "CircuitSetup Energy Analyzer"
+    assert dashboard_store.saved
     assert coordinator.last_dashboard_create_request["action"] == "updated"
 
 
@@ -519,9 +569,12 @@ async def test_coordinator_reads_attribute_shaped_lovelace_data() -> None:
     )
 
     collection = _FakeDashboardsCollection(existing=False)
+    dashboards: dict[str, _FakeLovelaceStorage] = {}
+    collection.dashboard_stores = dashboards
     hass = SimpleNamespace(
         data={
             "lovelace": SimpleNamespace(
+                dashboards=dashboards,
                 dashboards_collection=collection,
             )
         }
@@ -535,6 +588,56 @@ async def test_coordinator_reads_attribute_shaped_lovelace_data() -> None:
     await coordinator.async_create_dashboard()
 
     assert len(collection.created) == 1
+    assert dashboards[DASHBOARD_URL_PATH].saved
+    assert coordinator.last_dashboard_create_request["action"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_creates_dashboard_from_current_lovelace_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=False)
+    lovelace_data = SimpleNamespace(
+        dashboards={},
+        resources=object(),
+        yaml_dashboards={},
+    )
+    collection.dashboard_stores = lovelace_data.dashboards
+
+    async def load_collection(hass: object, data: object) -> object:
+        assert data is lovelace_data
+        return collection
+
+    monkeypatch.setattr(
+        module,
+        "_async_load_lovelace_dashboards_collection",
+        load_collection,
+        raising=False,
+    )
+    hass = SimpleNamespace(data={"lovelace": lovelace_data})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert len(collection.created) == 1
+    created = collection.created[0]
+    assert created["url_path"] == DASHBOARD_URL_PATH
+    assert created["mode"] == "storage"
+    assert "config" not in created
+    stored_dashboard = lovelace_data.dashboards[DASHBOARD_URL_PATH]
+    assert stored_dashboard.saved
+    assert "sensor.fridge_metric_consistency_status" in str(
+        stored_dashboard.saved[0]
+    )
     assert coordinator.last_dashboard_create_request["action"] == "created"
 
 

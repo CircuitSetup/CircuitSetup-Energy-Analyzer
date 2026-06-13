@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from inspect import isawaitable
@@ -263,12 +263,16 @@ FLOW_WATER_CONTEXT_PROFILES = frozenset(
     }
 )
 try:
+    from homeassistant.components.recorder import (
+        get_instance as _ha_recorder_get_instance,
+    )
     from homeassistant.components.recorder.statistics import (
         statistics_during_period as _ha_statistics_during_period,
     )
     from homeassistant.helpers.event import async_track_state_change_event
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 except ModuleNotFoundError:
+    _ha_recorder_get_instance = None
     _ha_statistics_during_period = None
     async_track_state_change_event = None
 
@@ -2631,16 +2635,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         payload: Mapping[str, Any],
     ) -> tuple[str, str | None]:
-        hass_data = getattr(self.hass, "data", {})
-        lovelace_data = (
-            hass_data.get("lovelace", {})
-            if isinstance(hass_data, Mapping)
-            else getattr(hass_data, "lovelace", {})
-        )
+        lovelace_data = _lovelace_data_from_hass(self.hass)
         collection = _lovelace_dashboard_item_value(
             lovelace_data,
             "dashboards_collection",
         )
+        if collection is None and _lovelace_dashboards(lovelace_data) is not None:
+            collection = await _async_load_lovelace_dashboards_collection(
+                self.hass,
+                lovelace_data,
+            )
         if collection is None:
             return "unavailable", "lovelace_dashboard_collection_unavailable"
 
@@ -2651,6 +2655,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             return "unavailable", "lovelace_dashboard_collection_unavailable"
 
         items = await items_method()
+        dashboard_config = _lovelace_dashboard_config(payload)
+        storage_payload = _lovelace_dashboard_storage_payload(payload)
         existing = next(
             (
                 item
@@ -2664,12 +2670,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 return "unavailable", "dashboard_update_unavailable"
             item_id = _lovelace_dashboard_item_id(existing, payload)
             update_payload = {
-                key: value for key, value in payload.items() if key != "url_path"
+                key: value
+                for key, value in storage_payload.items()
+                if key != "url_path"
             }
-            await update_method(item_id, update_payload)
+            updated_item = await update_method(item_id, update_payload)
+            item = {
+                **_lovelace_dashboard_item_mapping(existing),
+                **(dict(updated_item) if isinstance(updated_item, Mapping) else {}),
+                **update_payload,
+            }
+            if not await _async_save_lovelace_dashboard_config(
+                self.hass,
+                lovelace_data,
+                item,
+                dashboard_config,
+                update=True,
+            ):
+                return "unavailable", "dashboard_config_save_unavailable"
             return "updated", None
 
-        await create_method(dict(payload))
+        created_item = await create_method(dict(storage_payload))
+        item = created_item if isinstance(created_item, Mapping) else storage_payload
+        if not await _async_save_lovelace_dashboard_config(
+            self.hass,
+            lovelace_data,
+            item,
+            dashboard_config,
+            update=False,
+        ):
+            return "unavailable", "dashboard_config_save_unavailable"
         return "created", None
 
     async def async_label_nilm_signature(
@@ -4561,11 +4591,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 {"change", "sum", "state"},
             )
 
-        add_executor_job = getattr(self.hass, "async_add_executor_job", None)
         try:
-            if add_executor_job is None:
-                return _fetch()
-            return await add_executor_job(_fetch)
+            return await _async_recorder_executor_job(self.hass, _fetch)
         except Exception as err:  # noqa: BLE001 - recorder availability varies by setup.
             _LOGGER.debug(
                 "Recorder statistics unavailable for %s: %s",
@@ -6549,6 +6576,22 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
     )
 
 
+async def _async_recorder_executor_job(hass: Any, target: Any) -> Any:
+    if _ha_recorder_get_instance is not None:
+        try:
+            recorder = _ha_recorder_get_instance(hass)
+        except Exception:  # noqa: BLE001 - recorder may be absent during tests/setup.
+            recorder = None
+        add_recorder_job = getattr(recorder, "async_add_executor_job", None)
+        if callable(add_recorder_job):
+            return await add_recorder_job(target)
+
+    add_executor_job = getattr(hass, "async_add_executor_job", None)
+    if callable(add_executor_job):
+        return await add_executor_job(target)
+    return target()
+
+
 def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:
     target = _normalize_lovelace_path(payload.get("url_path"))
     if not target:
@@ -6557,6 +6600,129 @@ def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:
         _normalize_lovelace_path(_lovelace_dashboard_item_value(item, key)) == target
         for key in ("url_path", "id")
     )
+
+
+def _lovelace_data_from_hass(hass: Any) -> Any:
+    hass_data = getattr(hass, "data", {})
+    if isinstance(hass_data, Mapping):
+        return hass_data.get("lovelace", {})
+    return getattr(hass_data, "lovelace", {})
+
+
+async def _async_load_lovelace_dashboards_collection(
+    hass: Any,
+    lovelace_data: Any,
+) -> Any | None:
+    del lovelace_data
+    try:
+        from homeassistant.components.lovelace import dashboard as lovelace_dashboard
+    except ImportError:
+        return None
+
+    collection = lovelace_dashboard.DashboardsCollection(hass)
+    async_load = getattr(collection, "async_load", None)
+    if callable(async_load):
+        await async_load()
+    return collection
+
+
+def _lovelace_dashboards(lovelace_data: Any) -> MutableMapping[Any, Any] | None:
+    dashboards = _lovelace_dashboard_item_value(lovelace_data, "dashboards")
+    return dashboards if isinstance(dashboards, MutableMapping) else None
+
+
+def _lovelace_dashboard_storage_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "config"}
+
+
+def _lovelace_dashboard_config(payload: Mapping[str, Any]) -> dict[str, Any]:
+    config = payload.get("config")
+    return dict(config) if isinstance(config, Mapping) else {}
+
+
+async def _async_save_lovelace_dashboard_config(
+    hass: Any,
+    lovelace_data: Any,
+    item: Mapping[str, Any],
+    config: Mapping[str, Any],
+    *,
+    update: bool,
+) -> bool:
+    dashboards = _lovelace_dashboards(lovelace_data)
+    if dashboards is None:
+        return False
+
+    url_path = _normalize_lovelace_path(
+        _lovelace_dashboard_item_value(item, "url_path")
+    )
+    if not url_path:
+        return False
+
+    dashboard_store = dashboards.get(url_path)
+    if dashboard_store is None:
+        dashboard_store = _new_lovelace_storage(hass, item)
+        if dashboard_store is None:
+            return False
+        dashboards[url_path] = dashboard_store
+
+    if hasattr(dashboard_store, "config"):
+        dashboard_store.config = dict(item)
+
+    save = getattr(dashboard_store, "async_save", None)
+    if not callable(save):
+        return False
+    await save(dict(config))
+    _register_lovelace_dashboard_panel(hass, item, update=update)
+    return True
+
+
+def _new_lovelace_storage(hass: Any, item: Mapping[str, Any]) -> Any | None:
+    try:
+        from homeassistant.components.lovelace import dashboard as lovelace_dashboard
+    except ImportError:
+        return None
+    return lovelace_dashboard.LovelaceStorage(hass, dict(item))
+
+
+def _register_lovelace_dashboard_panel(
+    hass: Any,
+    item: Mapping[str, Any],
+    *,
+    update: bool,
+) -> None:
+    try:
+        from homeassistant.components import frontend
+        from homeassistant.components.lovelace.const import (
+            CONF_ICON,
+            CONF_REQUIRE_ADMIN,
+            CONF_SHOW_IN_SIDEBAR,
+            CONF_TITLE,
+            CONF_URL_PATH,
+            DEFAULT_ICON,
+            MODE_STORAGE,
+        )
+        from homeassistant.components.lovelace.const import (
+            DOMAIN as LOVELACE_DOMAIN,
+        )
+    except ImportError:
+        return
+
+    try:
+        frontend.async_register_built_in_panel(
+            hass,
+            LOVELACE_DOMAIN,
+            frontend_url_path=item.get(CONF_URL_PATH),
+            require_admin=item[CONF_REQUIRE_ADMIN],
+            show_in_sidebar=item[CONF_SHOW_IN_SIDEBAR],
+            sidebar_title=item[CONF_TITLE],
+            sidebar_icon=item.get(CONF_ICON, DEFAULT_ICON),
+            config={"mode": MODE_STORAGE},
+            update=update,
+        )
+    except (KeyError, ValueError):
+        return
 
 
 def _lovelace_dashboard_item_id(
@@ -6569,6 +6735,16 @@ def _lovelace_dashboard_item_id(
         or payload.get("url_path")
         or ""
     )
+
+
+def _lovelace_dashboard_item_mapping(item: Any) -> dict[str, Any]:
+    if isinstance(item, Mapping):
+        return dict(item)
+    return {
+        key: value
+        for key in ("id", "url_path", "mode", "title", "icon", "show_in_sidebar")
+        if (value := getattr(item, key, None)) is not None
+    }
 
 
 def _lovelace_dashboard_item_value(item: Any, key: str) -> Any:

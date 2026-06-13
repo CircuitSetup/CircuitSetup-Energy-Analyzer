@@ -8711,6 +8711,68 @@ async def test_runtime_handles_unavailable_recorder_statistics(
 
 
 @pytest.mark.asyncio
+async def test_recorder_statistics_use_recorder_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    recorder_jobs: list[object] = []
+
+    def fake_statistics_during_period(
+        hass: object,
+        start_time: datetime,
+        end_time: datetime | None,
+        statistic_ids: set[str],
+        period: str,
+        units: dict[str, str],
+        types: set[str],
+    ) -> dict[str, list[dict[str, float]]]:
+        del hass, start_time, end_time, statistic_ids, period, units, types
+        return {"sensor.energy": [{"sum": 12.3}]}
+
+    class FakeRecorder:
+        async def async_add_executor_job(self, target, *args):
+            recorder_jobs.append(target)
+            return target(*args)
+
+    def fake_get_instance(hass: object) -> FakeRecorder:
+        del hass
+        return FakeRecorder()
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        fake_statistics_during_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_recorder_get_instance",
+        fake_get_instance,
+        raising=False,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={CONF_CIRCUITS: []},
+        now_fn=lambda: now,
+    )
+
+    statistics = await coordinator._recorder_statistics_during_period(
+        statistic_ids={"sensor.energy"},
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        period="day",
+    )
+
+    assert recorder_jobs
+    assert statistics == {"sensor.energy": [{"sum": 12.3}]}
+
+
+@pytest.mark.asyncio
 async def test_runtime_utility_comparison_setup_issue_creates_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
