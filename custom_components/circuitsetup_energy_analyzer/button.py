@@ -362,6 +362,11 @@ def _button_availability_reason(
         return "maintenance_active"
     if button_key == "end_maintenance" and not _maintenance_active(state, circuit_id):
         return "maintenance_inactive"
+    if button_key == "pause_alerts":
+        if _alerts_paused(state, coordinator, circuit_id):
+            return "alerts_paused"
+        if not _has_active_alert(state, circuit_id):
+            return "no_active_alert"
     return None
 
 
@@ -372,6 +377,26 @@ def _availability_reason_label(reason: str) -> str:
 def _maintenance_active(state: Any, circuit_id: str) -> bool:
     maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
     return isinstance(maintenance, Mapping) and maintenance.get("active") is True
+
+
+def _alerts_paused(state: Any, coordinator: Any, circuit_id: str) -> bool:
+    paused_circuits = getattr(coordinator, "paused_circuits", ())
+    return circuit_id in paused_circuits or _maintenance_active(state, circuit_id)
+
+
+def _has_active_alert(state: Any, circuit_id: str) -> bool:
+    alerts_by_circuit = getattr(state, "active_alerts_by_circuit", {})
+    if not isinstance(alerts_by_circuit, Mapping):
+        return False
+    alerts = alerts_by_circuit.get(circuit_id)
+    if isinstance(alerts, int | float):
+        return alerts > 0
+    if isinstance(alerts, Mapping):
+        return bool(alerts)
+    try:
+        return len(alerts) > 0
+    except TypeError:
+        return bool(alerts)
 
 
 def _has_real_power_sensor(circuit: Any) -> bool:
