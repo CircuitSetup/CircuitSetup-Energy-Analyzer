@@ -968,6 +968,13 @@ def _target_nilm_signature_coordinators(
     ]
     if not required_signature_ids:
         raise HomeAssistantError("Missing signature_id.")
+    if (
+        len(required_signature_ids) > 1
+        and len(set(required_signature_ids)) != len(required_signature_ids)
+    ):
+        raise HomeAssistantError(
+            "source_signature_id and target_signature_id must be different."
+        )
 
     matches = [
         coordinator

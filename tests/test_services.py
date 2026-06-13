@@ -332,6 +332,45 @@ def test_advanced_circuit_service_schemas_accept_analyzer_entity_targets() -> No
         }
 
 
+def test_nilm_signature_service_schemas_accept_analyzer_entity_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import _SERVICE_SCHEMAS
+
+    assert _SERVICE_SCHEMAS["label_nilm_signature"](
+        {
+            "entity_id": "sensor.mains_health_summary",
+            "signature_id": "signature_1",
+            "label": "Microwave",
+        }
+    ) == {
+        "entity_id": "sensor.mains_health_summary",
+        "signature_id": "signature_1",
+        "label": "Microwave",
+    }
+    assert _SERVICE_SCHEMAS["ignore_nilm_signature"](
+        {"entity_id": "sensor.mains_health_summary", "signature_id": "signature_1"}
+    ) == {
+        "entity_id": "sensor.mains_health_summary",
+        "signature_id": "signature_1",
+    }
+    assert _SERVICE_SCHEMAS["mark_nilm_signature_expected"](
+        {"entity_id": "sensor.mains_health_summary", "signature_id": "signature_1"}
+    ) == {
+        "entity_id": "sensor.mains_health_summary",
+        "signature_id": "signature_1",
+    }
+    assert _SERVICE_SCHEMAS["merge_nilm_signatures"](
+        {
+            "entity_id": "sensor.mains_health_summary",
+            "source_signature_id": "signature_2",
+            "target_signature_id": "signature_1",
+        }
+    ) == {
+        "entity_id": "sensor.mains_health_summary",
+        "source_signature_id": "signature_2",
+        "target_signature_id": "signature_1",
+    }
+
+
 def test_setting_recommendation_service_schemas_validate_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         ATTR_ENTRY_ID,
@@ -1093,6 +1132,123 @@ async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> N
     assert coordinator.calls == [
         ("async_ignore_nilm_signature", ("mains", "signature_1"))
     ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_signature_services_accept_analyzer_entity_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_IGNORE_NILM_SIGNATURE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = SimpleNamespace(
+                nilm_signatures={"mains": [{"signature_id": "signature_1"}]}
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_ignore_nilm_signature(
+            self,
+            circuit_id: str,
+            signature_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_ignore_nilm_signature", (circuit_id, signature_id))
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
+        SimpleNamespace(
+            data={
+                "entity_id": "sensor.mains_health_summary",
+                "signature_id": "signature_1",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        ("async_ignore_nilm_signature", ("mains", "signature_1"))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_signature_services_reject_self_merge() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_MERGE_NILM_SIGNATURES,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        circuit_configs = [SimpleNamespace(circuit_id="mains")]
+        store_data = SimpleNamespace(
+            nilm_signatures={"mains": [{"signature_id": "signature_1"}]}
+        )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_merge_nilm_signatures(
+            self,
+            circuit_id: str,
+            source_signature_id: str,
+            target_signature_id: str,
+        ) -> None:
+            raise AssertionError("service should reject self-merge first")
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="source_signature_id and target_signature_id must be different",
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "source_signature_id": "signature_1",
+                    "target_signature_id": "signature_1",
+                }
+            )
+        )
 
 
 @pytest.mark.asyncio
