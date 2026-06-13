@@ -377,6 +377,44 @@ class _FakeDashboardsCollection:
         return {"id": item_id, **data}
 
 
+class _FakeAttributeDashboardsCollection:
+    def __init__(self) -> None:
+        self.created: list[dict[str, object]] = []
+        self.updated: list[tuple[str, dict[str, object]]] = []
+
+    async def async_items(self) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(
+                id="lovelace-circuitsetup-energy-analyzer",
+                url_path=DASHBOARD_URL_PATH,
+            )
+        ]
+
+    async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
+        self.created.append(data)
+        return {"id": DASHBOARD_URL_PATH, **data}
+
+    async def async_update_item(
+        self,
+        item_id: str,
+        data: dict[str, object],
+    ) -> dict[str, object]:
+        self.updated.append((item_id, data))
+        return {"id": item_id, **data}
+
+
+class _FakeExistingDashboardWithoutUpdate:
+    def __init__(self) -> None:
+        self.created: list[dict[str, object]] = []
+
+    async def async_items(self) -> list[dict[str, object]]:
+        return [{"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}]
+
+    async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
+        self.created.append(data)
+        return {"id": DASHBOARD_URL_PATH, **data}
+
+
 @pytest.mark.asyncio
 async def test_coordinator_creates_recommended_dashboard_with_selected_layout() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -429,3 +467,47 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     assert update["title"] == "CircuitSetup Energy Analyzer"
     assert "sensor.fridge_alert_evidence" in str(update["config"])
     assert coordinator.last_dashboard_create_request["action"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_updates_attribute_shaped_existing_dashboard() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeAttributeDashboardsCollection()
+    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert collection.created == []
+    assert len(collection.updated) == 1
+    item_id, update = collection.updated[0]
+    assert item_id == "lovelace-circuitsetup-energy-analyzer"
+    assert update["title"] == "CircuitSetup Energy Analyzer"
+    assert coordinator.last_dashboard_create_request["action"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_skips_duplicate_dashboard_when_update_unavailable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeExistingDashboardWithoutUpdate()
+    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert collection.created == []
+    assert coordinator.last_dashboard_create_request["action"] == "unavailable"
