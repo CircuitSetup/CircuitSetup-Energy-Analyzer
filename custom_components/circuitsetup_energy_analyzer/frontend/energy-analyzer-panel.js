@@ -1,6 +1,7 @@
 const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_evidence";
 const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
 const HISTORY_CALL_API_PREFIX = "history/period";
+const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const ACTION_SERVICE_NAMES = {
@@ -591,6 +592,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._selectNilmMergeTarget(index, button.dataset.nilmMergeTarget);
       });
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-load-all-nilm]")) {
+      button.addEventListener("click", () => this._loadExpandedNilm());
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-source-entity]")) {
       button.addEventListener("click", () => {
         this._openSourceEntity(button.dataset.sourceEntity);
@@ -698,13 +702,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmActions() {
-    const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
+    const nilm = this._payload && this._payload.nilm;
+    const signatures = nilm && nilm.signatures;
     if (!signatures || !signatures.length) {
       return "";
     }
+    const totalCount = Number((nilm && nilm.signature_count) || signatures.length);
+    const omittedCount = Number((nilm && nilm.signatures_omitted_count) || 0);
+    const summary = omittedCount > 0
+      ? `<p class="muted">Showing ${signatures.length} of ${totalCount} NILM signatures. ${omittedCount} more can be reviewed after loading the full slim NILM list. <button type="button" class="secondary" data-load-all-nilm>Load all NILM signatures</button></p>`
+      : "";
     return `
       <section class="panel">
         <h2>NILM Review</h2>
+        ${summary}
         ${signatures.map((signature, index) => `
           <div class="metric">
             <span>NILM signature</span>
@@ -797,16 +808,28 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmMergeTarget(signature, index) {
-    const options = signature && signature.actions && signature.actions.merge && signature.actions.merge.target_options;
+    const action = signature && signature.actions && signature.actions.merge;
+    const options = action && action.target_options;
     if (!options || !options.length) {
       return `<p class="muted">No other signature is available to merge into yet.</p>`;
     }
+    const omittedCount = Number((action && action.target_options_omitted_count) || 0);
+    const summary = omittedCount > 0
+      ? `<p class="muted">Showing ${options.length} of ${action.target_option_count} merge targets. ${omittedCount} more can be selected after loading the full slim NILM list. <button type="button" class="secondary" data-load-all-nilm>Load all merge targets</button></p>`
+      : "";
     return `
       <span class="muted">Merge into</span>
+      ${summary}
       <div class="merge-targets" id="nilm_merge_targets_${index}" data-selected="">
         ${options.map((option) => this._nilmMergeTargetChip(index, option)).join("")}
       </div>
     `;
+  }
+
+  _loadExpandedNilm() {
+    const routeUrl = new URL(this._routeKey(), window.location.origin);
+    routeUrl.searchParams.set(EXPAND_NILM_QUERY_PARAM, "1");
+    history.replaceState(null, "", `${routeUrl.pathname}${routeUrl.search}${routeUrl.hash}`);
   }
 
   _nilmMergeTargetChip(index, option) {

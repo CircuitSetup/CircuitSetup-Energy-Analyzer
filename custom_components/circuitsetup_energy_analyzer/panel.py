@@ -96,6 +96,7 @@ class AlertEvidenceView(HomeAssistantView):
             _loaded_coordinators(hass),
             alert_id=request.query.get("alert_id"),
             circuit_id=request.query.get("circuit_id"),
+            include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
         )
         return web.json_response(payload)
 
@@ -138,6 +139,7 @@ def alert_evidence_payload(
     *,
     alert_id: str | None = None,
     circuit_id: str | None = None,
+    include_all_nilm: bool = False,
 ) -> dict[str, Any]:
     """Return the dynamic panel payload for an alert or circuit fallback."""
     requested_alert_id = alert_id or None
@@ -154,6 +156,7 @@ def alert_evidence_payload(
                         alert,
                         requested_alert_id=requested_alert_id,
                         requested_circuit_id=requested_circuit_id,
+                        include_all_nilm=include_all_nilm,
                     )
 
     fallback_circuit: tuple[Any, CircuitConfig] | None = None
@@ -166,6 +169,7 @@ def alert_evidence_payload(
                     alert,
                     requested_alert_id=requested_alert_id,
                     requested_circuit_id=requested_circuit_id,
+                    include_all_nilm=include_all_nilm,
                 )
             if detail := _state_alert_detail(coordinator, requested_circuit_id):
                 config = _config_for_circuit(coordinator, requested_circuit_id)
@@ -190,6 +194,7 @@ def alert_evidence_payload(
                     "nilm": _nilm_payload_for_circuit(
                         coordinator,
                         requested_circuit_id,
+                        include_all_nilm=include_all_nilm,
                     ),
                 }
             config = _config_for_circuit(coordinator, requested_circuit_id)
@@ -219,6 +224,7 @@ def alert_evidence_payload(
             "nilm": _nilm_payload_for_circuit(
                 coordinator,
                 requested_circuit_id,
+                include_all_nilm=include_all_nilm,
             ),
             "message": "No current alert evidence is available for this circuit.",
             "next_step": (
@@ -249,6 +255,7 @@ def _payload_for_alert(
     *,
     requested_alert_id: str | None,
     requested_circuit_id: str | None,
+    include_all_nilm: bool,
 ) -> dict[str, Any]:
     config = _config_for_circuit(coordinator, alert.circuit_id)
     detail = alert_evidence_detail(alert, config=config)
@@ -268,7 +275,11 @@ def _payload_for_alert(
             coordinator,
             alert.circuit_id,
         ),
-        "nilm": _nilm_payload_for_circuit(coordinator, alert.circuit_id),
+        "nilm": _nilm_payload_for_circuit(
+            coordinator,
+            alert.circuit_id,
+            include_all_nilm=include_all_nilm,
+        ),
     }
 
 
@@ -513,6 +524,8 @@ def _first_recommendation_id(recommendations: list[dict[str, Any]]) -> str | Non
 def _nilm_payload_for_circuit(
     coordinator: Any,
     circuit_id: str | None,
+    *,
+    include_all_nilm: bool = False,
 ) -> dict[str, Any]:
     if not circuit_id:
         return {
@@ -522,7 +535,9 @@ def _nilm_payload_for_circuit(
             "signatures_omitted_count": 0,
         }
     signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
-    preview_signatures = signatures[:MAX_NILM_PANEL_SIGNATURES]
+    preview_signatures = (
+        signatures if include_all_nilm else signatures[:MAX_NILM_PANEL_SIGNATURES]
+    )
     return {
         "signatures": [
             {
@@ -535,6 +550,7 @@ def _nilm_payload_for_circuit(
                     circuit_id,
                     str(signature[ATTR_SIGNATURE_ID]),
                     signatures,
+                    include_all_nilm=include_all_nilm,
                 ),
             }
             for signature in preview_signatures
@@ -584,10 +600,16 @@ def _nilm_actions_for_signature(
     circuit_id: str,
     signature_id: str,
     signatures: list[dict[str, Any]],
+    *,
+    include_all_nilm: bool = False,
 ) -> dict[str, dict[str, Any]]:
     data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
     merge_target_options = _nilm_merge_target_options(signatures, signature_id)
-    merge_target_preview = merge_target_options[:MAX_NILM_MERGE_TARGET_OPTIONS]
+    merge_target_preview = (
+        merge_target_options
+        if include_all_nilm
+        else merge_target_options[:MAX_NILM_MERGE_TARGET_OPTIONS]
+    )
     merge_action: dict[str, Any] = {
         "domain": DOMAIN,
         "service": SERVICE_MERGE_NILM_SIGNATURES,
@@ -783,6 +805,10 @@ def _iter_items(value: Any) -> Iterable[Any]:
         return tuple(value)
     except TypeError:
         return ()
+
+
+def _truthy_query(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "all"}
 
 
 def _circuit_payload(config: CircuitConfig | None) -> dict[str, str] | None:
