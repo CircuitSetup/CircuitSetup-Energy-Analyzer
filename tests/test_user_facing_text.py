@@ -984,6 +984,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Safety Notice",
         "alert.safety_notice",
         "Source Entities",
+        "source-entity-chip",
+        "data-source-entity",
+        "hass-more-info",
+        "_openSourceEntity",
         "NILM Review",
         "signature.display_label",
         "recommendation.display_label",
@@ -1000,6 +1004,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "Graph entities" not in asset
     assert "Graphed Sources" not in asset
     assert "_entityList" not in asset
+    assert (
+        'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
+        not in asset
+    )
     assert "this._escape(signature.signature_id)}</strong>" not in asset
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
 
