@@ -661,9 +661,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!entities.length) {
       return "";
     }
+    const totalCount = Number(alert.source_entities_count || entities.length);
+    const omittedCount = Number(alert.source_entities_omitted_count || 0);
+    const summary = omittedCount > 0
+      ? `<p class="muted">Showing ${entities.length} of ${totalCount} source entities. ${omittedCount} more available in the circuit configuration.</p>`
+      : "";
     return `
       <section class="panel">
         <h2>Source Entities</h2>
+        ${summary}
         <div class="entity-list">
           ${entities.map((entityId) => this._sourceEntityChip(entityId)).join("")}
         </div>

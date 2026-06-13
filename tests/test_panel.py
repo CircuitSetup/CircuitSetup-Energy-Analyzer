@@ -115,6 +115,39 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     )
 
 
+def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="panel", feature="metric_consistency")
+    config = CircuitConfig(
+        circuit_id="panel",
+        name="Panel",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=tuple(
+            SensorRef(f"sensor.panel_source_{index:02d}", SensorRole.REAL_POWER)
+            for index in range(9)
+        ),
+    )
+    payload = alert_evidence_payload(
+        [_coordinator(alert, config=config)],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["alert"]["source_entities"] == [
+        "sensor.panel_source_00",
+        "sensor.panel_source_01",
+        "sensor.panel_source_02",
+        "sensor.panel_source_03",
+        "sensor.panel_source_04",
+    ]
+    assert payload["alert"]["source_entities_count"] == 9
+    assert payload["alert"]["source_entities_has_more"] is True
+    assert payload["alert"]["source_entities_omitted_count"] == 4
+
+
 def test_alert_evidence_payload_switches_to_end_maintenance_when_active() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
