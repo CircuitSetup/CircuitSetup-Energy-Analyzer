@@ -469,6 +469,59 @@ def hide_entity_registry_entries(
         update_entity(entity_id, hidden_by=hidden_by)
 
 
+def sync_entity_registry_visibility(
+    hass: Any,
+    *,
+    entry_id: str,
+    entity_domain: str,
+    hidden_unique_id_suffixes: set[str],
+    detail_level: Any,
+) -> None:
+    """Hide noisy detail rows normally, but reveal integration-hidden rows in Expert."""
+    if normalize_entity_detail_level(detail_level) != ENTITY_DETAIL_EXPERT:
+        hide_entity_registry_entries(
+            hass,
+            entry_id=entry_id,
+            entity_domain=entity_domain,
+            hidden_unique_id_suffixes=hidden_unique_id_suffixes,
+        )
+        return
+
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return
+
+    registry = er.async_get(hass)
+    update_entity = getattr(registry, "async_update_entity", None)
+    if not callable(update_entity):
+        return
+
+    hider = getattr(er, "RegistryEntryHider", None)
+    integration_hidden_by = _registry_disabled_by_name(
+        getattr(hider, "INTEGRATION", "integration")
+    )
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    prefix = f"{entity_domain}."
+    for entry in values:
+        entity_id = str(getattr(entry, "entity_id", ""))
+        unique_id = str(getattr(entry, "unique_id", ""))
+        hidden_by = _registry_disabled_by_name(getattr(entry, "hidden_by", None))
+        if (
+            getattr(entry, "config_entry_id", None) != entry_id
+            or getattr(entry, "platform", None) != DOMAIN
+            or not entity_id.startswith(prefix)
+            or hidden_by != integration_hidden_by
+            or not any(
+                unique_id.endswith(f"_{suffix}")
+                for suffix in hidden_unique_id_suffixes
+            )
+        ):
+            continue
+        update_entity(entity_id, hidden_by=None)
+
+
 def sync_entity_registry_categories(
     hass: Any,
     *,

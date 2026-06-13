@@ -67,6 +67,7 @@ from .entity import (
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     sync_entity_registry_categories,
+    sync_entity_registry_visibility,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .safety import with_electrical_safety_notice
@@ -3029,24 +3030,32 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="sensor",
         tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
     )
+    hidden_sensor_suffixes = {
+        description.key
+        for description in SENSOR_DESCRIPTIONS
+        if description.entity_registry_visible_default is False
+    }
+    hidden_demo_source_suffixes = {
+        unique_id.removeprefix(f"{entry_id}_")
+        for unique_id in {
+            str(getattr(entity, "unique_id", ""))
+            for entity in entities
+            if isinstance(entity, DemoSourceSensor)
+        }
+        if unique_id.startswith(f"{entry_id}_demo_source_")
+    }
+    sync_entity_registry_visibility(
+        hass,
+        entry_id=entry_id,
+        entity_domain="sensor",
+        hidden_unique_id_suffixes=hidden_sensor_suffixes,
+        detail_level=entity_detail_level_for_coordinator(coordinator),
+    )
     hide_entity_registry_entries(
         hass,
         entry_id=entry_id,
         entity_domain="sensor",
-        hidden_unique_id_suffixes={
-            description.key
-            for description in SENSOR_DESCRIPTIONS
-            if description.entity_registry_visible_default is False
-        }
-        | {
-            unique_id.removeprefix(f"{entry_id}_")
-            for unique_id in {
-                str(getattr(entity, "unique_id", ""))
-                for entity in entities
-                if isinstance(entity, DemoSourceSensor)
-            }
-            if unique_id.startswith(f"{entry_id}_demo_source_")
-        },
+        hidden_unique_id_suffixes=hidden_demo_source_suffixes,
     )
     sync_entity_registry_categories(
         hass,
