@@ -134,6 +134,7 @@ def alert_evidence_payload(
                         requested_circuit_id=requested_circuit_id,
                     )
 
+    fallback_circuit: tuple[Any, CircuitConfig] | None = None
     if requested_circuit_id:
         for coordinator in coordinators:
             if alert := _latest_alert_for_circuit(coordinator, requested_circuit_id):
@@ -170,38 +171,40 @@ def alert_evidence_payload(
                     ),
                 }
             config = _config_for_circuit(coordinator, requested_circuit_id)
-            if config is not None:
-                return {
-                    "status": "circuit_found_no_evidence",
-                    "requested_alert_id": requested_alert_id,
-                    "requested_circuit_id": requested_circuit_id,
-                    "alert": None,
-                    "circuit": _circuit_payload(config),
-                    "actions": _actions_for_context(
-                        coordinator,
-                        config=config,
-                        alert_id=None,
-                        circuit_id=requested_circuit_id,
-                    ),
-                    "setting_recommendations": (
-                        _setting_recommendations_for_circuit(
-                            coordinator,
-                            requested_circuit_id,
-                        )
-                    ),
-                    "nilm": _nilm_payload_for_circuit(
-                        coordinator,
-                        requested_circuit_id,
-                    ),
-                    "message": (
-                        "No current alert evidence is available for this circuit."
-                    ),
-                    "next_step": (
-                        "Use the available circuit actions below, open Advanced "
-                        "Circuit Settings, or review the summary sensors for the "
-                        "latest state."
-                    ),
-                }
+            if config is not None and fallback_circuit is None:
+                fallback_circuit = (coordinator, config)
+
+    if requested_circuit_id and fallback_circuit is not None:
+        coordinator, config = fallback_circuit
+        return {
+            "status": "circuit_found_no_evidence",
+            "requested_alert_id": requested_alert_id,
+            "requested_circuit_id": requested_circuit_id,
+            "alert": None,
+            "circuit": _circuit_payload(config),
+            "actions": _actions_for_context(
+                coordinator,
+                config=config,
+                alert_id=None,
+                circuit_id=requested_circuit_id,
+            ),
+            "setting_recommendations": (
+                _setting_recommendations_for_circuit(
+                    coordinator,
+                    requested_circuit_id,
+                )
+            ),
+            "nilm": _nilm_payload_for_circuit(
+                coordinator,
+                requested_circuit_id,
+            ),
+            "message": "No current alert evidence is available for this circuit.",
+            "next_step": (
+                "Use the available circuit actions below, open Advanced "
+                "Circuit Settings, or review the summary sensors for the "
+                "latest state."
+            ),
+        }
 
     return {
         "status": "not_found",

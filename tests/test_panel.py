@@ -458,6 +458,28 @@ def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
     )
 
 
+def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="hvac", feature="demand_monthly_peak")
+
+    payload = alert_evidence_payload(
+        [
+            _coordinator(config=_config("hvac")),
+            _coordinator(alert, config=_config("hvac")),
+        ],
+        circuit_id="hvac",
+    )
+
+    assert payload["status"] == "latest_for_circuit"
+    assert payload["alert"]["alert_id"] == notification_id_for_alert(alert)
+    assert payload["alert"]["feature"] == "demand_monthly_peak"
+
+
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
