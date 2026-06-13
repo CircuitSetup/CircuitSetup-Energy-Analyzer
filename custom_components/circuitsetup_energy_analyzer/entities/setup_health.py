@@ -61,6 +61,11 @@ _UTILITY_COMPARISON_SETUP_STATUSES = {
     "missing_utility",
     "missing_measured",
 }
+_UTILITY_COMPARISON_SETUP_ISSUES = {
+    "utility_comparison_source_mismatch",
+    "utility_comparison_missing_utility_source",
+    "utility_comparison_missing_measured_source",
+}
 _MAX_SETUP_HEALTH_LIST_ITEMS = 8
 _MAX_SETUP_HEALTH_ISSUES = 8
 _MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE = 3
@@ -141,7 +146,7 @@ def _setup_health_attributes_for_issues(
     )
     utility_comparison_setup_issues = _setup_health_issue_circuits(
         issues,
-        issue_keys={"utility_comparison_source_mismatch"},
+        issue_keys=_UTILITY_COMPARISON_SETUP_ISSUES,
     )
     bounded_issues = _bounded_setup_health_issues(issues)
     ready = not issues
@@ -520,19 +525,12 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                 )
             )
 
-        if _setup_health_has_utility_comparison_setup_status(coordinator, circuit_id):
-            issues.append(
-                _setup_health_issue(
-                    "Review utility comparison",
-                    f"Review utility comparison source settings for {circuit.name}",
-                    circuit,
-                    (
-                        "Utility comparison is enabled, but the utility source, "
-                        "measured kWh source, or recorder period cannot be compared."
-                    ),
-                    issue="utility_comparison_source_mismatch",
-                )
-            )
+        utility_comparison_issue = _setup_health_utility_comparison_issue(
+            coordinator,
+            circuit,
+        )
+        if utility_comparison_issue is not None:
+            issues.append(utility_comparison_issue)
 
     return _dedupe_setup_health_issues(issues)
 
@@ -865,15 +863,69 @@ def _setup_health_has_utility_comparison_setup_status(
     coordinator: Any,
     circuit_id: str,
 ) -> bool:
+    return (
+        _setup_health_utility_comparison_setup_status(coordinator, circuit_id)
+        is not None
+    )
+
+
+def _setup_health_utility_comparison_setup_status(
+    coordinator: Any,
+    circuit_id: str,
+) -> str | None:
     state = getattr(coordinator, "data", None)
     status = _setup_health_status(
         state,
         "utility_comparison_status_by_circuit",
         circuit_id,
     )
-    return (
-        status in _UTILITY_COMPARISON_SETUP_STATUSES
-        and _utility_comparison_configured(coordinator, circuit_id)
+    if (
+        status not in _UTILITY_COMPARISON_SETUP_STATUSES
+        or not _utility_comparison_configured(coordinator, circuit_id)
+    ):
+        return None
+    return status
+
+
+def _setup_health_utility_comparison_issue(
+    coordinator: Any,
+    circuit: Any,
+) -> dict[str, Any] | None:
+    status = _setup_health_utility_comparison_setup_status(
+        coordinator,
+        circuit.circuit_id,
+    )
+    if status is None:
+        return None
+    if status == "missing_utility":
+        return _setup_health_issue(
+            "Add utility comparison source",
+            f"Add utility comparison source for {circuit.name}",
+            circuit,
+            (
+                "Utility comparison is enabled, but utility kWh has no data."
+            ),
+            issue="utility_comparison_missing_utility_source",
+        )
+    if status == "missing_measured":
+        return _setup_health_issue(
+            "Add measured kWh source",
+            f"Add measured kWh source for {circuit.name}",
+            circuit,
+            (
+                "Utility comparison is enabled, but measured kWh has no data."
+            ),
+            issue="utility_comparison_missing_measured_source",
+        )
+    return _setup_health_issue(
+        "Review utility comparison",
+        f"Review utility comparison source settings for {circuit.name}",
+        circuit,
+        (
+            "Utility comparison is enabled, but the utility source, "
+            "measured kWh source, or recorder period cannot be compared."
+        ),
+        issue="utility_comparison_source_mismatch",
     )
 
 

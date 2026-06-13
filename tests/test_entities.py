@@ -1695,8 +1695,68 @@ def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
     assert [issue["issue"] for issue in attrs["issues"]] == [
         "missing_rain_context_source",
         "missing_water_flow_source",
-        "utility_comparison_source_mismatch",
+        "utility_comparison_missing_measured_source",
     ]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_issue", "expected_step", "expected_reason"),
+    (
+        (
+            "missing_utility",
+            "utility_comparison_missing_utility_source",
+            "Add utility comparison source for Mains",
+            "Utility comparison is enabled, but utility kWh has no data.",
+        ),
+        (
+            "missing_measured",
+            "utility_comparison_missing_measured_source",
+            "Add measured kWh source for Mains",
+            "Utility comparison is enabled, but measured kWh has no data.",
+        ),
+    ),
+)
+def test_setup_health_reports_specific_utility_comparison_setup_gaps(
+    status: str,
+    expected_issue: str,
+    expected_step: str,
+    expected_reason: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(utility_comparison_status_by_circuit={"mains": status}),
+        circuit_configs=(mains,),
+        entry_data={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+            },
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+            }
+        ),
+        options={},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+
+    assert attrs["next_step"] == expected_step
+    assert attrs["primary_issue"] == expected_issue
+    assert attrs["reason"] == expected_reason
+    assert attrs["utility_comparison_setup_issues"] == ["mains"]
+    assert attrs["issues"][0]["issue"] == expected_issue
+    assert attrs["issues"][0]["reason"] == expected_reason
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:

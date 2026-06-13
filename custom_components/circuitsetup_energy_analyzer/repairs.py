@@ -36,6 +36,12 @@ _REPAIR_FIXES: dict[str, str] = {
     "utility_comparison_source_mismatch": (
         "Review utility comparison source and measured kWh settings."
     ),
+    "utility_comparison_missing_utility_source": (
+        "Add or repair the utility, Opower, or recorder statistics kWh source."
+    ),
+    "utility_comparison_missing_measured_source": (
+        "Add or repair the local measured cumulative kWh source."
+    ),
     "unexpected_negative_real_power": (
         "Check CT orientation or change the circuit power-flow mode if export is "
         "expected."

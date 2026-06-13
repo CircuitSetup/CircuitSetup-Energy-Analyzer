@@ -747,6 +747,14 @@
       "title": "Energy Analyzer utility comparison needs source settings",
       "description": "Utility comparison is enabled for {circuit_name}, but the utility source, measured kWh source, or recorder period cannot be compared. Next step: {recommended_action}. Suggested fix: {fix}"
     },
+    "utility_comparison_missing_utility_source": {
+      "title": "Energy Analyzer utility comparison needs utility data",
+      "description": "Utility comparison is enabled for {circuit_name}, but the utility, Opower, or recorder statistics kWh source has no comparable data. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
+    "utility_comparison_missing_measured_source": {
+      "title": "Energy Analyzer utility comparison needs measured data",
+      "description": "Utility comparison is enabled for {circuit_name}, but the local measured cumulative kWh source has no comparable data. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
     "unexpected_negative_real_power": {
       "title": "Energy Analyzer sees negative load power",
       "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected. Suggested fix: {fix}"

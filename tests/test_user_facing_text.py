@@ -1148,6 +1148,8 @@ def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
         "missing_rain_context_source",
         "missing_water_flow_source",
         "utility_comparison_source_mismatch",
+        "utility_comparison_missing_utility_source",
+        "utility_comparison_missing_measured_source",
     ):
         description = issues[key]["description"]
         assert "{circuit_name}" in description
