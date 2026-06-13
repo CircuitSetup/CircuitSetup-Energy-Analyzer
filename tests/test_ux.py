@@ -148,6 +148,9 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
             "2026-06-02T10:00:00+00:00 to 2026-06-02T12:30:00+00:00"
         ),
         "contributing_metrics": {"power_factor": 1.2, "reactive_power": 2.1},
+        "contributing_metrics_count": 2,
+        "contributing_metrics_has_more": False,
+        "contributing_metrics_omitted_count": 0,
         "evidence_path": detail["evidence_path"],
         "graph_entities": [
             "sensor.fridge_reactive_power",
@@ -162,6 +165,41 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "graph_window_start": "2026-06-02T08:00:00+00:00",
         "graph_window_end": "2026-06-02T14:30:00+00:00",
     }
+
+
+def test_alert_evidence_detail_bounds_large_contributing_metric_attributes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        alert_evidence_detail,
+    )
+
+    features = {f"metric_{index:02d}": float(index) for index in range(12)}
+    features["sample_count"] = 42
+    features["threshold_w"] = 1500.0
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 30, tzinfo=UTC),
+        circuit_id="panel",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="metric_11",
+        observed_value=85.0,
+        baseline_value=80.0,
+        features=features,
+    )
+
+    detail = alert_evidence_detail(alert)
+
+    assert detail["threshold"] == 1500.0
+    assert detail["sample_count"] == 42
+    assert detail["contributing_metrics"] == {
+        "metric_11": 11.0,
+        "metric_00": 0.0,
+        "metric_01": 1.0,
+        "metric_02": 2.0,
+        "metric_03": 3.0,
+    }
+    assert detail["contributing_metrics_count"] == 14
+    assert detail["contributing_metrics_has_more"] is True
+    assert detail["contributing_metrics_omitted_count"] == 9
 
 
 def test_alert_evidence_detail_includes_safety_notice_for_capacity_alerts() -> None:
