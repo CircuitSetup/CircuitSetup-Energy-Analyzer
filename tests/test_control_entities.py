@@ -573,6 +573,45 @@ async def test_number_setup_skips_stale_daily_goal_without_energy_source(
 
 
 @pytest.mark.asyncio
+async def test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    coordinator = _FakeCoordinator(circuits=(_power_only_circuit(),))
+    coordinator.store_data = SimpleNamespace(
+        energy_goal_settings_by_circuit={
+            "garage_freezer": {"daily_goal_kwh": 3.25},
+        }
+    )
+    desired_identifiers: set[tuple[str, str]] = set()
+    monkeypatch.setattr(
+        number,
+        "prune_stale_entity_registry_entries",
+        lambda *args, **kwargs: None,
+    )
+
+    def _capture_device_prune(*args: object, **kwargs: object) -> None:
+        desired_identifiers.update(kwargs["desired_identifiers"])
+
+    monkeypatch.setattr(
+        number,
+        "prune_stale_device_registry_entries",
+        _capture_device_prune,
+    )
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
+    assert desired_identifiers == {(DOMAIN, "entry-1_garage_freezer")}
+
+
+@pytest.mark.asyncio
 async def test_number_setup_keeps_goal_when_runtime_energy_evidence_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

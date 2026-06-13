@@ -153,11 +153,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[NumberEntity] = []
+    circuit_device_identifiers: set[tuple[str, str]] = set()
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        circuit_device_identifiers.add((DOMAIN, f"{entry_id}_{circuit.circuit_id}"))
         entities.extend(
             CircuitDailyEnergyGoalNumber(
                 coordinator,
@@ -178,7 +180,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     prune_stale_device_registry_entries(
         hass,
         entry_id=entry_id,
-        desired_identifiers=device_identifiers_for_entities(entities),
+        desired_identifiers=(
+            device_identifiers_for_entities(entities) | circuit_device_identifiers
+        ),
     )
     async_add_entities(entities)
 
