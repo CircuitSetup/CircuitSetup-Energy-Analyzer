@@ -4,9 +4,18 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from ..const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
+    CONF_EXPECTS_WATER_FLOW,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_RAIN_SENSOR_ENTITY,
+    CONF_UTILITY_COMPARISON_SETTINGS,
+    CONF_WATER_FLOW_CORRELATION_ENABLED,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
 )
 from ..entity import circuit_info_from_config
 from ..models import ApplianceProfile, CircuitMode, SensorRole
@@ -35,6 +44,22 @@ _HIGH_POWER_PROFILES = {
     ApplianceProfile.EV_CHARGER,
     ApplianceProfile.SOLAR_INVERTER,
     ApplianceProfile.MAINS_NILM,
+}
+_PUMP_WATER_CONTEXT_PROFILES = {
+    ApplianceProfile.SUMP_PUMP,
+    ApplianceProfile.WATER_PUMP,
+    ApplianceProfile.WELL_PUMP,
+}
+_FLOW_WATER_CONTEXT_PROFILES = {
+    ApplianceProfile.WATER_PUMP,
+    ApplianceProfile.WELL_PUMP,
+    ApplianceProfile.WATER_HEATER,
+    ApplianceProfile.WASHER,
+}
+_UTILITY_COMPARISON_SETUP_STATUSES = {
+    "unconfigured",
+    "missing_utility",
+    "missing_measured",
 }
 
 
@@ -95,7 +120,15 @@ def _setup_health_attributes_for_issues(
             issues,
             states={"Let analyzer learn"},
         ),
-        "stale_sources": _setup_health_issue_circuits(
+        "stale_sources": _setup_health_issue_source_entities(
+            issues,
+            states={"Fix stale source sensor"},
+        ),
+        "stale_source_circuits": _setup_health_issue_circuits(
+            issues,
+            states={"Fix stale source sensor"},
+        ),
+        "stale_source_entities": _setup_health_issue_source_entities(
             issues,
             states={"Fix stale source sensor"},
         ),
@@ -107,6 +140,22 @@ def _setup_health_attributes_for_issues(
             issues,
             states={"Check CT direction"},
         ),
+        "dual_phase_missing_legs": _setup_health_issue_circuits(
+            issues,
+            issue_keys={"dual_phase_missing_leg"},
+        ),
+        "missing_rain_sources": _setup_health_issue_circuits(
+            issues,
+            issue_keys={"missing_rain_context_source"},
+        ),
+        "missing_water_flow_sources": _setup_health_issue_circuits(
+            issues,
+            issue_keys={"missing_water_flow_source"},
+        ),
+        "utility_comparison_setup_issues": _setup_health_issue_circuits(
+            issues,
+            issue_keys={"utility_comparison_source_mismatch"},
+        ),
         "issues": issues,
     }
 
@@ -115,15 +164,36 @@ def _setup_health_issue_circuits(
     issues: Iterable[Mapping[str, Any]],
     *,
     states: set[str] | None = None,
+    issue_keys: set[str] | None = None,
 ) -> list[str]:
     circuits: list[str] = []
     for issue in issues:
         if states is not None and issue.get("state") not in states:
             continue
+        if issue_keys is not None and issue.get("issue") not in issue_keys:
+            continue
         circuit_id = issue.get("affected_circuit")
         if circuit_id is not None and circuit_id not in circuits:
             circuits.append(str(circuit_id))
     return circuits
+
+
+def _setup_health_issue_source_entities(
+    issues: Iterable[Mapping[str, Any]],
+    *,
+    states: set[str] | None = None,
+    issue_keys: set[str] | None = None,
+) -> list[str]:
+    source_entities: list[str] = []
+    for issue in issues:
+        if states is not None and issue.get("state") not in states:
+            continue
+        if issue_keys is not None and issue.get("issue") not in issue_keys:
+            continue
+        for entity_id in issue.get("source_entities", ()):
+            if isinstance(entity_id, str) and entity_id not in source_entities:
+                source_entities.append(entity_id)
+    return source_entities
 
 
 def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
@@ -278,6 +348,48 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                 )
             )
 
+        if _setup_health_needs_rain_context_source(coordinator, raw_circuit):
+            issues.append(
+                _setup_health_issue(
+                    "Add rain source",
+                    f"Add a rain sensor for {circuit.name}",
+                    circuit,
+                    (
+                        "Rain-pump context is enabled, but no rain or rain-intensity "
+                        "source is configured."
+                    ),
+                    issue="missing_rain_context_source",
+                )
+            )
+
+        if _setup_health_needs_water_flow_source(coordinator, raw_circuit):
+            issues.append(
+                _setup_health_issue(
+                    "Add water-flow source",
+                    f"Add a water-flow sensor for {circuit.name}",
+                    circuit,
+                    (
+                        "Water-flow context is enabled, but no linked or global "
+                        "flow source is configured."
+                    ),
+                    issue="missing_water_flow_source",
+                )
+            )
+
+        if _setup_health_has_utility_comparison_setup_status(coordinator, circuit_id):
+            issues.append(
+                _setup_health_issue(
+                    "Review utility comparison",
+                    f"Review utility comparison source settings for {circuit.name}",
+                    circuit,
+                    (
+                        "Utility comparison is enabled, but the utility source, "
+                        "measured kWh source, or recorder period cannot be compared."
+                    ),
+                    issue="utility_comparison_source_mismatch",
+                )
+            )
+
     return _dedupe_setup_health_issues(issues)
 
 
@@ -303,6 +415,7 @@ def _setup_health_issue(
     reason: str,
     *,
     issue: str | None = None,
+    source_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     circuit_id = getattr(circuit, "circuit_id", None)
     return {
@@ -315,6 +428,7 @@ def _setup_health_issue(
         "fix": recommended_action,
         "open_path": SETUP_HEALTH_OPEN_PATH,
         "reason": reason,
+        "source_entities": list(dict.fromkeys(source_entities)),
     }
 
 
@@ -364,6 +478,10 @@ def _setup_health_data_quality_issue(
             circuit,
             "One or more selected source sensors have not updated recently.",
             issue="stale_source",
+            source_entities=_source_entities_mentioned_in_issues(
+                circuit,
+                issue_text,
+            ),
         )
     if (
         checklist.get("required_sensors_present") is False
@@ -555,6 +673,64 @@ def _setup_health_needs_temperature_source(coordinator: Any, circuit: Any) -> bo
     )
 
 
+def _setup_health_needs_rain_context_source(coordinator: Any, circuit: Any) -> bool:
+    profile = _appliance_profile(circuit)
+    return (
+        profile in _PUMP_WATER_CONTEXT_PROFILES
+        and _advanced_setting_bool(
+            coordinator,
+            circuit,
+            CONF_RAIN_PUMP_CORRELATION_ENABLED,
+            default=True,
+        )
+        and not _has_any_configured_entity(
+            coordinator,
+            CONF_RAIN_SENSOR_ENTITY,
+            CONF_RAIN_INTENSITY_ENTITY,
+        )
+    )
+
+
+def _setup_health_needs_water_flow_source(coordinator: Any, circuit: Any) -> bool:
+    profile = _appliance_profile(circuit)
+    return (
+        profile in _FLOW_WATER_CONTEXT_PROFILES
+        and _advanced_setting_bool(
+            coordinator,
+            circuit,
+            CONF_WATER_FLOW_CORRELATION_ENABLED,
+            default=True,
+        )
+        and _advanced_setting_bool(
+            coordinator,
+            circuit,
+            CONF_EXPECTS_WATER_FLOW,
+            default=True,
+        )
+        and not _has_any_configured_entity(
+            coordinator,
+            CONF_LINKED_FLOW_SENSOR_ENTITIES,
+            CONF_WATER_FLOW_SENSOR_ENTITIES,
+        )
+    )
+
+
+def _setup_health_has_utility_comparison_setup_status(
+    coordinator: Any,
+    circuit_id: str,
+) -> bool:
+    state = getattr(coordinator, "data", None)
+    status = _setup_health_status(
+        state,
+        "utility_comparison_status_by_circuit",
+        circuit_id,
+    )
+    return (
+        status in _UTILITY_COMPARISON_SETUP_STATUSES
+        and _utility_comparison_configured(coordinator, circuit_id)
+    )
+
+
 def _setup_health_has_missing_mains_status(state: Any, circuit_id: str) -> bool:
     for field_name in (
         "balance_status_by_circuit",
@@ -616,6 +792,36 @@ def _numeric_count(value: Any) -> float:
     if isinstance(value, int | float):
         return max(float(value), 0.0)
     return 0.0
+
+
+def _source_entities_mentioned_in_issues(circuit: Any, issue_text: str) -> list[str]:
+    source_entities = _source_entities(circuit)
+    mentioned = [
+        entity_id for entity_id in source_entities if entity_id.lower() in issue_text
+    ]
+    return mentioned or source_entities
+
+
+def _source_entities(circuit: Any) -> list[str]:
+    sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
+        circuit,
+        "sensors",
+        (),
+    )
+    source_entities: list[str] = []
+    for sensor in sensors or ():
+        entity_id = sensor.get("entity_id") if isinstance(sensor, Mapping) else getattr(
+            sensor,
+            "entity_id",
+            None,
+        )
+        if (
+            isinstance(entity_id, str)
+            and entity_id
+            and entity_id not in source_entities
+        ):
+            source_entities.append(entity_id)
+    return source_entities
 
 
 def _sensor_roles(circuit: Any) -> set[SensorRole]:
@@ -713,6 +919,27 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
     return isinstance(settings, Mapping) and bool(settings)
 
 
+def _advanced_settings(coordinator: Any, circuit: Any) -> Mapping[str, Any]:
+    circuit_id = _circuit_id(circuit)
+    settings = _coordinator_config_value(coordinator, CONF_ADVANCED_SETTINGS)
+    if isinstance(settings, Mapping):
+        circuit_settings = settings.get(circuit_id, {})
+        if isinstance(circuit_settings, Mapping):
+            return circuit_settings
+    return {}
+
+
+def _advanced_setting_bool(
+    coordinator: Any,
+    circuit: Any,
+    key: str,
+    *,
+    default: bool,
+) -> bool:
+    value = _advanced_settings(coordinator, circuit).get(key, default)
+    return bool(value)
+
+
 def _has_temperature_source(coordinator: Any) -> bool:
     value = _coordinator_config_value(coordinator, CONF_OUTDOOR_TEMPERATURE_ENTITY)
     return value is not None and bool(str(value).strip())
@@ -725,6 +952,37 @@ def _has_mains_source(coordinator: Any) -> bool:
     if isinstance(value, (list, tuple, set)):
         return any(bool(str(item).strip()) for item in value)
     return False
+
+
+def _has_any_configured_entity(coordinator: Any, *keys: str) -> bool:
+    for key in keys:
+        value = _coordinator_config_value(coordinator, key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (list, tuple, set)) and any(
+            bool(str(item).strip()) for item in value
+        ):
+            return True
+    return False
+
+
+def _utility_comparison_configured(coordinator: Any, circuit_id: str) -> bool:
+    store_data = getattr(coordinator, "store_data", None)
+    stored_settings = getattr(
+        store_data,
+        "utility_comparison_settings_by_circuit",
+        {},
+    )
+    if isinstance(stored_settings, Mapping) and stored_settings.get(circuit_id):
+        return True
+
+    configured_settings = _coordinator_config_value(
+        coordinator,
+        CONF_UTILITY_COMPARISON_SETTINGS,
+    )
+    return isinstance(configured_settings, Mapping) and bool(
+        configured_settings.get(circuit_id)
+    )
 
 
 def _coordinator_config_value(coordinator: Any, key: str) -> Any:
