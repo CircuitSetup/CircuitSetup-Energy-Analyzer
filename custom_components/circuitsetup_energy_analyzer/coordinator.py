@@ -3826,6 +3826,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.hass,
                 issue[0],
                 issue[1],
+                source_entities=(
+                    sample_or_problem.source_entity_ids
+                    if not isinstance(sample_or_problem, str)
+                    else ()
+                ),
             )
             self._active_repair_issues.add(issue)
 

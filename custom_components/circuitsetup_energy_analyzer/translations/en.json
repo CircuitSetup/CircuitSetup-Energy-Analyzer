@@ -701,63 +701,63 @@
   "issues": {
     "missing_source_entities": {
       "title": "Energy Analyzer source sensors are missing",
-      "description": "The integration has no configured source sensors. Add at least one CircuitSetup energy sensor before appliance analysis can start."
+      "description": "The integration has no configured source sensors. Add at least one CircuitSetup energy sensor before appliance analysis can start. Suggested fix: {fix}"
     },
     "missing_required_sensor": {
       "title": "Energy Analyzer source sensor is missing",
-      "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue."
+      "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
     },
     "phase_mismatch": {
       "title": "Energy Analyzer phase pairing looks suspicious",
-      "description": "A dual-phase circuit has source data that does not look like a valid paired load. Review the selected channels and CT orientation."
+      "description": "A dual-phase circuit has source data that does not look like a valid paired load. Review the selected channels and CT orientation. Suggested fix: {fix}"
     },
     "stale_source_sensor": {
       "title": "Energy Analyzer source sensor is stale",
-      "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit."
+      "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit. Suggested fix: {fix}"
     },
     "missing_energy_source": {
       "title": "Energy Analyzer circuit needs cumulative energy data",
-      "description": "A configured circuit has power data but no usable cumulative kWh source. Add a cumulative energy sensor, or create one with Home Assistant's Integration helper."
+      "description": "A configured circuit has power data but no usable cumulative kWh source. Add a cumulative energy sensor, or create one with Home Assistant's Integration helper. Suggested fix: {fix}"
     },
     "missing_mains_source": {
       "title": "Energy Analyzer feature needs a mains source",
-      "description": "A mains-dependent feature is enabled, but no mains or whole-home source is configured. Add a mains source before using mains balance, NILM, or solar-flow checks."
+      "description": "A mains-dependent feature is enabled, but no mains or whole-home source is configured. Add a mains source before using mains balance, NILM, or solar-flow checks. Suggested fix: {fix}"
     },
     "missing_electrical_metrics": {
       "title": "Energy Analyzer circuit needs matching electrical metrics",
-      "description": "A configured circuit is missing the supporting watts, amps, voltage, apparent power, or power factor inputs needed for metric-consistency checks."
+      "description": "A configured circuit is missing the supporting watts, amps, voltage, apparent power, or power factor inputs needed for metric-consistency checks. Suggested fix: {fix}"
     },
     "check_ct_direction": {
       "title": "Energy Analyzer found a power-flow or CT direction problem",
-      "description": "Analyzer evidence suggests reversed CT orientation, an unexpected export sign, or a power-flow mapping mismatch. Review CT direction and the configured power-flow mode."
+      "description": "Analyzer evidence suggests reversed CT orientation, an unexpected export sign, or a power-flow mapping mismatch. Review CT direction and the configured power-flow mode. Suggested fix: {fix}"
     },
     "dual_phase_missing_leg": {
       "title": "Energy Analyzer dual-phase circuit is missing one leg",
-      "description": "A dual-phase circuit cannot compare both split-phase legs because one leg is missing or unavailable. Review the selected leg A and leg B source sensors for this circuit."
+      "description": "A dual-phase circuit cannot compare both split-phase legs because one leg is missing or unavailable. Review the selected leg A and leg B source sensors for this circuit. Suggested fix: {fix}"
     },
     "missing_rain_context_source": {
       "title": "Energy Analyzer rain context needs a rain source",
-      "description": "Rain-pump correlation is enabled for a pump circuit, but no rain or rain-intensity source is configured. Add a rain sensor or disable rain-pump context for this circuit."
+      "description": "Rain-pump correlation is enabled for a pump circuit, but no rain or rain-intensity source is configured. Add a rain sensor or disable rain-pump context for this circuit. Suggested fix: {fix}"
     },
     "missing_water_flow_source": {
       "title": "Energy Analyzer water-flow context needs a flow source",
-      "description": "Water-flow correlation is enabled for a water-using circuit, but no linked or global water-flow source is configured. Add a flow sensor or disable water-flow context for this circuit."
+      "description": "Water-flow correlation is enabled for a water-using circuit, but no linked or global water-flow source is configured. Add a flow sensor or disable water-flow context for this circuit. Suggested fix: {fix}"
     },
     "utility_comparison_source_mismatch": {
       "title": "Energy Analyzer utility comparison needs source settings",
-      "description": "Utility comparison is enabled, but the utility source, measured kWh source, or recorder period cannot be compared. Review the utility comparison settings for this circuit."
+      "description": "Utility comparison is enabled, but the utility source, measured kWh source, or recorder period cannot be compared. Review the utility comparison settings for this circuit. Suggested fix: {fix}"
     },
     "unexpected_negative_real_power": {
       "title": "Energy Analyzer sees negative load power",
-      "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected."
+      "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected. Suggested fix: {fix}"
     },
     "missing_mains_nilm_sensor": {
       "title": "Energy Analyzer mains NILM sensor is missing",
-      "description": "Experimental NILM is enabled but a configured mains source sensor is missing or unavailable. Per-circuit analysis can continue, but NILM discovery is paused."
+      "description": "Experimental NILM is enabled but a configured mains source sensor is missing or unavailable. Per-circuit analysis can continue, but NILM discovery is paused. Suggested fix: {fix}"
     },
     "low_nilm_confidence": {
       "title": "Energy Analyzer NILM confidence is low",
-      "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications."
+      "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications. Suggested fix: {fix}"
     }
   }
 }

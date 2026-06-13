@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import voluptuous as vol
@@ -179,6 +180,56 @@ def test_repair_issue_severity_normalizes_unsupported_values_to_warning() -> Non
     assert _ha_issue_severity(fake_issue_registry, Severity.ERROR) == "error"
     assert _ha_issue_severity(fake_issue_registry, Severity.INFO) == "warning"
     assert _ha_issue_severity(fake_issue_registry, "surprising") == "warning"
+
+
+@pytest.mark.asyncio
+async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import repairs
+
+    calls = []
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    issue_registry_module = ModuleType("homeassistant.helpers.issue_registry")
+
+    class FakeIssueSeverity:
+        WARNING = "warning"
+        ERROR = "error"
+
+    def fake_create_issue(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    issue_registry_module.IssueSeverity = FakeIssueSeverity
+    issue_registry_module.async_create_issue = fake_create_issue
+    helpers_module.issue_registry = issue_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.issue_registry",
+        issue_registry_module,
+    )
+
+    await repairs.async_create_circuit_issue(
+        SimpleNamespace(),
+        "fridge",
+        "missing_energy_source",
+        source_entities=("sensor.fridge_power", "sensor.fridge_power"),
+    )
+
+    _, kwargs = calls[0]
+    assert kwargs["data"] == {
+        "circuit_id": "fridge",
+        "problem": "missing_energy_source",
+        "fix": "Add a cumulative kWh source for this circuit.",
+        "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
+        "source_entities": ["sensor.fridge_power"],
+    }
+    assert kwargs["translation_placeholders"] == {
+        "circuit_id": "fridge",
+        "fix": "Add a cumulative kWh source for this circuit.",
+        "open_path": "/config/integrations/integration/circuitsetup_energy_analyzer",
+        "source_entities": "sensor.fridge_power",
+    }
 
 
 def test_nilm_label_schema_validates_required_fields() -> None:
