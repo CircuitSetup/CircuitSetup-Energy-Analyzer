@@ -1311,6 +1311,55 @@ async def test_nilm_signature_services_reject_self_merge() -> None:
 
 
 @pytest.mark.asyncio
+async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ACKNOWLEDGE_ALERT,
+        SERVICE_MARK_ALERT_EXPECTED,
+        SERVICE_MARK_ALERT_UNHELPFUL,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_acknowledge_alert(self, alert_id: str) -> bool:
+            return False
+
+        async def async_mark_alert_expected(self, alert_id: str) -> bool:
+            return False
+
+        async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
+            return False
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    for service in (
+        SERVICE_ACKNOWLEDGE_ALERT,
+        SERVICE_MARK_ALERT_EXPECTED,
+        SERVICE_MARK_ALERT_UNHELPFUL,
+    ):
+        with pytest.raises(HomeAssistantError, match="Unknown alert_id 'stale-alert'"):
+            await hass.services.registered[(DOMAIN, service)](
+                SimpleNamespace(data={"alert_id": "stale-alert"})
+            )
+
+
+@pytest.mark.asyncio
 async def test_user_experience_services_dispatch_to_loaded_coordinators() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_END_MAINTENANCE,
@@ -1613,11 +1662,13 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ) -> None:
             self.calls.append(("async_end_maintenance", (circuit_id, relearn)))
 
-        async def async_mark_alert_expected(self, alert_id: str) -> None:
+        async def async_mark_alert_expected(self, alert_id: str) -> bool:
             self.calls.append(("async_mark_alert_expected", (alert_id,)))
+            return True
 
-        async def async_mark_alert_unhelpful(self, alert_id: str) -> None:
+        async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
             self.calls.append(("async_mark_alert_unhelpful", (alert_id,)))
+            return True
 
         async def async_mark_nilm_signature_expected(
             self,
@@ -1977,14 +2028,14 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
     )
 
     await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_ACKNOWLEDGE_ALERT)](
+        SimpleNamespace(data={"alert_id": notification_id_for_alert(alert)})
+    )
     await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
         SimpleNamespace(data={"circuit_id": "fridge"})
     )
     await hass.services.registered[(DOMAIN, SERVICE_PAUSE_ALERTS)](
         SimpleNamespace(data={"circuit_id": "fridge", "duration": "01:00:00"})
-    )
-    await hass.services.registered[(DOMAIN, SERVICE_ACKNOWLEDGE_ALERT)](
-        SimpleNamespace(data={"alert_id": notification_id_for_alert(alert)})
     )
     await hass.services.registered[(DOMAIN, SERVICE_EXPORT_DIAGNOSTICS)](
         SimpleNamespace(data={"circuit_id": "fridge"})
