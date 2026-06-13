@@ -231,7 +231,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
         "entry-1_fridge_start_maintenance",
-        "entry-1_fridge_end_maintenance",
         "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
@@ -239,10 +238,14 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     ):
         await by_unique_id[unique_id].async_press()
 
+    assert by_unique_id["entry-1_fridge_end_maintenance"].available is False
+    assert by_unique_id["entry-1_fridge_end_maintenance"].extra_state_attributes == {
+        "availability_reason": "maintenance_inactive",
+    }
+
     assert coordinator.calls == [
         ("async_relearn_baseline", ("fridge",)),
         ("async_start_maintenance", ("fridge", "", None, False)),
-        ("async_end_maintenance", ("fridge", False)),
         ("async_pause_alerts", ("fridge", None)),
         ("async_run_mapping_checks", ()),
         ("async_recalculate_setting_recommendations", (None,)),
@@ -308,6 +311,36 @@ async def test_button_availability_tracks_maintenance_state(
 
     assert by_unique_id["entry-1_fridge_start_maintenance"].available is False
     assert by_unique_id["entry-1_fridge_end_maintenance"].available is True
+
+
+@pytest.mark.asyncio
+async def test_unavailable_maintenance_button_press_raises_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    end_maintenance = by_unique_id["entry-1_fridge_end_maintenance"]
+
+    assert end_maintenance.available is False
+    assert end_maintenance.extra_state_attributes == {
+        "availability_reason": "maintenance_inactive",
+    }
+
+    with pytest.raises(button.HomeAssistantError, match="maintenance inactive"):
+        await end_maintenance.async_press()
+
+    assert coordinator.calls == []
 
 
 @pytest.mark.asyncio
