@@ -122,6 +122,9 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "sensor.fridge_reactive_power",
         "sensor.fridge_power_factor",
     ]
+    assert detail["source_entities_count"] == 3
+    assert detail["source_entities_has_more"] is False
+    assert detail["source_entities_omitted_count"] == 0
     assert detail["graph_window_start"] == "2026-06-02T08:00:00+00:00"
     assert detail["graph_window_end"] == "2026-06-02T14:30:00+00:00"
     assert detail == {
@@ -162,6 +165,9 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
             "sensor.fridge_reactive_power",
             "sensor.fridge_power_factor",
         ],
+        "source_entities_count": 3,
+        "source_entities_has_more": False,
+        "source_entities_omitted_count": 0,
         "graph_window_start": "2026-06-02T08:00:00+00:00",
         "graph_window_end": "2026-06-02T14:30:00+00:00",
     }
@@ -200,6 +206,46 @@ def test_alert_evidence_detail_bounds_large_contributing_metric_attributes() -> 
     assert detail["contributing_metrics_count"] == 14
     assert detail["contributing_metrics_has_more"] is True
     assert detail["contributing_metrics_omitted_count"] == 9
+
+
+def test_alert_evidence_detail_bounds_large_source_entity_previews() -> None:
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        alert_evidence_detail,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 30, tzinfo=UTC),
+        circuit_id="panel",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="metric_consistency",
+        observed_value=85.0,
+        baseline_value=80.0,
+        features={"metric_consistency": 0.42},
+    )
+    config = CircuitConfig(
+        circuit_id="panel",
+        name="Panel",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=tuple(
+            SensorRef(f"sensor.panel_source_{index:02d}", SensorRole.REAL_POWER)
+            for index in range(9)
+        ),
+    )
+
+    detail = alert_evidence_detail(alert, config=config)
+
+    assert detail["source_entities"] == [
+        "sensor.panel_source_00",
+        "sensor.panel_source_01",
+        "sensor.panel_source_02",
+        "sensor.panel_source_03",
+        "sensor.panel_source_04",
+    ]
+    assert detail["source_entities_count"] == 9
+    assert detail["source_entities_has_more"] is True
+    assert detail["source_entities_omitted_count"] == 4
 
 
 def test_alert_evidence_detail_includes_safety_notice_for_capacity_alerts() -> None:

@@ -42,6 +42,7 @@ SENSITIVITY_LABELS = {
     "sensitive": "Sensitive",
 }
 MAX_CONTRIBUTING_METRICS = 5
+MAX_ALERT_SOURCE_ENTITIES = 5
 REQUIRED_ROLES = {SensorRole.REAL_POWER}
 OPTIONAL_ROLES = {
     SensorRole.VOLTAGE,
@@ -147,6 +148,7 @@ def alert_evidence_detail(
         alert.features,
         primary_key=feature,
     )
+    source_entities = _bounded_source_entities(config)
     detail = {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": alert.circuit_id,
@@ -176,7 +178,10 @@ def alert_evidence_detail(
         "contributing_metrics_omitted_count": contributing_metrics["omitted_count"],
         "evidence_path": alert_evidence_path(alert, dashboard_path=dashboard_path),
         "graph_entities": list(alert_graph_entities(alert, config)),
-        "source_entities": list(alert_source_entities(config)),
+        "source_entities": source_entities["entities"],
+        "source_entities_count": source_entities["count"],
+        "source_entities_has_more": source_entities["has_more"],
+        "source_entities_omitted_count": source_entities["omitted_count"],
         "graph_window_start": graph_window_start.isoformat(),
         "graph_window_end": graph_window_end.isoformat(),
     }
@@ -280,6 +285,19 @@ def _bounded_contributing_metrics(
     preview_count = len(preview_items)
     return {
         "metrics": dict(preview_items),
+        "count": count,
+        "has_more": count > preview_count,
+        "omitted_count": max(count - preview_count, 0),
+    }
+
+
+def _bounded_source_entities(config: CircuitConfig | None) -> dict[str, Any]:
+    source_entities = list(alert_source_entities(config))
+    preview_entities = source_entities[:MAX_ALERT_SOURCE_ENTITIES]
+    count = len(source_entities)
+    preview_count = len(preview_entities)
+    return {
+        "entities": preview_entities,
         "count": count,
         "has_more": count > preview_count,
         "omitted_count": max(count - preview_count, 0),
