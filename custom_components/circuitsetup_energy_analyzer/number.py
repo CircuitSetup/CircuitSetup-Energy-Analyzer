@@ -227,22 +227,33 @@ def number_description_applies(
 def _has_energy_sensor(circuit: Any) -> bool:
     return any(
         _sensor_role(sensor) is SensorRole.ENERGY
+        and _sensor_unit_is_cumulative_energy(sensor)
         for sensor in _circuit_sensors(circuit)
     )
 
 
+def _sensor_unit_is_cumulative_energy(sensor: Any) -> bool:
+    unit = _sensor_value(sensor, "unit")
+    if unit is None:
+        return True
+    normalized = str(unit).strip().lower().replace(" ", "")
+    return normalized in {"kwh", "wh", "mwh"}
+
+
 def _sensor_role(sensor: Any) -> SensorRole | None:
-    role = (
-        sensor.get("role")
-        if isinstance(sensor, dict)
-        else getattr(sensor, "role", None)
-    )
+    role = _sensor_value(sensor, "role")
     if isinstance(role, SensorRole):
         return role
     try:
         return SensorRole(str(role))
     except (TypeError, ValueError):
         return None
+
+
+def _sensor_value(sensor: Any, key: str) -> Any:
+    if isinstance(sensor, Mapping):
+        return sensor.get(key)
+    return getattr(sensor, key, None)
 
 
 def _advanced_settings_for_circuit_id(

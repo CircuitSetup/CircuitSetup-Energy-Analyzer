@@ -101,6 +101,8 @@ def _registry_entry(
     unique_id: str,
     *,
     disabled_by: str | None = None,
+    circuit_id: str | None = None,
+    entity_key: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         entity_id=entity_id,
@@ -108,6 +110,8 @@ def _registry_entry(
         config_entry_id="entry-1",
         platform="circuitsetup_energy_analyzer",
         disabled_by=disabled_by,
+        circuit_id=circuit_id,
+        entity_key=entity_key,
     )
 
 
@@ -202,6 +206,84 @@ def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
     } <= refs
     assert "sensor.fridge_health_summary" not in refs
     assert "binary_sensor.fridge_running" not in refs
+
+
+def test_dashboard_uses_registry_metadata_when_unique_id_scheme_changes() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.renamed_health": _registry_entry(
+                        "sensor.renamed_health",
+                        "future-scheme-1",
+                        circuit_id="fridge",
+                        entity_key="health_summary",
+                    ),
+                    "sensor.renamed_activity": _registry_entry(
+                        "sensor.renamed_activity",
+                        "future-scheme-2",
+                        circuit_id="fridge",
+                        entity_key="activity_summary",
+                    ),
+                    "binary_sensor.renamed_running": _registry_entry(
+                        "binary_sensor.renamed_running",
+                        "future-scheme-3",
+                        circuit_id="fridge",
+                        entity_key="running",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+
+    assert {
+        "sensor.renamed_health",
+        "sensor.renamed_activity",
+        "binary_sensor.renamed_running",
+    } <= refs
+    assert "sensor.fridge_health_summary" not in refs
+    assert "binary_sensor.fridge_running" not in refs
+
+
+def test_dashboard_notes_ambiguous_metadata_matches_without_guessing() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.first_health": _registry_entry(
+                        "sensor.first_health",
+                        "future-scheme-1",
+                        circuit_id="fridge",
+                        entity_key="health_summary",
+                    ),
+                    "sensor.second_health": _registry_entry(
+                        "sensor.second_health",
+                        "future-scheme-2",
+                        circuit_id="fridge",
+                        entity_key="health_summary",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "sensor.first_health" not in refs
+    assert "sensor.second_health" not in refs
+    assert "sensor.fridge_health_summary" not in refs
+    assert "Ambiguous entities: Health Summary" in markdown
+    assert (
+        "Next step: remove duplicate stale analyzer entities or reload the integration."
+        in markdown
+    )
 
 
 def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> None:

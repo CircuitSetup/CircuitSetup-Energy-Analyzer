@@ -73,6 +73,19 @@ def _power_only_circuit() -> CircuitConfig:
     )
 
 
+def _misclassified_energy_circuit() -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="air_handler",
+        name="Air Handler",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.air_handler_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.air_handler_instant", SensorRole.ENERGY, unit="W"),
+        ),
+    )
+
+
 def _dict_energy_circuit() -> dict[str, object]:
     return {
         "circuit_id": "dishwasher",
@@ -572,6 +585,26 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
 
     _disable_registry_pruning(monkeypatch, number)
     coordinator = _FakeCoordinator(circuits=(_power_only_circuit(),))
+    coordinator.store_data = SimpleNamespace(energy_goal_settings_by_circuit={})
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
+
+
+@pytest.mark.asyncio
+async def test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    _disable_registry_pruning(monkeypatch, number)
+    coordinator = _FakeCoordinator(circuits=(_misclassified_energy_circuit(),))
     coordinator.store_data = SimpleNamespace(energy_goal_settings_by_circuit={})
     added_entities = []
 
