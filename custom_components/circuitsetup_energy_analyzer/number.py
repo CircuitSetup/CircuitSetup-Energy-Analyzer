@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .const import DOMAIN
+from .const import CONF_ADVANCED_SETTINGS, DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
     circuit_info_from_config,
@@ -193,6 +193,12 @@ def _daily_energy_goal_value(coordinator: Any, circuit_id: str) -> float:
                 return float(settings["daily_goal_kwh"])
             except (TypeError, ValueError):
                 return 0.0
+    advanced_settings = _advanced_settings_for_circuit_id(coordinator, circuit_id)
+    if advanced_settings.get("daily_goal_kwh") is not None:
+        try:
+            return float(advanced_settings["daily_goal_kwh"])
+        except (TypeError, ValueError):
+            return 0.0
     return 0.0
 
 
@@ -204,12 +210,14 @@ def number_description_applies(
     """Return whether a number control is useful for this circuit."""
     if description.key != "daily_energy_goal":
         return True
-    circuit_id = str(getattr(circuit, "circuit_id", "") or "")
+    circuit_id = _circuit_id(circuit)
     if _has_energy_sensor(circuit):
         return True
     store_data = getattr(coordinator, "store_data", None)
     settings_by_circuit = getattr(store_data, "energy_goal_settings_by_circuit", {})
     if isinstance(settings_by_circuit, Mapping) and circuit_id in settings_by_circuit:
+        return True
+    if "daily_goal_kwh" in _advanced_settings_for_circuit_id(coordinator, circuit_id):
         return True
     state = getattr(coordinator, "data", None)
     if circuit_id in getattr(state, "daily_energy_usage_by_circuit", {}):
@@ -221,7 +229,7 @@ def number_description_applies(
 def _has_energy_sensor(circuit: Any) -> bool:
     return any(
         _sensor_role(sensor) is SensorRole.ENERGY
-        for sensor in getattr(circuit, "sensors", ()) or ()
+        for sensor in _circuit_sensors(circuit)
     )
 
 
@@ -237,6 +245,46 @@ def _sensor_role(sensor: Any) -> SensorRole | None:
         return SensorRole(str(role))
     except (TypeError, ValueError):
         return None
+
+
+def _advanced_settings_for_circuit_id(
+    coordinator: Any | None,
+    circuit_id: str,
+) -> Mapping[str, Any]:
+    if coordinator is None:
+        return {}
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        settings_by_circuit = (
+            container.get(CONF_ADVANCED_SETTINGS)
+            if isinstance(container, Mapping)
+            else None
+        )
+        if not isinstance(settings_by_circuit, Mapping):
+            continue
+        settings = settings_by_circuit.get(circuit_id, {})
+        if isinstance(settings, Mapping):
+            return settings
+    return {}
+
+
+def _circuit_id(circuit: Any) -> str:
+    return str(_circuit_value(circuit, "circuit_id", "") or "")
+
+
+def _circuit_sensors(circuit: Any) -> tuple[Any, ...]:
+    sensors = _circuit_value(circuit, "sensors", ())
+    if isinstance(sensors, tuple):
+        return sensors
+    if isinstance(sensors, list):
+        return tuple(sensors)
+    return ()
+
+
+def _circuit_value(circuit: Any, key: str, default: Any = None) -> Any:
+    if isinstance(circuit, Mapping):
+        return circuit.get(key, default)
+    return getattr(circuit, key, default)
 
 
 async def _call_or_raise(

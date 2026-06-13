@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_ENTITY_DETAIL_LEVEL,
     DASHBOARD_LAYOUT_EXPERT,
     DOMAIN,
@@ -70,6 +71,19 @@ def _power_only_circuit() -> CircuitConfig:
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.garage_freezer_power", SensorRole.REAL_POWER),),
     )
+
+
+def _dict_energy_circuit() -> dict[str, object]:
+    return {
+        "circuit_id": "dishwasher",
+        "name": "Dishwasher",
+        "appliance_profile": "washer",
+        "mode": "single_phase",
+        "sensors": [
+            {"entity_id": "sensor.dishwasher_power", "role": "real_power"},
+            {"entity_id": "sensor.dishwasher_energy", "role": "energy"},
+        ],
+    }
 
 
 def _mains_circuit() -> CircuitConfig:
@@ -494,6 +508,53 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
     )
 
     assert added_entities == []
+
+
+@pytest.mark.asyncio
+async def test_control_entities_apply_to_dict_circuits_from_entry_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button, number
+
+    _disable_registry_pruning(monkeypatch, button)
+    _disable_registry_pruning(monkeypatch, number)
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "dishwasher": {"daily_goal_kwh": 3.25}
+            }
+        },
+        entry_data={},
+        store_data=SimpleNamespace(energy_goal_settings_by_circuit={}),
+        circuit_configs=(),
+    )
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={"circuits": [_dict_energy_circuit()]},
+    )
+    button_entities = []
+    number_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator), entry, button_entities.extend
+    )
+    await number.async_setup_entry(
+        _hass_with(coordinator), entry, number_entities.extend
+    )
+
+    assert {
+        entity.unique_id for entity in button_entities
+    } >= {
+        "entry-1_dishwasher_relearn_baseline",
+        "entry-1_dishwasher_start_maintenance",
+        "entry-1_dishwasher_end_maintenance",
+        "entry-1_dishwasher_pause_alerts",
+    }
+    assert [entity.unique_id for entity in number_entities] == [
+        "entry-1_dishwasher_daily_energy_goal"
+    ]
+    assert number_entities[0].native_value == 3.25
 
 
 @pytest.mark.asyncio

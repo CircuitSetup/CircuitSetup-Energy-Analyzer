@@ -6,6 +6,8 @@ from typing import Any
 
 from .appliance_metadata import appliance_icon_for_profile
 from .const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
@@ -2373,6 +2375,7 @@ def sensor_description_applies(
     if key in _WATER_FLOW_CONTEXT_SENSOR_KEYS:
         return profile in _WATER_FLOW_CONTEXT_PROFILES and _has_water_flow_source(
             coordinator,
+            circuit,
         )
     return False
 
@@ -2507,13 +2510,36 @@ def _has_rain_context_source(coordinator: Any) -> bool:
     )
 
 
-def _has_water_flow_source(coordinator: Any) -> bool:
+def _has_water_flow_source(coordinator: Any, circuit: Any | None = None) -> bool:
     value = _coordinator_config_value(coordinator, CONF_WATER_FLOW_SENSOR_ENTITIES)
+    if isinstance(value, str):
+        if value.strip():
+            return True
+    if isinstance(value, (list, tuple, set)):
+        if any(bool(str(item).strip()) for item in value):
+            return True
+    return circuit is not None and _has_linked_water_flow_source(coordinator, circuit)
+
+
+def _has_linked_water_flow_source(coordinator: Any, circuit: Any) -> bool:
+    settings = _advanced_settings_for_circuit(coordinator, circuit)
+    value = settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
     if isinstance(value, str):
         return bool(value.strip())
     if isinstance(value, (list, tuple, set)):
         return any(bool(str(item).strip()) for item in value)
     return False
+
+
+def _advanced_settings_for_circuit(
+    coordinator: Any,
+    circuit: Any,
+) -> Mapping[str, Any]:
+    settings_by_circuit = _coordinator_config_value(coordinator, CONF_ADVANCED_SETTINGS)
+    if not isinstance(settings_by_circuit, Mapping):
+        return {}
+    settings = settings_by_circuit.get(_circuit_id(circuit), {})
+    return settings if isinstance(settings, Mapping) else {}
 
 
 def _coordinator_config_value(coordinator: Any, key: str) -> Any:

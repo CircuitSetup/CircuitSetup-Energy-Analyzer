@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .const import CONF_WATER_FLOW_SENSOR_ENTITIES, DOMAIN
+from .const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DOMAIN,
+)
 from .entity import (
     CircuitAnalyzerEntity,
     EntityCategory,
@@ -357,7 +362,7 @@ def binary_sensor_description_applies(
                 ApplianceProfile.WATER_HEATER,
                 ApplianceProfile.WASHER,
             }
-            and _has_water_flow_source(coordinator)
+            and _has_water_flow_source(coordinator, circuit)
         )
     if description.key != "running":
         return True
@@ -392,7 +397,7 @@ def _sensor_role(sensor: Any) -> SensorRole | None:
         return None
 
 
-def _has_water_flow_source(coordinator: Any | None) -> bool:
+def _has_water_flow_source(coordinator: Any | None, circuit: Any | None = None) -> bool:
     """Return true when a water-flow input is configured for the integration."""
     if coordinator is None:
         return False
@@ -408,7 +413,40 @@ def _has_water_flow_source(coordinator: Any | None) -> bool:
             bool(str(item).strip()) for item in value
         ):
             return True
+    return circuit is not None and _has_linked_water_flow_source(coordinator, circuit)
+
+
+def _has_linked_water_flow_source(coordinator: Any, circuit: Any) -> bool:
+    """Return true when this circuit has a linked flow sensor override."""
+    settings = _advanced_settings_for_circuit(coordinator, circuit)
+    value = settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set)):
+        return any(bool(str(item).strip()) for item in value)
     return False
+
+
+def _advanced_settings_for_circuit(coordinator: Any, circuit: Any) -> Mapping[str, Any]:
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        settings_by_circuit = (
+            container.get(CONF_ADVANCED_SETTINGS)
+            if isinstance(container, Mapping)
+            else None
+        )
+        if not isinstance(settings_by_circuit, Mapping):
+            continue
+        settings = settings_by_circuit.get(_circuit_id(circuit), {})
+        if isinstance(settings, Mapping):
+            return settings
+    return {}
+
+
+def _circuit_id(circuit: Any) -> str:
+    if isinstance(circuit, Mapping):
+        return str(circuit.get("circuit_id") or circuit.get("id") or "")
+    return str(getattr(circuit, "circuit_id", "") or "")
 
 
 def _appliance_profile(value: Any) -> ApplianceProfile | None:
