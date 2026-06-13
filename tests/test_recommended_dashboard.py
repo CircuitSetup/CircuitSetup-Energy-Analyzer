@@ -238,6 +238,25 @@ def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> Non
     )
 
 
+def test_dashboard_does_not_guess_ids_when_registry_is_available_but_empty() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "sensor.fridge_health_summary" not in refs
+    assert "binary_sensor.fridge_running" not in refs
+    assert "Refrigerator dashboard note" in markdown
+    assert (
+        "missing: Health Summary, Activity Summary, Electrical Health, "
+        "Energy Summary, Daily Energy Usage, Running"
+    ) in markdown
+
+
 def test_dashboard_uses_registry_ids_for_global_and_circuit_controls() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),

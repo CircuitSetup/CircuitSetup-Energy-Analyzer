@@ -217,6 +217,7 @@ def test_nilm_label_schema_raises_for_missing_required_field() -> None:
 
 def test_user_experience_service_schemas_validate_required_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
+        _SERVICE_SCHEMAS,
         ALERT_FEEDBACK_SERVICE_SCHEMA,
         CAPACITY_SETTINGS_SERVICE_SCHEMA,
         MAINTENANCE_END_SERVICE_SCHEMA,
@@ -224,6 +225,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
         SENSITIVITY_SERVICE_SCHEMA,
+        SERVICE_PAUSE_ALERTS,
         UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA,
     )
 
@@ -285,6 +287,12 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     assert CAPACITY_SETTINGS_SERVICE_SCHEMA(
         {"circuit_id": "ev", "breaker_amps": 40.0, "warning_ratio": 0.8}
     ) == {"circuit_id": "ev", "breaker_amps": 40.0, "warning_ratio": 0.8}
+    assert _SERVICE_SCHEMAS[SERVICE_PAUSE_ALERTS](
+        {"entity_id": "sensor.fridge_health_summary", "duration": "01:00:00"}
+    ) == {
+        "entity_id": "sensor.fridge_health_summary",
+        "duration": "01:00:00",
+    }
 
     with pytest.raises(vol.Invalid):
         SENSITIVITY_SERVICE_SCHEMA({"circuit_id": "fridge"})
