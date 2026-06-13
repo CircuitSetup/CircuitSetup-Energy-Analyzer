@@ -310,11 +310,57 @@ def test_data_quality_checklist_reports_required_optional_and_sample_state() -> 
     assert checklist["numeric_states_valid"] is True
     assert checklist["source_data_fresh"] is True
     assert checklist["quality_issues"] == []
+    assert checklist["quality_issue_count"] == 0
+    assert checklist["quality_issues_has_more"] is False
+    assert checklist["quality_issues_omitted_count"] == 0
     assert checklist["metric_roles_present"] == [
         "power_factor",
         "reactive_power",
         "real_power",
     ]
+
+
+def test_data_quality_checklist_bounds_large_quality_issue_attributes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        data_quality_checklist,
+    )
+
+    config = CircuitConfig(
+        circuit_id="panel",
+        name="Panel",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.panel_w", SensorRole.REAL_POWER),),
+    )
+    issues = tuple(
+        f"sensor.panel_source_{index:02d} stale unavailable non_numeric"
+        for index in range(8)
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="panel",
+        real_power=120.0,
+        source_entity_ids=("sensor.panel_w",),
+        quality_issues=issues,
+    )
+
+    checklist = data_quality_checklist(config, sample)
+
+    assert checklist["quality_issues"] == [
+        "sensor.panel_source_00 stale unavailable non_numeric",
+        "sensor.panel_source_01 stale unavailable non_numeric",
+        "sensor.panel_source_02 stale unavailable non_numeric",
+        "sensor.panel_source_03 stale unavailable non_numeric",
+        "sensor.panel_source_04 stale unavailable non_numeric",
+    ]
+    assert checklist["quality_issue_count"] == 8
+    assert checklist["quality_issues_has_more"] is True
+    assert checklist["quality_issues_omitted_count"] == 3
+    assert checklist["numeric_states_valid"] is False
+    assert checklist["source_data_fresh"] is False
 
 
 def test_learning_progress_counts_age_cycles_and_baseline_confidence() -> None:

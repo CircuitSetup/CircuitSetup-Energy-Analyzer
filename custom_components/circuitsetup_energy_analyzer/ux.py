@@ -43,6 +43,7 @@ SENSITIVITY_LABELS = {
 }
 MAX_CONTRIBUTING_METRICS = 5
 MAX_ALERT_SOURCE_ENTITIES = 5
+MAX_QUALITY_ISSUES = 5
 REQUIRED_ROLES = {SensorRole.REAL_POWER}
 OPTIONAL_ROLES = {
     SensorRole.VOLTAGE,
@@ -317,6 +318,7 @@ def data_quality_checklist(
         bool(configured_optional) and configured_optional <= roles_with_values
     )
     quality_issues = list(getattr(sample, "quality_issues", ())) if sample else []
+    quality_issue_preview = quality_issues[:MAX_QUALITY_ISSUES]
 
     return {
         "required_sensors_present": required_present,
@@ -326,7 +328,13 @@ def data_quality_checklist(
             "non_numeric",
         ),
         "source_data_fresh": not _has_issue_containing(quality_issues, "stale"),
-        "quality_issues": quality_issues,
+        "quality_issues": quality_issue_preview,
+        "quality_issue_count": len(quality_issues),
+        "quality_issues_has_more": len(quality_issues) > len(quality_issue_preview),
+        "quality_issues_omitted_count": max(
+            len(quality_issues) - len(quality_issue_preview),
+            0,
+        ),
         "metric_roles_present": sorted(role.value for role in roles_with_values),
         "required_metric_coverage": _coverage(REQUIRED_ROLES, roles_with_values),
         "optional_metric_coverage": _coverage(configured_optional, roles_with_values),
