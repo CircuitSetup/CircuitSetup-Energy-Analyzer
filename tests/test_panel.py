@@ -269,6 +269,56 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     )
 
 
+def test_alert_evidence_payload_guides_recommendation_preview() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="ev_charger", feature="capacity_warning_ratio")
+    coordinator = _coordinator(alert, config=_config("ev_charger"))
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "ev_charger": [
+            {
+                "recommendation_id": "ev_charger:warning_ratio:v1",
+                "circuit_id": "ev_charger",
+                "setting_key": "warning_ratio",
+                "setting_label": "Capacity Warning Ratio",
+                "current_value": 0.9,
+                "suggested_value": 0.75,
+                "reason": "Observed sustained high-current samples.",
+                "evidence": {
+                    "observed_samples": 8,
+                    "p95_current_amps": 36.4,
+                    "source_entities": ["sensor.ev_charger_current"],
+                },
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    recommendation = payload["setting_recommendations"][0]
+    assert recommendation["default_value"] == 0.8
+    assert recommendation["expected_effect"].startswith(
+        "Warn earlier when usage approaches capacity"
+    )
+    assert recommendation["evidence_preview"] == (
+        "Observed Samples: 8; P95 Current Amps: 36.4"
+    )
+    assert "source_entities" not in recommendation["evidence_preview"]
+    assert recommendation["evidence_path"] == (
+        "/circuitsetup-energy-analyzer-evidence"
+        "?circuit_id=ev_charger&recommendation_id=ev_charger%3Awarning_ratio%3Av1"
+    )
+    assert recommendation["actions"]["preview"] == {
+        "path": recommendation["evidence_path"],
+    }
+
+
 def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
