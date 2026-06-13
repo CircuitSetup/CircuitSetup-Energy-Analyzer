@@ -544,6 +544,58 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
 
 
 @pytest.mark.asyncio
+async def test_number_setup_skips_stale_daily_goal_without_energy_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    _disable_registry_pruning(monkeypatch, number)
+    coordinator = _FakeCoordinator(circuits=(_power_only_circuit(),))
+    coordinator.options = {
+        CONF_ADVANCED_SETTINGS: {
+            "garage_freezer": {"daily_goal_kwh": 3.25},
+        }
+    }
+    coordinator.store_data = SimpleNamespace(
+        energy_goal_settings_by_circuit={
+            "garage_freezer": {"daily_goal_kwh": 3.25},
+        }
+    )
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
+
+
+@pytest.mark.asyncio
+async def test_number_setup_keeps_goal_when_runtime_energy_evidence_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    _disable_registry_pruning(monkeypatch, number)
+    coordinator = _FakeCoordinator(circuits=(_power_only_circuit(),))
+    coordinator.data.daily_energy_usage_by_circuit["garage_freezer"] = 1.2
+    coordinator.store_data = SimpleNamespace(energy_goal_settings_by_circuit={})
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_garage_freezer_daily_energy_goal"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

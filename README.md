@@ -441,6 +441,9 @@ Configure this from:
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
 Set a daily kWh goal for the circuit. Set the goal back to `0` to clear it.
+The daily goal control is only created when the circuit has usable energy data,
+so stale saved goals do not add a confusing control before a cumulative kWh
+source is configured.
 
 ### Run-cycle diagnostics
 

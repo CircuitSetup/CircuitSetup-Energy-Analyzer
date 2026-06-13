@@ -210,15 +210,9 @@ def number_description_applies(
     """Return whether a number control is useful for this circuit."""
     if description.key != "daily_energy_goal":
         return True
-    circuit_id = _circuit_id(circuit)
     if _has_energy_sensor(circuit):
         return True
-    store_data = getattr(coordinator, "store_data", None)
-    settings_by_circuit = getattr(store_data, "energy_goal_settings_by_circuit", {})
-    if isinstance(settings_by_circuit, Mapping) and circuit_id in settings_by_circuit:
-        return True
-    if "daily_goal_kwh" in _advanced_settings_for_circuit_id(coordinator, circuit_id):
-        return True
+    circuit_id = _circuit_id(circuit)
     state = getattr(coordinator, "data", None)
     if circuit_id in getattr(state, "daily_energy_usage_by_circuit", {}):
         return True
