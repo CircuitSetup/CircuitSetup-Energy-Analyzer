@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .const import (
@@ -244,9 +244,18 @@ def _resolved_entity_ids(
     missing_labels: list[str] = []
     disabled_labels: list[str] = []
     unavailable_labels: list[str] = []
+    ambiguous_labels: list[str] = []
     for entity_domain, entity_key, label in specs:
-        unique_id = _expected_unique_id(entry_id, circuit_id, entity_key)
-        entry = registry_lookup.get(unique_id)
+        entry, resolution_issue = _registry_entry_for_spec(
+            registry_lookup,
+            entry_id=entry_id,
+            circuit_id=circuit_id,
+            entity_domain=entity_domain,
+            entity_key=entity_key,
+        )
+        if resolution_issue == "ambiguous":
+            ambiguous_labels.append(label)
+            continue
         if entry is None:
             missing_labels.append(label)
             continue
@@ -272,6 +281,8 @@ def _resolved_entity_ids(
         notes.append(_dashboard_gap_note("missing", missing_labels))
     if unavailable_labels:
         notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
+    if ambiguous_labels:
+        notes.append(_dashboard_gap_note("ambiguous", ambiguous_labels))
     return entity_ids, notes
 
 
@@ -360,9 +371,17 @@ def _resolved_global_entity_ids(
     missing_labels: list[str] = []
     disabled_labels: list[str] = []
     unavailable_labels: list[str] = []
+    ambiguous_labels: list[str] = []
     for entity_domain, entity_key, label in specs:
-        unique_id = _expected_global_unique_id(entry_id, entity_key)
-        entry = registry_lookup.get(unique_id)
+        entry, resolution_issue = _registry_entry_for_global_spec(
+            registry_lookup,
+            entry_id=entry_id,
+            entity_domain=entity_domain,
+            entity_key=entity_key,
+        )
+        if resolution_issue == "ambiguous":
+            ambiguous_labels.append(label)
+            continue
         if entry is None:
             missing_labels.append(label)
             continue
@@ -385,6 +404,8 @@ def _resolved_global_entity_ids(
         notes.append(_dashboard_gap_note("missing", missing_labels))
     if unavailable_labels:
         notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
+    if ambiguous_labels:
+        notes.append(_dashboard_gap_note("ambiguous", ambiguous_labels))
     return entity_ids, notes
 
 
@@ -438,6 +459,12 @@ def _note_content(title: str, notes: Iterable[str]) -> str:
 
 def _dashboard_gap_note(reason: str, labels: Iterable[str]) -> str:
     label_text = ", ".join(labels)
+    if reason == "ambiguous":
+        return (
+            f"Ambiguous entities: {label_text}\n"
+            "Next step: remove duplicate stale analyzer entities or reload "
+            "the integration."
+        )
     if reason == "disabled":
         return (
             f"Disabled entities: {label_text}\n"
@@ -460,6 +487,101 @@ def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
 
 def _expected_global_unique_id(entry_id: str, entity_key: str) -> str:
     return f"{entry_id}_{entity_key}"
+
+
+def _registry_entry_for_spec(
+    registry_lookup: Mapping[str, Any],
+    *,
+    entry_id: str,
+    circuit_id: str,
+    entity_domain: str,
+    entity_key: str,
+) -> tuple[Any | None, str | None]:
+    exact = registry_lookup.get(_expected_unique_id(entry_id, circuit_id, entity_key))
+    if exact is not None:
+        return exact, None
+
+    candidates = [
+        entry
+        for entry in registry_lookup.values()
+        if _entry_entity_domain(entry) == entity_domain
+        and _entry_matches_circuit_key(entry, circuit_id, entity_key)
+    ]
+    if len(candidates) == 1:
+        return candidates[0], None
+    if len(candidates) > 1:
+        return None, "ambiguous"
+    return None, None
+
+
+def _registry_entry_for_global_spec(
+    registry_lookup: Mapping[str, Any],
+    *,
+    entry_id: str,
+    entity_domain: str,
+    entity_key: str,
+) -> tuple[Any | None, str | None]:
+    exact = registry_lookup.get(_expected_global_unique_id(entry_id, entity_key))
+    if exact is not None:
+        return exact, None
+
+    candidates = [
+        entry
+        for entry in registry_lookup.values()
+        if _entry_entity_domain(entry) == entity_domain
+        and _entry_matches_global_key(entry, entity_key)
+    ]
+    if len(candidates) == 1:
+        return candidates[0], None
+    if len(candidates) > 1:
+        return None, "ambiguous"
+    return None, None
+
+
+def _entry_matches_circuit_key(entry: Any, circuit_id: str, entity_key: str) -> bool:
+    entry_circuit = _entry_value(entry, "circuit_id", "circuit")
+    entry_key = _entry_value(
+        entry,
+        "entity_key",
+        "description_key",
+        "translation_key",
+        "key",
+    )
+    if entry_circuit == circuit_id and entry_key == entity_key:
+        return True
+
+    unique_id = str(_entry_value(entry, "unique_id") or "").strip()
+    return unique_id.endswith(f"_{circuit_id}_{entity_key}")
+
+
+def _entry_matches_global_key(entry: Any, entity_key: str) -> bool:
+    entry_key = _entry_value(
+        entry,
+        "entity_key",
+        "description_key",
+        "translation_key",
+        "key",
+    )
+    if entry_key == entity_key and not _entry_value(entry, "circuit_id", "circuit"):
+        return True
+
+    unique_id = str(_entry_value(entry, "unique_id") or "").strip()
+    return unique_id.endswith(f"_{entity_key}")
+
+
+def _entry_entity_domain(entry: Any) -> str:
+    entity_id = str(_entry_value(entry, "entity_id") or "").strip()
+    return entity_id.split(".", 1)[0] if "." in entity_id else ""
+
+
+def _entry_value(entry: Any, *keys: str) -> Any:
+    for key in keys:
+        if isinstance(entry, Mapping) and key in entry:
+            return entry[key]
+        value = getattr(entry, key, None)
+        if value is not None:
+            return value
+    return None
 
 
 def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> str:
