@@ -118,11 +118,23 @@ label_nilm_signature:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     signature_id:
       name: Signature ID
       description: Detected NILM signature identifier to label.
@@ -143,11 +155,23 @@ ignore_nilm_signature:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     signature_id:
       name: Signature ID
       description: Detected NILM signature identifier to ignore.
@@ -987,11 +1011,23 @@ mark_nilm_signature_expected:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     signature_id:
       name: Signature ID
       description: Detected NILM signature identifier to mark expected.
@@ -1005,11 +1041,23 @@ merge_nilm_signatures:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     source_signature_id:
       name: Source Signature ID
       description: Signature identifier to merge into the target signature.

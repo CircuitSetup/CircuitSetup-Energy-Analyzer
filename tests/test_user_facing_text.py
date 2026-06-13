@@ -1071,6 +1071,23 @@ def test_advanced_circuit_services_document_entity_targets() -> None:
         assert "analyzer entity" in fields["entity_id"]["description"]
 
 
+def test_nilm_signature_services_document_entity_targets() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+
+    for service_name in (
+        "label_nilm_signature",
+        "ignore_nilm_signature",
+        "mark_nilm_signature_expected",
+        "merge_nilm_signatures",
+    ):
+        fields = services[service_name]["fields"]
+        assert fields["circuit_id"]["required"] is False
+        assert fields["entity_id"]["required"] is False
+        assert "analyzer entity" in fields["entity_id"]["description"]
+
+
 def test_readme_includes_status_glossary_for_machine_values() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
