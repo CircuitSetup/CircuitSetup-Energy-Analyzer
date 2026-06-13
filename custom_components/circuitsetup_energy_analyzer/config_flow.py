@@ -703,6 +703,24 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
     )
 
 
+def _time_selector() -> Any:
+    return _selector({"time": {}}, str)
+
+
+def _weekday_select_selector() -> Any:
+    return _multi_select_selector(
+        [
+            {"value": "0", "label": "Monday"},
+            {"value": "1", "label": "Tuesday"},
+            {"value": "2", "label": "Wednesday"},
+            {"value": "3", "label": "Thursday"},
+            {"value": "4", "label": "Friday"},
+            {"value": "5", "label": "Saturday"},
+            {"value": "6", "label": "Sunday"},
+        ]
+    )
+
+
 def _optional_entity_marker(key: str, default: Any = None) -> vol.Optional:
     """Return an optional selector marker without invalid blank entity defaults."""
     value = str(default or "").strip()
@@ -1303,15 +1321,15 @@ def _billing_cost_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
         vol.Optional(
             FIELD_TOU_START,
             default=str(settings.get(FIELD_TOU_START) or ""),
-        ): _text_selector(),
+        ): _time_selector(),
         vol.Optional(
             FIELD_TOU_END,
             default=str(settings.get(FIELD_TOU_END) or ""),
-        ): _text_selector(),
+        ): _time_selector(),
         vol.Optional(
             FIELD_TOU_WEEKDAYS,
-            default=str(settings.get(FIELD_TOU_WEEKDAYS) or ""),
-        ): _text_selector(),
+            default=_tou_weekday_selection(settings.get(FIELD_TOU_WEEKDAYS)),
+        ): _weekday_select_selector(),
         vol.Optional(
             FIELD_TOU_NAME,
             default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
@@ -4122,7 +4140,7 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     _set_optional_float(settings, user_input, FIELD_TOU_RATE_PER_KWH)
     _set_optional_string(settings, user_input, FIELD_TOU_START)
     _set_optional_string(settings, user_input, FIELD_TOU_END)
-    _set_optional_string(settings, user_input, FIELD_TOU_WEEKDAYS)
+    _set_optional_tou_weekdays(settings, user_input)
     _set_optional_string(settings, user_input, FIELD_TOU_NAME)
     _set_optional_int(settings, user_input, FIELD_WINDOW_MINUTES)
     _set_optional_float(settings, user_input, FIELD_DEMAND_LIMIT_W)
@@ -4183,6 +4201,45 @@ def _set_optional_string(
     text = str(value).strip()
     if text:
         settings[key] = text
+
+
+def _tou_weekday_selection(value: Any) -> list[str]:
+    selected = _weekday_values(value)
+    return selected
+
+
+def _set_optional_tou_weekdays(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+) -> None:
+    if FIELD_TOU_WEEKDAYS not in user_input:
+        return
+    selected = _weekday_values(user_input.get(FIELD_TOU_WEEKDAYS))
+    if selected:
+        settings[FIELD_TOU_WEEKDAYS] = ",".join(selected)
+
+
+def _weekday_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items: Iterable[Any]
+    if isinstance(value, str):
+        raw_items = re.split(r"[\n,]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        raise SetupValidationError("invalid_advanced_settings")
+
+    selected: list[str] = []
+    for raw_item in raw_items:
+        item = str(raw_item).strip()
+        if not item:
+            continue
+        if item not in {"0", "1", "2", "3", "4", "5", "6"}:
+            raise SetupValidationError("invalid_advanced_settings")
+        if item not in selected:
+            selected.append(item)
+    return selected
 
 
 def _set_optional_bool(

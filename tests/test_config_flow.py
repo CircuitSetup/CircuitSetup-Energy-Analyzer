@@ -2086,6 +2086,44 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert "solar_export_tolerance_w" not in _schema_keys(schema)
 
 
+def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    schema = config_flow._advanced_settings_schema(
+        {"tou_start": "16:00", "tou_end": "21:00", "tou_weekdays": "0,2,4"},
+        {
+            "circuit_id": "mains",
+            "name": "Mains",
+            "appliance_profile": config_flow.ApplianceProfile.MAINS_NILM.value,
+            "mode": config_flow.CircuitMode.MAINS_NILM.value,
+            "power_flow": "mains_net",
+        },
+    )
+
+    assert _schema_default(schema, "tou_start") == "16:00"
+    assert _schema_default(schema, "tou_end") == "21:00"
+    assert _schema_default(schema, "tou_weekdays") == ["0", "2", "4"]
+    assert _schema_validator(schema, "tou_start") == {"time": {}}
+    assert _schema_validator(schema, "tou_end") == {"time": {}}
+    assert _schema_validator(schema, "tou_weekdays") == {
+        "select": {
+            "multiple": True,
+            "mode": "dropdown",
+            "options": [
+                {"value": "0", "label": "Monday"},
+                {"value": "1", "label": "Tuesday"},
+                {"value": "2", "label": "Wednesday"},
+                {"value": "3", "label": "Thursday"},
+                {"value": "4", "label": "Friday"},
+                {"value": "5", "label": "Saturday"},
+                {"value": "6", "label": "Sunday"},
+            ],
+        }
+    }
+
+
 def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,
@@ -2302,6 +2340,28 @@ def test_advanced_settings_from_sectioned_input_saves_flat_settings() -> None:
         "always_on_alert_w": 12.0,
         "min_samples": 36,
     }
+
+
+def test_advanced_settings_from_tou_weekday_selector_keeps_storage_format() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "billing_cost_settings": {
+                "tou_start": "16:00",
+                "tou_end": "21:00",
+                "tou_weekdays": ["0", "2", "4"],
+                "tou_name": "Peak",
+            },
+        }
+    )
+
+    assert settings["tou_start"] == "16:00"
+    assert settings["tou_end"] == "21:00"
+    assert settings["tou_weekdays"] == "0,2,4"
+    assert settings["tou_name"] == "Peak"
 
 
 @pytest.mark.asyncio

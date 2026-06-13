@@ -307,6 +307,13 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
+    billing_descriptions = settings_step["sections"]["billing_cost_settings"][
+        "data_description"
+    ]
+    assert "time picker" in billing_descriptions["tou_start"].lower()
+    assert "time picker" in billing_descriptions["tou_end"].lower()
+    assert "choose" in billing_descriptions["tou_weekdays"].lower()
+    assert "comma-separated" not in billing_descriptions["tou_weekdays"].lower()
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
