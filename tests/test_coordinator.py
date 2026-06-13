@@ -7338,8 +7338,17 @@ async def test_runtime_reports_energy_dashboard_readiness() -> None:
     assert coordinator.state.energy_dashboard_evidence_by_circuit["fridge"] == {
         "status": "ready",
         "ready_energy_entities": ["sensor.fridge_energy"],
+        "ready_energy_entity_count": 1,
+        "ready_energy_entities_has_more": False,
+        "ready_energy_entities_omitted_count": 0,
         "ready_power_entities": [],
+        "ready_power_entity_count": 0,
+        "ready_power_entities_has_more": False,
+        "ready_power_entities_omitted_count": 0,
         "issues": [],
+        "issue_count": 0,
+        "issues_has_more": False,
+        "issues_omitted_count": 0,
         "guidance": (
             "Add the ready energy entity to Home Assistant's Energy Dashboard "
             "as an individual device."

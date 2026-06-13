@@ -1226,6 +1226,8 @@ def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] 
         value = getattr(state, field_name, {}).get(circuit_id)
         if isinstance(value, Mapping):
             attributes = dict(value)
+            if field_name == "data_quality_checklist_by_circuit":
+                attributes.pop("quality_issues_full", None)
             if field_name == "recent_activity_timeline_by_circuit":
                 return _recent_activity_attributes(attributes)
             if field_name == "solar_load_shift_evidence_by_circuit":

@@ -9,6 +9,7 @@ from .normalize import SourceState
 _ENERGY_UNITS = {"kwh", "wh", "mwh"}
 _POWER_UNITS = {"w", "kw"}
 _ENERGY_STATE_CLASSES = {"total", "total_increasing"}
+_PAYLOAD_LIST_MAX_ITEMS = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +94,35 @@ def evaluate_energy_dashboard_readiness(
 
 def readiness_payload(result: EnergyDashboardReadiness) -> dict[str, object]:
     """Return a JSON-safe evidence payload for diagnostics attributes."""
+    energy_entities = _bounded_payload_list(result.ready_energy_entities)
+    power_entities = _bounded_payload_list(result.ready_power_entities)
+    issues = _bounded_payload_list(result.issues)
     return {
         "status": result.status,
-        "ready_energy_entities": list(result.ready_energy_entities),
-        "ready_power_entities": list(result.ready_power_entities),
-        "issues": list(result.issues),
+        "ready_energy_entities": energy_entities["items"],
+        "ready_energy_entity_count": energy_entities["count"],
+        "ready_energy_entities_has_more": energy_entities["has_more"],
+        "ready_energy_entities_omitted_count": energy_entities["omitted_count"],
+        "ready_power_entities": power_entities["items"],
+        "ready_power_entity_count": power_entities["count"],
+        "ready_power_entities_has_more": power_entities["has_more"],
+        "ready_power_entities_omitted_count": power_entities["omitted_count"],
+        "issues": issues["items"],
+        "issue_count": issues["count"],
+        "issues_has_more": issues["has_more"],
+        "issues_omitted_count": issues["omitted_count"],
         "guidance": result.guidance,
+    }
+
+
+def _bounded_payload_list(items: tuple[str, ...]) -> dict[str, object]:
+    preview = list(items[:_PAYLOAD_LIST_MAX_ITEMS])
+    count = len(items)
+    return {
+        "items": preview,
+        "count": count,
+        "has_more": count > len(preview),
+        "omitted_count": max(count - len(preview), 0),
     }
 
 

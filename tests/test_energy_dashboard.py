@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 
 from custom_components.circuitsetup_energy_analyzer.energy_dashboard import (
+    EnergyDashboardReadiness,
     evaluate_energy_dashboard_readiness,
+    readiness_payload,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -118,3 +120,54 @@ def test_energy_dashboard_readiness_reports_missing_source() -> None:
         "Add a circuit energy sensor to Home Assistant's Energy Dashboard, "
         "or expose a power sensor that Home Assistant can integrate."
     )
+
+
+def test_energy_dashboard_readiness_payload_bounds_source_lists() -> None:
+    result = EnergyDashboardReadiness(
+        circuit_id="panel",
+        status="ready",
+        ready_energy_entities=tuple(
+            f"sensor.panel_energy_{index:02d}" for index in range(8)
+        ),
+        ready_power_entities=tuple(
+            f"sensor.panel_power_{index:02d}" for index in range(7)
+        ),
+        issues=tuple(
+            f"sensor.panel_source_{index:02d} missing metadata"
+            for index in range(6)
+        ),
+        guidance="Add ready energy entities.",
+    )
+
+    payload = readiness_payload(result)
+
+    assert payload["ready_energy_entities"] == [
+        "sensor.panel_energy_00",
+        "sensor.panel_energy_01",
+        "sensor.panel_energy_02",
+        "sensor.panel_energy_03",
+        "sensor.panel_energy_04",
+    ]
+    assert payload["ready_energy_entity_count"] == 8
+    assert payload["ready_energy_entities_has_more"] is True
+    assert payload["ready_energy_entities_omitted_count"] == 3
+    assert payload["ready_power_entities"] == [
+        "sensor.panel_power_00",
+        "sensor.panel_power_01",
+        "sensor.panel_power_02",
+        "sensor.panel_power_03",
+        "sensor.panel_power_04",
+    ]
+    assert payload["ready_power_entity_count"] == 7
+    assert payload["ready_power_entities_has_more"] is True
+    assert payload["ready_power_entities_omitted_count"] == 2
+    assert payload["issues"] == [
+        "sensor.panel_source_00 missing metadata",
+        "sensor.panel_source_01 missing metadata",
+        "sensor.panel_source_02 missing metadata",
+        "sensor.panel_source_03 missing metadata",
+        "sensor.panel_source_04 missing metadata",
+    ]
+    assert payload["issue_count"] == 6
+    assert payload["issues_has_more"] is True
+    assert payload["issues_omitted_count"] == 1

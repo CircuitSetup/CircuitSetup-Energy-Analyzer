@@ -1163,6 +1163,50 @@ def test_nilm_unknown_load_attributes_are_bounded() -> None:
     assert all("sample_history" not in load for load in attrs["unknown_loads"])
 
 
+def test_data_quality_checklist_attributes_hide_full_issue_list() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    description = next(
+        item for item in SENSOR_DESCRIPTIONS if item.key == "data_quality_checklist"
+    )
+    state = AnalyzerState(
+        data_quality_checklist_by_circuit={
+            "panel": {
+                "quality_issues": [
+                    f"sensor.panel_source_{index:02d} stale" for index in range(5)
+                ],
+                "quality_issues_full": [
+                    *(f"sensor.panel_source_{index:02d} stale" for index in range(5)),
+                    "sensor.panel_power negative_real_power_load",
+                ],
+                "quality_issue_count": 6,
+                "quality_issues_has_more": True,
+                "quality_issues_omitted_count": 1,
+            }
+        }
+    )
+    entity = CircuitAnalyzerSensor(
+        SimpleNamespace(data=state),
+        entry_id="entry-1",
+        circuit=SimpleNamespace(
+            circuit_id="panel",
+            name="Panel",
+            appliance_profile=ApplianceProfile.MIXED,
+        ),
+        description=description,
+    )
+
+    attrs = entity.extra_state_attributes
+
+    assert attrs is not None
+    assert "quality_issues_full" not in attrs
+    assert attrs["quality_issue_count"] == 6
+    assert attrs["quality_issues_has_more"] is True
+
+
 def test_recent_activity_attributes_are_bounded() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1517,6 +1561,26 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
         ),
     )
     assert setup_health_value(negative_power) == "Check CT direction"
+
+    truncated_negative_power = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": [
+                        f"sensor.optional_{index} stale" for index in range(5)
+                    ],
+                    "quality_issues_full": [
+                        *(f"sensor.optional_{index} stale" for index in range(5)),
+                        "sensor.fridge_power negative_real_power_load",
+                    ],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(truncated_negative_power) == "Check CT direction"
 
     assert setup_health_value(coordinator_for(hvac)) == "Configure breaker amps"
 
