@@ -1042,6 +1042,35 @@ def test_daily_action_services_document_entity_targets() -> None:
         }
 
 
+def test_advanced_circuit_services_document_entity_targets() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+
+    for service_name in (
+        "export_diagnostics",
+        "export_history_csv",
+        "set_energy_usage_settings",
+        "set_energy_goal_settings",
+        "set_activity_alert_settings",
+        "set_billing_cycle_settings",
+        "set_cost_settings",
+        "set_demand_settings",
+        "set_capacity_settings",
+        "set_leg_imbalance_settings",
+        "set_metric_consistency_settings",
+        "set_mains_balance_settings",
+        "set_solar_flow_settings",
+        "set_standby_settings",
+        "set_utility_comparison_settings",
+        "recalculate_setting_recommendations",
+    ):
+        fields = services[service_name]["fields"]
+        assert fields["circuit_id"]["required"] is False
+        assert fields["entity_id"]["required"] is False
+        assert "analyzer entity" in fields["entity_id"]["description"]
+
+
 def test_readme_includes_status_glossary_for_machine_values() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 

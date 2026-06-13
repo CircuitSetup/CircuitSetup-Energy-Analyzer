@@ -302,6 +302,36 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         )
 
 
+def test_advanced_circuit_service_schemas_accept_analyzer_entity_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import _SERVICE_SCHEMAS
+
+    entity_target_services = (
+        "export_diagnostics",
+        "export_history_csv",
+        "set_energy_usage_settings",
+        "set_energy_goal_settings",
+        "set_activity_alert_settings",
+        "set_billing_cycle_settings",
+        "set_cost_settings",
+        "set_demand_settings",
+        "set_capacity_settings",
+        "set_leg_imbalance_settings",
+        "set_metric_consistency_settings",
+        "set_mains_balance_settings",
+        "set_solar_flow_settings",
+        "set_standby_settings",
+        "set_utility_comparison_settings",
+        "recalculate_setting_recommendations",
+    )
+
+    for service_name in entity_target_services:
+        schema = _SERVICE_SCHEMAS[service_name]
+        assert schema is not None
+        assert schema({"entity_id": "sensor.fridge_health_summary"}) == {
+            "entity_id": "sensor.fridge_health_summary"
+        }
+
+
 def test_setting_recommendation_service_schemas_validate_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         ATTR_ENTRY_ID,
@@ -651,6 +681,58 @@ async def test_circuit_services_accept_renamed_registry_entity_target(
     )
 
     assert coordinator.calls == [("async_relearn_baseline", ("fridge",))]
+
+
+@pytest.mark.asyncio
+async def test_circuit_services_reject_conflicting_circuit_and_entity_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RELEARN_BASELINE,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        circuit_configs = [
+            SimpleNamespace(circuit_id="fridge"),
+            SimpleNamespace(circuit_id="hvac"),
+        ]
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_relearn_baseline(self, circuit_id: str) -> None:
+            raise AssertionError("service should reject conflicting targets first")
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(
+        HomeAssistantError,
+        match=(
+            "circuit_id 'hvac' does not match entity_id target circuit "
+            "'fridge'"
+        ),
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "hvac",
+                    "entity_id": "sensor.fridge_health_summary",
+                }
+            )
+        )
 
 
 @pytest.mark.asyncio
