@@ -1145,6 +1145,15 @@ RECENT_ACTIVITY_ATTRIBUTE_FIELDS = (
     "repeated_count",
 )
 
+SOLAR_LOAD_SHIFT_CANDIDATE_MAX_ITEMS = 5
+SOLAR_LOAD_SHIFT_CANDIDATE_FIELDS = (
+    "circuit_id",
+    "name",
+    "appliance_profile",
+    "current_power_w",
+    "state",
+)
+
 
 def _recent_activity_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
     attributes = {key: item for key, item in value.items() if key != "items"}
@@ -1175,6 +1184,40 @@ def _recent_activity_item_preview(item: Any) -> dict[str, Any]:
     }
 
 
+def _solar_load_shift_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
+    attributes = {
+        key: item for key, item in value.items() if key != "candidate_loads"
+    }
+    raw_loads = value.get("candidate_loads", ())
+    if not isinstance(raw_loads, Iterable) or isinstance(
+        raw_loads, str | bytes | Mapping
+    ):
+        candidate_loads: list[Any] = []
+    else:
+        candidate_loads = list(raw_loads)
+
+    preview_loads = candidate_loads[:SOLAR_LOAD_SHIFT_CANDIDATE_MAX_ITEMS]
+    attributes["candidate_load_count"] = len(candidate_loads)
+    attributes["candidate_loads_shown_count"] = len(preview_loads)
+    attributes["candidate_loads_has_more"] = len(candidate_loads) > len(
+        preview_loads
+    )
+    attributes["candidate_loads"] = [
+        _solar_load_shift_candidate_preview(load) for load in preview_loads
+    ]
+    return attributes
+
+
+def _solar_load_shift_candidate_preview(candidate: Any) -> dict[str, Any]:
+    if not isinstance(candidate, Mapping):
+        return {}
+    return {
+        field: candidate[field]
+        for field in SOLAR_LOAD_SHIFT_CANDIDATE_FIELDS
+        if field in candidate and candidate[field] is not None
+    }
+
+
 def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] | None]:
     def attributes(state: Any, circuit_id: str) -> dict[str, Any] | None:
         value = getattr(state, field_name, {}).get(circuit_id)
@@ -1182,6 +1225,8 @@ def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] 
             attributes = dict(value)
             if field_name == "recent_activity_timeline_by_circuit":
                 return _recent_activity_attributes(attributes)
+            if field_name == "solar_load_shift_evidence_by_circuit":
+                return _solar_load_shift_attributes(attributes)
             if field_name in {
                 "demand_evidence_by_circuit",
                 "capacity_evidence_by_circuit",
