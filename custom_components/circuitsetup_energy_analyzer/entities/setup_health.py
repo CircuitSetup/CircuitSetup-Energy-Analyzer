@@ -107,7 +107,7 @@ def _setup_health_attributes_for_issues(
     return {
         "blocking_issue_count": len(issues),
         "issue_count": len(issues),
-        "warning_count": 0,
+        "warning_count": _setup_health_severity_count(issues, "warning"),
         "ready": ready,
         "next_step": primary["recommended_action"],
         "recommended_action": primary["recommended_action"],
@@ -194,6 +194,13 @@ def _setup_health_issue_source_entities(
             if isinstance(entity_id, str) and entity_id not in source_entities:
                 source_entities.append(entity_id)
     return source_entities
+
+
+def _setup_health_severity_count(
+    issues: Iterable[Mapping[str, Any]],
+    severity: str,
+) -> int:
+    return sum(1 for issue in issues if issue.get("severity") == severity)
 
 
 def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
@@ -415,6 +422,7 @@ def _setup_health_issue(
     reason: str,
     *,
     issue: str | None = None,
+    severity: str = "warning",
     source_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     circuit_id = getattr(circuit, "circuit_id", None)
@@ -425,6 +433,7 @@ def _setup_health_issue(
         "affected_circuit_name": getattr(circuit, "name", None),
         "circuit_id": circuit_id,
         "issue": issue or _setup_health_issue_key(state),
+        "severity": severity,
         "fix": recommended_action,
         "open_path": SETUP_HEALTH_OPEN_PATH,
         "reason": reason,

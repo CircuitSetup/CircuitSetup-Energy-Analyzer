@@ -1217,7 +1217,7 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
     setup_attrs = setup_health_attributes(setup_coordinator)
     assert setup_attrs["blocking_issue_count"] == 1
     assert setup_attrs["issue_count"] == 1
-    assert setup_attrs["warning_count"] == 0
+    assert setup_attrs["warning_count"] == 1
     assert setup_attrs["ready"] is False
     assert setup_attrs["next_step"] == (
         "Add a cumulative kWh sensor to Kitchen Fridge"
@@ -1236,6 +1236,7 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
     )
     assert setup_attrs["issues"][0]["circuit_id"] == "fridge"
     assert setup_attrs["issues"][0]["issue"] == "missing_energy_source"
+    assert setup_attrs["issues"][0]["severity"] == "warning"
     assert setup_attrs["issues"][0]["fix"] == (
         "Add a cumulative kWh sensor to Kitchen Fridge"
     )
