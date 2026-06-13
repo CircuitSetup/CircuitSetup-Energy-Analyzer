@@ -41,6 +41,7 @@ SENSITIVITY_LABELS = {
     "balanced": "Balanced",
     "sensitive": "Sensitive",
 }
+MAX_CONTRIBUTING_METRICS = 5
 REQUIRED_ROLES = {SensorRole.REAL_POWER}
 OPTIONAL_ROLES = {
     SensorRole.VOLTAGE,
@@ -142,6 +143,10 @@ def alert_evidence_detail(
     last_seen = _isoformat_or_none(alert.last_seen)
     graph_window_start, graph_window_end = alert_graph_window(alert)
     feature = _alert_feature(alert)
+    contributing_metrics = _bounded_contributing_metrics(
+        alert.features,
+        primary_key=feature,
+    )
     detail = {
         "alert_id": notification_id_for_alert(alert),
         "circuit_id": alert.circuit_id,
@@ -165,9 +170,10 @@ def alert_evidence_detail(
         "time_window": (
             f"{first_seen} to {last_seen}" if first_seen and last_seen else None
         ),
-        "contributing_metrics": {
-            str(key): value for key, value in sorted(alert.features.items())
-        },
+        "contributing_metrics": contributing_metrics["metrics"],
+        "contributing_metrics_count": contributing_metrics["count"],
+        "contributing_metrics_has_more": contributing_metrics["has_more"],
+        "contributing_metrics_omitted_count": contributing_metrics["omitted_count"],
         "evidence_path": alert_evidence_path(alert, dashboard_path=dashboard_path),
         "graph_entities": list(alert_graph_entities(alert, config)),
         "source_entities": list(alert_source_entities(config)),
@@ -250,6 +256,34 @@ def _alert_sample_count(features: Mapping[str, Any]) -> Any:
         if key in features:
             return features[key]
     return None
+
+
+def _bounded_contributing_metrics(
+    features: Mapping[str, Any],
+    *,
+    primary_key: str | None = None,
+) -> dict[str, Any]:
+    items = [(str(key), value) for key, value in sorted(features.items())]
+    preview_items: list[tuple[str, Any]] = []
+    if primary_key is not None:
+        for key, value in items:
+            if key == primary_key:
+                preview_items.append((key, value))
+                break
+    for key, value in items:
+        if key == primary_key:
+            continue
+        if len(preview_items) >= MAX_CONTRIBUTING_METRICS:
+            break
+        preview_items.append((key, value))
+    count = len(items)
+    preview_count = len(preview_items)
+    return {
+        "metrics": dict(preview_items),
+        "count": count,
+        "has_more": count > preview_count,
+        "omitted_count": max(count - preview_count, 0),
+    }
 
 
 def data_quality_checklist(
