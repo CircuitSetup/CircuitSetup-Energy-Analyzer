@@ -237,6 +237,7 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
             {
                 "recommendation_id": "hvac:standby_threshold_w:v1",
                 "feature": "standby_threshold_w",
+                "setting_label": "Standby threshold",
             },
         ]
     }
@@ -264,7 +265,7 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
         "entry_id": "entry-1",
     }
     assert payload["setting_recommendations"][1]["display_label"] == (
-        "Standby Threshold W"
+        "Standby threshold"
     )
 
 

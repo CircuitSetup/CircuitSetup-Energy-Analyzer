@@ -2656,6 +2656,15 @@ def _advanced_settings_for_circuit(
 
 
 def _coordinator_config_value(coordinator: Any, key: str) -> Any:
+    if key == CONF_UTILITY_COMPARISON_SETTINGS:
+        merged: dict[str, Any] = {}
+        for field_name in ("entry_data", "options"):
+            container = getattr(coordinator, field_name, {})
+            value = container.get(key) if isinstance(container, Mapping) else None
+            if isinstance(value, Mapping):
+                merged.update(value)
+        if merged:
+            return merged
     for field_name in ("options", "entry_data"):
         container = getattr(coordinator, field_name, {})
         if isinstance(container, Mapping) and container.get(key):

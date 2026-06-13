@@ -65,6 +65,27 @@ def test_record_cost_sample_applies_tou_peak_weekday_rate() -> None:
     assert result.status == "tou_peak"
 
 
+def test_record_cost_sample_accepts_time_picker_seconds_for_tou() -> None:
+    result = record_cost_sample(
+        {"last_energy_kwh": 100.0, "last_sample_at": "2026-06-08T16:30:00+00:00"},
+        circuit_id="hvac",
+        timestamp=datetime(2026, 6, 8, 18, 0, tzinfo=UTC),
+        energy_kwh=104.0,
+        settings=CostSettings(
+            default_rate_per_kwh=0.10,
+            tou_rate_per_kwh=0.30,
+            tou_start="17:00:00",
+            tou_end="21:00:00",
+            tou_weekdays=(0, 1, 2, 3, 4),
+            tou_name="Peak",
+        ),
+    )
+
+    assert result.active_rate_name == "Peak"
+    assert result.current_rate_per_kwh == 0.30
+    assert result.status == "tou_peak"
+
+
 def test_record_cost_sample_handles_overnight_tou_period() -> None:
     result = record_cost_sample(
         {"last_energy_kwh": 10.0, "last_sample_at": "2026-06-08T21:00:00+00:00"},

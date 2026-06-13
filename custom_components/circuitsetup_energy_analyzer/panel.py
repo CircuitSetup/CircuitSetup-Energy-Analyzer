@@ -386,6 +386,7 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
             ATTR_RECOMMENDATION_ID,
             "title",
             "summary",
+            "setting_label",
             "feature",
             "current_value",
             "suggested_value",
@@ -403,7 +404,7 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
 
 def _recommendation_display_label(payload: Mapping[str, Any]) -> str:
-    for key in ("title", "summary"):
+    for key in ("title", "summary", "setting_label"):
         value = str(payload.get(key) or "").strip()
         if value:
             return value

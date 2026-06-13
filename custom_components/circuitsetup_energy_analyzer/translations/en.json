@@ -717,43 +717,43 @@
     },
     "missing_energy_source": {
       "title": "Energy Analyzer circuit needs cumulative energy data",
-      "description": "{circuit_name} has power data but no usable cumulative kWh source. Next step: {recommended_action}. You can add a cumulative energy sensor, or create one with Home Assistant's Integration helper. Suggested fix: {fix}"
+      "description": "{circuit_name} has power data but no usable cumulative kWh source. Reason: {reason}. Next step: {recommended_action}. You can add a cumulative energy sensor, or create one with Home Assistant's Integration helper. Suggested fix: {fix}"
     },
     "missing_mains_source": {
       "title": "Energy Analyzer feature needs a mains source",
-      "description": "{circuit_name} has a mains-dependent feature enabled, but no mains or whole-home source is configured. Next step: {recommended_action}. Add a mains source before using mains balance, NILM, or solar-flow checks. Suggested fix: {fix}"
+      "description": "{circuit_name} has a mains-dependent feature enabled, but no mains or whole-home source is configured. Reason: {reason}. Next step: {recommended_action}. Add a mains source before using mains balance, NILM, or solar-flow checks. Suggested fix: {fix}"
     },
     "missing_electrical_metrics": {
       "title": "Energy Analyzer circuit needs matching electrical metrics",
-      "description": "{circuit_name} is missing the supporting watts, amps, voltage, apparent power, or power factor inputs needed for metric-consistency checks. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "{circuit_name} is missing the supporting watts, amps, voltage, apparent power, or power factor inputs needed for metric-consistency checks. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "check_ct_direction": {
       "title": "Energy Analyzer found a power-flow or CT direction problem",
-      "description": "Analyzer evidence for {circuit_name} suggests reversed CT orientation, an unexpected export sign, or a power-flow mapping mismatch. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Analyzer evidence for {circuit_name} suggests reversed CT orientation, an unexpected export sign, or a power-flow mapping mismatch. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "dual_phase_missing_leg": {
       "title": "Energy Analyzer dual-phase circuit is missing one leg",
-      "description": "{circuit_name} cannot compare both split-phase legs because one leg is missing or unavailable. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "{circuit_name} cannot compare both split-phase legs because one leg is missing or unavailable. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "missing_rain_context_source": {
       "title": "Energy Analyzer rain context needs a rain source",
-      "description": "Rain-pump correlation is enabled for {circuit_name}, but no rain or rain-intensity source is configured. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Rain-pump correlation is enabled for {circuit_name}, but no rain or rain-intensity source is configured. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "missing_water_flow_source": {
       "title": "Energy Analyzer water-flow context needs a flow source",
-      "description": "Water-flow correlation is enabled for {circuit_name}, but no linked or global water-flow source is configured. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Water-flow correlation is enabled for {circuit_name}, but no linked or global water-flow source is configured. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "utility_comparison_source_mismatch": {
       "title": "Energy Analyzer utility comparison needs source settings",
-      "description": "Utility comparison is enabled for {circuit_name}, but the utility source, measured kWh source, or recorder period cannot be compared. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Utility comparison is enabled for {circuit_name}, but the utility source, measured kWh source, or recorder period cannot be compared. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "utility_comparison_missing_utility_source": {
       "title": "Energy Analyzer utility comparison needs utility data",
-      "description": "Utility comparison is enabled for {circuit_name}, but the utility, Opower, or recorder statistics kWh source has no comparable data. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Utility comparison is enabled for {circuit_name}, but the utility, Opower, or recorder statistics kWh source has no comparable data. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "utility_comparison_missing_measured_source": {
       "title": "Energy Analyzer utility comparison needs measured data",
-      "description": "Utility comparison is enabled for {circuit_name}, but the local measured cumulative kWh source has no comparable data. Next step: {recommended_action}. Suggested fix: {fix}"
+      "description": "Utility comparison is enabled for {circuit_name}, but the local measured cumulative kWh source has no comparable data. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "unexpected_negative_real_power": {
       "title": "Energy Analyzer sees negative load power",
