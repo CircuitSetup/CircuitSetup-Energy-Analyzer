@@ -57,6 +57,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
+    this._nilmLabelDrafts = new Map();
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -116,6 +117,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._error = "";
     this._historyError = "";
     this._historySeries = [];
+    this._nilmLabelDrafts.clear();
     this._render();
 
     const routeUrl = new URL(routeKey, window.location.origin);
@@ -251,6 +253,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._hass.callService(action.domain, action.service, data);
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      if (actionKey === "label") {
+        this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
       }
       await this._loadEvidence({ routeKey: this._routeKey() });
     } catch (error) {
@@ -573,6 +578,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._callNilmAction(index, button.dataset.nilmAction);
       });
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-input]")) {
+      input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -706,7 +714,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmLabelField(signature, index) {
-    const currentLabel = signature.user_label
+    const draftKey = this._nilmLabelDraftKey(signature);
+    const currentLabel = this._nilmLabelDrafts.has(draftKey)
+      ? this._nilmLabelDrafts.get(draftKey)
+      : signature.user_label
       || signature.display_name
       || signature.likely_type
       || signature.display_label
@@ -717,11 +728,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <input
           id="nilm_label_${index}"
           type="text"
+          data-nilm-label-input
+          data-nilm-label-key="${this._escape(draftKey)}"
           value="${this._escape(currentLabel)}"
           placeholder="Appliance name"
         >
       </label>
     `;
+  }
+
+  _nilmLabelDraftKey(signature) {
+    return String(
+      (signature && (signature.signature_id || signature.id || signature.display_label))
+      || ""
+    );
+  }
+
+  _rememberNilmLabelDraft(input) {
+    if (!input || !input.dataset.nilmLabelKey) {
+      return;
+    }
+    this._nilmLabelDrafts.set(input.dataset.nilmLabelKey, input.value);
   }
 
   _renderRecommendations() {

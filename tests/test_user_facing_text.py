@@ -991,6 +991,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "NILM Review",
         "nilm-label-field",
         "_renderNilmLabelField",
+        "_nilmLabelDrafts",
+        "_rememberNilmLabelDraft",
         "Enter a label for this NILM signature before saving.",
         "Save Label",
         "merge-target-chip",
@@ -1021,6 +1023,24 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     )
     assert "this._escape(signature.signature_id)}</strong>" not in asset
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
+
+
+def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "this._nilmLabelDrafts = new Map();" in asset
+    assert (
+        "input.addEventListener(\"input\", () => this._rememberNilmLabelDraft("
+        in asset
+    )
+    assert "this._nilmLabelDraftKey(signature)" in asset
+    assert "this._nilmLabelDrafts.get(draftKey)" in asset
 
 
 def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() -> None:
