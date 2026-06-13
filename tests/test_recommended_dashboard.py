@@ -231,9 +231,17 @@ def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> Non
     assert "sensor.kitchen_fridge_health" in refs
     assert "sensor.kitchen_fridge_activity" not in refs
     assert "Refrigerator dashboard note" in markdown
-    assert "disabled: Activity Summary" in markdown
+    assert "Disabled entities: Activity Summary" in markdown
+    assert "Next step: enable these entities from Home Assistant entity settings." in (
+        markdown
+    )
     assert (
-        "missing: Electrical Health, Energy Summary, Daily Energy Usage, Running"
+        "Missing entities: Electrical Health, Energy Summary, Daily Energy Usage, "
+        "Running"
+        in markdown
+    )
+    assert (
+        "Next step: reload the integration or review Entity Detail Level."
         in markdown
     )
 
@@ -252,9 +260,13 @@ def test_dashboard_does_not_guess_ids_when_registry_is_available_but_empty() -> 
     assert "binary_sensor.fridge_running" not in refs
     assert "Refrigerator dashboard note" in markdown
     assert (
-        "missing: Health Summary, Activity Summary, Electrical Health, "
+        "Missing entities: Health Summary, Activity Summary, Electrical Health, "
         "Energy Summary, Daily Energy Usage, Running"
     ) in markdown
+    assert (
+        "Next step: reload the integration or review Entity Detail Level."
+        in markdown
+    )
 
 
 def test_dashboard_uses_registry_ids_for_global_and_circuit_controls() -> None:
@@ -336,6 +348,8 @@ def test_dashboard_adds_notes_for_missing_disabled_and_unavailable_controls() ->
         def get(self, entity_id: str) -> SimpleNamespace | None:
             if entity_id == "button.fridge_pause_alerts":
                 return SimpleNamespace(state="unavailable")
+            if entity_id == "button.fridge_end_maintenance":
+                return SimpleNamespace(state="unknown")
             return SimpleNamespace(state="idle")
 
     dashboard = build_recommended_dashboard(
@@ -353,6 +367,10 @@ def test_dashboard_adds_notes_for_missing_disabled_and_unavailable_controls() ->
                         "button.fridge_relearn",
                         "entry-1_fridge_relearn_baseline",
                     ),
+                    "button.fridge_end_maintenance": _registry_entry(
+                        "button.fridge_end_maintenance",
+                        "entry-1_fridge_end_maintenance",
+                    ),
                     "button.fridge_pause_alerts": _registry_entry(
                         "button.fridge_pause_alerts",
                         "entry-1_fridge_pause_alerts",
@@ -366,10 +384,20 @@ def test_dashboard_adds_notes_for_missing_disabled_and_unavailable_controls() ->
     markdown = "\n".join(_markdown_contents(dashboard))
 
     assert "Dashboard controls note" in markdown
-    assert "disabled: Dashboard Layout" in markdown
+    assert "Disabled entities: Dashboard Layout" in markdown
+    assert "Next step: enable these entities from Home Assistant entity settings." in (
+        markdown
+    )
     assert "Refrigerator controls note" in markdown
-    assert "missing: Alert Sensitivity, Daily Energy Goal" in markdown
-    assert "unavailable: Pause Alerts" in markdown
+    assert "Missing entities: Alert Sensitivity, Daily Energy Goal" in markdown
+    assert (
+        "Next step: reload the integration or review Entity Detail Level."
+        in markdown
+    )
+    assert "Unavailable entities: End Maintenance, Pause Alerts" in markdown
+    assert "Next step: open the entity details and follow its availability reason." in (
+        markdown
+    )
 
 
 class _FakeDashboardsCollection:

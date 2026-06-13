@@ -267,11 +267,11 @@ def _resolved_entity_ids(
 
     notes: list[str] = []
     if disabled_labels:
-        notes.append(f"disabled: {', '.join(disabled_labels)}")
+        notes.append(_dashboard_gap_note("disabled", disabled_labels))
     if missing_labels:
-        notes.append(f"missing: {', '.join(missing_labels)}")
+        notes.append(_dashboard_gap_note("missing", missing_labels))
     if unavailable_labels:
-        notes.append(f"unavailable: {', '.join(unavailable_labels)}")
+        notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
     return entity_ids, notes
 
 
@@ -380,11 +380,11 @@ def _resolved_global_entity_ids(
 
     notes: list[str] = []
     if disabled_labels:
-        notes.append(f"disabled: {', '.join(disabled_labels)}")
+        notes.append(_dashboard_gap_note("disabled", disabled_labels))
     if missing_labels:
-        notes.append(f"missing: {', '.join(missing_labels)}")
+        notes.append(_dashboard_gap_note("missing", missing_labels))
     if unavailable_labels:
-        notes.append(f"unavailable: {', '.join(unavailable_labels)}")
+        notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
     return entity_ids, notes
 
 
@@ -423,7 +423,7 @@ def _entity_is_unavailable(hass: Any | None, entity_id: str) -> bool:
         return False
     state = get_state(entity_id)
     state_value = str(getattr(state, "state", "")).strip().lower()
-    return state_value == "unavailable"
+    return state_value in {"unknown", "unavailable"}
 
 
 def _circuit_note(name: str, notes: Iterable[str]) -> str:
@@ -434,6 +434,24 @@ def _note_content(title: str, notes: Iterable[str]) -> str:
     lines = [f"**{title}**"]
     lines.extend(note for note in notes if note)
     return "\n".join(lines)
+
+
+def _dashboard_gap_note(reason: str, labels: Iterable[str]) -> str:
+    label_text = ", ".join(labels)
+    if reason == "disabled":
+        return (
+            f"Disabled entities: {label_text}\n"
+            "Next step: enable these entities from Home Assistant entity settings."
+        )
+    if reason == "unavailable":
+        return (
+            f"Unavailable entities: {label_text}\n"
+            "Next step: open the entity details and follow its availability reason."
+        )
+    return (
+        f"Missing entities: {label_text}\n"
+        "Next step: reload the integration or review Entity Detail Level."
+    )
 
 
 def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
