@@ -1140,6 +1140,17 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "not observed a cumulative kWh increase" in readme_text
 
 
+def test_readme_explains_generated_dashboard_controls() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "generated dashboard uses Home Assistant's current entity registry IDs" in (
+        readme_text
+    )
+    assert "renamed analyzer entities are respected" in readme_text
+    assert "adds small action cards" in readme_text
+    assert "Missing, disabled, or unavailable entities" in readme_text
+
+
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
