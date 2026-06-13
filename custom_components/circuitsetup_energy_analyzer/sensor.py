@@ -7,10 +7,12 @@ from typing import Any
 from .appliance_metadata import appliance_icon_for_profile
 from .const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
+    CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
@@ -2363,6 +2365,7 @@ def sensor_description_applies(
     description: DiagnosticSensorDescription,
     circuit: Any,
     coordinator: Any,
+    configured_circuits: Iterable[Any] | None = None,
 ) -> bool:
     """Return whether a diagnostic sensor is useful for this circuit."""
     key = description.key
@@ -2430,7 +2433,7 @@ def sensor_description_applies(
     if key in _BALANCE_SENSOR_KEYS:
         return is_mains
     if key in _SOLAR_FLOW_SENSOR_KEYS:
-        return is_mains and _has_solar_flow_sources(coordinator)
+        return is_mains and _has_solar_flow_sources(coordinator, configured_circuits)
     if key in _UTILITY_COMPARISON_SENSOR_KEYS:
         return _stored_settings(
             coordinator,
@@ -2476,11 +2479,17 @@ def sensor_description_applies(
 def _applicable_sensor_descriptions(
     circuit: Any,
     coordinator: Any,
+    configured_circuits: Iterable[Any] | None = None,
 ) -> tuple[DiagnosticSensorDescription, ...]:
     return tuple(
         description
         for description in SENSOR_DESCRIPTIONS
-        if sensor_description_applies(description, circuit, coordinator)
+        if sensor_description_applies(
+            description,
+            circuit,
+            coordinator,
+            configured_circuits,
+        )
     )
 
 
@@ -2588,6 +2597,17 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
     store_data = getattr(coordinator, "store_data", None)
     settings_by_circuit = getattr(store_data, field_name, {}) if store_data else {}
     settings = settings_by_circuit.get(_circuit_id(circuit), {})
+    if isinstance(settings, Mapping) and bool(settings):
+        return True
+    config_key = {
+        "utility_comparison_settings_by_circuit": CONF_UTILITY_COMPARISON_SETTINGS,
+    }.get(field_name)
+    if config_key is None:
+        return False
+    settings_by_circuit = _coordinator_config_value(coordinator, config_key)
+    if not isinstance(settings_by_circuit, Mapping):
+        return False
+    settings = settings_by_circuit.get(_circuit_id(circuit), {})
     return isinstance(settings, Mapping) and bool(settings)
 
 
@@ -2643,8 +2663,12 @@ def _coordinator_config_value(coordinator: Any, key: str) -> Any:
     return None
 
 
-def _has_solar_flow_sources(coordinator: Any) -> bool:
-    for circuit in getattr(coordinator, "circuit_configs", ()) or ():
+def _has_solar_flow_sources(
+    coordinator: Any,
+    configured_circuits: Iterable[Any] | None = None,
+) -> bool:
+    circuits = tuple(configured_circuits or ()) or _configured_circuits(coordinator)
+    for circuit in circuits:
         profile = _appliance_profile(circuit)
         power_flow = (
             circuit.get("power_flow")
@@ -2659,6 +2683,19 @@ def _has_solar_flow_sources(coordinator: Any) -> bool:
         except (TypeError, ValueError):
             continue
     return False
+
+
+def _configured_circuits(coordinator: Any) -> tuple[Any, ...]:
+    circuits = tuple(getattr(coordinator, "circuit_configs", ()) or ())
+    if circuits:
+        return circuits
+    for field_name in ("entry_data", "options"):
+        container = getattr(coordinator, field_name, {})
+        if isinstance(container, Mapping):
+            configured = container.get(CONF_CIRCUITS)
+            if isinstance(configured, (list, tuple)):
+                return tuple(configured)
+    return ()
 
 
 setup_health_value = _entity_setup_health_value
@@ -2941,15 +2978,20 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     """Set up diagnostic sensor entities for configured circuits."""
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
+    configured_circuits = tuple(circuits_for_entities(entry, coordinator))
     entities: list[SensorEntity] = [
         SetupHealthSensor(coordinator, entry_id=entry_id),
     ]
 
-    for raw_circuit in circuits_for_entities(entry, coordinator):
+    for raw_circuit in configured_circuits:
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
-        descriptions = _applicable_sensor_descriptions(raw_circuit, coordinator)
+        descriptions = _applicable_sensor_descriptions(
+            raw_circuit,
+            coordinator,
+            configured_circuits,
+        )
         entities.extend(
             CircuitAnalyzerSensor(
                 coordinator,
@@ -2963,7 +3005,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entities.extend(
         _demo_source_entities_for_circuits(
             entry_id,
-            circuits_for_entities(entry, coordinator),
+            configured_circuits,
         )
     )
     prune_stale_entity_registry_entries(

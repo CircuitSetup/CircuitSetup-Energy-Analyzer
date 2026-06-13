@@ -3296,6 +3296,94 @@ async def test_sensor_setup_entry_does_not_create_leg_imbalance_for_mains_nilm()
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_uses_entry_data_for_solar_flow_applicability() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(),
+        entry_data={},
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "appliance_profile": "mains_nilm",
+                    "mode": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "appliance_profile": "solar_inverter",
+                    "mode": "single_phase",
+                    "power_flow": "generation",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"}
+                    ],
+                },
+            ]
+        },
+    )
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_mains_solar_flow_status",
+        "entry-1_mains_solar_surplus_status",
+        "entry-1_mains_solar_load_shift_status",
+    } <= unique_ids
+    assert "entry-1_solar_solar_flow_status" not in unique_ids
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        store_data=FeatureStoreData(),
+        options={
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+            }
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_mains_utility_comparison_difference",
+        "entry-1_mains_utility_comparison_status",
+    } <= unique_ids
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -> (
     None
 ):
