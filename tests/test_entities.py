@@ -1678,6 +1678,93 @@ def test_setup_health_attributes_are_bounded_for_recorder() -> None:
     assert attrs["stale_sources_truncated_count"] > 0
 
 
+def test_setup_health_attributes_keep_multi_issue_payload_small() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    profiles = (
+        ApplianceProfile.HVAC,
+        ApplianceProfile.WELL_PUMP,
+        ApplianceProfile.WATER_HEATER,
+        ApplianceProfile.MAINS_NILM,
+    )
+    circuits = tuple(
+        CircuitConfig(
+            circuit_id=f"multi_issue_circuit_{index:03d}_{'circuit_' * 12}",
+            name=f"Multi Issue Circuit {index:03d} {'Name ' * 16}",
+            appliance_profile=profiles[index % len(profiles)],
+            mode=(
+                CircuitMode.DUAL_PHASE
+                if index % len(profiles) in {0, 2}
+                else CircuitMode.SINGLE_PHASE
+            ),
+            sensors=(
+                SensorRef(
+                    f"sensor.multi_issue_circuit_{index:03d}_{'source_' * 16}power",
+                    SensorRole.REAL_POWER,
+                ),
+                SensorRef(
+                    f"sensor.multi_issue_circuit_{index:03d}_{'source_' * 16}current",
+                    SensorRole.CURRENT,
+                ),
+            ),
+        )
+        for index in range(80)
+    )
+    utility_settings = {
+        circuit.circuit_id: {
+            "enabled": True,
+            "utility_source_entity": f"sensor.utility_{index}",
+            "measured_source_entity": f"sensor.measured_{index}",
+        }
+        for index, circuit in enumerate(circuits)
+    }
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                circuit.circuit_id: {
+                    "quality_issues": [
+                        (
+                            f"{circuit.sensors[0].entity_id} stale unavailable "
+                            "negative_real_power_load"
+                        )
+                    ],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+                for circuit in circuits
+            },
+            balance_status_by_circuit={
+                circuit.circuit_id: (
+                    "missing_mains"
+                    if circuit.appliance_profile is ApplianceProfile.MAINS_NILM
+                    else "negative_balance"
+                )
+                for circuit in circuits
+            },
+            utility_comparison_status_by_circuit={
+                circuit.circuit_id: "missing_utility" for circuit in circuits
+            },
+        ),
+        circuit_configs=circuits,
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit=utility_settings,
+        ),
+        options={CONF_UTILITY_COMPARISON_SETTINGS: utility_settings},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+    encoded = json.dumps(attrs, sort_keys=True, default=str, separators=(",", ":"))
+
+    assert len(encoded) <= 6_000
+    assert attrs["issue_count"] > 80
+    assert attrs["issues_truncated_count"] > 0
+    assert attrs["affected_circuits_truncated_count"] > 0
+    assert attrs["negative_power_loads_truncated_count"] > 0
+    assert attrs["utility_comparison_setup_issues_truncated_count"] > 0
+
+
 def test_setup_health_attributes_bound_oversized_strings() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
