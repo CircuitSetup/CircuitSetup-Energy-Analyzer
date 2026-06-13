@@ -491,6 +491,8 @@ Configure billing-cycle and cost settings from:
 
 Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
+Time-of-use settings use a time picker for the peak start/end times and a weekday selector for peak days, so normal setup does not require typing comma-separated weekday numbers.
+
 ### Demand and capacity
 
 Demand tracking uses rolling average watts. Capacity tracking compares amps with a configured breaker or circuit rating.

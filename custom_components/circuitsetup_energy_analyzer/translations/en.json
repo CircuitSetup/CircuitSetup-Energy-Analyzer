@@ -291,9 +291,9 @@
               "billing_min_elapsed_days": "Minimum days into the billing cycle before projected-budget alerts can be raised.",
               "default_rate_per_kwh": "Optional default utility rate for circuit cost tracking.",
               "tou_rate_per_kwh": "Optional time-of-use rate for the configured peak window.",
-              "tou_start": "Optional peak-rate start time, such as 16:00.",
-              "tou_end": "Optional peak-rate end time, such as 21:00.",
-              "tou_weekdays": "Optional comma-separated weekdays for peak pricing, where Monday is 0.",
+              "tou_start": "Optional peak-rate start time using the time picker.",
+              "tou_end": "Optional peak-rate end time using the time picker.",
+              "tou_weekdays": "Choose the weekdays where peak pricing applies.",
               "tou_name": "Display name for the time-of-use rate window."
             }
           },
