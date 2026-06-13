@@ -110,6 +110,7 @@ class _FakeCoordinator:
         self.circuit_configs = circuits or (_circuit(),)
         self.options = {CONF_ENTITY_DETAIL_LEVEL: "standard"}
         self.entry_data = {}
+        self.last_dashboard_create_request: dict[str, object] | None = None
         self.store_data = SimpleNamespace(
             energy_goal_settings_by_circuit={
                 "fridge": {"daily_goal_kwh": 4.5},
@@ -301,6 +302,38 @@ async def test_button_setup_skips_inapplicable_controls_and_keeps_single_globals
         if entity.unique_id.endswith("create_dashboard")
     ]
     assert len(create_dashboard_entities) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_dashboard_button_exposes_last_dashboard_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator()
+    coordinator.last_dashboard_create_request = {
+        "action": "unavailable",
+        "reason": "dashboard_update_unavailable",
+        "dashboard_path": "/circuitsetup-energy-analyzer",
+        "layout": "standard",
+    }
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+
+    assert by_unique_id["entry-1_create_dashboard"].extra_state_attributes == {
+        "last_dashboard_action": "unavailable",
+        "last_dashboard_reason": "dashboard_update_unavailable",
+        "last_dashboard_path": "/circuitsetup-energy-analyzer",
+        "last_dashboard_layout": "standard",
+    }
 
 
 @pytest.mark.asyncio

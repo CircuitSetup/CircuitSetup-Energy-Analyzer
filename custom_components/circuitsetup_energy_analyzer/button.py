@@ -257,6 +257,27 @@ class GlobalAnalyzerButton(ButtonEntity):
             "manufacturer": "CircuitSetup",
         }
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose the last dashboard create/update result on its action button."""
+        if self.entity_description.key != "create_dashboard":
+            return None
+        request = getattr(self.coordinator, "last_dashboard_create_request", None)
+        if not isinstance(request, Mapping):
+            return None
+
+        attributes: dict[str, str] = {}
+        for source_key, attribute_key in (
+            ("action", "last_dashboard_action"),
+            ("reason", "last_dashboard_reason"),
+            ("dashboard_path", "last_dashboard_path"),
+            ("layout", "last_dashboard_layout"),
+        ):
+            value = str(request.get(source_key) or "").strip()
+            if value:
+                attributes[attribute_key] = value
+        return attributes or None
+
     async def async_press(self) -> None:
         """Run the integration-wide action."""
         await _call_or_raise(
