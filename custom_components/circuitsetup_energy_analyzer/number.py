@@ -153,11 +153,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[NumberEntity] = []
+    circuit_device_identifiers: set[tuple[str, str]] = set()
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        circuit_device_identifiers.add((DOMAIN, f"{entry_id}_{circuit.circuit_id}"))
         entities.extend(
             CircuitDailyEnergyGoalNumber(
                 coordinator,
@@ -178,7 +180,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     prune_stale_device_registry_entries(
         hass,
         entry_id=entry_id,
-        desired_identifiers=device_identifiers_for_entities(entities),
+        desired_identifiers=(
+            device_identifiers_for_entities(entities) | circuit_device_identifiers
+        ),
     )
     async_add_entities(entities)
 
@@ -210,15 +214,9 @@ def number_description_applies(
     """Return whether a number control is useful for this circuit."""
     if description.key != "daily_energy_goal":
         return True
-    circuit_id = _circuit_id(circuit)
     if _has_energy_sensor(circuit):
         return True
-    store_data = getattr(coordinator, "store_data", None)
-    settings_by_circuit = getattr(store_data, "energy_goal_settings_by_circuit", {})
-    if isinstance(settings_by_circuit, Mapping) and circuit_id in settings_by_circuit:
-        return True
-    if "daily_goal_kwh" in _advanced_settings_for_circuit_id(coordinator, circuit_id):
-        return True
+    circuit_id = _circuit_id(circuit)
     state = getattr(coordinator, "data", None)
     if circuit_id in getattr(state, "daily_energy_usage_by_circuit", {}):
         return True
