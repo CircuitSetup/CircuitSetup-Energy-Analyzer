@@ -1126,6 +1126,70 @@ def test_recent_activity_attributes_are_bounded() -> None:
     }
 
 
+def test_solar_load_shift_attributes_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    description = next(
+        item for item in SENSOR_DESCRIPTIONS if item.key == "solar_load_shift_status"
+    )
+    candidate_loads = [
+        {
+            "circuit_id": f"load_{index}",
+            "name": f"Flexible Load {index}",
+            "appliance_profile": "pool_pump",
+            "current_power_w": 120.0 + index,
+            "state": "idle",
+            "debug_samples": [index] * 20,
+        }
+        for index in range(8)
+    ]
+    state = AnalyzerState(
+        solar_load_shift_evidence_by_circuit={
+            "mains": {
+                "status": "surplus_candidate",
+                "solar_surplus_status": "high_surplus",
+                "active_flexible_load_power_w": 0.0,
+                "solar_load_shift_available_w": 500.0,
+                "grid_import_w": 0.0,
+                "solar_coverage_percent": 0.0,
+                "active_flexible_load_count": 0,
+                "idle_flexible_load_count": 8,
+                "unavailable_flexible_load_count": 0,
+                "candidate_loads": candidate_loads,
+            }
+        }
+    )
+
+    attrs = description.attributes_fn(state, "mains")
+
+    assert attrs == {
+        "status": "surplus_candidate",
+        "solar_surplus_status": "high_surplus",
+        "active_flexible_load_power_w": 0.0,
+        "solar_load_shift_available_w": 500.0,
+        "grid_import_w": 0.0,
+        "solar_coverage_percent": 0.0,
+        "active_flexible_load_count": 0,
+        "idle_flexible_load_count": 8,
+        "unavailable_flexible_load_count": 0,
+        "candidate_load_count": 8,
+        "candidate_loads_shown_count": 5,
+        "candidate_loads_has_more": True,
+        "candidate_loads": [
+            {
+                "circuit_id": f"load_{index}",
+                "name": f"Flexible Load {index}",
+                "appliance_profile": "pool_pump",
+                "current_power_w": 120.0 + index,
+                "state": "idle",
+            }
+            for index in range(5)
+        ],
+    }
+
+
 def test_setup_health_prioritizes_missing_energy_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -2607,6 +2671,9 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         "status": "active_solar_supported",
         "active_flexible_load_power_w": 800.0,
         "solar_coverage_percent": 100.0,
+        "candidate_load_count": 1,
+        "candidate_loads_shown_count": 1,
+        "candidate_loads_has_more": False,
         "candidate_loads": [{"circuit_id": "pool", "state": "active"}],
     }
     utility_comparison_evidence = {
