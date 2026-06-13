@@ -135,6 +135,42 @@ def test_alert_evidence_payload_switches_to_end_maintenance_when_active() -> Non
         "service": "end_maintenance",
         "data": {"circuit_id": "hvac"},
     }
+    assert payload["actions"]["pause_alerts"] == {
+        "domain": DOMAIN,
+        "service": "pause_alerts",
+        "data": {"circuit_id": "hvac"},
+        "enabled": False,
+        "unavailable_reason": "alerts_paused",
+        "unavailable_label": "Alerts are already paused for this circuit.",
+    }
+
+
+def test_alert_evidence_payload_marks_pause_alerts_unavailable_without_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    coordinator = _coordinator()
+    coordinator.state.alert_evidence_by_circuit = {
+        "hvac": {
+            "alert_id": None,
+            "circuit_id": "hvac",
+            "feature": "leg_imbalance",
+            "feature_name": "Leg Imbalance",
+            "message": "Previous issue",
+        }
+    }
+
+    payload = alert_evidence_payload([coordinator], circuit_id="hvac")
+
+    assert payload["actions"]["pause_alerts"] == {
+        "domain": DOMAIN,
+        "service": "pause_alerts",
+        "data": {"circuit_id": "hvac"},
+        "enabled": False,
+        "unavailable_reason": "no_active_alert",
+        "unavailable_label": "No active alert is available to pause.",
+    }
 
 
 def test_alert_evidence_payload_includes_setting_recommendation_actions() -> None:

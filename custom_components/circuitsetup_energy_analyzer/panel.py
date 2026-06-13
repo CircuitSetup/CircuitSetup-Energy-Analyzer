@@ -34,7 +34,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260612-guided-actions"
+PANEL_MODULE_VERSION = "20260612-action-availability"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -259,11 +259,12 @@ def _actions_for_context(
             }
         actions.update(
             {
-                "pause_alerts": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_PAUSE_ALERTS,
-                    "data": circuit_data,
-                },
+                "pause_alerts": _pause_alerts_action(
+                    coordinator,
+                    circuit_id,
+                    alert_id=alert_id,
+                    data=circuit_data,
+                ),
                 "relearn_baseline": {
                     "domain": DOMAIN,
                     "service": SERVICE_RELEARN_BASELINE,
@@ -529,6 +530,82 @@ def _format_first_seen_label(value: Any) -> str | None:
     if not text:
         return None
     return text.split("T", 1)[0]
+
+
+def _pause_alerts_action(
+    coordinator: Any,
+    circuit_id: str,
+    *,
+    alert_id: Any,
+    data: dict[str, str],
+) -> dict[str, Any]:
+    action: dict[str, Any] = {
+        "domain": DOMAIN,
+        "service": SERVICE_PAUSE_ALERTS,
+        "data": data,
+    }
+    reason = _pause_alerts_unavailable_reason(
+        coordinator,
+        circuit_id,
+        alert_id=alert_id,
+    )
+    if reason is not None:
+        action.update(
+            {
+                "enabled": False,
+                "unavailable_reason": reason,
+                "unavailable_label": _unavailable_action_label(reason),
+            }
+        )
+    return action
+
+
+def _pause_alerts_unavailable_reason(
+    coordinator: Any,
+    circuit_id: str,
+    *,
+    alert_id: Any,
+) -> str | None:
+    if _alerts_paused(coordinator, circuit_id):
+        return "alerts_paused"
+    if isinstance(alert_id, str) and alert_id:
+        return None
+    if _has_active_alert(coordinator, circuit_id):
+        return None
+    return "no_active_alert"
+
+
+def _unavailable_action_label(reason: str) -> str:
+    return {
+        "alerts_paused": "Alerts are already paused for this circuit.",
+        "no_active_alert": "No active alert is available to pause.",
+    }.get(reason, reason.replace("_", " ").capitalize())
+
+
+def _alerts_paused(coordinator: Any, circuit_id: str) -> bool:
+    paused_circuits = getattr(coordinator, "paused_circuits", ())
+    return circuit_id in paused_circuits or _maintenance_active(coordinator, circuit_id)
+
+
+def _has_active_alert(coordinator: Any, circuit_id: str) -> bool:
+    state = getattr(coordinator, "state", None)
+    alerts_by_circuit = getattr(state, "active_alerts_by_circuit", {})
+    if isinstance(alerts_by_circuit, Mapping) and _truthy_collection(
+        alerts_by_circuit.get(circuit_id)
+    ):
+        return True
+    return _latest_alert_for_circuit(coordinator, circuit_id) is not None
+
+
+def _truthy_collection(value: Any) -> bool:
+    if isinstance(value, (int, float)):
+        return value > 0
+    if isinstance(value, Mapping):
+        return bool(value)
+    try:
+        return len(value) > 0
+    except TypeError:
+        return bool(value)
 
 
 def _maintenance_active(coordinator: Any, circuit_id: str) -> bool:

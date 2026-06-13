@@ -4,22 +4,46 @@ relearn_baseline:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 pause_alerts:
   name: Pause alerts
   description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause Alerts button entity."
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     duration:
       name: Duration
       description: How long alert notifications should stay paused.
@@ -55,11 +79,23 @@ export_history_csv:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 run_mapping_checks:
   name: Run mapping checks
   description: "Advanced/script action: run configured source-entity mapping checks. The normal user path is the integration Run Mapping Checks button entity."
@@ -113,11 +149,23 @@ set_circuit_sensitivity:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     preset:
       name: Preset
       description: Alert sensitivity preset for the circuit.
@@ -138,11 +186,23 @@ set_energy_usage_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     window_days:
       name: Window Days
       description: Rolling energy baseline window in days for the circuit.
@@ -170,11 +230,23 @@ set_energy_goal_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     daily_goal_kwh:
       name: Daily Goal kWh
       description: Daily kWh target for this circuit; use 0 to clear it.
@@ -675,11 +747,23 @@ start_maintenance:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     note:
       name: Note
       description: Optional maintenance note stored with the circuit.
@@ -707,11 +791,23 @@ end_maintenance:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     relearn:
       name: Relearn
       description: Relearn the circuit baseline after ending maintenance.

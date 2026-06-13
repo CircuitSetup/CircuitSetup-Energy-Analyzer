@@ -417,6 +417,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           flex-wrap: wrap;
           gap: 10px;
         }
+        .action-item {
+          display: inline-flex;
+          flex-direction: column;
+          gap: 4px;
+          max-width: 220px;
+        }
+        .action-reason {
+          color: var(--secondary-text-color, #6b7280);
+          font-size: 0.78rem;
+          line-height: 1.3;
+        }
         button, a.button {
           appearance: none;
           border: 1px solid var(--primary-color, #0b6bcb);
@@ -778,10 +789,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _actionButton(actionKey, label, secondary = false) {
     const actions = this._payload && this._payload.actions;
-    if (!actions || !actions[actionKey]) {
+    const action = actions && actions[actionKey];
+    if (!action) {
       return "";
     }
-    return `<button id="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(actionKey)}>${this._escape(label)}</button>`;
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    const hint = reason ? `<span class="action-reason">${this._escape(reason)}</span>` : "";
+    return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${this._escape(label)}</button>${hint}</span>`;
   }
 
   _nilmActionButton(index, actionKey, label, secondary = false, disabled = false) {
@@ -808,6 +823,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _disabled(actionKey) {
     return this._busyAction === actionKey ? "disabled" : "";
+  }
+
+  _actionDisabled(actionKey, action) {
+    return this._busyAction === actionKey || (action && action.enabled === false) ? "disabled" : "";
   }
 
   _formatNumber(value) {

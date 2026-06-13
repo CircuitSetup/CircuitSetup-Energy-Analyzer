@@ -128,6 +128,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "demand_limit_w": "Demand Limit W",
     "duration": "Duration",
     "entry_id": "Entry ID",
+    "entity_id": "Analyzer Entity",
     "goal_alert_ratio": "Goal Alert Ratio",
     "label": "Label",
     "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
@@ -976,6 +977,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "alert.safety_notice",
         "Source Entities",
         "NILM Review",
+        "unavailable_reason",
+        "action-reason",
+        "_actionDisabled",
     ):
         assert expected in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset
@@ -1005,6 +1009,30 @@ def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() ->
         "_evidenceRequestId",
     ):
         assert expected in asset
+
+
+def test_daily_action_services_document_entity_targets() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+
+    for service_name in (
+        "relearn_baseline",
+        "pause_alerts",
+        "start_maintenance",
+        "end_maintenance",
+        "set_circuit_sensitivity",
+        "set_energy_goal_settings",
+    ):
+        fields = services[service_name]["fields"]
+        assert fields["circuit_id"]["required"] is False
+        assert fields["entity_id"]["required"] is False
+        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert fields["entity_id"]["selector"] == {
+            "entity": {
+                "domain": ["sensor", "binary_sensor", "button", "select", "number"]
+            }
+        }
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:
