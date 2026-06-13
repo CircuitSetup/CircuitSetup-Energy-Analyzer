@@ -2648,13 +2648,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             (
                 item
                 for item in items
-                if isinstance(item, Mapping)
-                and item.get("url_path") == payload.get("url_path")
+                if _lovelace_dashboard_matches(item, payload)
             ),
             None,
         )
-        if existing is not None and callable(update_method):
-            item_id = str(existing.get("id") or existing.get("url_path"))
+        if existing is not None:
+            if not callable(update_method):
+                return "unavailable"
+            item_id = _lovelace_dashboard_item_id(existing, payload)
             update_payload = {
                 key: value for key, value in payload.items() if key != "url_path"
             }
@@ -6539,6 +6540,38 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
         normalized == suffix or normalized.endswith(f"_{suffix}")
         for suffix in metric_suffixes
     )
+
+
+def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:
+    target = _normalize_lovelace_path(payload.get("url_path"))
+    if not target:
+        return False
+    return any(
+        _normalize_lovelace_path(_lovelace_dashboard_item_value(item, key)) == target
+        for key in ("url_path", "id")
+    )
+
+
+def _lovelace_dashboard_item_id(
+    item: Any,
+    payload: Mapping[str, Any],
+) -> str:
+    return str(
+        _lovelace_dashboard_item_value(item, "id")
+        or _lovelace_dashboard_item_value(item, "url_path")
+        or payload.get("url_path")
+        or ""
+    )
+
+
+def _lovelace_dashboard_item_value(item: Any, key: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(key)
+    return getattr(item, key, None)
+
+
+def _normalize_lovelace_path(value: Any) -> str:
+    return str(value or "").strip().removeprefix("/")
 
 
 def _friendly_name_from_circuit_id(circuit_id: str) -> str:
