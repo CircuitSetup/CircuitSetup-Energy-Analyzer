@@ -597,7 +597,9 @@ def _setup_health_data_quality_issue(
     quality_issues = [
         str(issue)
         for issue in (
-            checklist.get("quality_issues", []) if checklist is not None else []
+            checklist.get("quality_issues_full") or checklist.get("quality_issues", [])
+            if checklist is not None
+            else []
         )
     ]
     issue_text = " ".join([data_quality, *quality_issues]).lower()

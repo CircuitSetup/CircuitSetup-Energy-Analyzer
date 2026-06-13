@@ -335,6 +335,7 @@ def data_quality_checklist(
             len(quality_issues) - len(quality_issue_preview),
             0,
         ),
+        "quality_issues_full": quality_issues,
         "metric_roles_present": sorted(role.value for role in roles_with_values),
         "required_metric_coverage": _coverage(REQUIRED_ROLES, roles_with_values),
         "optional_metric_coverage": _coverage(configured_optional, roles_with_values),

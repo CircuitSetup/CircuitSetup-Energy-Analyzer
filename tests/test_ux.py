@@ -359,6 +359,7 @@ def test_data_quality_checklist_bounds_large_quality_issue_attributes() -> None:
     assert checklist["quality_issue_count"] == 8
     assert checklist["quality_issues_has_more"] is True
     assert checklist["quality_issues_omitted_count"] == 3
+    assert checklist["quality_issues_full"] == list(issues)
     assert checklist["numeric_states_valid"] is False
     assert checklist["source_data_fresh"] is False
 
