@@ -61,6 +61,10 @@ _UTILITY_COMPARISON_SETUP_STATUSES = {
     "missing_utility",
     "missing_measured",
 }
+_MAX_SETUP_HEALTH_LIST_ITEMS = 8
+_MAX_SETUP_HEALTH_ISSUES = 8
+_MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE = 3
+_MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH = 80
 
 
 def setup_health_value(coordinator: Any) -> str:
@@ -103,64 +107,175 @@ def _setup_health_attributes_for_issues(
     primary: Mapping[str, Any],
 ) -> dict[str, Any]:
     affected_circuits = _setup_health_issue_circuits(issues)
+    learning_circuits = _setup_health_issue_circuits(
+        issues,
+        states={"Let analyzer learn"},
+    )
+    stale_sources = _setup_health_issue_source_entities(
+        issues,
+        states={"Fix stale source sensor"},
+    )
+    stale_source_circuits = _setup_health_issue_circuits(
+        issues,
+        states={"Fix stale source sensor"},
+    )
+    missing_energy_sources = _setup_health_issue_circuits(
+        issues,
+        states={"Add cumulative kWh source"},
+    )
+    negative_power_loads = _setup_health_issue_circuits(
+        issues,
+        states={"Check CT direction"},
+    )
+    dual_phase_missing_legs = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"dual_phase_missing_leg"},
+    )
+    missing_rain_sources = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"missing_rain_context_source"},
+    )
+    missing_water_flow_sources = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"missing_water_flow_source"},
+    )
+    utility_comparison_setup_issues = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"utility_comparison_source_mismatch"},
+    )
+    bounded_issues = _bounded_setup_health_issues(issues)
     ready = not issues
     return {
         "blocking_issue_count": len(issues),
         "issue_count": len(issues),
         "warning_count": _setup_health_severity_count(issues, "warning"),
         "ready": ready,
-        "next_step": primary["recommended_action"],
-        "recommended_action": primary["recommended_action"],
-        "primary_issue": primary.get("issue"),
-        "primary_severity": primary.get("severity"),
-        "issue_summary": _setup_health_issue_summary(issues, primary),
-        "affected_circuit": primary["affected_circuit"],
-        "affected_circuit_name": primary["affected_circuit_name"],
-        "affected_circuits": affected_circuits,
-        "open_path": primary["open_path"],
-        "reason": primary["reason"],
-        "learning_circuits": _setup_health_issue_circuits(
-            issues,
-            states={"Let analyzer learn"},
+        "next_step": _bounded_setup_health_value(primary["recommended_action"]),
+        "recommended_action": _bounded_setup_health_value(
+            primary["recommended_action"],
         ),
-        "stale_sources": _setup_health_issue_source_entities(
-            issues,
-            states={"Fix stale source sensor"},
+        "primary_issue": _bounded_setup_health_value(primary.get("issue")),
+        "primary_severity": _bounded_setup_health_value(primary.get("severity")),
+        "issue_summary": _bounded_setup_health_string(
+            _setup_health_issue_summary(issues, primary),
         ),
-        "stale_source_circuits": _setup_health_issue_circuits(
-            issues,
-            states={"Fix stale source sensor"},
+        "affected_circuit": _bounded_setup_health_value(primary["affected_circuit"]),
+        "affected_circuit_name": _bounded_setup_health_value(
+            primary["affected_circuit_name"],
         ),
-        "stale_source_entities": _setup_health_issue_source_entities(
-            issues,
-            states={"Fix stale source sensor"},
+        "affected_circuits": _bounded_setup_health_list(affected_circuits),
+        "affected_circuits_truncated_count": _truncated_count(affected_circuits),
+        "open_path": _bounded_setup_health_value(primary["open_path"]),
+        "reason": _bounded_setup_health_value(primary["reason"]),
+        "learning_circuits": _bounded_setup_health_list(learning_circuits),
+        "learning_circuits_truncated_count": _truncated_count(learning_circuits),
+        "stale_sources": _bounded_setup_health_list(stale_sources),
+        "stale_sources_truncated_count": _truncated_count(stale_sources),
+        "stale_source_circuits": _bounded_setup_health_list(stale_source_circuits),
+        "stale_source_circuits_truncated_count": _truncated_count(
+            stale_source_circuits,
         ),
-        "missing_energy_sources": _setup_health_issue_circuits(
-            issues,
-            states={"Add cumulative kWh source"},
+        "stale_source_entities": _bounded_setup_health_list(stale_sources),
+        "stale_source_entities_truncated_count": _truncated_count(stale_sources),
+        "missing_energy_sources": _bounded_setup_health_list(missing_energy_sources),
+        "missing_energy_sources_truncated_count": _truncated_count(
+            missing_energy_sources,
         ),
-        "negative_power_loads": _setup_health_issue_circuits(
-            issues,
-            states={"Check CT direction"},
+        "negative_power_loads": _bounded_setup_health_list(negative_power_loads),
+        "negative_power_loads_truncated_count": _truncated_count(
+            negative_power_loads,
         ),
-        "dual_phase_missing_legs": _setup_health_issue_circuits(
-            issues,
-            issue_keys={"dual_phase_missing_leg"},
+        "dual_phase_missing_legs": _bounded_setup_health_list(
+            dual_phase_missing_legs,
         ),
-        "missing_rain_sources": _setup_health_issue_circuits(
-            issues,
-            issue_keys={"missing_rain_context_source"},
+        "dual_phase_missing_legs_truncated_count": _truncated_count(
+            dual_phase_missing_legs,
         ),
-        "missing_water_flow_sources": _setup_health_issue_circuits(
-            issues,
-            issue_keys={"missing_water_flow_source"},
+        "missing_rain_sources": _bounded_setup_health_list(missing_rain_sources),
+        "missing_rain_sources_truncated_count": _truncated_count(
+            missing_rain_sources,
         ),
-        "utility_comparison_setup_issues": _setup_health_issue_circuits(
-            issues,
-            issue_keys={"utility_comparison_source_mismatch"},
+        "missing_water_flow_sources": _bounded_setup_health_list(
+            missing_water_flow_sources,
         ),
-        "issues": issues,
+        "missing_water_flow_sources_truncated_count": _truncated_count(
+            missing_water_flow_sources,
+        ),
+        "utility_comparison_setup_issues": _bounded_setup_health_list(
+            utility_comparison_setup_issues,
+        ),
+        "utility_comparison_setup_issues_truncated_count": _truncated_count(
+            utility_comparison_setup_issues,
+        ),
+        "issues": bounded_issues,
+        "issues_truncated_count": len(issues) - len(bounded_issues),
     }
+
+
+def _bounded_setup_health_list(values: list[str]) -> list[str]:
+    return [
+        _bounded_setup_health_string(value)
+        for value in values[:_MAX_SETUP_HEALTH_LIST_ITEMS]
+    ]
+
+
+def _truncated_count(values: list[str]) -> int:
+    return max(len(values) - _MAX_SETUP_HEALTH_LIST_ITEMS, 0)
+
+
+def _bounded_setup_health_issues(
+    issues: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        _bounded_setup_health_issue(issue)
+        for issue in issues[:_MAX_SETUP_HEALTH_ISSUES]
+    ]
+
+
+def _bounded_setup_health_issue(issue: Mapping[str, Any]) -> dict[str, Any]:
+    bounded = {
+        key: _bounded_setup_health_value(value) for key, value in issue.items()
+    }
+    source_entities = [
+        _bounded_setup_health_string(entity_id)
+        for entity_id in bounded.get("source_entities", ())
+        if isinstance(entity_id, str)
+    ]
+    bounded["source_entities"] = source_entities[
+        :_MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE
+    ]
+    bounded["source_entities_truncated_count"] = max(
+        len(source_entities) - _MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE,
+        0,
+    )
+    return bounded
+
+
+def _bounded_setup_health_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _bounded_setup_health_string(value)
+    if isinstance(value, list):
+        return [_bounded_setup_health_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_bounded_setup_health_value(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            key: _bounded_setup_health_value(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _bounded_setup_health_string(
+    value: str,
+    max_length: int = _MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH,
+) -> str:
+    if len(value) <= max_length:
+        return value
+    suffix = "..."
+    if max_length <= len(suffix):
+        return suffix[:max_length]
+    return value[: max_length - len(suffix)] + suffix
 
 
 def _setup_health_issue_circuits(
@@ -216,7 +331,13 @@ def _setup_health_issue_summary(
     count = len(issues)
     suffix = "" if count == 1 else "s"
     more = "" if count == 1 else f" (+{count - 1} more)"
-    return f"{count} {severity}{suffix}: {primary['recommended_action']}{more}"
+    prefix = f"{count} {severity}{suffix}: "
+    action_length = _MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH - len(prefix) - len(more)
+    action = _bounded_setup_health_string(
+        str(primary["recommended_action"]),
+        max_length=action_length,
+    )
+    return f"{prefix}{action}{more}"
 
 
 def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
