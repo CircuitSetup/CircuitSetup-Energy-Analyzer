@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
+          fetch-depth: 0
 
       - name: Resolve release tag
         id: tag
@@ -61,6 +62,16 @@ jobs:
               )
           print(f"Version files match {tag}")
           PY
+
+      - name: Verify release PR batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          MINIMUM_RELEASE_PRS: "3"
+        run: |
+          python scripts/verify_release_batch.py \
+            --tag "$RELEASE_TAG" \
+            --minimum-prs "$MINIMUM_RELEASE_PRS"
 
       - name: Publish GitHub release
         env:
