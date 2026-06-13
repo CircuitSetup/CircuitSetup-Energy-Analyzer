@@ -38,6 +38,22 @@ from .services import (
 from .ux import alert_evidence_detail, friendly_feature_name
 
 PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
+MAX_NILM_PANEL_SIGNATURES = 5
+MAX_NILM_MERGE_TARGET_OPTIONS = 5
+NILM_SIGNATURE_PANEL_FIELDS = (
+    ATTR_SIGNATURE_ID,
+    "display_name",
+    "user_label",
+    "likely_type",
+    "typical_watts",
+    "confidence",
+    "first_seen",
+    "last_seen",
+    "voltage_class",
+    "running_state",
+    "current_runtime_minutes",
+    "estimated_energy_today_kwh",
+)
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
@@ -499,12 +515,18 @@ def _nilm_payload_for_circuit(
     circuit_id: str | None,
 ) -> dict[str, Any]:
     if not circuit_id:
-        return {"signatures": []}
+        return {
+            "signatures": [],
+            "signature_count": 0,
+            "signatures_has_more": False,
+            "signatures_omitted_count": 0,
+        }
     signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
+    preview_signatures = signatures[:MAX_NILM_PANEL_SIGNATURES]
     return {
         "signatures": [
             {
-                **signature,
+                **_nilm_signature_payload(signature),
                 "display_label": _nilm_signature_label(
                     signature,
                     str(signature[ATTR_SIGNATURE_ID]),
@@ -515,9 +537,15 @@ def _nilm_payload_for_circuit(
                     signatures,
                 ),
             }
-            for signature in signatures
+            for signature in preview_signatures
             if signature.get(ATTR_SIGNATURE_ID)
-        ]
+        ],
+        "signature_count": len(signatures),
+        "signatures_has_more": len(signatures) > len(preview_signatures),
+        "signatures_omitted_count": max(
+            len(signatures) - len(preview_signatures),
+            0,
+        ),
     }
 
 
@@ -559,14 +587,22 @@ def _nilm_actions_for_signature(
 ) -> dict[str, dict[str, Any]]:
     data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
     merge_target_options = _nilm_merge_target_options(signatures, signature_id)
+    merge_target_preview = merge_target_options[:MAX_NILM_MERGE_TARGET_OPTIONS]
     merge_action: dict[str, Any] = {
         "domain": DOMAIN,
         "service": SERVICE_MERGE_NILM_SIGNATURES,
         "data": {ATTR_CIRCUIT_ID: circuit_id, "source_signature_id": signature_id},
         "requires": ["target_signature_id"],
-        "target_options": merge_target_options,
+        "target_options": merge_target_preview,
+        "target_option_count": len(merge_target_options),
+        "target_options_has_more": len(merge_target_options)
+        > len(merge_target_preview),
+        "target_options_omitted_count": max(
+            len(merge_target_options) - len(merge_target_preview),
+            0,
+        ),
     }
-    if not merge_target_options:
+    if not merge_target_preview:
         merge_action.update(
             {
                 "enabled": False,
@@ -613,6 +649,14 @@ def _nilm_merge_target_options(
             }
         )
     return options
+
+
+def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: signature[key]
+        for key in NILM_SIGNATURE_PANEL_FIELDS
+        if key in signature
+    }
 
 
 def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
