@@ -513,6 +513,32 @@ async def test_coordinator_updates_attribute_shaped_existing_dashboard() -> None
 
 
 @pytest.mark.asyncio
+async def test_coordinator_reads_attribute_shaped_lovelace_data() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=False)
+    hass = SimpleNamespace(
+        data={
+            "lovelace": SimpleNamespace(
+                dashboards_collection=collection,
+            )
+        }
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert len(collection.created) == 1
+    assert coordinator.last_dashboard_create_request["action"] == "created"
+
+
+@pytest.mark.asyncio
 async def test_coordinator_skips_duplicate_dashboard_when_update_unavailable() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

@@ -2631,10 +2631,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         payload: Mapping[str, Any],
     ) -> tuple[str, str | None]:
-        collection = (
-            getattr(self.hass, "data", {})
-            .get("lovelace", {})
-            .get("dashboards_collection")
+        hass_data = getattr(self.hass, "data", {})
+        lovelace_data = (
+            hass_data.get("lovelace", {})
+            if isinstance(hass_data, Mapping)
+            else getattr(hass_data, "lovelace", {})
+        )
+        collection = _lovelace_dashboard_item_value(
+            lovelace_data,
+            "dashboards_collection",
         )
         if collection is None:
             return "unavailable", "lovelace_dashboard_collection_unavailable"
