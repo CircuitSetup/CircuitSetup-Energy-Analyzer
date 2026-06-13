@@ -178,7 +178,7 @@ def _circuit_card(
     circuit: Any,
     layout: str,
     *,
-    registry_lookup: dict[str, Any],
+    registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any]:
@@ -230,11 +230,11 @@ def _resolved_entity_ids(
     circuit_id: str,
     specs: Iterable[tuple[str, str, str]],
     *,
-    registry_lookup: dict[str, Any],
+    registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> tuple[list[str], list[str]]:
-    if not entry_id or not registry_lookup:
+    if not entry_id or registry_lookup is None:
         return [
             _guessed_entity_id(circuit_id, entity_domain, entity_key)
             for entity_domain, entity_key, _label in specs
@@ -277,7 +277,7 @@ def _resolved_entity_ids(
 
 def _global_controls_card(
     *,
-    registry_lookup: dict[str, Any],
+    registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any] | None:
@@ -299,7 +299,7 @@ def _circuit_controls_card(
     name: str,
     circuit_id: str,
     *,
-    registry_lookup: dict[str, Any],
+    registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any] | None:
@@ -349,11 +349,11 @@ def _control_card(
 def _resolved_global_entity_ids(
     specs: Iterable[tuple[str, str, str]],
     *,
-    registry_lookup: dict[str, Any],
+    registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> tuple[list[str], list[str]]:
-    if not entry_id or not registry_lookup:
+    if not entry_id or registry_lookup is None:
         return [], []
 
     entity_ids: list[str] = []
@@ -388,9 +388,12 @@ def _resolved_global_entity_ids(
     return entity_ids, notes
 
 
-def _registry_entity_lookup(hass: Any | None, entry_id: str | None) -> dict[str, Any]:
+def _registry_entity_lookup(
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any] | None:
     if hass is None or not entry_id:
-        return {}
+        return None
     try:
         from homeassistant.helpers import entity_registry as er
     except ImportError:
@@ -398,7 +401,7 @@ def _registry_entity_lookup(hass: Any | None, entry_id: str | None) -> dict[str,
     else:
         registry = er.async_get(hass)
     if registry is None:
-        return {}
+        return None
 
     entries = getattr(registry, "entities", {})
     values = entries.values() if hasattr(entries, "values") else entries
