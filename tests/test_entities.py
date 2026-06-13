@@ -8,8 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_UTILITY_COMPARISON_SETTINGS,
+    CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
@@ -1320,6 +1324,106 @@ def test_setup_health_learning_next_step_uses_specific_progress_reason() -> None
     )
     cycle_attrs = setup_health_attributes(cycle_learning)
     assert cycle_attrs["next_step"] == "Learning: 3 more run cycles needed for Washer"
+
+
+def test_setup_health_stale_source_lists_source_entities_and_circuits() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power stale"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+            }
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(
+                    SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+                    SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+                ),
+            ),
+        ),
+        store_data=FeatureStoreData(),
+        options={},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+
+    assert attrs["stale_sources"] == ["sensor.fridge_power"]
+    assert attrs["stale_source_circuits"] == ["fridge"]
+    assert attrs["issues"][0]["source_entities"] == ["sensor.fridge_power"]
+
+
+def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    sump_pump = CircuitConfig(
+        circuit_id="sump_pump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.sump_power", SensorRole.REAL_POWER),),
+    )
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            utility_comparison_status_by_circuit={"mains": "missing_measured"}
+        ),
+        circuit_configs=(sump_pump, washer, mains),
+        entry_data={
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True},
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+            },
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+            },
+        },
+        store_data=FeatureStoreData(
+            utility_comparison_settings_by_circuit={
+                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+            }
+        ),
+        options={},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+
+    assert setup_health_value(coordinator) == "Add rain source"
+    assert attrs["missing_rain_sources"] == ["sump_pump"]
+    assert attrs["missing_water_flow_sources"] == ["washer"]
+    assert attrs["utility_comparison_setup_issues"] == ["mains"]
+    assert [issue["issue"] for issue in attrs["issues"]] == [
+        "missing_rain_context_source",
+        "missing_water_flow_source",
+        "utility_comparison_source_mismatch",
+    ]
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
