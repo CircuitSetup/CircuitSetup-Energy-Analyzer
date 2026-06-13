@@ -21,6 +21,7 @@ from .settings_advisor import (
     recommendation_from_dict,
     recommendation_to_dict,
 )
+from .ux import normalize_sensitivity
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -241,7 +242,7 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             data.water_context_history_by_circuit
         ),
         "sensitivity_by_circuit": {
-            str(circuit_id): str(sensitivity)
+            str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
         },
         "maintenance_by_circuit": _dict_of_dicts(data.maintenance_by_circuit),
@@ -340,7 +341,7 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("water_context_history_by_circuit", {})
         ),
         sensitivity_by_circuit={
-            str(circuit_id): str(sensitivity)
+            str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in raw.get(
                 "sensitivity_by_circuit",
                 {},

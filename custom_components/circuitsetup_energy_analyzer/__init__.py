@@ -15,6 +15,7 @@ from .coordinator import EnergyAnalyzerCoordinator
 from .panel import async_setup_panel, async_unload_panel
 from .services import async_setup_services, async_unload_services
 from .storage import FeatureStore, FeatureStoreData
+from .ux import canonicalize_sensitivity_config
 
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
@@ -57,6 +58,24 @@ async def async_setup_entry(
             await async_unload_panel(hass)
             await async_unload_services(hass)
         raise
+    return True
+
+
+async def async_migrate_entry(
+    hass: Any,
+    entry: CircuitSetupEnergyAnalyzerConfigEntry,
+) -> bool:
+    """Migrate config-entry data while preserving existing keys."""
+    data = canonicalize_sensitivity_config(getattr(entry, "data", {}) or {})
+    options = canonicalize_sensitivity_config(getattr(entry, "options", {}) or {})
+    if data != dict(getattr(entry, "data", {}) or {}) or options != dict(
+        getattr(entry, "options", {}) or {}
+    ):
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            options=options,
+        )
     return True
 
 
