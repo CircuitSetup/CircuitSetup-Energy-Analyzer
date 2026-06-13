@@ -9050,7 +9050,70 @@ async def test_runtime_utility_comparison_setup_issue_creates_repair(
 
     await coordinator.async_process_update()
 
-    assert ("mains", "utility_comparison_source_mismatch") in issues
+    assert ("mains", "utility_comparison_missing_utility_source") in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_utility_comparison_missing_measured_creates_specific_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    created: list[tuple[str, str, dict[str, str]]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        created.append((circuit_id, problem, kwargs["data"]))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
+    )
+    coordinator.state.utility_comparison_status_by_circuit["mains"] = (
+        "missing_measured"
+    )
+    coordinator.store_data.utility_comparison_settings_by_circuit["mains"] = {
+        "utility_energy_entity": "sensor.utility_kwh",
+    }
+
+    await coordinator._sync_setup_health_repairs("mains")
+
+    assert created == [
+        (
+            "mains",
+            "utility_comparison_missing_measured_source",
+            {
+                "circuit_name": "Mains",
+                "recommended_action": "Add measured kWh source for Mains",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -9089,14 +9152,22 @@ async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
         },
         now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
     )
-    coordinator._active_repair_issues.add(
-        ("mains", "utility_comparison_source_mismatch")
+    coordinator._active_repair_issues.update(
+        {
+            ("mains", "utility_comparison_source_mismatch"),
+            ("mains", "utility_comparison_missing_utility_source"),
+            ("mains", "utility_comparison_missing_measured_source"),
+        }
     )
     coordinator.state.utility_comparison_status_by_circuit["mains"] = "tracking"
 
     await coordinator._sync_setup_health_repairs("mains")
 
-    assert deleted == [("mains", "utility_comparison_source_mismatch")]
+    assert deleted == [
+        ("mains", "utility_comparison_missing_measured_source"),
+        ("mains", "utility_comparison_missing_utility_source"),
+        ("mains", "utility_comparison_source_mismatch"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -221,8 +221,15 @@ _SETUP_HEALTH_REPAIR_PROBLEMS = frozenset(
         "missing_rain_context_source",
         "missing_water_flow_source",
         "utility_comparison_source_mismatch",
+        "utility_comparison_missing_utility_source",
+        "utility_comparison_missing_measured_source",
     }
 )
+_UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS = {
+    "unconfigured": "utility_comparison_source_mismatch",
+    "missing_utility": "utility_comparison_missing_utility_source",
+    "missing_measured": "utility_comparison_missing_measured_source",
+}
 
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
@@ -3863,19 +3870,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             desired.add((circuit_id, "missing_rain_context_source"))
         if self._setup_health_has_missing_water_flow_source(circuit_id):
             desired.add((circuit_id, "missing_water_flow_source"))
-        if self._setup_health_has_utility_comparison_setup_status(circuit_id):
-            desired.add((circuit_id, "utility_comparison_source_mismatch"))
+        utility_comparison_problem = (
+            self._setup_health_utility_comparison_repair_problem(circuit_id)
+        )
+        if utility_comparison_problem is not None:
+            desired.add((circuit_id, utility_comparison_problem))
 
         current = {
             issue
             for issue in self._active_repair_issues
             if issue[0] == circuit_id and issue[1] in _SETUP_HEALTH_REPAIR_PROBLEMS
         }
-        for issue in current - desired:
+        for issue in sorted(current - desired):
             await repairs.async_delete_circuit_issue(self.hass, issue[0], issue[1])
             self._active_repair_issues.discard(issue)
 
-        for issue in desired - self._active_repair_issues:
+        for issue in sorted(desired - self._active_repair_issues):
             await repairs.async_create_circuit_issue(
                 self.hass,
                 issue[0],
@@ -3911,6 +3921,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             "utility_comparison_source_mismatch": (
                 f"Review utility comparison source settings for {circuit_name}"
+            ),
+            "utility_comparison_missing_utility_source": (
+                f"Add utility comparison source for {circuit_name}"
+            ),
+            "utility_comparison_missing_measured_source": (
+                f"Add measured kWh source for {circuit_name}"
             ),
         }
         return {
@@ -3990,11 +4006,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
     ) -> bool:
-        return self.state.utility_comparison_status_by_circuit.get(circuit_id) in {
-            "unconfigured",
-            "missing_utility",
-            "missing_measured",
-        }
+        return (
+            self._setup_health_utility_comparison_repair_problem(circuit_id)
+            is not None
+        )
+
+    def _setup_health_utility_comparison_repair_problem(
+        self: Self,
+        circuit_id: str,
+    ) -> str | None:
+        status = self.state.utility_comparison_status_by_circuit.get(circuit_id)
+        return _UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS.get(str(status))
 
     def _has_rain_context_source_configured(self: Self) -> bool:
         return bool(
