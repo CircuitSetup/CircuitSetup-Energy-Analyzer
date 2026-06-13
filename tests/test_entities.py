@@ -10,6 +10,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -17,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
+    ENTITY_DETAIL_EXPERT,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -32,6 +34,13 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 DOMAIN_PATH = Path(__file__).parents[1] / "custom_components" / DOMAIN
+
+
+def _use_expert_entity_detail(coordinator: SimpleNamespace) -> SimpleNamespace:
+    options = dict(getattr(coordinator, "options", {}) or {})
+    options[CONF_ENTITY_DETAIL_LEVEL] = ENTITY_DETAIL_EXPERT
+    coordinator.options = options
+    return coordinator
 
 
 def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> None:
@@ -455,6 +464,81 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
     assert fake_registry.updated == [
         ("sensor.fridge_last_event", "integration"),
     ]
+
+
+def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+
+    class FakeHider:
+        INTEGRATION = "integration"
+        USER = "user"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "binary_sensor.fridge_learning": SimpleNamespace(
+                    entity_id="binary_sensor.fridge_learning",
+                    unique_id="entry-1_fridge_learning",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="integration",
+                ),
+                "binary_sensor.fridge_data_quality_problem": SimpleNamespace(
+                    entity_id="binary_sensor.fridge_data_quality_problem",
+                    unique_id="entry-1_fridge_data_quality_problem",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="user",
+                ),
+                "binary_sensor.fridge_running": SimpleNamespace(
+                    entity_id="binary_sensor.fridge_running",
+                    unique_id="entry-1_fridge_running",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by=None,
+                ),
+            }
+            self.updated: list[tuple[str, object]] = []
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs.get("hidden_by")))
+            self.entities[entity_id].hidden_by = kwargs.get("hidden_by")
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryHider = FakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entity.sync_entity_registry_visibility(
+        SimpleNamespace(entity_registry=fake_registry),
+        entry_id="entry-1",
+        entity_domain="binary_sensor",
+        hidden_unique_id_suffixes={"learning", "data_quality_problem"},
+        detail_level=ENTITY_DETAIL_EXPERT,
+    )
+
+    assert fake_registry.updated == [("binary_sensor.fridge_learning", None)]
+    assert (
+        fake_registry.entities[
+            "binary_sensor.fridge_data_quality_problem"
+        ].hidden_by
+        == "user"
+    )
 
 
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
@@ -4059,6 +4143,91 @@ async def test_sensor_setup_entry_hides_existing_demo_source_entities(
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_keeps_demo_source_entities_hidden_for_expert(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    class FakeHider:
+        INTEGRATION = "integration"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.cs_energy_analyzer_demo_washer_active_power": SimpleNamespace(
+                    entity_id="sensor.cs_energy_analyzer_demo_washer_active_power",
+                    unique_id=(
+                        "entry-1_demo_source_exact_"
+                        "cs_energy_analyzer_demo_washer_active_power"
+                    ),
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="integration",
+                    entity_category=None,
+                ),
+            }
+            self.removed: list[str] = []
+            self.updated: list[tuple[str, dict[str, object]]] = []
+
+        def async_remove(self, entity_id) -> None:
+            self.removed.append(entity_id)
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs))
+            self.entities[entity_id].hidden_by = kwargs.get("hidden_by")
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryHider = FakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+                SensorRole.REAL_POWER,
+            ),
+        ),
+    )
+    coordinator = _use_expert_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert fake_registry.updated == []
+    assert (
+        fake_registry.entities[
+            "sensor.cs_energy_analyzer_demo_washer_active_power"
+        ].hidden_by
+        == "integration"
+    )
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
@@ -4289,6 +4458,88 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
         "entry-1_well_pump_data_quality_problem",
         "entry-1_well_pump_maintenance",
     ]
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_entry_unhides_expert_diagnostics(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        async_setup_entry,
+    )
+
+    class FakeHider:
+        INTEGRATION = "integration"
+        USER = "user"
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "binary_sensor.well_pump_learning": SimpleNamespace(
+                    entity_id="binary_sensor.well_pump_learning",
+                    unique_id="entry-1_well_pump_learning",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="integration",
+                ),
+                "binary_sensor.well_pump_data_quality_problem": SimpleNamespace(
+                    entity_id="binary_sensor.well_pump_data_quality_problem",
+                    unique_id="entry-1_well_pump_data_quality_problem",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    hidden_by="user",
+                ),
+            }
+            self.updated: list[tuple[str, object]] = []
+            self.removed: list[str] = []
+
+        def async_remove(self, entity_id) -> None:
+            self.removed.append(entity_id)
+
+        def async_update_entity(self, entity_id, **kwargs) -> None:
+            self.updated.append((entity_id, kwargs.get("hidden_by")))
+            self.entities[entity_id].hidden_by = kwargs.get("hidden_by")
+
+    fake_registry = FakeRegistry()
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.RegistryEntryHider = FakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    circuit = {
+        "circuit_id": "well_pump",
+        "name": "Well Pump",
+    }
+    coordinator = _use_expert_entity_detail(SimpleNamespace(data=AnalyzerState()))
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={CONF_CIRCUITS: [circuit]})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    assert fake_registry.updated == [("binary_sensor.well_pump_learning", None)]
+    assert (
+        fake_registry.entities[
+            "binary_sensor.well_pump_data_quality_problem"
+        ].hidden_by
+        == "user"
+    )
+    assert fake_registry.removed == []
 
 
 @pytest.mark.asyncio
