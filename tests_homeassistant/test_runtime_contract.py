@@ -38,7 +38,10 @@ def _circuit() -> CircuitConfig:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
     )
 
 
