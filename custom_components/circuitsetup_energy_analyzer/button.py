@@ -179,6 +179,17 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Run the circuit action."""
+        reason = _button_availability_reason(
+            self.entity_description.key,
+            self.circuit_id,
+            self.coordinator_state,
+            self.coordinator,
+        )
+        if reason is not None:
+            raise HomeAssistantError(
+                f"Cannot {self.entity_description.name_suffix.strip().lower()} "
+                f"right now because {_availability_reason_label(reason)}."
+            )
         await _call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
@@ -352,6 +363,10 @@ def _button_availability_reason(
     if button_key == "end_maintenance" and not _maintenance_active(state, circuit_id):
         return "maintenance_inactive"
     return None
+
+
+def _availability_reason_label(reason: str) -> str:
+    return reason.replace("_", " ")
 
 
 def _maintenance_active(state: Any, circuit_id: str) -> bool:
