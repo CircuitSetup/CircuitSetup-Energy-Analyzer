@@ -1079,6 +1079,53 @@ def test_nilm_unknown_load_attributes_are_bounded() -> None:
     assert all("sample_history" not in load for load in attrs["unknown_loads"])
 
 
+def test_recent_activity_attributes_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    description = next(
+        item for item in SENSOR_DESCRIPTIONS if item.key == "recent_activity"
+    )
+    timeline_items = [
+        {
+            "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
+            "title": f"Activity {index}",
+            "detail": "Retained activity detail",
+            "extra_samples": [index] * 20,
+        }
+        for index in range(9)
+    ]
+    state = AnalyzerState(
+        recent_activity_timeline_by_circuit={
+            "fridge": {
+                "status": "activity",
+                "window_hours": 24,
+                "total_count": 9,
+                "items": timeline_items,
+            }
+        }
+    )
+
+    attrs = description.attributes_fn(state, "fridge")
+
+    assert attrs == {
+        "status": "activity",
+        "window_hours": 24,
+        "total_count": 9,
+        "shown_count": 5,
+        "has_more": True,
+        "items": [
+            {
+                "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
+                "title": f"Activity {index}",
+                "detail": "Retained activity detail",
+            }
+            for index in range(5)
+        ],
+    }
+
+
 def test_setup_health_prioritizes_missing_energy_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -2494,6 +2541,8 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
     recent_activity = {
         "status": "activity",
         "total_count": 2,
+        "shown_count": 1,
+        "has_more": False,
         "items": [{"title": "Possible issue: Cycle Duration"}],
     }
     energy_evidence = {

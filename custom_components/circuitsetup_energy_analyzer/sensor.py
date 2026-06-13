@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any
 
@@ -1129,11 +1129,59 @@ def _numeric_count(value: Any) -> float:
     return 0.0
 
 
+RECENT_ACTIVITY_ATTRIBUTE_MAX_ITEMS = 5
+RECENT_ACTIVITY_ATTRIBUTE_FIELDS = (
+    "timestamp",
+    "title",
+    "detail",
+    "kind",
+    "severity",
+    "feature",
+    "feature_name",
+    "event_type",
+    "observed_value",
+    "baseline_value",
+    "change_ratio",
+    "repeated_count",
+)
+
+
+def _recent_activity_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
+    attributes = {key: item for key, item in value.items() if key != "items"}
+    raw_items = value.get("items", ())
+    if not isinstance(raw_items, Iterable) or isinstance(
+        raw_items, str | bytes | Mapping
+    ):
+        item_list: list[Any] = []
+    else:
+        item_list = list(raw_items)
+
+    preview_items = item_list[:RECENT_ACTIVITY_ATTRIBUTE_MAX_ITEMS]
+    attributes["shown_count"] = len(preview_items)
+    attributes["has_more"] = len(item_list) > len(preview_items)
+    attributes["items"] = [
+        _recent_activity_item_preview(item) for item in preview_items
+    ]
+    return attributes
+
+
+def _recent_activity_item_preview(item: Any) -> dict[str, Any]:
+    if not isinstance(item, Mapping):
+        return {}
+    return {
+        field: item[field]
+        for field in RECENT_ACTIVITY_ATTRIBUTE_FIELDS
+        if field in item and item[field] is not None
+    }
+
+
 def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] | None]:
     def attributes(state: Any, circuit_id: str) -> dict[str, Any] | None:
         value = getattr(state, field_name, {}).get(circuit_id)
         if isinstance(value, Mapping):
             attributes = dict(value)
+            if field_name == "recent_activity_timeline_by_circuit":
+                return _recent_activity_attributes(attributes)
             if field_name in {
                 "demand_evidence_by_circuit",
                 "capacity_evidence_by_circuit",
