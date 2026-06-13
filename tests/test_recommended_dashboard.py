@@ -238,6 +238,121 @@ def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> Non
     )
 
 
+def test_dashboard_uses_registry_ids_for_global_and_circuit_controls() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "select.layout_choice": _registry_entry(
+                        "select.layout_choice",
+                        "entry-1_dashboard_layout",
+                    ),
+                    "select.detail_choice": _registry_entry(
+                        "select.detail_choice",
+                        "entry-1_entity_detail_level",
+                    ),
+                    "button.mapping_now": _registry_entry(
+                        "button.mapping_now",
+                        "entry-1_run_mapping_checks",
+                    ),
+                    "button.refresh_suggestions": _registry_entry(
+                        "button.refresh_suggestions",
+                        "entry-1_recalculate_suggestions",
+                    ),
+                    "button.update_dashboard": _registry_entry(
+                        "button.update_dashboard",
+                        "entry-1_create_dashboard",
+                    ),
+                    "select.fridge_sensitivity": _registry_entry(
+                        "select.fridge_sensitivity",
+                        "entry-1_fridge_alert_sensitivity",
+                    ),
+                    "number.fridge_kwh_goal": _registry_entry(
+                        "number.fridge_kwh_goal",
+                        "entry-1_fridge_daily_energy_goal",
+                    ),
+                    "button.fridge_relearn": _registry_entry(
+                        "button.fridge_relearn",
+                        "entry-1_fridge_relearn_baseline",
+                    ),
+                    "button.fridge_start_maintenance": _registry_entry(
+                        "button.fridge_start_maintenance",
+                        "entry-1_fridge_start_maintenance",
+                    ),
+                    "button.fridge_end_maintenance": _registry_entry(
+                        "button.fridge_end_maintenance",
+                        "entry-1_fridge_end_maintenance",
+                    ),
+                    "button.fridge_pause_alerts": _registry_entry(
+                        "button.fridge_pause_alerts",
+                        "entry-1_fridge_pause_alerts",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+
+    assert {
+        "select.layout_choice",
+        "select.detail_choice",
+        "button.mapping_now",
+        "button.refresh_suggestions",
+        "button.update_dashboard",
+        "select.fridge_sensitivity",
+        "number.fridge_kwh_goal",
+        "button.fridge_relearn",
+        "button.fridge_start_maintenance",
+        "button.fridge_end_maintenance",
+        "button.fridge_pause_alerts",
+    } <= refs
+    assert "button.fridge_create_dashboard" not in refs
+
+
+def test_dashboard_adds_notes_for_missing_disabled_and_unavailable_controls() -> None:
+    class FakeStates:
+        def get(self, entity_id: str) -> SimpleNamespace | None:
+            if entity_id == "button.fridge_pause_alerts":
+                return SimpleNamespace(state="unavailable")
+            return SimpleNamespace(state="idle")
+
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "select.layout_choice": _registry_entry(
+                        "select.layout_choice",
+                        "entry-1_dashboard_layout",
+                        disabled_by="integration",
+                    ),
+                    "button.fridge_relearn": _registry_entry(
+                        "button.fridge_relearn",
+                        "entry-1_fridge_relearn_baseline",
+                    ),
+                    "button.fridge_pause_alerts": _registry_entry(
+                        "button.fridge_pause_alerts",
+                        "entry-1_fridge_pause_alerts",
+                    ),
+                }
+            ),
+            states=FakeStates(),
+        ),
+        entry_id="entry-1",
+    )
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "Dashboard controls note" in markdown
+    assert "disabled: Dashboard Layout" in markdown
+    assert "Refrigerator controls note" in markdown
+    assert "missing: Alert Sensitivity, Daily Energy Goal" in markdown
+    assert "unavailable: Pause Alerts" in markdown
+
+
 class _FakeDashboardsCollection:
     def __init__(self, existing: bool) -> None:
         self._existing = existing

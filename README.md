@@ -244,6 +244,8 @@ Choose one layout:
 
 You can also choose the layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, then press `button.circuitsetup_energy_analyzer_create_dashboard`.
 
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. When the related control entities exist, it also adds small action cards for dashboard layout, entity detail level, mapping checks, settings recalculation, daily energy goals, alert sensitivity, relearn baseline, maintenance, and pause alerts. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards.
+
 For manual dashboards, start with one simple card per important appliance:
 
 1. Activity Summary

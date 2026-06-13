@@ -51,6 +51,21 @@ EXPERT_ENTITY_SPECS = (
     ("sensor", "recent_activity", "Recent Activity"),
     ("sensor", "settings_suggestions", "Settings Suggestions"),
 )
+GLOBAL_CONTROL_SPECS = (
+    ("select", "dashboard_layout", "Dashboard Layout"),
+    ("select", "entity_detail_level", "Entity Detail Level"),
+    ("button", "run_mapping_checks", "Run Mapping Checks"),
+    ("button", "recalculate_suggestions", "Recalculate Suggestions"),
+    ("button", "create_dashboard", "Create Or Update Dashboard"),
+)
+CIRCUIT_CONTROL_SPECS = (
+    ("select", "alert_sensitivity", "Alert Sensitivity"),
+    ("number", "daily_energy_goal", "Daily Energy Goal"),
+    ("button", "relearn_baseline", "Relearn Baseline"),
+    ("button", "start_maintenance", "Start Maintenance"),
+    ("button", "end_maintenance", "End Maintenance"),
+    ("button", "pause_alerts", "Pause Alerts"),
+)
 
 
 def normalize_dashboard_layout(value: Any) -> str:
@@ -83,6 +98,12 @@ def build_recommended_dashboard(
             "dashboard will show a note with the next thing to check."
         )
     ]
+    if global_controls_card := _global_controls_card(
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    ):
+        cards.append(global_controls_card)
     for circuit in circuit_list:
         cards.append(
             _circuit_card(
@@ -188,6 +209,14 @@ def _circuit_card(
                 "entities": [{"entity": entity_id} for entity_id in _dedupe(entities)],
             }
         )
+    if control_card := _circuit_controls_card(
+        name,
+        circuit_id,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    ):
+        cards.append(control_card)
     if len(cards) == 1:
         return cards[0]
     return {
@@ -246,6 +275,119 @@ def _resolved_entity_ids(
     return entity_ids, notes
 
 
+def _global_controls_card(
+    *,
+    registry_lookup: dict[str, Any],
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any] | None:
+    entities, notes = _resolved_global_entity_ids(
+        GLOBAL_CONTROL_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    return _control_card(
+        "Dashboard Controls",
+        note_title="Dashboard controls note",
+        entities=entities,
+        notes=notes,
+    )
+
+
+def _circuit_controls_card(
+    name: str,
+    circuit_id: str,
+    *,
+    registry_lookup: dict[str, Any],
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any] | None:
+    entities, notes = _resolved_entity_ids(
+        circuit_id,
+        CIRCUIT_CONTROL_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    return _control_card(
+        f"{name} Controls",
+        note_title=f"{name} controls note",
+        entities=entities,
+        notes=notes,
+    )
+
+
+def _control_card(
+    title: str,
+    *,
+    note_title: str,
+    entities: Iterable[str],
+    notes: Iterable[str],
+) -> dict[str, Any] | None:
+    cards: list[dict[str, Any]] = []
+    note_list = [note for note in notes if note]
+    entity_list = list(_dedupe(entities))
+    if note_list:
+        cards.append(_markdown_card(_note_content(note_title, note_list)))
+    if entity_list:
+        cards.append(
+            {
+                "type": "entities",
+                "title": title,
+                "show_header_toggle": False,
+                "entities": [{"entity": entity_id} for entity_id in entity_list],
+            }
+        )
+    if not cards:
+        return None
+    if len(cards) == 1:
+        return cards[0]
+    return {"type": "vertical-stack", "title": title, "cards": cards}
+
+
+def _resolved_global_entity_ids(
+    specs: Iterable[tuple[str, str, str]],
+    *,
+    registry_lookup: dict[str, Any],
+    hass: Any | None,
+    entry_id: str | None,
+) -> tuple[list[str], list[str]]:
+    if not entry_id or not registry_lookup:
+        return [], []
+
+    entity_ids: list[str] = []
+    missing_labels: list[str] = []
+    disabled_labels: list[str] = []
+    unavailable_labels: list[str] = []
+    for entity_domain, entity_key, label in specs:
+        unique_id = _expected_global_unique_id(entry_id, entity_key)
+        entry = registry_lookup.get(unique_id)
+        if entry is None:
+            missing_labels.append(label)
+            continue
+        if getattr(entry, "disabled_by", None):
+            disabled_labels.append(label)
+            continue
+        entity_id = str(getattr(entry, "entity_id", "")).strip()
+        if not entity_id or not entity_id.startswith(f"{entity_domain}."):
+            missing_labels.append(label)
+            continue
+        if _entity_is_unavailable(hass, entity_id):
+            unavailable_labels.append(label)
+            continue
+        entity_ids.append(entity_id)
+
+    notes: list[str] = []
+    if disabled_labels:
+        notes.append(f"disabled: {', '.join(disabled_labels)}")
+    if missing_labels:
+        notes.append(f"missing: {', '.join(missing_labels)}")
+    if unavailable_labels:
+        notes.append(f"unavailable: {', '.join(unavailable_labels)}")
+    return entity_ids, notes
+
+
 def _registry_entity_lookup(hass: Any | None, entry_id: str | None) -> dict[str, Any]:
     if hass is None or not entry_id:
         return {}
@@ -282,13 +424,21 @@ def _entity_is_unavailable(hass: Any | None, entity_id: str) -> bool:
 
 
 def _circuit_note(name: str, notes: Iterable[str]) -> str:
-    lines = [f"**{name} dashboard note**"]
+    return _note_content(f"{name} dashboard note", notes)
+
+
+def _note_content(title: str, notes: Iterable[str]) -> str:
+    lines = [f"**{title}**"]
     lines.extend(note for note in notes if note)
     return "\n".join(lines)
 
 
 def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
     return f"{entry_id}_{circuit_id}_{entity_key}"
+
+
+def _expected_global_unique_id(entry_id: str, entity_key: str) -> str:
+    return f"{entry_id}_{entity_key}"
 
 
 def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> str:
