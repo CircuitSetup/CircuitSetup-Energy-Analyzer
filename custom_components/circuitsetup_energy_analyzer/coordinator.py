@@ -1328,8 +1328,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
         self.async_set_updated_data(self.state)
 
-    async def async_acknowledge_alert(self: Self, alert_id: str) -> None:
+    async def async_acknowledge_alert(self: Self, alert_id: str) -> bool:
         """Acknowledge an active alert evidence item."""
+        if self._alert_for_id(alert_id) is None:
+            return False
         self.store_data.alerts = [
             alert
             for alert in self.store_data.alerts
@@ -1360,6 +1362,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_all_ux_state(self._now_fn())
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
+        return True
 
     async def async_set_circuit_sensitivity(
         self: Self,
@@ -2368,13 +2371,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
-    async def async_mark_alert_expected(self: Self, alert_id: str) -> None:
+    async def async_mark_alert_expected(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
-        await self._store_alert_feedback(alert_id, "expected")
+        return await self._store_alert_feedback(alert_id, "expected")
 
-    async def async_mark_alert_unhelpful(self: Self, alert_id: str) -> None:
+    async def async_mark_alert_unhelpful(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as unhelpful for future notifications."""
-        await self._store_alert_feedback(alert_id, "unhelpful")
+        return await self._store_alert_feedback(alert_id, "unhelpful")
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
@@ -4920,10 +4923,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._water_context_alert_policies[key] = policy
         return policy
 
-    async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> None:
+    async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> bool:
         alert = self._alert_for_id(alert_id)
         if alert is None:
-            return
+            return False
         self.store_data.alert_feedback[_alert_feedback_key(alert)] = {
             "action": action,
             "alert_id": alert_id,
@@ -4938,6 +4941,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(alert.circuit_id, self._now_fn())
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
+        return True
 
     def _alert_for_id(self: Self, alert_id: str) -> AlertEvidence | None:
         alerts = list(self.store_data.alerts)

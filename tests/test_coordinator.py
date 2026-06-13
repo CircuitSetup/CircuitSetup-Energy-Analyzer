@@ -5588,6 +5588,36 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_alert_feedback_methods_report_stale_alert_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="reactive_power",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(alerts=[alert]),
+    )
+
+    assert await coordinator.async_mark_alert_expected("missing-alert") is False
+    assert await coordinator.async_mark_alert_unhelpful("missing-alert") is False
+    assert await coordinator.async_acknowledge_alert("missing-alert") is False
+
+    alert_id = notification_id_for_alert(alert)
+    assert await coordinator.async_mark_alert_expected(alert_id) is True
+    assert await coordinator.async_acknowledge_alert(alert_id) is True
+
+
+@pytest.mark.asyncio
 async def test_export_diagnostics_includes_ux_state() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

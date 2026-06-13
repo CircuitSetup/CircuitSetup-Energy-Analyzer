@@ -387,21 +387,27 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_ACKNOWLEDGE_ALERT:
-        alert_id = data.get(ATTR_ALERT_ID)
-        for coordinator in _loaded_coordinators(hass):
-            await _call_if_present(coordinator, "async_acknowledge_alert", alert_id)
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_acknowledge_alert",
+        )
         return
 
     if service == SERVICE_MARK_ALERT_EXPECTED:
-        alert_id = data.get(ATTR_ALERT_ID)
-        for coordinator in _loaded_coordinators(hass):
-            await _call_if_present(coordinator, "async_mark_alert_expected", alert_id)
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_alert_expected",
+        )
         return
 
     if service == SERVICE_MARK_ALERT_UNHELPFUL:
-        alert_id = data.get(ATTR_ALERT_ID)
-        for coordinator in _loaded_coordinators(hass):
-            await _call_if_present(coordinator, "async_mark_alert_unhelpful", alert_id)
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_alert_unhelpful",
+        )
         return
 
     if service == SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS:
@@ -916,6 +922,28 @@ def _loaded_coordinators(hass: Any) -> list[Any]:
     ]
 
 
+async def _dispatch_alert_id_action(
+    hass: Any,
+    data: Mapping[str, Any],
+    *,
+    method_name: str,
+) -> None:
+    alert_id = data.get(ATTR_ALERT_ID)
+    if not isinstance(alert_id, str) or not alert_id:
+        raise HomeAssistantError("Missing alert_id.")
+
+    handled = False
+    for coordinator in _loaded_coordinators(hass):
+        result = await _call_if_present(coordinator, method_name, alert_id)
+        handled = handled or result is True
+
+    if not handled:
+        raise HomeAssistantError(
+            f"Unknown alert_id '{alert_id}'. Open a newer notification or "
+            "review the evidence panel for the current alert."
+        )
+
+
 def _target_recommendation_coordinators(
     hass: Any,
     recommendation_id: Any,
@@ -1102,10 +1130,11 @@ def _coordinator_has_recommendation(coordinator: Any, recommendation_id: str) ->
     return False
 
 
-async def _call_if_present(target: Any, method_name: str, *args: Any) -> None:
+async def _call_if_present(target: Any, method_name: str, *args: Any) -> Any:
     method = getattr(target, method_name, None)
     if method is None:
-        return
+        return None
     result = method(*args)
     if inspect.isawaitable(result):
-        await result
+        return await result
+    return result
