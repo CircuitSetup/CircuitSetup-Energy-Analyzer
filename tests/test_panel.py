@@ -352,6 +352,52 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     }
 
 
+def test_alert_evidence_payload_bounds_recommendation_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="ev_charger", feature="capacity_warning_ratio")
+    coordinator = _coordinator(alert, config=_config("ev_charger"))
+    coordinator.state.settings_recommendations_by_circuit = {
+        "ev_charger": [
+            {
+                "recommendation_id": "ev_charger:warning_ratio:v1",
+                "circuit_id": "ev_charger",
+                "setting_key": "warning_ratio",
+                "evidence": {
+                    "observed_samples": 8,
+                    "p95_current_amps": 36.4,
+                    "median_current_amps": 31.2,
+                    "spike_count": 3,
+                    "long_notes": "x" * 5000,
+                    "source_entities": [
+                        f"sensor.ev_charger_{index}" for index in range(50)
+                    ],
+                    "sample_history": [{"watts": index} for index in range(200)],
+                    "nested_summary": {"p95": 36.4},
+                },
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    recommendation = payload["setting_recommendations"][0]
+    assert "evidence" not in recommendation
+    assert recommendation["evidence_preview"] == (
+        "Observed Samples: 8; P95 Current Amps: 36.4; "
+        "Median Current Amps: 31.2; Spike Count: 3"
+    )
+    assert recommendation["evidence_key_count"] == 8
+    assert recommendation["evidence_preview_key_count"] == 4
+    assert recommendation["evidence_omitted_key_count"] == 4
+    assert recommendation["evidence_has_more"] is True
+
+
 def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
