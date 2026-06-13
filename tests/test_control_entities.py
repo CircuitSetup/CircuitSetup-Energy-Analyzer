@@ -228,6 +228,8 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     for entity in added_entities:
         _assert_base_description_defaults(entity.entity_description)
 
+    coordinator.data.active_alerts_by_circuit["fridge"] = [object()]
+
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
         "entry-1_fridge_start_maintenance",
@@ -311,6 +313,46 @@ async def test_button_availability_tracks_maintenance_state(
 
     assert by_unique_id["entry-1_fridge_start_maintenance"].available is False
     assert by_unique_id["entry-1_fridge_end_maintenance"].available is True
+
+
+@pytest.mark.asyncio
+async def test_pause_alerts_button_requires_active_unpaused_alert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    pause_alerts = by_unique_id["entry-1_fridge_pause_alerts"]
+
+    assert pause_alerts.available is False
+    assert pause_alerts.extra_state_attributes == {
+        "availability_reason": "no_active_alert",
+    }
+
+    with pytest.raises(button.HomeAssistantError, match="no active alert"):
+        await pause_alerts.async_press()
+
+    coordinator.data.active_alerts_by_circuit["fridge"] = [object()]
+
+    assert pause_alerts.available is True
+    assert pause_alerts.extra_state_attributes is None
+
+    coordinator.data.maintenance_by_circuit["fridge"] = {"active": True}
+
+    assert pause_alerts.available is False
+    assert pause_alerts.extra_state_attributes == {
+        "availability_reason": "alerts_paused",
+    }
 
 
 @pytest.mark.asyncio
