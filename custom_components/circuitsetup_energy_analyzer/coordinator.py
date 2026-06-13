@@ -3923,7 +3923,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 f"Check CT direction or power-flow mode for {circuit_name}"
             ),
             "dual_phase_missing_leg": (
-                f"Review the selected leg sensors for {circuit_name}"
+                f"Review leg A and leg B source sensors for {circuit_name}"
             ),
             "missing_rain_context_source": f"Add a rain sensor for {circuit_name}",
             "missing_water_flow_source": (
@@ -3939,13 +3939,81 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 f"Add measured kWh source for {circuit_name}"
             ),
         }
-        return {
+        repair_data = {
             "circuit_name": str(circuit_name),
+            "reason": self._setup_health_repair_reason(circuit_id, problem),
             "recommended_action": recommended_actions.get(
                 problem,
                 f"Review setup for {circuit_name}",
             ),
+            "source_entities": self._setup_health_repair_source_entities(
+                circuit_id,
+                problem,
+            ),
         }
+        return repair_data
+
+    def _setup_health_repair_reason(self: Self, circuit_id: str, problem: str) -> str:
+        config = self._config_for_circuit(circuit_id)
+        circuit_name = getattr(config, "name", None) or circuit_id
+        reasons = {
+            "missing_energy_source": (
+                "Daily Energy Usage needs a cumulative energy source."
+            ),
+            "missing_mains_source": (
+                "Mains balance, NILM, or solar-flow checks need a mains source."
+            ),
+            "missing_electrical_metrics": (
+                "Power Metric Consistency needs matching supporting sensors."
+            ),
+            "check_ct_direction": (
+                "Signed power evidence suggests export, reversed CT orientation, "
+                "or a mapping mismatch."
+            ),
+            "dual_phase_missing_leg": (
+                "One side of this dual-phase circuit is missing real-power data."
+            ),
+            "missing_rain_context_source": (
+                "Rain-pump context is enabled, but no rain source is configured."
+            ),
+            "missing_water_flow_source": (
+                "Water-flow context is enabled, but no flow source is configured."
+            ),
+            "utility_comparison_source_mismatch": (
+                "Utility comparison sources or recorder periods cannot be compared."
+            ),
+            "utility_comparison_missing_utility_source": (
+                "Utility comparison is enabled, but utility kWh has no data."
+            ),
+            "utility_comparison_missing_measured_source": (
+                "Utility comparison is enabled, but measured kWh has no data."
+            ),
+        }
+        return reasons.get(problem, f"Review setup for {circuit_name}.")
+
+    def _setup_health_repair_source_entities(
+        self: Self,
+        circuit_id: str,
+        problem: str,
+    ) -> list[str]:
+        config = self._config_for_circuit(circuit_id)
+        if config is None:
+            return []
+        source_entities = [
+            sensor.entity_id
+            for sensor in getattr(config, "sensors", ())
+            if isinstance(getattr(sensor, "entity_id", None), str)
+            and sensor.entity_id
+        ]
+        if problem == "dual_phase_missing_leg":
+            return source_entities
+        if problem in {
+            "missing_energy_source",
+            "missing_electrical_metrics",
+            "check_ct_direction",
+        }:
+            return source_entities
+        return []
 
     def _setup_health_has_missing_mains_status(self: Self, circuit_id: str) -> bool:
         for field_name in (

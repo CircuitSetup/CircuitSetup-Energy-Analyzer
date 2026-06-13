@@ -2730,9 +2730,11 @@ async def test_setup_health_repair_includes_circuit_context(
             "missing_energy_source",
             {
                 "circuit_name": "Refrigerator",
+                "reason": "Daily Energy Usage needs a cumulative energy source.",
                 "recommended_action": (
                     "Add a cumulative kWh sensor to Refrigerator"
                 ),
+                "source_entities": ["sensor.fridge_power"],
             },
         )
     ]
@@ -2895,7 +2897,7 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
     )
 
     now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
-    issues: list[tuple[str, str]] = []
+    issues: list[tuple[str, str, dict[str, Any]]] = []
 
     async def fake_issue(
         hass,
@@ -2904,7 +2906,7 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
         severity=Severity.WARNING,
         **kwargs,
     ) -> None:
-        issues.append((circuit_id, problem))
+        issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
         coordinator_module.repairs,
@@ -2955,7 +2957,20 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
     assert coordinator.state.leg_imbalance_status_by_circuit["hvac"] == (
         "missing_leg_power"
     )
-    assert ("hvac", "dual_phase_missing_leg") in issues
+    dual_phase_issue = next(
+        data
+        for circuit_id, problem, data in issues
+        if circuit_id == "hvac" and problem == "dual_phase_missing_leg"
+    )
+    assert dual_phase_issue == {
+        "circuit_name": "HVAC",
+        "reason": "One side of this dual-phase circuit is missing real-power data.",
+        "recommended_action": "Review leg A and leg B source sensors for HVAC",
+        "source_entities": [
+            "sensor.hvac_l1_power",
+            "sensor.hvac_l2_power",
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -9110,7 +9125,11 @@ async def test_runtime_utility_comparison_missing_measured_creates_specific_repa
             "utility_comparison_missing_measured_source",
             {
                 "circuit_name": "Mains",
+                "reason": (
+                    "Utility comparison is enabled, but measured kWh has no data."
+                ),
                 "recommended_action": "Add measured kWh source for Mains",
+                "source_entities": [],
             },
         )
     ]
