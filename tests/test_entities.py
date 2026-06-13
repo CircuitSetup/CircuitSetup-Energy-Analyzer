@@ -588,8 +588,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         sensitivity_value,
         settings_suggestions_attributes,
         settings_suggestions_value,
-        setup_health_attributes,
-        setup_health_value,
         solar_flexible_load_coverage_value,
         solar_flexible_load_power_value,
         solar_flow_status_value,
@@ -637,8 +635,13 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
                     {
                         "signature_id": "sig-motor",
                         "likely_type": "motor",
+                        "typical_watts": 725.0,
+                        "confidence": 0.81,
+                        "first_seen": "2026-06-12T12:00:00+00:00",
+                        "raw_samples": [1, 2, 3],
                     }
                 ],
+                "debug_history": [{"sample": index} for index in range(20)],
             }
         },
         nilm_topology_evidence_by_circuit={
@@ -846,10 +849,15 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert nilm_unknown_loads_attributes(state, "fridge") == {
         "unknown_load_count": 2,
         "active_unknown_load_count": 1,
+        "shown_count": 1,
+        "has_more": False,
         "unknown_loads": [
             {
                 "signature_id": "sig-motor",
                 "likely_type": "motor",
+                "typical_watts": 725.0,
+                "confidence": 0.81,
+                "first_seen": "2026-06-12T12:00:00+00:00",
             }
         ],
     }
@@ -1026,6 +1034,56 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         "has_more": False,
         "recommendations": [],
     }
+
+
+def test_nilm_unknown_load_attributes_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities.nilm import (
+        nilm_unknown_loads_attributes,
+    )
+
+    unknown_loads = [
+        {
+            "signature_id": f"signature-{index}",
+            "display_name": f"Unknown load {index}",
+            "likely_type": "motor",
+            "typical_watts": 600 + index,
+            "confidence": 0.5,
+            "first_seen": "2026-06-12T12:00:00+00:00",
+            "sample_history": [index] * 20,
+        }
+        for index in range(7)
+    ]
+    state = AnalyzerState(
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "unknown_load_count": len(unknown_loads),
+                "active_unknown_load_count": 6,
+                "unknown_loads": unknown_loads,
+            }
+        }
+    )
+
+    attrs = nilm_unknown_loads_attributes(state, "mains")
+
+    assert attrs["unknown_load_count"] == 7
+    assert attrs["active_unknown_load_count"] == 6
+    assert attrs["shown_count"] == 5
+    assert attrs["has_more"] is True
+    assert [load["signature_id"] for load in attrs["unknown_loads"]] == [
+        "signature-0",
+        "signature-1",
+        "signature-2",
+        "signature-3",
+        "signature-4",
+    ]
+    assert all("sample_history" not in load for load in attrs["unknown_loads"])
+
+
+def test_setup_health_prioritizes_missing_energy_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
 
     setup_coordinator = SimpleNamespace(
         data=AnalyzerState(

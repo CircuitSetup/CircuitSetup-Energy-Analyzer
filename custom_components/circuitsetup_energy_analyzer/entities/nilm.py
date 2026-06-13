@@ -1,7 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
+
+NILM_UNKNOWN_LOADS_ATTRIBUTE_MAX_ITEMS = 5
+NILM_UNKNOWN_LOADS_ATTRIBUTE_FIELDS = (
+    "signature_id",
+    "display_name",
+    "likely_type",
+    "typical_watts",
+    "confidence",
+    "first_seen",
+)
 
 
 def nilm_signature_count_value(state: Any, circuit_id: str) -> int:
@@ -48,4 +58,36 @@ def nilm_unknown_loads_attributes(state: Any, circuit_id: str) -> dict[str, Any]
         circuit_id,
         {},
     )
-    return dict(inventory) if isinstance(inventory, Mapping) else {}
+    if not isinstance(inventory, Mapping) or not inventory:
+        return {}
+
+    unknown_loads = inventory.get("unknown_loads", ())
+    unknown_load_items = (
+        list(unknown_loads)
+        if isinstance(unknown_loads, Iterable)
+        and not isinstance(unknown_loads, (str, bytes))
+        else []
+    )
+    shown_unknown_loads = [
+        _unknown_load_attribute_preview(load)
+        for load in unknown_load_items[:NILM_UNKNOWN_LOADS_ATTRIBUTE_MAX_ITEMS]
+    ]
+    return {
+        "unknown_load_count": int(inventory.get("unknown_load_count", 0) or 0),
+        "active_unknown_load_count": int(
+            inventory.get("active_unknown_load_count", 0) or 0
+        ),
+        "shown_count": len(shown_unknown_loads),
+        "has_more": len(unknown_load_items) > len(shown_unknown_loads),
+        "unknown_loads": shown_unknown_loads,
+    }
+
+
+def _unknown_load_attribute_preview(load: Any) -> dict[str, Any]:
+    if not isinstance(load, Mapping):
+        return {}
+    return {
+        field: value
+        for field in NILM_UNKNOWN_LOADS_ATTRIBUTE_FIELDS
+        if (value := load.get(field)) is not None
+    }
