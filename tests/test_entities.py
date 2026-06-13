@@ -1540,6 +1540,98 @@ def test_setup_health_stale_source_lists_source_entities_and_circuits() -> None:
     assert attrs["issues"][0]["source_entities"] == ["sensor.fridge_power"]
 
 
+def test_setup_health_attributes_are_bounded_for_recorder() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    circuits = tuple(
+        CircuitConfig(
+            circuit_id=f"large_stale_circuit_{index:03d}_{'circuit_' * 24}",
+            name=f"Large Stale Circuit {index:03d} {'Name ' * 32}",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef(
+                    f"sensor.large_stale_circuit_{index:03d}_{'source_' * 28}power",
+                    SensorRole.REAL_POWER,
+                ),
+            ),
+        )
+        for index in range(80)
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                circuit.circuit_id: {
+                    "quality_issues": [
+                        f"{circuit.sensors[0].entity_id} stale for recorder cap test"
+                    ],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+                for circuit in circuits
+            }
+        ),
+        circuit_configs=circuits,
+        store_data=FeatureStoreData(),
+        options={},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+    encoded = json.dumps(attrs, sort_keys=True, default=str, separators=(",", ":"))
+
+    assert len(encoded) <= 12_000
+    assert attrs["issue_count"] == 80
+    assert attrs["issue_summary"].startswith("80 warnings: Fix stale source")
+    assert attrs["issue_summary"].endswith("(+79 more)")
+    assert len(attrs["issue_summary"]) <= 80
+    assert attrs["issues"][0]["affected_circuit"].startswith(
+        "large_stale_circuit_000",
+    )
+    assert len(attrs["issues"][0]["affected_circuit"]) <= 80
+    assert attrs["issues_truncated_count"] > 0
+    assert attrs["stale_sources_truncated_count"] > 0
+
+
+def test_setup_health_attributes_bound_oversized_strings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    source_entity = f"sensor.{'very_long_source_entity_name_' * 20}power"
+    circuit = CircuitConfig(
+        circuit_id="long_source_circuit",
+        name="Long Source Circuit",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef(source_entity, SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                circuit.circuit_id: {
+                    "quality_issues": [f"{source_entity} is stale"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                }
+            }
+        ),
+        circuit_configs=(circuit,),
+        store_data=FeatureStoreData(),
+        options={},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+    encoded = json.dumps(attrs, sort_keys=True, default=str, separators=(",", ":"))
+    bounded_source = attrs["issues"][0]["source_entities"][0]
+
+    assert len(encoded) <= 12_000
+    assert len(bounded_source) <= 80
+    assert bounded_source.endswith("...")
+    assert attrs["stale_sources"] == [bounded_source]
+
+
 def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
