@@ -688,14 +688,27 @@ def _service_circuit_id(
     required: bool = True,
 ) -> str | None:
     circuit_id = data.get(ATTR_CIRCUIT_ID)
+    normalized_circuit_id = None
     if isinstance(circuit_id, str):
         normalized = circuit_id.strip()
         if normalized:
-            return normalized
+            normalized_circuit_id = normalized
 
     entity_ids = _service_entity_ids(data)
     if entity_ids:
-        return _circuit_id_from_service_entity_ids(hass, entity_ids)
+        entity_circuit_id = _circuit_id_from_service_entity_ids(hass, entity_ids)
+        if (
+            normalized_circuit_id is not None
+            and normalized_circuit_id != entity_circuit_id
+        ):
+            raise HomeAssistantError(
+                f"circuit_id '{normalized_circuit_id}' does not match "
+                f"entity_id target circuit '{entity_circuit_id}'."
+            )
+        return entity_circuit_id
+
+    if normalized_circuit_id is not None:
+        return normalized_circuit_id
 
     if required:
         raise HomeAssistantError("Missing circuit_id.")

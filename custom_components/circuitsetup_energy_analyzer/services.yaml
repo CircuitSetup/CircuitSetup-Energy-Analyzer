@@ -68,11 +68,23 @@ export_diagnostics:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 export_history_csv:
   name: Export history CSV
   description: "Advanced/script action: export retained analyzer history for a configured circuit. The normal user path is the dashboard/export card or automation."
@@ -275,11 +287,23 @@ set_demand_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: hvac
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     window_minutes:
       name: Window Minutes
       description: Rolling demand averaging window in minutes for the circuit.
@@ -306,11 +330,23 @@ set_capacity_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as ev or hvac.
-      required: true
+      description: Optional configured circuit identifier, such as ev or hvac. You can choose an analyzer entity instead.
+      required: false
       example: ev
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     breaker_amps:
       name: Breaker Amps
       description: Breaker or circuit rating in amps used for capacity diagnostics.
@@ -339,11 +375,23 @@ set_leg_imbalance_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured dual-phase circuit identifier, such as hvac.
-      required: true
+      description: Optional dual-phase circuit identifier, such as hvac. You can choose an analyzer entity instead.
+      required: false
       example: hvac
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     warning_ratio:
       name: Warning Ratio
       description: Leg imbalance ratio that can trigger repeated possible-issue alerts.
@@ -372,11 +420,23 @@ set_metric_consistency_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as hvac or fridge.
-      required: true
+      description: Optional configured circuit identifier, such as hvac or fridge. You can choose an analyzer entity instead.
+      required: false
       example: hvac
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     apparent_power_tolerance_percent:
       name: Apparent Power Tolerance Percent
       description: Allowed VA mismatch percent before the metric state changes.
@@ -416,11 +476,23 @@ set_mains_balance_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured mains aggregate circuit identifier, usually mains.
-      required: true
+      description: Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     negative_tolerance_w:
       name: Negative Tolerance W
       description: Negative watts allowed before mains balance is flagged.
@@ -438,11 +510,23 @@ set_solar_flow_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured mains aggregate circuit identifier, usually mains.
-      required: true
+      description: Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     export_tolerance_w:
       name: Export Tolerance W
       description: Extra export watts allowed before solar flow is flagged inconsistent.
@@ -493,11 +577,23 @@ set_activity_alert_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     max_active_minutes:
       name: Max Active Minutes
       description: Notify when the circuit stays active longer than this many minutes.
@@ -524,11 +620,23 @@ set_billing_cycle_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     cycle_start_day:
       name: Cycle Start Day
       description: Day of the month when the utility billing cycle starts.
@@ -566,11 +674,23 @@ set_cost_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     cycle_start_day:
       name: Cycle Start Day
       description: Day of the month when the utility billing cycle starts.
@@ -637,11 +757,23 @@ set_standby_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured circuit identifier, such as fridge or mains.
-      required: true
+      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
+      required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     window_hours:
       name: Window Hours
       description: Rolling Always On analysis window in hours for the circuit.
@@ -678,11 +810,23 @@ set_utility_comparison_settings:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Configured aggregate circuit identifier, usually mains.
-      required: true
+      description: Optional aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
+      required: false
       example: mains
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     utility_energy_entity:
       name: Utility Energy Entity
       description: Utility kWh sensor representing the same period as measured data.
@@ -886,11 +1030,23 @@ recalculate_setting_recommendations:
   fields:
     circuit_id:
       name: Circuit ID
-      description: Optional configured circuit identifier to recalculate; leave empty to recalculate all loaded circuits.
+      description: Optional configured circuit identifier to recalculate; choose an analyzer entity, or leave empty for all circuits.
       required: false
       example: fridge
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 apply_setting_recommendation:
   name: Apply setting recommendation
   description: "Advanced/script action: apply an advanced setting recommendation by ID. The normal user path is the Suggested Settings UI button."
