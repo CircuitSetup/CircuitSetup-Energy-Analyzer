@@ -86,6 +86,37 @@ def friendly_sensitivity_label(value: Any) -> str:
     return SENSITIVITY_LABELS[normalize_sensitivity(value)]
 
 
+def canonicalize_sensitivity_config(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a mutable config copy using canonical sensitivity preset names."""
+    copied = _mutable_config_copy(value)
+    if CONF_SENSITIVITY_KEY in copied:
+        copied[CONF_SENSITIVITY_KEY] = normalize_sensitivity(
+            copied[CONF_SENSITIVITY_KEY]
+        )
+
+    advanced_settings = copied.get(CONF_ADVANCED_SETTINGS_KEY)
+    if isinstance(advanced_settings, Mapping):
+        for settings in advanced_settings.values():
+            if isinstance(settings, dict) and "preset" in settings:
+                settings["preset"] = normalize_sensitivity(settings["preset"])
+
+    return copied
+
+
+CONF_SENSITIVITY_KEY = "sensitivity"
+CONF_ADVANCED_SETTINGS_KEY = "advanced_settings"
+
+
+def _mutable_config_copy(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _mutable_config_copy(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_mutable_config_copy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mutable_config_copy(item) for item in value)
+    return value
+
+
 def friendly_feature_name(value: Any) -> str:
     """Return a human-readable label for an internal alert feature key."""
     raw = str(value or "").strip()

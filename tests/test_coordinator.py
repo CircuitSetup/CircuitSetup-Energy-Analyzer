@@ -649,6 +649,60 @@ async def test_setup_entry_stores_and_unload_stops_coordinator_without_ha() -> N
 
 
 @pytest.mark.asyncio
+async def test_migrate_entry_canonicalizes_legacy_sensitivity_values() -> None:
+    from custom_components.circuitsetup_energy_analyzer import async_migrate_entry
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.updates = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            self.updates.append((entry, kwargs))
+            entry.data = MappingProxyType(kwargs.get("data", entry.data))
+            entry.options = MappingProxyType(kwargs.get("options", entry.options))
+
+    hass = SimpleNamespace(config_entries=FakeConfigEntries())
+    entry = SimpleNamespace(
+        data=MappingProxyType(
+            {
+                CONF_SENSITIVITY: "low",
+                CONF_ADVANCED_SETTINGS: MappingProxyType(
+                    {"freezer": MappingProxyType({"preset": "standard"})}
+                ),
+            }
+        ),
+        options=MappingProxyType(
+            {
+                CONF_SENSITIVITY: "high",
+                CONF_ADVANCED_SETTINGS: MappingProxyType(
+                    {"dryer": MappingProxyType({"preset": "high"})}
+                ),
+            }
+        ),
+    )
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert hass.config_entries.updates == [
+        (
+            entry,
+            {
+                "data": {
+                    CONF_SENSITIVITY: "quiet",
+                    CONF_ADVANCED_SETTINGS: {"freezer": {"preset": "balanced"}},
+                },
+                "options": {
+                    CONF_SENSITIVITY: "sensitive",
+                    CONF_ADVANCED_SETTINGS: {"dryer": {"preset": "sensitive"}},
+                },
+            },
+        )
+    ]
+    assert entry.data[CONF_SENSITIVITY] == "quiet"
+    assert entry.options[CONF_SENSITIVITY] == "sensitive"
+
+
+@pytest.mark.asyncio
 async def test_setup_entry_rolls_back_forwarding_failure() -> None:
     from custom_components.circuitsetup_energy_analyzer import async_setup_entry
 
@@ -5329,6 +5383,35 @@ def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
     assert coordinator._sensitivity_for_circuit("unknown") == "balanced"
     assert coordinator._alert_policy_for_circuit("fridge").min_repeated == 3
     assert coordinator._alert_policy_for_circuit("hvac").min_repeated == 4
+
+
+def test_coordinator_canonicalizes_legacy_sensitivity_config_copies() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        entry_data={
+            CONF_SENSITIVITY: "low",
+            "advanced_settings": {
+                "freezer": {"preset": "standard"},
+            },
+        },
+        options={
+            CONF_SENSITIVITY: "high",
+            "advanced_settings": {
+                "dryer": {"preset": "high"},
+            },
+        },
+    )
+
+    assert coordinator.entry_data[CONF_SENSITIVITY] == "quiet"
+    assert coordinator.entry_data["advanced_settings"]["freezer"]["preset"] == (
+        "balanced"
+    )
+    assert coordinator.options[CONF_SENSITIVITY] == "sensitive"
+    assert coordinator.options["advanced_settings"]["dryer"]["preset"] == "sensitive"
 
 
 @pytest.mark.asyncio

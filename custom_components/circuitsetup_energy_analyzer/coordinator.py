@@ -189,6 +189,7 @@ from .utility_comparison import (
 from .ux import (
     alert_evidence_detail,
     alert_policy_name_for_sensitivity,
+    canonicalize_sensitivity_config,
     data_quality_checklist,
     health_summary,
     learning_progress,
@@ -661,8 +662,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN)
         self.entry_id = entry_id
-        self.entry_data = _mutable_copy(entry_data or {})
-        self.options = _mutable_copy(options or {})
+        self.entry_data = canonicalize_sensitivity_config(entry_data or {})
+        self.options = canonicalize_sensitivity_config(options or {})
         self._config_entry = config_entry
         self._store = store
         self.store_data = store_data or FeatureStoreData()

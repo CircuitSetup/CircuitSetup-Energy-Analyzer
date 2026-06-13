@@ -164,6 +164,44 @@ def test_standard_retention_keeps_at_least_month_of_events() -> None:
     assert pruned.events == [event]
 
 
+def test_storage_migrates_legacy_sensitivity_names_on_load_and_save() -> None:
+    restored = feature_store_data_from_dict(
+        {
+            "sensitivity_by_circuit": {
+                "freezer": "low",
+                "fridge": "standard",
+                "dryer": "high",
+                "mystery": "surprising",
+            }
+        }
+    )
+
+    assert restored.sensitivity_by_circuit == {
+        "freezer": "quiet",
+        "fridge": "balanced",
+        "dryer": "sensitive",
+        "mystery": "balanced",
+    }
+
+    raw = feature_store_data_to_dict(
+        FeatureStoreData(
+            sensitivity_by_circuit={
+                "freezer": "low",
+                "fridge": "standard",
+                "dryer": "high",
+                "mystery": "surprising",
+            }
+        )
+    )
+
+    assert raw["sensitivity_by_circuit"] == {
+        "freezer": "quiet",
+        "fridge": "balanced",
+        "dryer": "sensitive",
+        "mystery": "balanced",
+    }
+
+
 def test_feature_store_round_trips_unknown_load_inventory() -> None:
     data = FeatureStoreData(
         nilm_unknown_loads_by_circuit={

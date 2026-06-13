@@ -359,6 +359,8 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 - Activity-alert sensitivity
 - Rain, pump, and water-flow context
 
+Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and **Sensitive**. Older stored presets are automatically migrated to those names.
+
 Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
 Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions:
