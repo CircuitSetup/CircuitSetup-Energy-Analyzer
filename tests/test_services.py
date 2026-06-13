@@ -443,6 +443,7 @@ def test_nilm_signature_service_schemas_accept_analyzer_entity_targets() -> None
 
 def test_setting_recommendation_service_schemas_validate_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_ENTITY_ID,
         ATTR_ENTRY_ID,
         ATTR_RECOMMENDATION_ID,
         RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA,
@@ -459,6 +460,9 @@ def test_setting_recommendation_service_schemas_validate_fields() -> None:
     assert RECOMMENDATION_ACTION_SERVICE_SCHEMA(
         {ATTR_RECOMMENDATION_ID: "recommendation-1", ATTR_ENTRY_ID: "entry-1"}
     ) == {ATTR_RECOMMENDATION_ID: "recommendation-1", ATTR_ENTRY_ID: "entry-1"}
+    assert RECOMMENDATION_ACTION_SERVICE_SCHEMA(
+        {ATTR_ENTITY_ID: "sensor.fridge_health_summary"}
+    ) == {ATTR_ENTITY_ID: "sensor.fridge_health_summary"}
 
     with pytest.raises(vol.Invalid):
         RECOMMENDATION_ACTION_SERVICE_SCHEMA({})
@@ -1104,6 +1108,164 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
             ("duplicate:daily_spike_ratio:v1",),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_setting_recommendation_services_accept_single_entity_target(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_APPLY_SETTING_RECOMMENDATION,
+        SERVICE_DENY_SETTING_RECOMMENDATION,
+        SERVICE_DISMISS_SETTING_RECOMMENDATION,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+            self.store_data = SimpleNamespace(
+                settings_recommendations={"fridge:daily_spike_ratio:v1": object()}
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_apply_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_apply_setting_recommendation", (recommendation_id,))
+            )
+
+        async def async_deny_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_deny_setting_recommendation", (recommendation_id,))
+            )
+
+        async def async_dismiss_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_dismiss_setting_recommendation", (recommendation_id,))
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    entity_data = {"entity_id": "sensor.fridge_health_summary"}
+    await hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data=entity_data)
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_DENY_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data=entity_data)
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_DISMISS_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data=entity_data)
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_apply_setting_recommendation",
+            ("fridge:daily_spike_ratio:v1",),
+        ),
+        (
+            "async_deny_setting_recommendation",
+            ("fridge:daily_spike_ratio:v1",),
+        ),
+        (
+            "async_dismiss_setting_recommendation",
+            ("fridge:daily_spike_ratio:v1",),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setting_recommendation_entity_target_rejects_ambiguous_recommendations(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_APPLY_SETTING_RECOMMENDATION,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self, recommendation_ids: set[str]) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+            self.store_data = SimpleNamespace(
+                settings_recommendations={
+                    recommendation_id: object()
+                    for recommendation_id in recommendation_ids
+                }
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_apply_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_apply_setting_recommendation", (recommendation_id,))
+            )
+
+    coordinator = FakeCoordinator(
+        {"fridge:daily_spike_ratio:v1", "fridge:standby_threshold_w:v1"}
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)]
+
+    with pytest.raises(
+        HomeAssistantError,
+        match=(
+            "entity_id target for circuit_id 'fridge' has multiple setting "
+            "recommendations"
+        ),
+    ):
+        await handler(
+            SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
+        )
+
+    assert coordinator.calls == []
 
 
 @pytest.mark.asyncio

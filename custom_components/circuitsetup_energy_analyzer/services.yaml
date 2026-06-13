@@ -1133,15 +1133,28 @@ recalculate_setting_recommendations:
             - number
 apply_setting_recommendation:
   name: Apply setting recommendation
-  description: "Advanced/script action: apply an advanced setting recommendation by ID. The normal user path is the Suggested Settings UI button."
+  description: "Advanced/script action: apply an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID
-      description: Recommendation identifier shown with the advanced setting suggestion.
-      required: true
+      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
+      required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is applied without typing the recommendation ID.
+      required: false
+      selector:
+        entity:
+          integration: circuitsetup_energy_analyzer
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     entry_id:
       name: Entry ID
       description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
@@ -1151,15 +1164,28 @@ apply_setting_recommendation:
         text:
 deny_setting_recommendation:
   name: Deny setting recommendation
-  description: "Advanced/script action: deny an advanced setting recommendation by ID. The normal user path is the Suggested Settings UI button."
+  description: "Advanced/script action: deny an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID
-      description: Recommendation identifier shown with the advanced setting suggestion.
-      required: true
+      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
+      required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is denied without typing the recommendation ID.
+      required: false
+      selector:
+        entity:
+          integration: circuitsetup_energy_analyzer
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     entry_id:
       name: Entry ID
       description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
@@ -1169,15 +1195,28 @@ deny_setting_recommendation:
         text:
 dismiss_setting_recommendation:
   name: Dismiss setting recommendation
-  description: "Advanced/script action: dismiss an advanced setting recommendation by ID without applying it. The normal user path is the Suggested Settings UI button."
+  description: "Advanced/script action: dismiss an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
       name: Recommendation ID
-      description: Recommendation identifier shown with the advanced setting suggestion.
-      required: true
+      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
+      required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is dismissed without typing the recommendation ID.
+      required: false
+      selector:
+        entity:
+          integration: circuitsetup_energy_analyzer
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
     entry_id:
       name: Entry ID
       description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.

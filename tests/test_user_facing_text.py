@@ -1113,6 +1113,25 @@ def test_alert_feedback_services_document_entity_targets() -> None:
         assert "exactly one active alert" in fields["entity_id"]["description"]
 
 
+def test_recommendation_action_services_document_entity_targets() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+
+    for service_name in (
+        "apply_setting_recommendation",
+        "deny_setting_recommendation",
+        "dismiss_setting_recommendation",
+    ):
+        fields = services[service_name]["fields"]
+        assert fields["recommendation_id"]["required"] is False
+        assert fields["entity_id"]["required"] is False
+        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert "exactly one pending recommendation" in fields[
+            "entity_id"
+        ]["description"]
+
+
 def test_readme_includes_status_glossary_for_machine_values() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
