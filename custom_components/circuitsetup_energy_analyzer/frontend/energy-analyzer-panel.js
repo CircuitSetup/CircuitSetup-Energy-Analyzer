@@ -581,8 +581,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>NILM Review</h2>
         ${signatures.map((signature, index) => `
           <div class="metric">
-            <span>${this._escape(signature.display_name || signature.likely_type || signature.signature_id)}</span>
-            <strong>${this._escape(signature.signature_id)}</strong>
+            <span>NILM signature</span>
+            <strong>${this._escape(signature.display_label || signature.display_name || signature.likely_type || "Unknown load")}</strong>
             ${this._renderNilmMergeTarget(signature, index)}
             <div class="actions">
               ${this._nilmActionButton(index, "label", "Label")}
@@ -608,7 +608,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${recommendations.map((recommendation, index) => `
             <div class="metric">
               <span>${this._escape(recommendation.feature || "Suggested setting")}</span>
-              <strong>${this._escape(recommendation.title || recommendation.recommendation_id || "Recommendation")}</strong>
+              <strong>${this._escape(recommendation.display_label || recommendation.title || "Suggested setting")}</strong>
               ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
               ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
               <div class="entity-list">
@@ -758,10 +758,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (this._loading) {
       return "";
     }
+    const message = (this._payload && this._payload.message) || "The alert from this notification is no longer available.";
+    const nextStep = (this._payload && this._payload.next_step) || "Open a newer notification or review the appliance summary sensors for current evidence.";
     return `
       <section class="panel">
         <h2>Historical alert not found</h2>
-        <p class="muted">The alert from this notification is no longer available. Open a newer notification or review the appliance summary sensors for current evidence.</p>
+        <p class="muted">${this._escape(message)} ${this._escape(nextStep)}</p>
       </section>
     `;
   }

@@ -232,10 +232,11 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
             {
                 "recommendation_id": "hvac:daily_spike_ratio:v1",
                 "title": "Raise daily spike threshold",
+                "feature": "daily_spike_ratio",
             },
             {
                 "recommendation_id": "hvac:standby_threshold_w:v1",
-                "title": "Raise standby threshold",
+                "feature": "standby_threshold_w",
             },
         ]
     }
@@ -255,10 +256,16 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     assert payload["setting_recommendations"][0]["actions"]["dismiss"]["service"] == (
         "dismiss_setting_recommendation"
     )
+    assert payload["setting_recommendations"][0]["display_label"] == (
+        "Raise daily spike threshold"
+    )
     assert payload["setting_recommendations"][1]["actions"]["apply"]["data"] == {
         "recommendation_id": "hvac:standby_threshold_w:v1",
         "entry_id": "entry-1",
     }
+    assert payload["setting_recommendations"][1]["display_label"] == (
+        "Standby Threshold W"
+    )
 
 
 def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
@@ -293,6 +300,7 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     )
 
     assert payload["nilm"]["signatures"][0]["signature_id"] == "signature_1"
+    assert payload["nilm"]["signatures"][0]["display_label"] == "Motor-like load"
     assert payload["nilm"]["signatures"][0]["actions"]["label"]["service"] == (
         "label_nilm_signature"
     )
@@ -350,6 +358,9 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
     )
 
     merge_action = payload["nilm"]["signatures"][0]["actions"]["merge"]
+    assert payload["nilm"]["signatures"][0]["display_label"] == (
+        "Motor-like load, 3.8 kW, confidence 72%, first seen 2026-06-10"
+    )
     assert merge_action["data"] == {
         "circuit_id": "mains",
         "source_signature_id": "signature_1",
@@ -404,6 +415,12 @@ def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
         "alert": None,
         "circuit": None,
         "actions": {},
+        "message": (
+            "The requested alert or circuit evidence is no longer available."
+        ),
+        "next_step": (
+            "Open a newer notification or review the appliance summary sensors."
+        ),
     }
 
 
