@@ -467,6 +467,92 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
     ]
 
 
+def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="nilm_unknown_load")
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(alert, config=config)
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": f"signature_{index}",
+                    "display_name": f"Unknown load {index}",
+                    "likely_type": "motor",
+                    "typical_watts": 1000.0 + index,
+                    "confidence": 0.70,
+                    "sample_history": [index] * 20,
+                }
+                for index in range(8)
+            ]
+        }
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    nilm = payload["nilm"]
+    assert nilm["signature_count"] == 8
+    assert nilm["signatures_has_more"] is True
+    assert nilm["signatures_omitted_count"] == 3
+    assert [signature["signature_id"] for signature in nilm["signatures"]] == [
+        "signature_0",
+        "signature_1",
+        "signature_2",
+        "signature_3",
+        "signature_4",
+    ]
+    assert all("sample_history" not in signature for signature in nilm["signatures"])
+
+    merge_action = nilm["signatures"][0]["actions"]["merge"]
+    assert merge_action["target_option_count"] == 7
+    assert merge_action["target_options_has_more"] is True
+    assert merge_action["target_options_omitted_count"] == 2
+    assert [option["value"] for option in merge_action["target_options"]] == [
+        "signature_1",
+        "signature_2",
+        "signature_3",
+        "signature_4",
+        "signature_5",
+    ]
+
+    expanded_payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+        include_all_nilm=True,
+    )
+
+    expanded_nilm = expanded_payload["nilm"]
+    assert expanded_nilm["signature_count"] == 8
+    assert expanded_nilm["signatures_has_more"] is False
+    assert expanded_nilm["signatures_omitted_count"] == 0
+    assert [signature["signature_id"] for signature in expanded_nilm["signatures"]] == [
+        f"signature_{index}" for index in range(8)
+    ]
+    assert all(
+        "sample_history" not in signature for signature in expanded_nilm["signatures"]
+    )
+
+    expanded_merge_action = expanded_nilm["signatures"][0]["actions"]["merge"]
+    assert expanded_merge_action["target_option_count"] == 7
+    assert expanded_merge_action["target_options_has_more"] is False
+    assert expanded_merge_action["target_options_omitted_count"] == 0
+    assert [
+        option["value"] for option in expanded_merge_action["target_options"]
+    ] == [f"signature_{index}" for index in range(1, 8)]
+
+
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
