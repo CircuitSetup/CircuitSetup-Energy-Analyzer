@@ -6590,10 +6590,7 @@ async def _async_recorder_executor_job(hass: Any, target: Any) -> Any:
         if callable(add_recorder_job):
             return await add_recorder_job(target)
 
-    add_executor_job = getattr(hass, "async_add_executor_job", None)
-    if callable(add_executor_job):
-        return await add_executor_job(target)
-    return target()
+    raise RuntimeError("recorder executor is not available")
 
 
 def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:

@@ -8407,6 +8407,17 @@ async def test_runtime_compares_opower_statistics_with_measured_mains_statistics
         raising=False,
     )
 
+    class FakeRecorder:
+        async def async_add_executor_job(self, target, *args):
+            return target(*args)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_recorder_get_instance",
+        lambda hass: FakeRecorder(),
+        raising=False,
+    )
+
     class FakeStates:
         def get(self, entity_id: str):
             assert entity_id == "sensor.mains_power"
@@ -8543,6 +8554,17 @@ async def test_runtime_compares_opower_statistics_with_configured_circuit_sum(
         coordinator_module,
         "_ha_statistics_during_period",
         fake_statistics_during_period,
+        raising=False,
+    )
+
+    class FakeRecorder:
+        async def async_add_executor_job(self, target, *args):
+            return target(*args)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_recorder_get_instance",
+        lambda hass: FakeRecorder(),
         raising=False,
     )
 
@@ -8770,6 +8792,59 @@ async def test_recorder_statistics_use_recorder_executor(
 
     assert recorder_jobs
     assert statistics == {"sensor.energy": [{"sum": 12.3}]}
+
+
+@pytest.mark.asyncio
+async def test_recorder_statistics_skip_generic_executor_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    generic_jobs: list[object] = []
+    statistics_calls = 0
+
+    def fake_statistics_during_period(*args, **kwargs):
+        nonlocal statistics_calls
+        del args, kwargs
+        statistics_calls += 1
+        return {"sensor.energy": [{"sum": 12.3}]}
+
+    async def async_add_executor_job(target, *args):
+        generic_jobs.append(target)
+        return target(*args)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_statistics_during_period",
+        fake_statistics_during_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "_ha_recorder_get_instance",
+        lambda hass: None,
+        raising=False,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}, async_add_executor_job=async_add_executor_job),
+        entry_data={CONF_CIRCUITS: []},
+        now_fn=lambda: now,
+    )
+
+    statistics = await coordinator._recorder_statistics_during_period(
+        statistic_ids={"sensor.energy"},
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        period="day",
+    )
+
+    assert statistics == {}
+    assert generic_jobs == []
+    assert statistics_calls == 0
 
 
 @pytest.mark.asyncio
