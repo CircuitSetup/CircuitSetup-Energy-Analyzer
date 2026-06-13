@@ -24,6 +24,7 @@ from .services import (
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+    SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
     SERVICE_RELEARN_BASELINE,
     SERVICE_START_MAINTENANCE,
@@ -34,7 +35,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260613-friendly-nilm-labels"
+PANEL_MODULE_VERSION = "20260613-action-polish"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -166,6 +167,39 @@ def alert_evidence_payload(
                     "nilm": _nilm_payload_for_circuit(
                         coordinator,
                         requested_circuit_id,
+                    ),
+                }
+            config = _config_for_circuit(coordinator, requested_circuit_id)
+            if config is not None:
+                return {
+                    "status": "circuit_found_no_evidence",
+                    "requested_alert_id": requested_alert_id,
+                    "requested_circuit_id": requested_circuit_id,
+                    "alert": None,
+                    "circuit": _circuit_payload(config),
+                    "actions": _actions_for_context(
+                        coordinator,
+                        config=config,
+                        alert_id=None,
+                        circuit_id=requested_circuit_id,
+                    ),
+                    "setting_recommendations": (
+                        _setting_recommendations_for_circuit(
+                            coordinator,
+                            requested_circuit_id,
+                        )
+                    ),
+                    "nilm": _nilm_payload_for_circuit(
+                        coordinator,
+                        requested_circuit_id,
+                    ),
+                    "message": (
+                        "No current alert evidence is available for this circuit."
+                    ),
+                    "next_step": (
+                        "Use the available circuit actions below, open Advanced "
+                        "Circuit Settings, or review the summary sensors for the "
+                        "latest state."
                     ),
                 }
 
@@ -475,6 +509,24 @@ def _nilm_actions_for_signature(
     signatures: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
+    merge_target_options = _nilm_merge_target_options(signatures, signature_id)
+    merge_action: dict[str, Any] = {
+        "domain": DOMAIN,
+        "service": SERVICE_MERGE_NILM_SIGNATURES,
+        "data": {ATTR_CIRCUIT_ID: circuit_id, "source_signature_id": signature_id},
+        "requires": ["target_signature_id"],
+        "target_options": merge_target_options,
+    }
+    if not merge_target_options:
+        merge_action.update(
+            {
+                "enabled": False,
+                "unavailable_reason": "no_merge_target",
+                "unavailable_label": (
+                    "No other NILM signature is available to merge into yet."
+                ),
+            }
+        )
     return {
         "label": {
             "domain": DOMAIN,
@@ -492,13 +544,7 @@ def _nilm_actions_for_signature(
             "service": SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
             "data": dict(data),
         },
-        "merge": {
-            "domain": DOMAIN,
-            "service": "merge_nilm_signatures",
-            "data": {ATTR_CIRCUIT_ID: circuit_id, "source_signature_id": signature_id},
-            "requires": ["target_signature_id"],
-            "target_options": _nilm_merge_target_options(signatures, signature_id),
-        },
+        "merge": merge_action,
     }
 
 
