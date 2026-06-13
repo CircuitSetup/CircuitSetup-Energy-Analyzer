@@ -284,6 +284,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
         SENSITIVITY_SERVICE_SCHEMA,
+        SERVICE_ACKNOWLEDGE_ALERT,
         SERVICE_PAUSE_ALERTS,
         UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA,
     )
@@ -309,6 +310,11 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     ) == {"circuit_id": "fridge", "relearn": True}
     assert ALERT_FEEDBACK_SERVICE_SCHEMA({"alert_id": "alert-1"}) == {
         "alert_id": "alert-1"
+    }
+    assert ALERT_FEEDBACK_SERVICE_SCHEMA(
+        {"entity_id": "sensor.fridge_health_summary"}
+    ) == {
+        "entity_id": "sensor.fridge_health_summary"
     }
     assert NILM_SIGNATURE_SERVICE_SCHEMA(
         {"circuit_id": "mains", "signature_id": "signature_1"}
@@ -351,6 +357,11 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     ) == {
         "entity_id": "sensor.fridge_health_summary",
         "duration": "01:00:00",
+    }
+    assert _SERVICE_SCHEMAS[SERVICE_ACKNOWLEDGE_ALERT](
+        {"entity_id": "sensor.fridge_health_summary"}
+    ) == {
+        "entity_id": "sensor.fridge_health_summary",
     }
 
     with pytest.raises(vol.Invalid):
@@ -1361,6 +1372,9 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_alert_feedback_services_accept_single_alert_entity_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_ACKNOWLEDGE_ALERT,
         SERVICE_MARK_ALERT_EXPECTED,
@@ -1380,11 +1394,16 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
 
         def __init__(self) -> None:
             self.calls: list[tuple[str, str]] = []
+            self.alert = AlertEvidence(
+                timestamp=datetime(2026, 6, 13, 12, 0, tzinfo=UTC),
+                circuit_id="fridge",
+                severity=Severity.WARNING,
+                message="Fridge door appears open.",
+                feature="door_open",
+            )
             self.state = SimpleNamespace(
                 active_alerts_by_circuit={
-                    "fridge": [
-                        SimpleNamespace(alert_id="alert-fridge-door-open"),
-                    ],
+                    "fridge": [self.alert],
                 }
             )
 
@@ -1424,10 +1443,11 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
             SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
         )
 
+    expected_alert_id = notification_id_for_alert(coordinator.alert)
     assert coordinator.calls == [
-        ("async_acknowledge_alert", "alert-fridge-door-open"),
-        ("async_mark_alert_expected", "alert-fridge-door-open"),
-        ("async_mark_alert_unhelpful", "alert-fridge-door-open"),
+        ("async_acknowledge_alert", expected_alert_id),
+        ("async_mark_alert_expected", expected_alert_id),
+        ("async_mark_alert_unhelpful", expected_alert_id),
     ]
 
 

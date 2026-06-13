@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from . import notifications
 from .const import DOMAIN
 from .ux import normalize_sensitivity
 
@@ -296,7 +297,7 @@ RECOMMENDATION_ACTION_SERVICE_SCHEMA = _schema(
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
     SERVICE_PAUSE_ALERTS: _circuit_schema(ATTR_DURATION),
-    SERVICE_ACKNOWLEDGE_ALERT: _schema(required=(ATTR_ALERT_ID,)),
+    SERVICE_ACKNOWLEDGE_ALERT: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_EXPORT_DIAGNOSTICS: CIRCUIT_SERVICE_SCHEMA,
     SERVICE_EXPORT_HISTORY_CSV: CIRCUIT_SERVICE_SCHEMA,
     SERVICE_RUN_MAPPING_CHECKS: None,
@@ -999,7 +1000,10 @@ def _alert_id_from_alert(alert: Any) -> str | None:
     else:
         alert_id = getattr(alert, ATTR_ALERT_ID, None)
     if not isinstance(alert_id, str):
-        return None
+        try:
+            alert_id = notifications.notification_id_for_alert(alert)
+        except AttributeError:
+            return None
     normalized = alert_id.strip()
     return normalized or None
 
