@@ -975,6 +975,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "No history samples",
         "Matched alert",
         "Latest evidence for circuit",
+        "Circuit actions available",
         "Historical alert not found",
         "Observed",
         "Baseline",
@@ -989,6 +990,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "unavailable_reason",
         "action-reason",
         "_actionDisabled",
+        "_guardActionCall",
+        "Action unavailable",
+        "Home Assistant service calls are not available",
     ):
         assert expected in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset

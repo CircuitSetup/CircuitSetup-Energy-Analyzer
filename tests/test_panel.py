@@ -313,6 +313,13 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
         "circuit_id": "mains",
         "signature_id": "signature_1",
     }
+    assert payload["nilm"]["signatures"][0]["actions"]["merge"]["enabled"] is False
+    assert payload["nilm"]["signatures"][0]["actions"]["merge"][
+        "unavailable_reason"
+    ] == "no_merge_target"
+    assert payload["nilm"]["signatures"][0]["actions"]["merge"][
+        "unavailable_label"
+    ] == "No other NILM signature is available to merge into yet."
 
 
 def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None:
@@ -422,6 +429,55 @@ def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
             "Open a newer notification or review the appliance summary sensors."
         ),
     }
+
+
+def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    payload = alert_evidence_payload([_coordinator()], circuit_id="hvac")
+
+    assert payload["status"] == "circuit_found_no_evidence"
+    assert payload["requested_circuit_id"] == "hvac"
+    assert payload["alert"] is None
+    assert payload["circuit"] == {
+        "circuit_id": "hvac",
+        "name": "HVAC",
+        "appliance_profile": "hvac",
+        "mode": "dual_phase",
+    }
+    assert payload["message"] == (
+        "No current alert evidence is available for this circuit."
+    )
+    assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "hvac"}
+    assert payload["actions"]["start_maintenance"]["data"] == {"circuit_id": "hvac"}
+    assert payload["actions"]["pause_alerts"]["enabled"] is False
+    assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
+        "/config/integrations/"
+    )
+
+
+def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="hvac", feature="demand_monthly_peak")
+
+    payload = alert_evidence_payload(
+        [
+            _coordinator(config=_config("hvac")),
+            _coordinator(alert, config=_config("hvac")),
+        ],
+        circuit_id="hvac",
+    )
+
+    assert payload["status"] == "latest_for_circuit"
+    assert payload["alert"]["alert_id"] == notification_id_for_alert(alert)
+    assert payload["alert"]["feature"] == "demand_monthly_peak"
 
 
 @pytest.mark.asyncio

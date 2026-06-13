@@ -192,10 +192,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       service: ACTION_SERVICE_NAMES[actionKey],
       data: { alert_id: fallbackAlert && fallbackAlert.alert_id },
     };
-    if (!action || !this._hass || !this._hass.callService) {
-      if (action && action.path) {
-        this._navigate(action.path);
-      }
+    if (!this._guardActionCall(action, actionKey)) {
       return;
     }
     if (action.path) {
@@ -222,7 +219,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
     const signature = signatures && signatures[index];
     const action = signature && signature.actions && signature.actions[actionKey];
-    if (!action || !this._hass || !this._hass.callService) {
+    if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
       return;
     }
     const data = Object.assign({}, action.data || {});
@@ -264,7 +261,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const recommendations = this._payload && this._payload.setting_recommendations;
     const recommendation = recommendations && recommendations[index];
     const action = recommendation && recommendation.actions && recommendation.actions[actionKey];
-    if (!action || !this._hass || !this._hass.callService) {
+    if (!this._guardActionCall(action, `recommendation ${actionKey}`)) {
       return;
     }
     const busyKey = `recommendation_${index}_${actionKey}`;
@@ -290,6 +287,33 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     history.pushState(null, "", path);
     window.dispatchEvent(new Event("location-changed"));
+  }
+
+  _guardActionCall(action, label) {
+    if (!action) {
+      this._error = `Action unavailable: ${label}. Reload the evidence panel and try again.`;
+      this._render();
+      return false;
+    }
+    if (action.enabled === false) {
+      this._error = action.unavailable_label || `Action unavailable: ${action.unavailable_reason || label}.`;
+      this._render();
+      return false;
+    }
+    if (action.path) {
+      return true;
+    }
+    if (!action.service) {
+      this._error = `Action unavailable: ${label}. The panel did not receive a service to call.`;
+      this._render();
+      return false;
+    }
+    if (!this._hass || !this._hass.callService) {
+      this._error = "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.";
+      this._render();
+      return false;
+    }
+    return true;
   }
 
   _routeKey() {
@@ -765,6 +789,28 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>Historical alert not found</h2>
         <p class="muted">${this._escape(message)} ${this._escape(nextStep)}</p>
       </section>
+      ${this._renderFallbackActions()}
+    `;
+  }
+
+  _renderFallbackActions() {
+    const actions = this._payload && this._payload.actions;
+    if (!actions || !Object.keys(actions).length) {
+      return "";
+    }
+    return `
+      <section class="panel">
+        <h2>Available Circuit Actions</h2>
+        <div class="actions">
+          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
+          ${this._actionButton("start_maintenance", "Start Maintenance", true)}
+          ${this._actionButton("end_maintenance", "End Maintenance", true)}
+          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
+          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
+        </div>
+      </section>
+      ${this._renderRecommendations()}
+      ${this._renderNilmActions()}
     `;
   }
 
@@ -781,6 +827,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (status === "latest_for_circuit") {
       return "Latest evidence for circuit";
+    }
+    if (status === "circuit_found_no_evidence") {
+      return "Circuit actions available";
     }
     return "Historical alert not found";
   }
