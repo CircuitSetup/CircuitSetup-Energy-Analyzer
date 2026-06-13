@@ -511,3 +511,28 @@ async def test_coordinator_skips_duplicate_dashboard_when_update_unavailable() -
 
     assert collection.created == []
     assert coordinator.last_dashboard_create_request["action"] == "unavailable"
+    assert (
+        coordinator.last_dashboard_create_request["reason"]
+        == "dashboard_update_unavailable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_records_reason_when_lovelace_collection_is_missing() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert coordinator.last_dashboard_create_request["action"] == "unavailable"
+    assert (
+        coordinator.last_dashboard_create_request["reason"]
+        == "lovelace_dashboard_collection_unavailable"
+    )

@@ -2590,7 +2590,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             hass=self.hass,
             entry_id=self.entry_id,
         )
-        action = await self._async_create_or_update_lovelace_dashboard(
+        action, reason = await self._async_create_or_update_lovelace_dashboard(
             dashboard_payload
         )
         payload = {
@@ -2600,6 +2600,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "layout": layout,
             "action": action,
         }
+        if reason is not None:
+            payload["reason"] = reason
         self.last_dashboard_create_request = payload
         bus = getattr(self.hass, "bus", None)
         fire = getattr(bus, "async_fire", None)
@@ -2628,20 +2630,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def _async_create_or_update_lovelace_dashboard(
         self: Self,
         payload: Mapping[str, Any],
-    ) -> str:
+    ) -> tuple[str, str | None]:
         collection = (
             getattr(self.hass, "data", {})
             .get("lovelace", {})
             .get("dashboards_collection")
         )
         if collection is None:
-            return "unavailable"
+            return "unavailable", "lovelace_dashboard_collection_unavailable"
 
         items_method = getattr(collection, "async_items", None)
         create_method = getattr(collection, "async_create_item", None)
         update_method = getattr(collection, "async_update_item", None)
         if not callable(items_method) or not callable(create_method):
-            return "unavailable"
+            return "unavailable", "lovelace_dashboard_collection_unavailable"
 
         items = await items_method()
         existing = next(
@@ -2654,16 +2656,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if existing is not None:
             if not callable(update_method):
-                return "unavailable"
+                return "unavailable", "dashboard_update_unavailable"
             item_id = _lovelace_dashboard_item_id(existing, payload)
             update_payload = {
                 key: value for key, value in payload.items() if key != "url_path"
             }
             await update_method(item_id, update_payload)
-            return "updated"
+            return "updated", None
 
         await create_method(dict(payload))
-        return "created"
+        return "created", None
 
     async def async_label_nilm_signature(
         self: Self,
