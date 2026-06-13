@@ -1131,6 +1131,29 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
         assert phrase in readme_text
 
 
+def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
+    translations = json.loads(
+        (
+            INTEGRATION_DIR / "translations" / "en.json"
+        ).read_text(encoding="utf-8")
+    )
+    issues = translations["issues"]
+
+    for key in (
+        "missing_energy_source",
+        "missing_mains_source",
+        "missing_electrical_metrics",
+        "check_ct_direction",
+        "dual_phase_missing_leg",
+        "missing_rain_context_source",
+        "missing_water_flow_source",
+        "utility_comparison_source_mismatch",
+    ):
+        description = issues[key]["description"]
+        assert "{circuit_name}" in description
+        assert "{recommended_action}" in description
+
+
 def test_readme_includes_practical_usage_guide() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())
