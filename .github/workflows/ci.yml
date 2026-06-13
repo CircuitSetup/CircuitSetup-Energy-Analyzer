@@ -38,8 +38,17 @@ jobs:
         run: pytest -q
 
   home-assistant-contract:
-    name: Home Assistant contract tests
+    name: Home Assistant contract tests (${{ matrix.ha-channel }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha-channel: stable
+            experimental: false
+          - ha-channel: dev
+            experimental: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -50,10 +59,23 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install Home Assistant test dependencies
+      - name: Install Home Assistant test dependencies (stable)
+        if: matrix.ha-channel == 'stable'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
+
+      - name: Install Home Assistant test dependencies (dev)
+        if: matrix.ha-channel == 'dev'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+          python -m pip install --upgrade --no-cache-dir pytest-homeassistant-custom-component
+          python -m pip install --upgrade --no-cache-dir git+https://github.com/home-assistant/core.git@dev
+
+      - name: Show Home Assistant version
+        run: |
+          python -c "from homeassistant.const import __version__; print(f'Home Assistant version: {__version__}')"
 
       - name: Run Home Assistant contract tests
         run: python -m pytest tests/test_control_entities.py tests/test_config_flow.py tests_homeassistant -q
