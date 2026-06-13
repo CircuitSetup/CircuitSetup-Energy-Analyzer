@@ -995,6 +995,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_rememberNilmLabelDraft",
         "Enter a label for this NILM signature before saving.",
         "Save Label",
+        "merge-target-chip",
+        "_nilmMergeTargetChip",
+        "_selectNilmMergeTarget",
+        "data-nilm-merge-target",
         "signature.display_label",
         "recommendation.display_label",
         "unavailable_reason",
@@ -1012,6 +1016,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "_entityList" not in asset
     assert "window.prompt" not in asset
     assert "Label this NILM signature" not in asset
+    assert "<select id=\"nilm_merge_target_" not in asset
     assert (
         'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
         not in asset

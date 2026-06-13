@@ -236,8 +236,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.label = label;
     }
     if (actionKey === "merge") {
-      const targetSelector = this.shadowRoot.querySelector(`#nilm_merge_target_${index}`);
-      const target = targetSelector ? targetSelector.value : "";
+      const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
+      const target = targetList ? targetList.dataset.selected || "" : "";
       if (!target) {
         this._error = "Choose a merge target before merging NILM signatures.";
         this._render();
@@ -524,6 +524,26 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font: inherit;
           padding: 8px 10px;
         }
+        .merge-targets {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 8px;
+        }
+        .merge-target-chip {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 999px;
+          color: var(--primary-text-color, #111827);
+          cursor: pointer;
+          font: inherit;
+          padding: 7px 11px;
+        }
+        .merge-target-chip[aria-pressed="true"] {
+          background: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
       </style>
       <main class="shell">
         <section class="panel">
@@ -560,6 +580,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmIndex, 10);
+        this._selectNilmMergeTarget(index, button.dataset.nilmMergeTarget);
+      });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-source-entity]")) {
       button.addEventListener("click", () => {
@@ -762,12 +788,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return `<p class="muted">No other signature is available to merge into yet.</p>`;
     }
     return `
-      <label class="muted" for="nilm_merge_target_${index}">Merge into</label>
-      <select id="nilm_merge_target_${index}">
-        <option value="">Choose target signature</option>
-        ${options.map((option) => `<option value="${this._escape(option.value)}">${this._escape(option.label)}</option>`).join("")}
-      </select>
+      <span class="muted">Merge into</span>
+      <div class="merge-targets" id="nilm_merge_targets_${index}" data-selected="">
+        ${options.map((option) => this._nilmMergeTargetChip(index, option)).join("")}
+      </div>
     `;
+  }
+
+  _nilmMergeTargetChip(index, option) {
+    return `
+      <button
+        type="button"
+        class="merge-target-chip"
+        data-nilm-index="${index}"
+        data-nilm-merge-target="${this._escape(option.value)}"
+        aria-pressed="false"
+      >${this._escape(option.label)}</button>
+    `;
+  }
+
+  _selectNilmMergeTarget(index, target) {
+    const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
+    if (!targetList || !target) {
+      return;
+    }
+    targetList.dataset.selected = target;
+    for (const button of targetList.querySelectorAll("[data-nilm-merge-target]")) {
+      button.setAttribute(
+        "aria-pressed",
+        button.dataset.nilmMergeTarget === target ? "true" : "false",
+      );
+    }
   }
 
   _renderSafetyNotice(alert) {
