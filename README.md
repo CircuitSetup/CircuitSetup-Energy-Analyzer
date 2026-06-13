@@ -363,7 +363,7 @@ Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and *
 
 Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
-Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions:
+Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions. If you do call a circuit service from an automation, you can target a renamed analyzer entity instead of typing the circuit ID.
 
 - `button.<circuit>_relearn_baseline`
 - `button.<circuit>_start_maintenance`
