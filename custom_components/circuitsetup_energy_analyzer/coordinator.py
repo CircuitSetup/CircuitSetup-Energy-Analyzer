@@ -2654,7 +2654,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not callable(items_method) or not callable(create_method):
             return "unavailable", "lovelace_dashboard_collection_unavailable"
 
-        items = await items_method()
+        items = await _async_lovelace_method_result(items_method())
         dashboard_config = _lovelace_dashboard_config(payload)
         storage_payload = _lovelace_dashboard_storage_payload(payload)
         existing = next(
@@ -2674,7 +2674,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for key, value in storage_payload.items()
                 if key != "url_path"
             }
-            updated_item = await update_method(item_id, update_payload)
+            updated_item = await _async_lovelace_method_result(
+                update_method(item_id, update_payload)
+            )
             item = {
                 **_lovelace_dashboard_item_mapping(existing),
                 **(dict(updated_item) if isinstance(updated_item, Mapping) else {}),
@@ -2690,7 +2692,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 return "unavailable", "dashboard_config_save_unavailable"
             return "updated", None
 
-        created_item = await create_method(dict(storage_payload))
+        created_item = await _async_lovelace_method_result(
+            create_method(dict(storage_payload))
+        )
         item = created_item if isinstance(created_item, Mapping) else storage_payload
         if not await _async_save_lovelace_dashboard_config(
             self.hass,
@@ -6622,7 +6626,7 @@ async def _async_load_lovelace_dashboards_collection(
     collection = lovelace_dashboard.DashboardsCollection(hass)
     async_load = getattr(collection, "async_load", None)
     if callable(async_load):
-        await async_load()
+        await _async_lovelace_method_result(async_load())
     return collection
 
 
@@ -6673,9 +6677,15 @@ async def _async_save_lovelace_dashboard_config(
     save = getattr(dashboard_store, "async_save", None)
     if not callable(save):
         return False
-    await save(dict(config))
+    await _async_lovelace_method_result(save(dict(config)))
     _register_lovelace_dashboard_panel(hass, item, update=update)
     return True
+
+
+async def _async_lovelace_method_result(result: Any) -> Any:
+    if isawaitable(result):
+        return await result
+    return result
 
 
 def _new_lovelace_storage(hass: Any, item: Mapping[str, Any]) -> Any | None:

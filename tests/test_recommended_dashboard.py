@@ -435,6 +435,13 @@ class _FakeAttributeDashboardsCollection:
         return {"id": item_id, **data}
 
 
+class _FakeSyncItemsDashboardsCollection(_FakeDashboardsCollection):
+    def async_items(self) -> list[dict[str, object]]:  # type: ignore[override]
+        if not self._existing:
+            return []
+        return [{"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}]
+
+
 class _FakeExistingDashboardWithoutUpdate:
     def __init__(self) -> None:
         self.created: list[dict[str, object]] = []
@@ -638,6 +645,47 @@ async def test_coordinator_creates_dashboard_from_current_lovelace_data(
     assert "sensor.fridge_metric_consistency_status" in str(
         stored_dashboard.saved[0]
     )
+    assert coordinator.last_dashboard_create_request["action"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_handles_sync_lovelace_dashboard_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeSyncItemsDashboardsCollection(existing=False)
+    lovelace_data = SimpleNamespace(
+        dashboards={},
+        resources=object(),
+        yaml_dashboards={},
+    )
+    collection.dashboard_stores = lovelace_data.dashboards
+
+    async def load_collection(hass: object, data: object) -> object:
+        assert data is lovelace_data
+        return collection
+
+    monkeypatch.setattr(
+        module,
+        "_async_load_lovelace_dashboards_collection",
+        load_collection,
+        raising=False,
+    )
+    hass = SimpleNamespace(data={"lovelace": lovelace_data})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert len(collection.created) == 1
+    assert lovelace_data.dashboards[DASHBOARD_URL_PATH].saved
     assert coordinator.last_dashboard_create_request["action"] == "created"
 
 
