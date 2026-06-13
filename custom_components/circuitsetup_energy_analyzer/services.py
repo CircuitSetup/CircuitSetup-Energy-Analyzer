@@ -289,10 +289,29 @@ NILM_MERGE_SERVICE_SCHEMA = _schema(
 RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA = _schema(
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
-RECOMMENDATION_ACTION_SERVICE_SCHEMA = _schema(
-    required=(ATTR_RECOMMENDATION_ID,),
-    optional=(ATTR_ENTRY_ID,),
-)
+
+
+def _recommendation_action_schema() -> Callable:
+    base_schema = _schema(
+        optional=(ATTR_RECOMMENDATION_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
+    )
+
+    def validate(data: Mapping[str, Any] | None) -> dict[str, Any]:
+        values = base_schema(data)
+        if values.get(ATTR_RECOMMENDATION_ID) or values.get(ATTR_ENTITY_ID):
+            return values
+        try:
+            import voluptuous as vol
+        except ModuleNotFoundError as err:
+            raise ValueError(
+                "Missing recommendation_id or entity_id.",
+            ) from err
+        raise vol.Invalid("Missing recommendation_id or entity_id.")
+
+    return validate
+
+
+RECOMMENDATION_ACTION_SERVICE_SCHEMA = _recommendation_action_schema()
 
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
@@ -427,7 +446,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_APPLY_SETTING_RECOMMENDATION:
-        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        recommendation_id = _service_recommendation_id(hass, data)
         for coordinator in _target_recommendation_coordinators(
             hass,
             recommendation_id,
@@ -441,7 +460,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_DENY_SETTING_RECOMMENDATION:
-        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        recommendation_id = _service_recommendation_id(hass, data)
         for coordinator in _target_recommendation_coordinators(
             hass,
             recommendation_id,
@@ -455,7 +474,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     if service == SERVICE_DISMISS_SETTING_RECOMMENDATION:
-        recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+        recommendation_id = _service_recommendation_id(hass, data)
         for coordinator in _target_recommendation_coordinators(
             hass,
             recommendation_id,
@@ -1008,6 +1027,39 @@ def _alert_id_from_alert(alert: Any) -> str | None:
     return normalized or None
 
 
+def _service_recommendation_id(hass: Any, data: Mapping[str, Any]) -> str:
+    recommendation_id = data.get(ATTR_RECOMMENDATION_ID)
+    if isinstance(recommendation_id, str):
+        recommendation_id = recommendation_id.strip()
+    if isinstance(recommendation_id, str) and recommendation_id:
+        return recommendation_id
+
+    circuit_id = _service_circuit_id(hass, data)
+    target_coordinators = _target_coordinators(hass, circuit_id)
+    recommendation_ids = sorted(
+        {
+            recommendation_id
+            for coordinator in target_coordinators
+            for recommendation_id in _recommendation_ids_for_circuit(
+                coordinator,
+                circuit_id,
+            )
+        },
+    )
+    if len(recommendation_ids) == 1:
+        return recommendation_ids[0]
+    if recommendation_ids:
+        raise HomeAssistantError(
+            f"entity_id target for circuit_id '{circuit_id}' has multiple "
+            "setting recommendations: "
+            f"{', '.join(recommendation_ids)}. Pass recommendation_id explicitly."
+        )
+    raise HomeAssistantError(
+        f"entity_id target for circuit_id '{circuit_id}' has no setting "
+        "recommendations. Pass recommendation_id explicitly."
+    )
+
+
 def _target_recommendation_coordinators(
     hass: Any,
     recommendation_id: Any,
@@ -1192,6 +1244,66 @@ def _coordinator_has_recommendation(coordinator: Any, recommendation_id: str) ->
             if current_id == recommendation_id:
                 return True
     return False
+
+
+def _recommendation_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[str]:
+    recommendation_ids: set[str] = set()
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
+    if isinstance(by_circuit, Mapping):
+        _collect_recommendation_ids(by_circuit.get(circuit_id, ()), recommendation_ids)
+
+    store_data = getattr(coordinator, "store_data", None)
+    stored = getattr(store_data, "settings_recommendations", {})
+    if isinstance(stored, Mapping):
+        for recommendation_id, recommendation in stored.items():
+            if _recommendation_matches_circuit(
+                recommendation_id,
+                recommendation,
+                circuit_id,
+            ):
+                recommendation_ids.add(str(recommendation_id))
+    return recommendation_ids
+
+
+def _collect_recommendation_ids(
+    recommendations: Any,
+    recommendation_ids: set[str],
+) -> None:
+    for recommendation in _iter_items(recommendations):
+        if isinstance(recommendation, Mapping):
+            recommendation_id = recommendation.get(ATTR_RECOMMENDATION_ID)
+        else:
+            recommendation_id = getattr(recommendation, ATTR_RECOMMENDATION_ID, None)
+        if isinstance(recommendation_id, str) and recommendation_id.strip():
+            recommendation_ids.add(recommendation_id.strip())
+
+
+def _recommendation_matches_circuit(
+    recommendation_id: Any,
+    recommendation: Any,
+    circuit_id: str,
+) -> bool:
+    item_circuit_id = (
+        recommendation.get(ATTR_CIRCUIT_ID)
+        if isinstance(recommendation, Mapping)
+        else getattr(recommendation, ATTR_CIRCUIT_ID, None)
+    )
+    if isinstance(item_circuit_id, str) and item_circuit_id:
+        return item_circuit_id == circuit_id
+    return isinstance(recommendation_id, str) and recommendation_id.startswith(
+        f"{circuit_id}:",
+    )
+
+
+def _iter_items(value: Any) -> Iterable[Any]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        return value.values()
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        return value
+    return (value,)
 
 
 async def _call_if_present(target: Any, method_name: str, *args: Any) -> Any:
