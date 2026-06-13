@@ -2745,6 +2745,83 @@ def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> N
     )
 
 
+@pytest.mark.asyncio
+async def test_options_forms_replace_removed_demo_source_entities(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_dryer_active_power",
+                "sensor.cs_energy_analyzer_demo_dryer_voltage",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_dryer_active_power",
+                "sensor.cs_energy_analyzer_demo_dryer_voltage",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "cs_energy_analyzer_demo_dryer",
+                    "name": "Dryer",
+                    "appliance_profile": "dryer",
+                    "mode": "dual_phase",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_dryer_active_power"
+                            ),
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.cs_energy_analyzer_demo_dryer_voltage",
+                            "role": "voltage",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    source_schema = config_flow._options_schema(entry)
+
+    assert _schema_default(source_schema, CONF_EXTRA_SOURCE_ENTITIES) == [
+        "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+        "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+    ]
+
+    flow = config_flow.CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "cs_energy_analyzer_demo_dryer"}
+    )
+
+    assert result["type"] == "form"
+    assert _schema_default(result["data_schema"], "included_sensors") == [
+        "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+        "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+    ]
+    included_options = _schema_validator(result["data_schema"], "included_sensors")[
+        "select"
+    ]["options"]
+    assert not any(
+        option["value"]
+        in {
+            "sensor.cs_energy_analyzer_demo_dryer_active_power",
+            "sensor.cs_energy_analyzer_demo_dryer_voltage",
+        }
+        for option in included_options
+    )
+
+
 def test_options_schema_includes_saved_demo_entity_ids_with_registry_suffixes(
     monkeypatch,
 ) -> None:

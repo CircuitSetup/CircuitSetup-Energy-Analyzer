@@ -398,6 +398,23 @@ class SetupValidationError(ValueError):
         self.error_key = error_key
 
 
+_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
+_DEMO_CURRENT_SOURCE_ENTITY_IDS = set(_DEMO_SOURCE_ENTITY_IDS)
+_DEMO_SPLIT_SOURCE_CIRCUITS = {"hvac", "water_heater", "dryer", "car_charger"}
+_DEMO_SOURCE_METRIC_ALIASES = {
+    "power": "active_power",
+    "real_power": "active_power",
+}
+_DEMO_SPLIT_SOURCE_METRICS = {
+    "energy",
+    "active_power",
+    "current",
+    "power_factor",
+    "reactive_power",
+    "apparent_power",
+}
+
+
 def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> str:
     """Format auto-suggested dual-phase mappings for user confirmation."""
     suggestion_list = list(suggestions)
@@ -424,6 +441,87 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
     return "\n".join(lines)
 
 
+def _normalize_demo_source_entity_ids(entity_ids: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    for entity_id in entity_ids:
+        replacements = _current_demo_source_entity_ids(entity_id)
+        if replacements:
+            normalized.extend(replacements)
+        elif not str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX):
+            normalized.append(str(entity_id))
+    return list(dict.fromkeys(normalized))
+
+
+def _current_demo_source_entity_ids(entity_id: str) -> tuple[str, ...]:
+    entity_id = str(entity_id).strip()
+    if entity_id in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
+        return (entity_id,)
+    if not entity_id.startswith(_DEMO_SOURCE_ENTITY_PREFIX):
+        return ()
+    if _demo_unsuffixed_source_entity_id(entity_id) in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
+        return (entity_id,)
+
+    object_id = entity_id.removeprefix(_DEMO_SOURCE_ENTITY_PREFIX)
+    if replacement := _demo_power_alias_source_entity_id(object_id):
+        return (replacement,)
+    if replacement := _demo_split_source_entity_ids(object_id):
+        return replacement
+    if replacement := _demo_voltage_source_entity_ids(object_id):
+        return replacement
+    return ()
+
+
+def _demo_unsuffixed_source_entity_id(entity_id: str) -> str:
+    return re.sub(r"_\d+$", "", entity_id)
+
+
+def _demo_power_alias_source_entity_id(object_id: str) -> str:
+    for suffix, replacement_suffix in _DEMO_SOURCE_METRIC_ALIASES.items():
+        if not object_id.endswith(f"_{suffix}"):
+            continue
+        replacement = (
+            f"{_DEMO_SOURCE_ENTITY_PREFIX}"
+            f"{object_id[: -len(suffix)]}{replacement_suffix}"
+        )
+        if replacement in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
+            return replacement
+    return ""
+
+
+def _demo_split_source_entity_ids(object_id: str) -> tuple[str, ...]:
+    for circuit in _DEMO_SPLIT_SOURCE_CIRCUITS:
+        prefix = f"{circuit}_"
+        if not object_id.startswith(prefix):
+            continue
+        metric = object_id.removeprefix(prefix)
+        metric = _DEMO_SOURCE_METRIC_ALIASES.get(metric, metric)
+        if metric not in _DEMO_SPLIT_SOURCE_METRICS:
+            return ()
+        replacements = tuple(
+            f"{_DEMO_SOURCE_ENTITY_PREFIX}{circuit}_{leg}_{metric}"
+            for leg in ("l1", "l2")
+        )
+        return tuple(
+            replacement
+            for replacement in replacements
+            if replacement in _DEMO_CURRENT_SOURCE_ENTITY_IDS
+        )
+    return ()
+
+
+def _demo_voltage_source_entity_ids(object_id: str) -> tuple[str, ...]:
+    if not object_id.endswith("_voltage"):
+        return ()
+    circuit = object_id.removesuffix("_voltage")
+    replacements = (
+        "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
+        "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+    )
+    if circuit in _DEMO_SPLIT_SOURCE_CIRCUITS:
+        return replacements
+    return replacements[:1]
+
+
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize setup data without requiring Home Assistant."""
     source_devices = _strict_string_list(
@@ -434,10 +532,12 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
     legacy_source_entities = _strict_string_list(
         user_input.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    legacy_source_entities = _normalize_demo_source_entity_ids(legacy_source_entities)
     source_entities = list(
         dict.fromkeys([*extra_source_entities, *legacy_source_entities])
     )
@@ -476,9 +576,11 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
-            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
-            invalid_error_key="invalid_mains_source_entities",
+        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
+            _strict_string_list(
+                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                invalid_error_key="invalid_mains_source_entities",
+            )
         ),
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
@@ -506,6 +608,7 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
     outdoor_temperature_entity = str(
         user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
     ).strip()
@@ -534,9 +637,11 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
-            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
-            invalid_error_key="invalid_mains_source_entities",
+        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
+            _strict_string_list(
+                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                invalid_error_key="invalid_mains_source_entities",
+            )
         ),
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
@@ -554,6 +659,7 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             user_input.get(CONF_SOURCE_ENTITIES),
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
+        source_entities = _normalize_demo_source_entity_ids(source_entities)
         merged_source_entities.extend(source_entities)
     merged_source_entities = list(dict.fromkeys(merged_source_entities))
     if not merged_source_entities:
@@ -988,22 +1094,26 @@ def _mains_schema(
     config_entry: config_entries.ConfigEntry,
     source_entity_ids: Iterable[str] | None = None,
 ) -> Any:
-    mains_source_entities = _entry_value(
-        config_entry,
-        CONF_MAINS_SOURCE_ENTITIES,
-        [],
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            _entry_value(
+                config_entry,
+                CONF_MAINS_SOURCE_ENTITIES,
+                [],
+            ),
+            invalid_error_key="invalid_mains_source_entities",
+        )
     )
-    source_entities = _entry_value(config_entry, CONF_SOURCE_ENTITIES, [])
+    source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            _entry_value(config_entry, CONF_SOURCE_ENTITIES, []),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
     selectable_source_entities = _selectable_source_entity_ids(
         source_entity_ids,
-        _strict_string_list(
-            source_entities,
-            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-        ),
-        _strict_string_list(
-            mains_source_entities,
-            invalid_error_key="invalid_mains_source_entities",
-        ),
+        source_entities,
+        mains_source_entities,
     )
     return vol.Schema(
         {
@@ -3532,6 +3642,12 @@ def _options_schema(
         CONF_SOURCE_ENTITIES,
         data.get(CONF_SOURCE_ENTITIES, []),
     )
+    source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            source_entities,
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
     source_devices = options.get(
         CONF_SOURCE_DEVICES,
         data.get(CONF_SOURCE_DEVICES, []),
@@ -3539,6 +3655,12 @@ def _options_schema(
     mains_source_entities = options.get(
         CONF_MAINS_SOURCE_ENTITIES,
         data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+    )
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            mains_source_entities,
+            invalid_error_key="invalid_mains_source_entities",
+        )
     )
     outdoor_temperature_entity = options.get(
         CONF_OUTDOOR_TEMPERATURE_ENTITY,
@@ -3560,20 +3682,17 @@ def _options_schema(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
     )
-    selectable_source_entities = _selectable_source_entity_ids(
-        source_entity_ids,
-        _strict_string_list(
-            source_entities,
-            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-        ),
+    extra_source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
             extra_source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-        ),
-        _strict_string_list(
-            mains_source_entities,
-            invalid_error_key="invalid_mains_source_entities",
-        ),
+        )
+    )
+    selectable_source_entities = _selectable_source_entity_ids(
+        source_entity_ids,
+        source_entities,
+        extra_source_entities,
+        mains_source_entities,
     )
     return vol.Schema(
         {
@@ -3674,6 +3793,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         options.get(CONF_SOURCE_ENTITIES, data.get(CONF_SOURCE_ENTITIES, [])),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    source_entities = _normalize_demo_source_entity_ids(source_entities)
     extra_source_entities = _strict_string_list(
         options.get(
             CONF_EXTRA_SOURCE_ENTITIES,
@@ -3681,6 +3801,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         ),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
+    extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
     merged_source_entities = list(
         dict.fromkeys([*extra_source_entities, *source_entities])
     )
@@ -3709,12 +3830,14 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
                 data.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL),
             )
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _strict_string_list(
-            options.get(
-                CONF_MAINS_SOURCE_ENTITIES,
-                data.get(CONF_MAINS_SOURCE_ENTITIES, []),
-            ),
-            invalid_error_key="invalid_mains_source_entities",
+        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
+            _strict_string_list(
+                options.get(
+                    CONF_MAINS_SOURCE_ENTITIES,
+                    data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                ),
+                invalid_error_key="invalid_mains_source_entities",
+            )
         ),
         CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
             options.get(
