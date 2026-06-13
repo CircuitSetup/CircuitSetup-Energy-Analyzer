@@ -224,8 +224,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const data = Object.assign({}, action.data || {});
     if (actionKey === "label") {
-      const label = window.prompt("Label this NILM signature");
+      const labelInput = this.shadowRoot.querySelector(`#nilm_label_${index}`);
+      const label = labelInput ? labelInput.value.trim() : "";
       if (!label) {
+        this._error = "Enter a label for this NILM signature before saving.";
+        this._render();
         return;
       }
       data.label = label;
@@ -503,6 +506,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           border-color: var(--primary-color, #03a9f4);
           outline: none;
         }
+        .nilm-label-field {
+          display: grid;
+          gap: 4px;
+          margin-top: 10px;
+        }
+        .nilm-label-field input {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 8px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          padding: 8px 10px;
+        }
       </style>
       <main class="shell">
         <section class="panel">
@@ -649,9 +665,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>NILM signature</span>
             <strong>${this._escape(signature.display_label || signature.display_name || signature.likely_type || "Unknown load")}</strong>
+            ${this._renderNilmLabelField(signature, index)}
             ${this._renderNilmMergeTarget(signature, index)}
             <div class="actions">
-              ${this._nilmActionButton(index, "label", "Label")}
+              ${this._nilmActionButton(index, "label", "Save Label")}
               ${this._nilmActionButton(index, "ignore", "Ignore", true)}
               ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
               ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
@@ -659,6 +676,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </div>
         `).join("")}
       </section>
+    `;
+  }
+
+  _renderNilmLabelField(signature, index) {
+    const currentLabel = signature.user_label
+      || signature.display_name
+      || signature.likely_type
+      || signature.display_label
+      || "";
+    return `
+      <label class="nilm-label-field" for="nilm_label_${index}">
+        <span class="muted">Label this load</span>
+        <input
+          id="nilm_label_${index}"
+          type="text"
+          value="${this._escape(currentLabel)}"
+          placeholder="Appliance name"
+        >
+      </label>
     `;
   }
 
