@@ -64,6 +64,7 @@ async def async_create_data_quality_issue(
     problem: str,
     severity: Severity | str = Severity.WARNING,
     source_entities: Iterable[str] = (),
+    data: Mapping[str, Any] | None = None,
 ) -> None:
     """Create a Home Assistant Repairs issue for data quality/config problems."""
     await async_create_circuit_issue(
@@ -72,6 +73,7 @@ async def async_create_data_quality_issue(
         problem,
         severity=severity,
         source_entities=source_entities,
+        data=data,
     )
 
 

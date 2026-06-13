@@ -2508,7 +2508,7 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
         severity=Severity.WARNING,
         **kwargs,
     ) -> None:
-        issues.append((circuit_id, problem))
+        issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
         coordinator_module.repairs,
@@ -2534,7 +2534,18 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
     await coordinator.async_process_update()
 
-    assert issues == [("fridge", "missing_required_sensor")]
+    assert issues == [
+        (
+            "fridge",
+            "missing_required_sensor",
+            {
+                "circuit_name": "Fridge",
+                "reason": "A configured circuit is missing a required source sensor.",
+                "recommended_action": "Review source sensors for Fridge",
+                "source_entities": ["sensor.missing"],
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -2554,8 +2565,16 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
         problem,
         severity=Severity.WARNING,
         source_entities=(),
+        **kwargs,
     ) -> None:
-        issues.append((circuit_id, problem, tuple(source_entities)))
+        issues.append(
+            (
+                circuit_id,
+                problem,
+                tuple(source_entities),
+                dict(kwargs.get("data") or {}),
+            )
+        )
 
     monkeypatch.setattr(
         coordinator_module.repairs,
@@ -2605,6 +2624,17 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
             "fridge",
             "unexpected_negative_real_power",
             ("sensor.fridge_power", "sensor.fridge_current"),
+            {
+                "circuit_name": "Fridge",
+                "reason": "A load circuit is reporting sustained negative real power.",
+                "recommended_action": (
+                    "Check CT direction or power-flow mode for Fridge"
+                ),
+                "source_entities": [
+                    "sensor.fridge_power",
+                    "sensor.fridge_current",
+                ],
+            },
         )
     ]
     assert "negative_real_power_load" in coordinator.state.data_quality_by_circuit[

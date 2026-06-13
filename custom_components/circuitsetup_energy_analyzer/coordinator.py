@@ -3832,17 +3832,88 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._active_repair_issues.discard(issue)
 
         for issue in desired - self._active_repair_issues:
+            source_entities = (
+                sample_or_problem.source_entity_ids
+                if not isinstance(sample_or_problem, str)
+                else self._data_quality_repair_source_entities(issue[0])
+            )
             await repairs.async_create_data_quality_issue(
                 self.hass,
                 issue[0],
                 issue[1],
-                source_entities=(
-                    sample_or_problem.source_entity_ids
-                    if not isinstance(sample_or_problem, str)
-                    else ()
+                source_entities=source_entities,
+                data=self._data_quality_repair_data(
+                    issue[0],
+                    issue[1],
+                    source_entities,
                 ),
             )
             self._active_repair_issues.add(issue)
+
+    def _data_quality_repair_data(
+        self: Self,
+        circuit_id: str,
+        problem: str,
+        source_entities: Iterable[str],
+    ) -> dict[str, Any]:
+        config = self._config_for_circuit(circuit_id)
+        circuit_name = getattr(config, "name", None) or circuit_id
+        return {
+            "circuit_name": str(circuit_name),
+            "reason": self._data_quality_repair_reason(problem),
+            "recommended_action": self._data_quality_repair_action(
+                circuit_name,
+                problem,
+            ),
+            "source_entities": list(dict.fromkeys(source_entities)),
+        }
+
+    def _data_quality_repair_reason(self: Self, problem: str) -> str:
+        reasons = {
+            "missing_required_sensor": (
+                "A configured circuit is missing a required source sensor."
+            ),
+            "missing_source_entities": (
+                "The integration has no configured source sensors."
+            ),
+            "stale_source_sensor": (
+                "One or more selected source sensors have not updated recently."
+            ),
+            "unexpected_negative_real_power": (
+                "A load circuit is reporting sustained negative real power."
+            ),
+        }
+        return reasons.get(problem, "A configured circuit has source-data issues.")
+
+    def _data_quality_repair_action(
+        self: Self,
+        circuit_name: str,
+        problem: str,
+    ) -> str:
+        actions = {
+            "missing_required_sensor": f"Review source sensors for {circuit_name}",
+            "missing_source_entities": (
+                f"Add at least one source sensor for {circuit_name}"
+            ),
+            "stale_source_sensor": (
+                f"Fix stale source sensor data for {circuit_name}"
+            ),
+            "unexpected_negative_real_power": (
+                f"Check CT direction or power-flow mode for {circuit_name}"
+            ),
+        }
+        return actions.get(problem, f"Review source data for {circuit_name}")
+
+    def _data_quality_repair_source_entities(self: Self, circuit_id: str) -> list[str]:
+        config = self._config_for_circuit(circuit_id)
+        if config is None:
+            return []
+        return [
+            sensor.entity_id
+            for sensor in getattr(config, "sensors", ())
+            if isinstance(getattr(sensor, "entity_id", None), str)
+            and sensor.entity_id
+        ]
 
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
         desired: set[tuple[str, str]] = set()
