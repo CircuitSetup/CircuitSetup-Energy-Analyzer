@@ -329,7 +329,7 @@ def button_description_applies(
 
 
 def _supports_daily_circuit_actions(circuit: Any) -> bool:
-    profile = _appliance_profile(getattr(circuit, "appliance_profile", None))
+    profile = _appliance_profile(_circuit_value(circuit, "appliance_profile"))
     if profile in {
         ApplianceProfile.MAINS_NILM,
         ApplianceProfile.SOLAR_INVERTER,
@@ -402,7 +402,7 @@ def _has_active_alert(state: Any, circuit_id: str) -> bool:
 def _has_real_power_sensor(circuit: Any) -> bool:
     return any(
         _sensor_role(sensor) is SensorRole.REAL_POWER
-        for sensor in getattr(circuit, "sensors", ()) or ()
+        for sensor in _circuit_sensors(circuit)
     )
 
 
@@ -418,6 +418,21 @@ def _sensor_role(sensor: Any) -> SensorRole | None:
         return SensorRole(str(role))
     except (TypeError, ValueError):
         return None
+
+
+def _circuit_sensors(circuit: Any) -> tuple[Any, ...]:
+    sensors = _circuit_value(circuit, "sensors", ())
+    if isinstance(sensors, tuple):
+        return sensors
+    if isinstance(sensors, list):
+        return tuple(sensors)
+    return ()
+
+
+def _circuit_value(circuit: Any, key: str, default: Any = None) -> Any:
+    if isinstance(circuit, Mapping):
+        return circuit.get(key, default)
+    return getattr(circuit, key, default)
 
 
 def _appliance_profile(value: Any) -> ApplianceProfile | None:

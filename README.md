@@ -244,7 +244,7 @@ Choose one layout:
 
 You can also choose the layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, then press `button.circuitsetup_energy_analyzer_create_dashboard`.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. When the related control entities exist, it also adds small action cards for dashboard layout, entity detail level, mapping checks, settings recalculation, daily energy goals, alert sensitivity, relearn baseline, maintenance, and pause alerts. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. When the related control entities exist, it also adds small action cards for dashboard layout, entity detail level, mapping checks, settings recalculation, daily energy goals, alert sensitivity, relearn baseline, maintenance, and pause alerts. These controls are created for both analyzer-managed circuits and circuits loaded from the config entry data. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards.
 
 For manual dashboards, start with one simple card per important appliance:
 
@@ -471,7 +471,7 @@ The analyzer can report weather-explained pump activity, possible excess pump ac
 
 ### Water-flow correlation
 
-Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
+Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one global or circuit-linked binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
 
 The analyzer compares how long the water-flow sensor has been active with recent mapped appliance runtime. It can report:
 
@@ -881,8 +881,8 @@ These are most useful for dedicated appliance circuits such as refrigerators, fr
 | **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Visible for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
 | **Outdoor Temperature** | `sensor.<circuit>_outdoor_temperature` | Graphable outdoor temperature value used by HVAC weather context. | Visible for HVAC-like circuits when outdoor temperature context is configured. | Numeric temperature in `°F` or `°C` |
 | **Rain Pump Correlation** | `sensor.<circuit>_rain_pump_correlation` | Pump runtime compared with rain, optional rain intensity, HVAC compressor context, and learned dry-weather runtime. Attributes include rain source, rain activity, compressor context, observed runtime, dry baseline, and explanation. | Visible for sump pump, water pump, and well pump circuits when a rain source is configured. | `Unconfigured`, `Learning`, `Normal`, `Rain Explained`, `Compressor Explained`, `Weather Explained`, `Possible Excess Pump Activity`, `Possible Missing Pump Activity` |
-| **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
-| **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Visible for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | Minutes |
+| **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Visible for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
+| **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Visible for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | Minutes |
 | **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, disabled by default. | Percentage mismatch |
 | **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, disabled by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
 
@@ -975,7 +975,7 @@ Diagnostic binary sensors are created for configured circuits. Operational binar
 | **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Advanced diagnostic, disabled by default. | `on`, `off` |
 | **Maintenance** | `binary_sensor.<circuit>_maintenance` | On when the circuit is marked as in maintenance. | Advanced diagnostic, disabled by default. | `on`, `off` |
 | **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Default visible for appliance circuits. | `on`, `off` |
-| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Feature-specific for water pump, well pump, water heater, and washer circuits when a flow sensor is configured. | `on`, `off` |
+| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Feature-specific for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `on`, `off` |
 
 ## Status Glossary
 
