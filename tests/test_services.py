@@ -1202,6 +1202,108 @@ async def test_setting_recommendation_services_accept_single_entity_target(
 
 
 @pytest.mark.asyncio
+async def test_setting_recommendation_entity_target_ignores_stored_history(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_APPLY_SETTING_RECOMMENDATION,
+        async_setup_services,
+    )
+    from custom_components.circuitsetup_energy_analyzer.settings_advisor import (
+        RecommendationStatus,
+        SettingRecommendation,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    def recommendation(
+        recommendation_id: str,
+        status: RecommendationStatus,
+    ) -> SettingRecommendation:
+        return SettingRecommendation(
+            recommendation_id=recommendation_id,
+            unique_key=recommendation_id.rsplit(":", 1)[0],
+            circuit_id="fridge",
+            circuit_name="Fridge",
+            setting_key="daily_spike_ratio",
+            setting_label="Daily Spike Ratio",
+            current_value=0.25,
+            suggested_value=0.3,
+            unit="ratio",
+            feature="energy_usage_spikes",
+            group="Energy Usage",
+            confidence=0.82,
+            reason="Observed high daily energy spikes.",
+            evidence={},
+            apply_payload={"daily_spike_ratio": 0.3},
+            status=status,
+            created_at=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+            expires_at=datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+        )
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+            self.state = SimpleNamespace(
+                settings_recommendations_by_circuit={
+                    "fridge": [
+                        {
+                            "recommendation_id": "fridge:daily_spike_ratio:v1",
+                            "circuit_id": "fridge",
+                        }
+                    ]
+                }
+            )
+            self.store_data = SimpleNamespace(
+                settings_recommendations={
+                    "fridge:daily_spike_ratio:v1": recommendation(
+                        "fridge:daily_spike_ratio:v1",
+                        RecommendationStatus.PENDING,
+                    ),
+                    "fridge:standby_threshold_w:v1": recommendation(
+                        "fridge:standby_threshold_w:v1",
+                        RecommendationStatus.APPLIED,
+                    ),
+                }
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_apply_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_apply_setting_recommendation", (recommendation_id,))
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
+    )
+
+    assert coordinator.calls == [
+        ("async_apply_setting_recommendation", ("fridge:daily_spike_ratio:v1",))
+    ]
+
+
+@pytest.mark.asyncio
 async def test_setting_recommendation_entity_target_rejects_ambiguous_recommendations(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (

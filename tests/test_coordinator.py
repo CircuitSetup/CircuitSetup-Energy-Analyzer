@@ -9117,6 +9117,67 @@ async def test_runtime_utility_comparison_missing_measured_creates_specific_repa
 
 
 @pytest.mark.asyncio
+async def test_runtime_specific_utility_comparison_repair_deletes_legacy_generic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    created: list[tuple[str, str]] = []
+    deleted: list[tuple[str, str]] = []
+
+    async def fake_create(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        created.append((circuit_id, problem))
+
+    async def fake_delete(hass, circuit_id, problem) -> None:
+        deleted.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_create,
+    )
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_delete_circuit_issue",
+        fake_delete,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
+    )
+    coordinator.state.utility_comparison_status_by_circuit["mains"] = (
+        "missing_measured"
+    )
+
+    await coordinator._sync_setup_health_repairs("mains")
+
+    assert deleted == [("mains", "utility_comparison_source_mismatch")]
+    assert created == [("mains", "utility_comparison_missing_measured_source")]
+
+
+@pytest.mark.asyncio
 async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

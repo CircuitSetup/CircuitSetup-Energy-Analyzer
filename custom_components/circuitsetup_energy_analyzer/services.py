@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from . import notifications
@@ -1261,7 +1262,7 @@ def _recommendation_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[st
                 recommendation_id,
                 recommendation,
                 circuit_id,
-            ):
+            ) and _recommendation_is_pending(coordinator, recommendation):
                 recommendation_ids.add(str(recommendation_id))
     return recommendation_ids
 
@@ -1294,6 +1295,32 @@ def _recommendation_matches_circuit(
     return isinstance(recommendation_id, str) and recommendation_id.startswith(
         f"{circuit_id}:",
     )
+
+
+def _recommendation_is_pending(coordinator: Any, recommendation: Any) -> bool:
+    status = (
+        recommendation.get("status")
+        if isinstance(recommendation, Mapping)
+        else getattr(recommendation, "status", None)
+    )
+    if status is None:
+        return True
+    status_value = getattr(status, "value", status)
+    if str(status_value) != "pending":
+        return False
+
+    expires_at = (
+        recommendation.get("expires_at")
+        if isinstance(recommendation, Mapping)
+        else getattr(recommendation, "expires_at", None)
+    )
+    if not isinstance(expires_at, datetime):
+        return True
+    now_fn = getattr(coordinator, "_now_fn", None)
+    now = now_fn() if callable(now_fn) else datetime.now(UTC)
+    if expires_at.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    return expires_at > now
 
 
 def _iter_items(value: Any) -> Iterable[Any]:

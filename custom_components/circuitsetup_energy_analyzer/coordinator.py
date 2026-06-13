@@ -3881,6 +3881,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for issue in self._active_repair_issues
             if issue[0] == circuit_id and issue[1] in _SETUP_HEALTH_REPAIR_PROBLEMS
         }
+        if (
+            utility_comparison_problem
+            in {
+                "utility_comparison_missing_utility_source",
+                "utility_comparison_missing_measured_source",
+            }
+        ):
+            current.add((circuit_id, "utility_comparison_source_mismatch"))
         for issue in sorted(current - desired):
             await repairs.async_delete_circuit_issue(self.hass, issue[0], issue[1])
             self._active_repair_issues.discard(issue)
