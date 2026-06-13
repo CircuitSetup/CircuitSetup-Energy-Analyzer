@@ -175,7 +175,7 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         )
         if reason is None:
             return None
-        return {"availability_reason": reason}
+        return _availability_attributes(reason)
 
     async def async_press(self) -> None:
         """Run the circuit action."""
@@ -188,7 +188,8 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         if reason is not None:
             raise HomeAssistantError(
                 f"Cannot {self.entity_description.name_suffix.strip().lower()} "
-                f"right now because {_availability_reason_label(reason)}."
+                f"right now because {reason.replace('_', ' ')}: "
+                f"{_availability_reason_label(reason)}"
             )
         await _call_or_raise(
             self.coordinator,
@@ -259,14 +260,16 @@ class GlobalAnalyzerButton(ButtonEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, str] | None:
-        """Expose the last dashboard create/update result on its action button."""
+        """Expose global action availability and dashboard action results."""
+        attributes: dict[str, str] = {}
+        if not self.available:
+            attributes.update(_availability_attributes("action_unavailable"))
         if self.entity_description.key != "create_dashboard":
-            return None
+            return attributes or None
         request = getattr(self.coordinator, "last_dashboard_create_request", None)
         if not isinstance(request, Mapping):
-            return None
+            return attributes or None
 
-        attributes: dict[str, str] = {}
         for source_key, attribute_key in (
             ("action", "last_dashboard_action"),
             ("reason", "last_dashboard_reason"),
@@ -392,7 +395,33 @@ def _button_availability_reason(
 
 
 def _availability_reason_label(reason: str) -> str:
-    return reason.replace("_", " ")
+    return {
+        "action_unavailable": "The analyzer action is unavailable.",
+        "maintenance_active": "Maintenance is already active for this circuit.",
+        "maintenance_inactive": "Maintenance is not active for this circuit.",
+        "alerts_paused": "Alerts are already paused for this circuit.",
+        "no_active_alert": "No active alert is available to pause.",
+    }.get(reason, reason.replace("_", " "))
+
+
+def _availability_attributes(reason: str) -> dict[str, str]:
+    return {
+        "availability_reason": reason,
+        "availability_label": _availability_reason_label(reason),
+        "next_step": _availability_next_step(reason),
+    }
+
+
+def _availability_next_step(reason: str) -> str:
+    return {
+        "action_unavailable": "Reload the integration or check the system log.",
+        "maintenance_active": "Use End Maintenance when work is complete.",
+        "maintenance_inactive": "Use Start Maintenance before ending maintenance.",
+        "alerts_paused": "End maintenance or wait for the alert pause to expire.",
+        "no_active_alert": (
+            "Review the circuit summary or evidence panel for current alerts."
+        ),
+    }.get(reason, "Review the circuit controls and try again.")
 
 
 def _maintenance_active(state: Any, circuit_id: str) -> bool:

@@ -258,6 +258,8 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     assert by_unique_id["entry-1_fridge_end_maintenance"].available is False
     assert by_unique_id["entry-1_fridge_end_maintenance"].extra_state_attributes == {
         "availability_reason": "maintenance_inactive",
+        "availability_label": "Maintenance is not active for this circuit.",
+        "next_step": "Use Start Maintenance before ending maintenance.",
     }
 
     assert coordinator.calls == [
@@ -337,6 +339,39 @@ async def test_create_dashboard_button_exposes_last_dashboard_result(
 
 
 @pytest.mark.asyncio
+async def test_unavailable_global_buttons_explain_missing_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(),
+        options={},
+        entry_data={},
+        store_data=SimpleNamespace(),
+    )
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    run_mapping = by_unique_id["entry-1_run_mapping_checks"]
+
+    assert run_mapping.available is False
+    assert run_mapping.extra_state_attributes == {
+        "availability_reason": "action_unavailable",
+        "availability_label": "The analyzer action is unavailable.",
+        "next_step": "Reload the integration or check the system log.",
+    }
+
+
+@pytest.mark.asyncio
 async def test_button_availability_tracks_maintenance_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -384,6 +419,8 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
     assert pause_alerts.available is False
     assert pause_alerts.extra_state_attributes == {
         "availability_reason": "no_active_alert",
+        "availability_label": "No active alert is available to pause.",
+        "next_step": "Review the circuit summary or evidence panel for current alerts.",
     }
 
     with pytest.raises(button.HomeAssistantError, match="no active alert"):
@@ -399,6 +436,8 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
     assert pause_alerts.available is False
     assert pause_alerts.extra_state_attributes == {
         "availability_reason": "alerts_paused",
+        "availability_label": "Alerts are already paused for this circuit.",
+        "next_step": "End maintenance or wait for the alert pause to expire.",
     }
 
 
@@ -424,6 +463,8 @@ async def test_unavailable_maintenance_button_press_raises_clear_error(
     assert end_maintenance.available is False
     assert end_maintenance.extra_state_attributes == {
         "availability_reason": "maintenance_inactive",
+        "availability_label": "Maintenance is not active for this circuit.",
+        "next_step": "Use Start Maintenance before ending maintenance.",
     }
 
     with pytest.raises(button.HomeAssistantError, match="maintenance inactive"):
