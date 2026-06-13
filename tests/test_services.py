@@ -284,6 +284,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
         SENSITIVITY_SERVICE_SCHEMA,
+        SERVICE_ACKNOWLEDGE_ALERT,
         SERVICE_PAUSE_ALERTS,
         UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA,
     )
@@ -309,6 +310,11 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     ) == {"circuit_id": "fridge", "relearn": True}
     assert ALERT_FEEDBACK_SERVICE_SCHEMA({"alert_id": "alert-1"}) == {
         "alert_id": "alert-1"
+    }
+    assert ALERT_FEEDBACK_SERVICE_SCHEMA(
+        {"entity_id": "sensor.fridge_health_summary"}
+    ) == {
+        "entity_id": "sensor.fridge_health_summary"
     }
     assert NILM_SIGNATURE_SERVICE_SCHEMA(
         {"circuit_id": "mains", "signature_id": "signature_1"}
@@ -351,6 +357,11 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     ) == {
         "entity_id": "sensor.fridge_health_summary",
         "duration": "01:00:00",
+    }
+    assert _SERVICE_SCHEMAS[SERVICE_ACKNOWLEDGE_ALERT](
+        {"entity_id": "sensor.fridge_health_summary"}
+    ) == {
+        "entity_id": "sensor.fridge_health_summary",
     }
 
     with pytest.raises(vol.Invalid):
@@ -1357,6 +1368,141 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
             await hass.services.registered[(DOMAIN, service)](
                 SimpleNamespace(data={"alert_id": "stale-alert"})
             )
+
+
+@pytest.mark.asyncio
+async def test_alert_feedback_services_accept_single_alert_entity_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ACKNOWLEDGE_ALERT,
+        SERVICE_MARK_ALERT_EXPECTED,
+        SERVICE_MARK_ALERT_UNHELPFUL,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+            self.alert = AlertEvidence(
+                timestamp=datetime(2026, 6, 13, 12, 0, tzinfo=UTC),
+                circuit_id="fridge",
+                severity=Severity.WARNING,
+                message="Fridge door appears open.",
+                feature="door_open",
+            )
+            self.state = SimpleNamespace(
+                active_alerts_by_circuit={
+                    "fridge": [self.alert],
+                }
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_acknowledge_alert(self, alert_id: str) -> bool:
+            self.calls.append(("async_acknowledge_alert", alert_id))
+            return True
+
+        async def async_mark_alert_expected(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_alert_expected", alert_id))
+            return True
+
+        async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_alert_unhelpful", alert_id))
+            return True
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    for service in (
+        SERVICE_ACKNOWLEDGE_ALERT,
+        SERVICE_MARK_ALERT_EXPECTED,
+        SERVICE_MARK_ALERT_UNHELPFUL,
+    ):
+        await hass.services.registered[(DOMAIN, service)](
+            SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
+        )
+
+    expected_alert_id = notification_id_for_alert(coordinator.alert)
+    assert coordinator.calls == [
+        ("async_acknowledge_alert", expected_alert_id),
+        ("async_mark_alert_expected", expected_alert_id),
+        ("async_mark_alert_unhelpful", expected_alert_id),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_alert_feedback_services_reject_ambiguous_entity_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_MARK_ALERT_EXPECTED,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+
+        def __init__(self) -> None:
+            self.state = SimpleNamespace(
+                active_alerts_by_circuit={
+                    "fridge": [
+                        SimpleNamespace(alert_id="alert-a"),
+                        SimpleNamespace(alert_id="alert-b"),
+                    ],
+                }
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_mark_alert_expected(self, alert_id: str) -> bool:
+            raise AssertionError("service should reject ambiguous target first")
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="entity_id target for circuit_id 'fridge' has multiple active alerts",
+    ):
+        await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_EXPECTED)](
+            SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
+        )
 
 
 @pytest.mark.asyncio
