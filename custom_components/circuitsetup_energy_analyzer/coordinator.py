@@ -4589,8 +4589,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         normalized_period = _utility_statistic_period_value(period)
 
-        def _fetch() -> dict[str, list[dict[str, Any]]]:
-            return _ha_statistics_during_period(
+        try:
+            return await _async_recorder_executor_job(
+                self.hass,
+                _ha_statistics_during_period,
                 self.hass,
                 start_time,
                 end_time,
@@ -4599,9 +4601,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 {"energy": "kWh"},
                 {"change", "sum", "state"},
             )
-
-        try:
-            return await _async_recorder_executor_job(self.hass, _fetch)
         except Exception as err:  # noqa: BLE001 - recorder availability varies by setup.
             _LOGGER.debug(
                 "Recorder statistics unavailable for %s: %s",
@@ -6585,7 +6584,7 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
     )
 
 
-async def _async_recorder_executor_job(hass: Any, target: Any) -> Any:
+async def _async_recorder_executor_job(hass: Any, target: Any, *args: Any) -> Any:
     if _ha_recorder_get_instance is not None:
         try:
             recorder = _ha_recorder_get_instance(hass)
@@ -6593,7 +6592,7 @@ async def _async_recorder_executor_job(hass: Any, target: Any) -> Any:
             recorder = None
         add_recorder_job = getattr(recorder, "async_add_executor_job", None)
         if callable(add_recorder_job):
-            return await add_recorder_job(target)
+            return await add_recorder_job(target, *args)
 
     raise RuntimeError("recorder executor is not available")
 
