@@ -2060,6 +2060,25 @@ def test_setup_health_helpers_are_feature_module_exports() -> None:
     assert feature_module.setup_health_attributes is sensor_attributes
 
 
+def test_energy_helpers_are_feature_module_exports() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities import (
+        energy as feature_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        daily_energy_usage_value,
+        energy_goal_status_value,
+        energy_goal_usage_value,
+        energy_usage_share_value,
+        energy_usage_status_value,
+    )
+
+    assert feature_module.daily_energy_usage_value is daily_energy_usage_value
+    assert feature_module.energy_usage_share_value is energy_usage_share_value
+    assert feature_module.energy_usage_status_value is energy_usage_status_value
+    assert feature_module.energy_goal_usage_value is energy_goal_usage_value
+    assert feature_module.energy_goal_status_value is energy_goal_status_value
+
+
 def test_status_sensor_entities_explain_machine_status_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
