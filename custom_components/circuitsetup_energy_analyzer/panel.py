@@ -10,6 +10,7 @@ from .const import DOMAIN
 from .models import AlertEvidence, CircuitConfig
 from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
+    is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
     recommendation_setting_default_value,
     recommendation_setting_expected_effect,
@@ -492,9 +493,40 @@ def _add_recommendation_guidance(payload: dict[str, Any]) -> None:
     expected_effect = recommendation_setting_expected_effect(setting_key)
     if expected_effect:
         payload["expected_effect"] = expected_effect
-    evidence_preview = recommendation_evidence_preview(payload.get("evidence"))
+    evidence = payload.pop("evidence", None)
+    payload.update(_recommendation_evidence_metadata(evidence))
+    evidence_preview = recommendation_evidence_preview(evidence)
     if evidence_preview:
         payload["evidence_preview"] = evidence_preview
+
+
+def _recommendation_evidence_metadata(
+    evidence: Any,
+    *,
+    limit: int = 4,
+) -> dict[str, Any]:
+    if not isinstance(evidence, Mapping):
+        return {}
+
+    preview_key_count = 0
+    for key, value in evidence.items():
+        key_text = str(key)
+        if is_hidden_recommendation_evidence_key(key_text):
+            continue
+        if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+            continue
+        preview_key_count += 1
+        if preview_key_count >= limit:
+            break
+
+    evidence_key_count = len(evidence)
+    omitted_key_count = max(evidence_key_count - preview_key_count, 0)
+    return {
+        "evidence_key_count": evidence_key_count,
+        "evidence_preview_key_count": preview_key_count,
+        "evidence_omitted_key_count": omitted_key_count,
+        "evidence_has_more": omitted_key_count > 0,
+    }
 
 
 def _recommendation_evidence_path(
