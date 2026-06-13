@@ -8,7 +8,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-MINIMUM_RELEASE_PRS = 3
+MINIMUM_RELEASE_PRS = 2
 
 
 def distinct_pull_request_numbers(

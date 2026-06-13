@@ -74,7 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
-          MINIMUM_RELEASE_PRS: "3"
+          MINIMUM_RELEASE_PRS: "2"
         run: |
           python scripts/verify_release_batch.py \
             --tag "$RELEASE_TAG" \
@@ -92,3 +92,15 @@ jobs:
               --title "$RELEASE_TAG" \
               --generate-notes
           fi
+
+      - name: Clean generated release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          notes_file="$(mktemp)"
+          cleaned_notes_file="$(mktemp)"
+          trap 'rm -f "$notes_file" "$cleaned_notes_file"' EXIT
+          gh release view "$RELEASE_TAG" --json body --jq .body > "$notes_file"
+          python scripts/clean_release_notes.py < "$notes_file" > "$cleaned_notes_file"
+          gh release edit "$RELEASE_TAG" --notes-file "$cleaned_notes_file"

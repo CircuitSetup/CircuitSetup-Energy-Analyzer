@@ -66,10 +66,25 @@ def test_release_workflow_verifies_release_pr_batch() -> None:
     assert checkout_step["with"]["fetch-depth"] == "0"
     assert guard_step["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert guard_step["env"]["RELEASE_TAG"] == "${{ steps.tag.outputs.tag }}"
-    assert guard_step["env"]["MINIMUM_RELEASE_PRS"] == "3"
+    assert guard_step["env"]["MINIMUM_RELEASE_PRS"] == "2"
     assert "scripts/verify_release_batch.py" in guard_step["run"]
     assert "--tag \"$RELEASE_TAG\"" in guard_step["run"]
     assert "--minimum-prs \"$MINIMUM_RELEASE_PRS\"" in guard_step["run"]
+
+
+def test_release_workflow_cleans_generated_notes_for_owner_entries() -> None:
+    workflow = _load_release_workflow()
+    release_steps = workflow["jobs"]["release"]["steps"]
+    cleanup_step = next(
+        step
+        for step in release_steps
+        if step["name"] == "Clean generated release notes"
+    )
+
+    assert cleanup_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert cleanup_step["env"]["RELEASE_TAG"] == "${{ steps.tag.outputs.tag }}"
+    assert "scripts/clean_release_notes.py" in cleanup_step["run"]
+    assert "gh release edit \"$RELEASE_TAG\" --notes-file" in cleanup_step["run"]
 
 
 def _load_release_batch_module():
@@ -94,13 +109,38 @@ def test_release_batch_guard_counts_distinct_associated_prs() -> None:
     ) == {66, 68}
 
 
-def test_release_batch_guard_requires_more_than_two_prs(capsys) -> None:
+def test_release_batch_guard_requires_more_than_one_pr(capsys) -> None:
     guard = _load_release_batch_module()
 
-    guard.require_minimum_pull_requests({66, 68, 70}, minimum=3)
+    guard.require_minimum_pull_requests({66, 68}, minimum=2)
 
     with pytest.raises(SystemExit) as excinfo:
-        guard.require_minimum_pull_requests({68, 70}, minimum=3)
+        guard.require_minimum_pull_requests({68}, minimum=2)
 
     assert excinfo.value.code == 1
-    assert "at least 3 merged pull requests" in capsys.readouterr().err
+    assert "at least 2 merged pull requests" in capsys.readouterr().err
+
+
+def test_release_notes_cleanup_omits_owner_username_only() -> None:
+    module_path = ROOT / "scripts" / "clean_release_notes.py"
+    spec = importlib.util.spec_from_file_location("clean_release_notes", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    body = "\n".join(
+        [
+            "## What's Changed",
+            "* Reveal Expert entity detail rows safely by @CircuitSetup in #88",
+            "* External fix by @friend in #90",
+        ]
+    )
+
+    assert module.clean_release_notes_body(body) == "\n".join(
+        [
+            "## What's Changed",
+            "* Reveal Expert entity detail rows safely in #88",
+            "* External fix by @friend in #90",
+        ]
+    )
