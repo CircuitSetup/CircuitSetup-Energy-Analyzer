@@ -18,10 +18,11 @@ def _load_release_workflow() -> dict[str, object]:
     )
 
 
-def test_release_workflow_is_manual_only() -> None:
+def test_release_workflow_runs_for_version_tags_and_manual_dispatch() -> None:
     workflow = _load_release_workflow()
 
     assert workflow["on"] == {
+        "push": {"tags": ["v*.*.*"]},
         "workflow_dispatch": {
             "inputs": {
                 "tag": {
@@ -34,7 +35,7 @@ def test_release_workflow_is_manual_only() -> None:
     }
 
 
-def test_release_workflow_uses_dispatch_tag_only() -> None:
+def test_release_workflow_resolves_dispatch_or_pushed_tag() -> None:
     workflow = _load_release_workflow()
     release_steps = workflow["jobs"]["release"]["steps"]
     checkout_step = next(
@@ -44,10 +45,12 @@ def test_release_workflow_uses_dispatch_tag_only() -> None:
         step for step in release_steps if step["name"] == "Resolve release tag"
     )
 
-    assert checkout_step["with"]["ref"] == "${{ inputs.tag }}"
+    assert (
+        checkout_step["with"]["ref"]
+        == "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}"
+    )
     assert 'echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
-    assert "github.ref" not in tag_step["run"]
-    assert "GITHUB_REF_NAME" not in tag_step["run"]
+    assert 'echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
 
 
 def test_release_workflow_verifies_release_pr_batch() -> None:
