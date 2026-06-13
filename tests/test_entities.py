@@ -2079,6 +2079,31 @@ def test_energy_helpers_are_feature_module_exports() -> None:
     assert feature_module.energy_goal_status_value is energy_goal_status_value
 
 
+def test_nilm_helpers_are_feature_module_exports() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities import (
+        nilm as feature_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        nilm_signature_count_value,
+        nilm_topology_status_value,
+        nilm_unknown_loads_attributes,
+        nilm_unknown_loads_value,
+        nilm_unmatched_load_percentage_value,
+    )
+
+    assert feature_module.nilm_signature_count_value is nilm_signature_count_value
+    assert (
+        feature_module.nilm_unmatched_load_percentage_value
+        is nilm_unmatched_load_percentage_value
+    )
+    assert feature_module.nilm_topology_status_value is nilm_topology_status_value
+    assert feature_module.nilm_unknown_loads_value is nilm_unknown_loads_value
+    assert (
+        feature_module.nilm_unknown_loads_attributes
+        is nilm_unknown_loads_attributes
+    )
+
+
 def test_status_sensor_entities_explain_machine_status_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,

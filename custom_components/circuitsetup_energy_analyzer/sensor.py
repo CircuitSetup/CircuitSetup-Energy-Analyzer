@@ -31,6 +31,13 @@ from .entities.energy import (
     energy_usage_share_value,
     energy_usage_status_value,
 )
+from .entities.nilm import (
+    nilm_signature_count_value,
+    nilm_topology_status_value,
+    nilm_unknown_loads_attributes,
+    nilm_unknown_loads_value,
+    nilm_unmatched_load_percentage_value,
+)
 from .entities.settings_suggestions import (
     settings_suggestions_attributes,
     settings_suggestions_value,
@@ -318,53 +325,6 @@ def power_factor_drift_value(state: Any, circuit_id: str) -> float:
     return float(
         getattr(state, "power_factor_drift_by_circuit", {}).get(circuit_id, 0.0)
     )
-
-
-def nilm_signature_count_value(state: Any, circuit_id: str) -> int:
-    """Return the number of discovered NILM signatures for a circuit."""
-    return int(
-        getattr(state, "nilm_signature_count_by_circuit", {}).get(circuit_id, 0)
-    )
-
-
-def nilm_unmatched_load_percentage_value(state: Any, circuit_id: str) -> float:
-    """Return the NILM unmatched load percentage for a circuit."""
-    return float(
-        getattr(state, "nilm_unmatched_load_percentage_by_circuit", {}).get(
-            circuit_id,
-            0.0,
-        )
-    )
-
-
-def nilm_topology_status_value(state: Any, circuit_id: str) -> str:
-    """Return whether mains NILM topology matches the configured circuit mode."""
-    return str(
-        getattr(state, "nilm_topology_status_by_circuit", {}).get(
-            circuit_id,
-            "no_match",
-        )
-    )
-
-
-def nilm_unknown_loads_value(state: Any, circuit_id: str) -> int:
-    """Return the count of reviewable unknown NILM loads for a circuit."""
-    inventory = getattr(state, "nilm_unknown_loads_by_circuit", {}).get(
-        circuit_id,
-        {},
-    )
-    if isinstance(inventory, Mapping):
-        return int(inventory.get("unknown_load_count", 0))
-    return 0
-
-
-def nilm_unknown_loads_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
-    """Return consolidated unknown NILM load inventory attributes."""
-    inventory = getattr(state, "nilm_unknown_loads_by_circuit", {}).get(
-        circuit_id,
-        {},
-    )
-    return dict(inventory) if isinstance(inventory, Mapping) else {}
 
 
 _WEATHER_CONTEXT_STATUS_LABELS = {
