@@ -486,6 +486,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           border-radius: 4px;
           padding: 2px 5px;
         }
+        .source-entity-chip {
+          align-items: center;
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 999px;
+          color: var(--primary-text-color, #111827);
+          cursor: pointer;
+          display: inline-flex;
+          font: inherit;
+          gap: 6px;
+          padding: 6px 10px;
+        }
+        .source-entity-chip:hover,
+        .source-entity-chip:focus {
+          border-color: var(--primary-color, #03a9f4);
+          outline: none;
+        }
       </style>
       <main class="shell">
         <section class="panel">
@@ -518,6 +535,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
         this._callNilmAction(index, button.dataset.nilmAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-source-entity]")) {
+      button.addEventListener("click", () => {
+        this._openSourceEntity(button.dataset.sourceEntity);
       });
     }
   }
@@ -589,10 +611,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <section class="panel">
         <h2>Source Entities</h2>
         <div class="entity-list">
-          ${entities.map((entityId) => `<code>${this._escape(entityId)}</code>`).join("")}
+          ${entities.map((entityId) => this._sourceEntityChip(entityId)).join("")}
         </div>
       </section>
     `;
+  }
+
+  _sourceEntityChip(entityId) {
+    const escapedEntityId = this._escape(entityId);
+    return `
+      <button class="source-entity-chip" data-source-entity="${escapedEntityId}" title="Open ${escapedEntityId} details">
+        <code>${escapedEntityId}</code><span>Open details</span>
+      </button>
+    `;
+  }
+
+  _openSourceEntity(entityId) {
+    if (!entityId) {
+      return;
+    }
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      detail: { entityId },
+    }));
   }
 
   _renderNilmActions() {
