@@ -984,6 +984,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     asset = asset_path.read_text(encoding="utf-8")
 
     for expected in (
+        'customElements.get("circuitsetup-energy-analyzer-panel")',
         'customElements.define("circuitsetup-energy-analyzer-panel"',
         "URLSearchParams",
         "/api/circuitsetup_energy_analyzer/alert_evidence",

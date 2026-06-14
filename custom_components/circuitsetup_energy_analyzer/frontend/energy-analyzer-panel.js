@@ -1107,4 +1107,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 }
 
-customElements.define("circuitsetup-energy-analyzer-panel", CircuitSetupEnergyAnalyzerPanel);
+if (!customElements.get("circuitsetup-energy-analyzer-panel")) {
+  customElements.define("circuitsetup-energy-analyzer-panel", CircuitSetupEnergyAnalyzerPanel);
+}
