@@ -14,6 +14,7 @@ INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 EXPECTED_FLOW_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
+    "demo_source_bundle_enabled": "Load Bundled Demo Sources",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "outdoor_temperature_entity": "Outdoor Temperature Entity",
@@ -27,6 +28,7 @@ EXPECTED_FLOW_LABELS = {
 EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
+    "demo_source_bundle_enabled": "Load Bundled Demo Sources",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "outdoor_temperature_entity": "Outdoor Temperature Entity",
     "rain_sensor_entity": "Rain Sensor",
