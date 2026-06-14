@@ -2250,7 +2250,7 @@ def _start_assignment_review(
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
     groups = assignment_groups_from_sources(
-        pending_config.get(CONF_SOURCE_ENTITIES, []),
+        _assignment_review_source_entities(pending_config),
         mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
         existing_circuits=existing_circuit_list,
     )
@@ -2271,6 +2271,23 @@ def _start_assignment_review(
     if show_picker:
         return _assignment_picker_form(flow)
     return _assignment_review_form(flow)
+
+
+def _assignment_review_source_entities(config: Mapping[str, Any]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            [
+                *_strict_string_list(
+                    config.get(CONF_SOURCE_ENTITIES, []),
+                    invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+                ),
+                *_strict_string_list(
+                    config.get(CONF_EXTRA_SOURCE_ENTITIES, []),
+                    invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+                ),
+            ]
+        )
+    )
 
 
 def _handle_assignment_review_submission(
@@ -4009,7 +4026,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
             invalid_error_key="invalid_source_devices",
         ),
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
-        CONF_SOURCE_ENTITIES: merged_source_entities,
+        CONF_SOURCE_ENTITIES: source_entities,
         CONF_DEMO_SOURCE_BUNDLE_ENABLED: demo_source_bundle_enabled,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             options.get(

@@ -2277,6 +2277,65 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_review_keeps_removed_extra_sources_inactive() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    refrigerator = {
+        "circuit_id": "refrigerator",
+        "name": "Kitchen Refrigerator",
+        "appliance_profile": "refrigerator",
+        "mode": "single_phase",
+        "power_flow": "load",
+        "retention_mode": "standard",
+        "sensors": [
+            {"entity_id": "sensor.refrigerator_power", "role": "real_power"},
+        ],
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: ["sensor.refrigerator_power"],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.microwave_power",
+            ],
+            CONF_CIRCUITS: [refrigerator],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "refrigerator"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.refrigerator_power"],
+            "circuit_name": "Kitchen Refrigerator",
+            "appliance_profile": "refrigerator",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert len(result["data"][CONF_CIRCUITS]) == 1
+    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == "refrigerator"
+    assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power",
+        "sensor.microwave_power",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_can_remove_auto_inferred_appliance() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
