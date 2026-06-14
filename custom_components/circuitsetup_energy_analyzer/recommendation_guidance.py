@@ -5,6 +5,7 @@ from typing import Any
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .capacity import DEFAULT_CAPACITY_WARNING_RATIO
+from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -15,6 +16,7 @@ from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
 from .solar_flow import (
+    EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
 )
@@ -37,8 +39,11 @@ _SETTING_DEFAULTS: dict[str, Any] = {
     "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
     "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
     "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+    "export_tolerance_w": EXPORT_TOLERANCE_W,
+    "solar_export_tolerance_w": EXPORT_TOLERANCE_W,
     "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
     "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    "flexible_load_running_threshold_w": FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 }
 
 _SETTING_EXPECTED_EFFECTS = {
@@ -84,6 +89,14 @@ _SETTING_EXPECTED_EFFECTS = {
         "Tune mains-minus-load balance checks while still surfacing mapping, "
         "solar, or CT-orientation problems."
     ),
+    "export_tolerance_w": (
+        "Keep normal CT and inverter timing drift from triggering solar-flow "
+        "inconsistency guidance, while still surfacing larger export mismatches."
+    ),
+    "solar_export_tolerance_w": (
+        "Keep normal CT and inverter timing drift from triggering solar-flow "
+        "inconsistency guidance, while still surfacing larger export mismatches."
+    ),
     "solar_surplus_threshold_w": (
         "Start solar surplus guidance near typical observed export so load "
         "shifting prompts are less noisy."
@@ -91,6 +104,11 @@ _SETTING_EXPECTED_EFFECTS = {
     "high_solar_surplus_threshold_w": (
         "Reserve high solar surplus guidance for the upper end of observed "
         "export events."
+    ),
+    "flexible_load_running_threshold_w": (
+        "Classify flexible loads as running only after their draw clears the "
+        "idle/noise floor, so load-shift prompts do not treat standby draw as "
+        "active use."
     ),
 }
 

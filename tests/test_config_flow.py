@@ -618,6 +618,68 @@ async def test_options_recommendations_step_guides_solar_flow_suggestions() -> N
 
 
 @pytest.mark.asyncio
+async def test_recommendations_step_guides_solar_flow_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "mains": [
+                    {
+                        "recommendation_id": "mains:solar_export_tolerance_w:v1",
+                        "circuit_id": "mains",
+                        "circuit_name": "Mains",
+                        "setting_key": "solar_export_tolerance_w",
+                        "setting_label": "Solar Export Tolerance W",
+                        "current_value": 100.0,
+                        "suggested_value": 250.0,
+                        "unit": "W",
+                        "confidence": 0.68,
+                        "reason": (
+                            "Observed inverter and mains readings differ at export."
+                        ),
+                        "evidence": {"p95_export_residual_w": 220.0},
+                    },
+                    {
+                        "recommendation_id": (
+                            "mains:flexible_load_running_threshold_w:v1"
+                        ),
+                        "circuit_id": "mains",
+                        "circuit_name": "Mains",
+                        "setting_key": "flexible_load_running_threshold_w",
+                        "setting_label": "Flexible Load Running Threshold W",
+                        "current_value": 100.0,
+                        "suggested_value": 175.0,
+                        "unit": "W",
+                        "confidence": 0.7,
+                        "reason": "Observed low idle draw on flexible loads.",
+                        "evidence": {"observed_flexible_loads": 3},
+                    },
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations()
+
+    summary = result["description_placeholders"]["recommendations"]
+    assert "Mains - Solar Export Tolerance W: 100 W -> 250 W" in summary
+    assert "Default value: 100" in summary
+    assert "Expected effect: Keep normal CT and inverter timing drift" in summary
+    assert "P95 Export Residual W: 220" in summary
+    assert "Mains - Flexible Load Running Threshold W: 100 W -> 175 W" in summary
+    assert "Expected effect: Classify flexible loads as running only after" in summary
+    assert "Observed Flexible Loads: 3" in summary
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "method_name"),
     [
