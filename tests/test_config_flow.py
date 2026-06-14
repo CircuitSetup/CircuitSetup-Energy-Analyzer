@@ -1618,6 +1618,55 @@ async def test_options_flow_creates_recommended_dashboard(
 
 
 @pytest.mark.asyncio
+async def test_options_flow_reports_dashboard_creation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def async_set_dashboard_layout(self, layout: str) -> None:
+            self.calls.append(("async_set_dashboard_layout", (layout,)))
+
+        async def async_create_dashboard(self) -> dict[str, str]:
+            self.calls.append(("async_create_dashboard", ()))
+            return {
+                "action": "unavailable",
+                "reason": "lovelace_dashboard_collection_unavailable",
+            }
+
+    coordinator = Coordinator()
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_dashboard(
+        {CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "dashboard"
+    assert result["errors"] == {"base": "dashboard_creation_unavailable"}
+    assert _schema_default(result["data_schema"], CONF_DASHBOARD_LAYOUT) == (
+        DASHBOARD_LAYOUT_STANDARD
+    )
+    assert coordinator.calls == [
+        ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
+        ("async_create_dashboard", ()),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_sources_step_preserves_existing_mains_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

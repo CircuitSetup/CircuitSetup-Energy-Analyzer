@@ -2639,7 +2639,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._refresh_ux_state(config, None, self._now_fn())
         self.async_set_updated_data(self.state)
 
-    async def async_create_dashboard(self: Self) -> None:
+    async def async_create_dashboard(self: Self) -> dict[str, Any]:
         """Create or update the recommended Home Assistant dashboard."""
         layout = normalize_dashboard_layout(self.dashboard_layout)
         dashboard_payload = dashboard_storage_payload(
@@ -2666,6 +2666,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if fire is not None:
             fire(f"{DOMAIN}_create_dashboard", payload)
         self.async_set_updated_data(self.state)
+        return payload
 
     async def async_set_dashboard_layout(self: Self, layout: str) -> None:
         """Persist the selected recommended-dashboard layout."""
