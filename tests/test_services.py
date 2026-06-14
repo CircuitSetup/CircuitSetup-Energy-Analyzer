@@ -2465,6 +2465,55 @@ async def test_set_circuit_sensitivity_service_normalizes_legacy_presets() -> No
 
 
 @pytest.mark.asyncio
+async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_SET_CIRCUIT_SENSITIVITY,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_set_circuit_sensitivity(
+            self,
+            circuit_id: str,
+            preset: str,
+        ) -> None:
+            self.calls.append((circuit_id, preset))
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="alert sensitivity"):
+        await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
+            SimpleNamespace(data={"circuit_id": "fridge", "preset": "noisy"})
+        )
+
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
 async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
