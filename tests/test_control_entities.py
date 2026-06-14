@@ -166,9 +166,7 @@ class _FakeCoordinator:
         self,
         circuit_id: str | None = None,
     ) -> None:
-        self.calls.append(
-            ("async_recalculate_setting_recommendations", (circuit_id,))
-        )
+        self.calls.append(("async_recalculate_setting_recommendations", (circuit_id,)))
 
     async def async_create_dashboard(self) -> None:
         self.calls.append(("async_create_dashboard", ()))
@@ -541,6 +539,38 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
 
 
 @pytest.mark.asyncio
+async def test_select_controls_reject_invalid_options_without_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+
+    with pytest.raises(select.HomeAssistantError, match="alert sensitivity"):
+        await by_unique_id["entry-1_fridge_alert_sensitivity"].async_select_option(
+            "Noisy"
+        )
+    with pytest.raises(select.HomeAssistantError, match="entity detail level"):
+        await by_unique_id["entry-1_entity_detail_level"].async_select_option(
+            "advanced"
+        )
+    with pytest.raises(select.HomeAssistantError, match="dashboard layout"):
+        await by_unique_id["entry-1_dashboard_layout"].async_select_option("Huge")
+
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
 async def test_number_setup_entry_adds_daily_energy_goal_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -718,11 +748,7 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     _disable_registry_pruning(monkeypatch, number)
     coordinator = SimpleNamespace(
         data=AnalyzerState(),
-        options={
-            CONF_ADVANCED_SETTINGS: {
-                "dishwasher": {"daily_goal_kwh": 3.25}
-            }
-        },
+        options={CONF_ADVANCED_SETTINGS: {"dishwasher": {"daily_goal_kwh": 3.25}}},
         entry_data={},
         store_data=SimpleNamespace(energy_goal_settings_by_circuit={}),
         circuit_configs=(),
@@ -741,9 +767,7 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
         _hass_with(coordinator), entry, number_entities.extend
     )
 
-    assert {
-        entity.unique_id for entity in button_entities
-    } >= {
+    assert {entity.unique_id for entity in button_entities} >= {
         "entry-1_dishwasher_relearn_baseline",
         "entry-1_dishwasher_start_maintenance",
         "entry-1_dishwasher_end_maintenance",
