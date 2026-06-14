@@ -1521,7 +1521,7 @@ def test_learning_progress_attributes_are_bounded() -> None:
         "baseline_age_days": 3,
         "cycle_count": 2,
         "learned_feature_count": 1,
-        "pending_feature_sample_count": 12,
+        "pending_feature_sample_count": 1266,
         "pending_feature_samples_shown_count": 5,
         "pending_feature_samples_has_more": True,
         "pending_feature_samples": {
@@ -3561,7 +3561,7 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         description=descriptions["learning_progress"],
     ).extra_state_attributes == {
         "learned_feature_count": 5,
-        "pending_feature_sample_count": 1,
+        "pending_feature_sample_count": 3,
         "pending_feature_samples_shown_count": 1,
         "pending_feature_samples_has_more": False,
         "pending_feature_samples": {"reactive_power": 3},

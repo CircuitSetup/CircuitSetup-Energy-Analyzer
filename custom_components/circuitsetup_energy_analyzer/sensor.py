@@ -1207,13 +1207,20 @@ def _learning_progress_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
         pending_items = []
 
     preview_items = pending_items[:LEARNING_PROGRESS_PENDING_SAMPLE_MAX_ITEMS]
-    attributes["pending_feature_sample_count"] = len(pending_items)
+    attributes["pending_feature_sample_count"] = _pending_feature_sample_count(
+        pending_items,
+    )
     attributes["pending_feature_samples_shown_count"] = len(preview_items)
     attributes["pending_feature_samples_has_more"] = len(pending_items) > len(
         preview_items
     )
     attributes["pending_feature_samples"] = dict(preview_items)
     return attributes
+
+
+def _pending_feature_sample_count(pending_items: list[tuple[Any, Any]]) -> int | float:
+    total = sum(_numeric_count(value) for _, value in pending_items)
+    return int(total) if total.is_integer() else total
 
 
 def _bounded_attribute_string(value: str, max_length: int) -> str:
