@@ -571,6 +571,73 @@ async def test_select_controls_reject_invalid_options_without_side_effects(
 
 
 @pytest.mark.asyncio
+async def test_unavailable_selects_explain_missing_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(_circuit(),),
+        options={},
+        entry_data={},
+        store_data=SimpleNamespace(),
+    )
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+
+    for unique_id in (
+        "entry-1_fridge_alert_sensitivity",
+        "entry-1_entity_detail_level",
+        "entry-1_dashboard_layout",
+    ):
+        entity = by_unique_id[unique_id]
+        assert entity.available is False
+        assert entity.extra_state_attributes == {
+            "availability_reason": "action_unavailable",
+            "availability_label": "The analyzer action is unavailable.",
+            "next_step": "Reload the integration or check the system log.",
+        }
+
+    with pytest.raises(select.HomeAssistantError, match="analyzer action"):
+        await by_unique_id["entry-1_entity_detail_level"].async_select_option(
+            "expert"
+        )
+
+
+@pytest.mark.asyncio
+async def test_circuit_select_preserves_coordinator_update_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    coordinator = _FakeCoordinator()
+    coordinator.last_update_success = False
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    entity = by_unique_id["entry-1_fridge_alert_sensitivity"]
+
+    assert entity.available is False
+    assert entity.extra_state_attributes is None
+
+
+@pytest.mark.asyncio
 async def test_number_setup_entry_adds_daily_energy_goal_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
