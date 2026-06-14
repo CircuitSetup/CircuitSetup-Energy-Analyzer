@@ -133,6 +133,8 @@ def build_recommended_dashboard(
                 "path": "overview",
                 "icon": DASHBOARD_ICON,
                 "type": "sections",
+                "max_columns": 4,
+                "dense_section_placement": True,
                 "sections": sections,
             }
         ],

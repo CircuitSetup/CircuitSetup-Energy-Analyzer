@@ -235,6 +235,8 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     assert dashboard["views"][0]["type"] == "sections"
     assert dashboard["views"][0]["title"] == "Overview"
     assert dashboard["views"][0]["path"] == "overview"
+    assert dashboard["views"][0]["max_columns"] == 4
+    assert dashboard["views"][0]["dense_section_placement"] is True
 
 
 def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None:
