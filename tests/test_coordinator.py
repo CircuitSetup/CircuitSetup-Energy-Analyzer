@@ -937,6 +937,151 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
     }
 
 
+def test_coordinator_replaces_store_advanced_settings_after_section_reset() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "refrigerator": {
+                    "preset": "balanced",
+                    "standby_threshold_w": 7.0,
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            sensitivity_by_circuit={
+                "refrigerator": "sensitive",
+                "freezer": "quiet",
+            },
+            energy_usage_settings_by_circuit={
+                "refrigerator": {"daily_spike_ratio": 0.35},
+                "freezer": {"daily_spike_ratio": 0.4},
+            },
+            standby_settings_by_circuit={
+                "refrigerator": {"standby_threshold_w": 6.0},
+                "freezer": {"standby_threshold_w": 5.0},
+            },
+        ),
+    )
+
+    assert coordinator.store_data.sensitivity_by_circuit == {
+        "refrigerator": "balanced",
+        "freezer": "quiet",
+    }
+    assert coordinator.store_data.energy_usage_settings_by_circuit == {
+        "freezer": {"daily_spike_ratio": 0.4},
+    }
+    assert coordinator.store_data.standby_settings_by_circuit == {
+        "refrigerator": {"standby_threshold_w": 7.0},
+        "freezer": {"standby_threshold_w": 5.0},
+    }
+
+
+def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={CONF_ADVANCED_SETTINGS: {"refrigerator": {}}},
+        store_data=FeatureStoreData(
+            sensitivity_by_circuit={
+                "refrigerator": "sensitive",
+                "freezer": "quiet",
+            },
+            energy_usage_settings_by_circuit={
+                "refrigerator": {"daily_spike_ratio": 0.35},
+                "freezer": {"daily_spike_ratio": 0.4},
+            },
+            energy_goal_settings_by_circuit={
+                "refrigerator": {"daily_goal_kwh": 2.5},
+            },
+            activity_alert_settings_by_circuit={
+                "refrigerator": {"max_active_minutes": 120},
+            },
+            billing_settings_by_circuit={
+                "refrigerator": {"budget_kwh": 90.0},
+            },
+            cost_settings_by_circuit={
+                "refrigerator": {"default_rate_per_kwh": 0.18},
+            },
+            demand_settings_by_circuit={
+                "refrigerator": {"demand_limit_w": 1200.0},
+            },
+            capacity_settings_by_circuit={
+                "refrigerator": {"warning_ratio": 0.8},
+            },
+            standby_settings_by_circuit={
+                "refrigerator": {"standby_threshold_w": 6.0},
+            },
+            leg_imbalance_settings_by_circuit={
+                "refrigerator": {"warning_ratio": 0.4},
+            },
+            metric_consistency_settings_by_circuit={
+                "refrigerator": {"power_factor_tolerance": 0.08},
+            },
+            balance_settings_by_circuit={
+                "refrigerator": {"negative_tolerance_w": 250.0},
+            },
+            solar_flow_settings_by_circuit={
+                "refrigerator": {"solar_surplus_threshold_w": 750.0},
+            },
+        ),
+    )
+
+    assert coordinator.store_data.sensitivity_by_circuit == {"freezer": "quiet"}
+    assert coordinator.store_data.energy_usage_settings_by_circuit == {
+        "freezer": {"daily_spike_ratio": 0.4},
+    }
+    assert "refrigerator" not in coordinator.store_data.energy_goal_settings_by_circuit
+    assert (
+        "refrigerator"
+        not in coordinator.store_data.activity_alert_settings_by_circuit
+    )
+    assert "refrigerator" not in coordinator.store_data.billing_settings_by_circuit
+    assert "refrigerator" not in coordinator.store_data.cost_settings_by_circuit
+    assert "refrigerator" not in coordinator.store_data.demand_settings_by_circuit
+    assert "refrigerator" not in coordinator.store_data.capacity_settings_by_circuit
+    assert "refrigerator" not in coordinator.store_data.standby_settings_by_circuit
+    assert (
+        "refrigerator"
+        not in coordinator.store_data.leg_imbalance_settings_by_circuit
+    )
+    assert (
+        "refrigerator"
+        not in coordinator.store_data.metric_consistency_settings_by_circuit
+    )
+    assert "refrigerator" not in coordinator.store_data.balance_settings_by_circuit
+    assert "refrigerator" not in coordinator.store_data.solar_flow_settings_by_circuit
+
+
 @pytest.mark.asyncio
 async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     monkeypatch,

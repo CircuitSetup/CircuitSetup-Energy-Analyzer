@@ -1067,6 +1067,62 @@ async def test_options_advanced_step_saves_existing_setting_families() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_advanced_step_resets_circuit_to_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Kitchen Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                },
+            ]
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "refrigerator": {
+                    "preset": "sensitive",
+                    "daily_spike_ratio": 0.35,
+                    "standby_threshold_w": 6.0,
+                },
+                "hvac": {
+                    "preset": "quiet",
+                    "breaker_amps": 40.0,
+                },
+            }
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    await flow.async_step_select_advanced_circuit({"circuit_id": "refrigerator"})
+    result = await flow.async_step_advanced_settings(
+        {"analysis_settings": {"reset_advanced_settings_to_defaults": True}}
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS] == {
+        "refrigerator": {},
+        "hvac": {
+            "preset": "quiet",
+            "breaker_amps": 40.0,
+        }
+    }
+
+
+@pytest.mark.asyncio
 async def test_options_flow_rejects_bogus_retention_mode() -> None:
     from types import SimpleNamespace
 
@@ -2602,27 +2658,63 @@ def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
         _advanced_settings_schema,
     )
 
-    schema = _advanced_settings_schema(
-        {},
-        {
-            "circuit_id": "refrigerator",
-            "name": "Kitchen Refrigerator",
-            "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
-            "mode": CircuitMode.SINGLE_PHASE.value,
-            "power_flow": "load",
-        },
-    )
+    schemas = [
+        _advanced_settings_schema(
+            {},
+            {
+                "circuit_id": "refrigerator",
+                "name": "Kitchen Refrigerator",
+                "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+                "mode": CircuitMode.SINGLE_PHASE.value,
+                "power_flow": "load",
+            },
+        ),
+        _advanced_settings_schema(
+            {},
+            {
+                "circuit_id": "well_pump",
+                "name": "Well Pump",
+                "appliance_profile": ApplianceProfile.WELL_PUMP.value,
+                "mode": CircuitMode.DUAL_PHASE.value,
+                "power_flow": "load",
+            },
+        ),
+        _advanced_settings_schema(
+            {},
+            {
+                "circuit_id": "mains",
+                "name": "Mains",
+                "appliance_profile": ApplianceProfile.MAINS_NILM.value,
+                "mode": CircuitMode.MAINS_NILM.value,
+                "power_flow": "mains_net",
+            },
+        ),
+    ]
 
-    for field_name in (
+    reset_fields = (
+        "reset_advanced_settings_to_defaults",
         "reset_analysis_settings_to_defaults",
         "reset_energy_settings_to_defaults",
         "reset_activity_settings_to_defaults",
         "reset_billing_cost_settings_to_defaults",
         "reset_demand_capacity_settings_to_defaults",
         "reset_standby_settings_to_defaults",
+        "reset_water_context_settings_to_defaults",
+        "reset_dual_phase_settings_to_defaults",
         "reset_power_quality_settings_to_defaults",
-    ):
-        assert _schema_default(schema, field_name) is False
+        "reset_mains_balance_settings_to_defaults",
+        "reset_solar_flow_settings_to_defaults",
+    )
+    defaults = {}
+    for schema in schemas:
+        for field_name in reset_fields:
+            try:
+                defaults[field_name] = _schema_default(schema, field_name)
+            except AssertionError:
+                continue
+
+    assert set(defaults) == set(reset_fields)
+    assert all(default is False for default in defaults.values())
 
 
 def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None:
@@ -2920,6 +3012,81 @@ def test_advanced_settings_from_input_resets_selected_sections_to_defaults() -> 
         "budget_kwh": 90.0,
         "budget_alert_ratio": 0.85,
         "min_elapsed_days": 5,
+    }
+
+
+def test_advanced_settings_from_input_resets_all_settings_to_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "analysis_settings": {
+                "reset_advanced_settings_to_defaults": True,
+                "preset": "high",
+            },
+            "energy_settings": {
+                "daily_spike_ratio": 0.35,
+            },
+            "standby_settings": {
+                "standby_threshold_w": 6.0,
+            },
+        }
+    )
+
+    assert settings == {}
+
+
+def test_advanced_settings_from_input_resets_remaining_feature_sections() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "analysis_settings": {
+                "preset": "high",
+            },
+            "water_context_settings": {
+                "rain_pump_correlation_enabled": True,
+                "rain_response_window_minutes": 180,
+                "rain_activity_delta_threshold_pct": 40.0,
+                "water_flow_correlation_enabled": True,
+                "linked_flow_sensor_entities": ["binary_sensor.water_flow"],
+                "expects_water_flow": True,
+                "flow_mismatch_threshold_minutes": 9,
+                "reset_water_context_settings_to_defaults": True,
+            },
+            "dual_phase_settings": {
+                "leg_imbalance_warning_ratio": 0.4,
+                "leg_imbalance_min_total_power_w": 800.0,
+                "reset_dual_phase_settings_to_defaults": True,
+            },
+            "power_quality_settings": {
+                "apparent_power_tolerance_percent": 12.0,
+                "power_factor_tolerance": 0.08,
+                "minimum_apparent_power_va": 120.0,
+            },
+            "mains_balance_settings": {
+                "balance_negative_tolerance_w": 250.0,
+                "reset_mains_balance_settings_to_defaults": True,
+            },
+            "solar_flow_settings": {
+                "solar_export_tolerance_w": 150.0,
+                "solar_surplus_threshold_w": 750.0,
+                "high_solar_surplus_threshold_w": 2000.0,
+                "flexible_load_running_threshold_w": 175.0,
+                "reset_solar_flow_settings_to_defaults": True,
+            },
+        }
+    )
+
+    assert settings == {
+        "preset": "sensitive",
+        "apparent_power_tolerance_percent": 12.0,
+        "power_factor_tolerance": 0.08,
+        "minimum_apparent_power_va": 120.0,
     }
 
 

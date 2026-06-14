@@ -58,6 +58,7 @@ EXPECTED_ADVANCED_CIRCUIT_LABELS = {
 }
 
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
+    "reset_advanced_settings_to_defaults": "Reset This Circuit To Defaults",
     "reset_analysis_settings_to_defaults": "Reset Sensitivity To Defaults",
     "preset": "Sensitivity",
     "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
