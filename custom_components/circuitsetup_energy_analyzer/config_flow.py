@@ -268,6 +268,46 @@ FIELD_TOU_NAME = "tou_name"
 FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
+_SOURCE_METRIC_SUFFIXES = (
+    "_reactive_power",
+    "_apparent_power",
+    "_power_factor",
+    "_line_frequency",
+    "_real_power",
+    "_active_power",
+    "_frequency",
+    "_current",
+    "_voltage",
+    "_energy",
+    "_watts",
+    "_watt",
+    "_amps",
+    "_amp",
+    "_power",
+    "_kwh",
+    "_mwh",
+    "_wh",
+    "_var",
+    "_va",
+    "_pf",
+    "_hz",
+)
+_SOURCE_LEG_SUFFIXES = (
+    "_leg_a",
+    "_leg_b",
+    "_line_a",
+    "_line_b",
+    "_phase_a",
+    "_phase_b",
+    "_leg_1",
+    "_leg_2",
+    "_line_1",
+    "_line_2",
+    "_phase_1",
+    "_phase_2",
+    "_l1",
+    "_l2",
+)
 FIELD_WARNING_RATIO = "warning_ratio"
 FIELD_WINDOW_HOURS = "window_hours"
 FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
@@ -2161,6 +2201,7 @@ def _handle_assignment_review_submission(
             getattr(flow, "_pending_config", {}) or {},
             getattr(flow, "_assignment_existing_circuits", []) or [],
             str(getattr(flow, "_assignment_selected_circuit_id", "") or ""),
+            groups[index],
             reviewed_circuits,
         )
     return _final_config_from_reviewed_circuits(
@@ -2305,10 +2346,12 @@ def _final_config_from_single_assignment_update(
     pending_config: Mapping[str, Any],
     existing_circuits: Iterable[Mapping[str, Any]],
     selected_circuit_id: str,
+    selected_group: Mapping[str, Any],
     reviewed_circuits: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
     reviewed = [dict(circuit) for circuit in reviewed_circuits]
     replacement = reviewed[0] if reviewed else None
+    selected_entity_ids = _assignment_entity_ids_from_group(selected_group)
     final_circuits: list[dict[str, Any]] = []
     replaced = False
     for circuit in existing_circuits:
@@ -2322,19 +2365,88 @@ def _final_config_from_single_assignment_update(
     if replacement is not None and not replaced:
         final_circuits.append(replacement)
     if not final_circuits:
-        return _final_config_from_empty_assignment_update(pending_config)
-    return _final_config_from_reviewed_circuits(pending_config, final_circuits)
+        return _final_config_from_empty_assignment_update(
+            pending_config,
+            removed_source_entities=selected_entity_ids,
+        )
+
+    final_config = dict(pending_config)
+    final_config[CONF_SOURCE_ENTITIES] = _source_entities_after_assignment_update(
+        pending_config,
+        final_circuits,
+        removed_source_entities=selected_entity_ids,
+    )
+    final_config[CONF_CIRCUITS] = final_circuits
+    circuit_ids = {
+        str(circuit.get("circuit_id") or circuit.get("id") or "")
+        for circuit in final_circuits
+    }
+    known_loads = [
+        circuit_id
+        for circuit_id in _strict_string_list(
+            final_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+            invalid_error_key="invalid_known_load_circuits",
+        )
+        if circuit_id in circuit_ids
+    ]
+    if known_loads or CONF_KNOWN_LOAD_CIRCUITS in final_config:
+        final_config[CONF_KNOWN_LOAD_CIRCUITS] = known_loads
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
+        final_circuits
+    )
+    return final_config
 
 
 def _final_config_from_empty_assignment_update(
     pending_config: Mapping[str, Any],
+    *,
+    removed_source_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     final_config = dict(pending_config)
+    removed = {str(entity_id) for entity_id in removed_source_entities}
+    if removed:
+        source_entities = _strict_string_list(
+            final_config.get(CONF_SOURCE_ENTITIES, []),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+        final_config[CONF_SOURCE_ENTITIES] = [
+            entity_id for entity_id in source_entities if entity_id not in removed
+        ]
     final_config[CONF_CIRCUITS] = []
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits([])
     if CONF_KNOWN_LOAD_CIRCUITS in final_config:
         final_config[CONF_KNOWN_LOAD_CIRCUITS] = []
     return final_config
+
+
+def _source_entities_after_assignment_update(
+    pending_config: Mapping[str, Any],
+    circuits: Iterable[Mapping[str, Any]],
+    *,
+    removed_source_entities: Iterable[str] = (),
+) -> list[str]:
+    removed = {str(entity_id) for entity_id in removed_source_entities}
+    active_source_entities = [
+        entity_id
+        for entity_id in _strict_string_list(
+            pending_config.get(CONF_SOURCE_ENTITIES, []),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+        if entity_id not in removed
+    ]
+    circuit_source_entities = [
+        entity_id
+        for circuit in circuits
+        for entity_id in _sensor_entity_ids_from_circuit(circuit)
+    ]
+    return list(dict.fromkeys([*active_source_entities, *circuit_source_entities]))
+
+
+def _assignment_entity_ids_from_group(group: Mapping[str, Any]) -> tuple[str, ...]:
+    entity_ids = tuple(str(entity_id) for entity_id in group.get("entity_ids", ()))
+    if entity_ids:
+        return entity_ids
+    return _sensor_entity_ids_from_circuit(group)
 
 
 def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str:
@@ -2540,52 +2652,18 @@ def _assignment_leg_hint(entity_id: str) -> str | None:
 
 def _assignment_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = str(entity_id).split(".")[-1].strip().lower()
-    for suffix in (
-        "_reactive_power",
-        "_apparent_power",
-        "_power_factor",
-        "_line_frequency",
-        "_real_power",
-        "_active_power",
-        "_frequency",
-        "_current",
-        "_voltage",
-        "_energy",
-        "_watts",
-        "_watt",
-        "_amps",
-        "_amp",
-        "_power",
-        "_kwh",
-        "_mwh",
-        "_wh",
-        "_var",
-        "_va",
-        "_pf",
-        "_hz",
-    ):
-        if object_id.endswith(suffix):
-            object_id = object_id[: -len(suffix)]
-            break
-    for suffix in (
-        "_leg_a",
-        "_leg_b",
-        "_line_a",
-        "_line_b",
-        "_phase_a",
-        "_phase_b",
-        "_leg_1",
-        "_leg_2",
-        "_line_1",
-        "_line_2",
-        "_phase_1",
-        "_phase_2",
-        "_l1",
-        "_l2",
-    ):
-        if object_id.endswith(suffix):
-            return object_id[: -len(suffix)]
-    return object_id
+    return _strip_trailing_source_detail_tokens(object_id)
+
+
+def _strip_trailing_source_detail_tokens(object_id: str) -> str:
+    stripped = object_id
+    while True:
+        for suffix in (*_SOURCE_METRIC_SUFFIXES, *_SOURCE_LEG_SUFFIXES):
+            if stripped.endswith(suffix):
+                stripped = stripped[: -len(suffix)]
+                break
+        else:
+            return stripped or object_id
 
 
 def _suggest_assignment_profile_mode(

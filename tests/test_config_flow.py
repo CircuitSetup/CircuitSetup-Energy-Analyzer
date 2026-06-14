@@ -1257,6 +1257,97 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("circuit_id", "expected_name", "expected_profile", "expected_mode", "suffixes"),
+    [
+        (
+            "car_charger",
+            "Car Charger",
+            "ev_charger",
+            "dual_phase",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "hvac",
+            "Hvac",
+            "hvac",
+            "dual_phase",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "dryer",
+            "Dryer",
+            "dryer",
+            "dual_phase",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "water_heater",
+            "Water Heater",
+            "water_heater",
+            "dual_phase",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "refrigerator",
+            "Refrigerator",
+            "refrigerator",
+            "single_phase",
+            ("power_l1", "current_l1"),
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_user_flow_groups_appliance_sources_with_metric_before_leg(
+    circuit_id: str,
+    expected_name: str,
+    expected_profile: str,
+    expected_mode: str,
+    suffixes: tuple[str, ...],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    source_entities = [f"sensor.{circuit_id}_{suffix}" for suffix in suffixes]
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: source_entities,
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == expected_name
+    assert _schema_default(result["data_schema"], "appliance_profile") == (
+        expected_profile
+    )
+    assert _schema_default(result["data_schema"], "included_sensors") == source_entities
+    assert result["description_placeholders"] == {
+        "circuit_name": expected_name,
+        "appliance_profile": expected_profile,
+        "circuit_mode": expected_mode,
+        "power_flow": "load",
+    }
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": expected_name,
+            "appliance_profile": expected_profile,
+            "included_sensors": source_entities,
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+    circuit = flow._pending_final_config[CONF_CIRCUITS][0]
+    assert circuit["circuit_id"] == circuit_id
+    assert [sensor["entity_id"] for sensor in circuit["sensors"]] == source_entities
+
+
 def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         build_config_from_assignment_input,
@@ -1910,6 +2001,44 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_review_can_remove_auto_inferred_appliance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    source_entities = [
+        "sensor.dryer_power_l1",
+        "sensor.dryer_current_l1",
+        "sensor.dryer_power_l2",
+        "sensor.dryer_current_l2",
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: source_entities,
+            CONF_EXTRA_SOURCE_ENTITIES: source_entities,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment({"selected_assignment": "dryer"})
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == "Dryer"
+    assert "remove_from_analysis" in _schema_keys(result["data_schema"])
+
+    result = await flow.async_step_assign({"remove_from_analysis": True})
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == []
+    assert result["data"][CONF_SOURCE_ENTITIES] == []
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == source_entities
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_can_remove_last_appliance() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -1950,7 +2079,7 @@ async def test_options_assignment_review_can_remove_last_appliance() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_CIRCUITS] == []
-    assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.microwave_power"]
+    assert result["data"][CONF_SOURCE_ENTITIES] == []
     assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.microwave_power"]
 
 

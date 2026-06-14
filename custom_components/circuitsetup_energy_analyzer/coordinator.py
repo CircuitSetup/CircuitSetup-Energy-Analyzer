@@ -6643,6 +6643,54 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     )
 
 
+_SOURCE_METRIC_SUFFIXES = (
+    "_reactive_power",
+    "_apparent_power",
+    "_power_factor",
+    "_line_frequency",
+    "_real_power",
+    "_active_power",
+    "_frequency",
+    "_current",
+    "_voltage",
+    "_energy",
+    "_watts",
+    "_watt",
+    "_amps",
+    "_amp",
+    "_power",
+    "_kwh",
+    "_mwh",
+    "_wh",
+    "_var",
+    "_va",
+    "_pf",
+    "_hz",
+)
+_SOURCE_LEG_SUFFIXES = (
+    "_leg_a",
+    "_leg_b",
+    "_line_a",
+    "_line_b",
+    "_phase_a",
+    "_phase_b",
+    "_leg_1",
+    "_leg_2",
+    "_line_1",
+    "_line_2",
+    "_phase_1",
+    "_phase_2",
+    "_leg1",
+    "_leg2",
+    "_line1",
+    "_line2",
+    "_phase1",
+    "_phase2",
+    "_l1",
+    "_l2",
+)
+
+
 def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
     object_id = _entity_object_id(entity_id)
     if _has_metric_suffix(object_id, ("power_factor", "pf")):
@@ -6732,58 +6780,22 @@ def _append_missing_voltage_legs(
 
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = _entity_object_id(entity_id)
-    for suffix in (
-        "_reactive_power",
-        "_apparent_power",
-        "_power_factor",
-        "_line_frequency",
-        "_real_power",
-        "_active_power",
-        "_frequency",
-        "_current",
-        "_voltage",
-        "_energy",
-        "_watts",
-        "_watt",
-        "_amps",
-        "_amp",
-        "_power",
-        "_kwh",
-        "_mwh",
-        "_wh",
-        "_var",
-        "_va",
-        "_pf",
-        "_hz",
-    ):
-        if object_id.endswith(suffix):
-            return _strip_trailing_leg_token(object_id[: -len(suffix)])
-    return _strip_trailing_leg_token(object_id)
+    return _strip_trailing_source_detail_tokens(object_id)
+
+
+def _strip_trailing_source_detail_tokens(object_id: str) -> str:
+    stripped = object_id
+    while True:
+        for suffix in (*_SOURCE_METRIC_SUFFIXES, *_SOURCE_LEG_SUFFIXES):
+            if stripped.endswith(suffix):
+                stripped = stripped[: -len(suffix)]
+                break
+        else:
+            return stripped or object_id
 
 
 def _strip_trailing_leg_token(object_id: str) -> str:
-    for suffix in (
-        "_leg_a",
-        "_leg_b",
-        "_line_a",
-        "_line_b",
-        "_phase_a",
-        "_phase_b",
-        "_leg_1",
-        "_leg_2",
-        "_line_1",
-        "_line_2",
-        "_phase_1",
-        "_phase_2",
-        "_leg1",
-        "_leg2",
-        "_line1",
-        "_line2",
-        "_phase1",
-        "_phase2",
-        "_l1",
-        "_l2",
-    ):
+    for suffix in _SOURCE_LEG_SUFFIXES:
         if object_id.endswith(suffix):
             return object_id[: -len(suffix)]
     return object_id
@@ -6794,7 +6806,7 @@ def _entity_object_id(entity_id: str) -> str:
 
 
 def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
-    normalized = object_id.strip().lower()
+    normalized = _strip_trailing_leg_token(object_id.strip().lower())
     return any(
         normalized == suffix or normalized.endswith(f"_{suffix}")
         for suffix in metric_suffixes
