@@ -1307,6 +1307,90 @@ async def test_setting_recommendation_entity_target_ignores_stored_history(
 
 
 @pytest.mark.asyncio
+async def test_setting_recommendation_entity_target_ignores_state_history(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_APPLY_SETTING_RECOMMENDATION,
+        async_setup_services,
+    )
+    from custom_components.circuitsetup_energy_analyzer.settings_advisor import (
+        RecommendationStatus,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+            self.state = SimpleNamespace(
+                settings_recommendations_by_circuit={
+                    "fridge": [
+                        {
+                            "recommendation_id": "fridge:daily_spike_ratio:v1",
+                            "circuit_id": "fridge",
+                            "status": RecommendationStatus.PENDING,
+                            "expires_at": datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+                        },
+                        {
+                            "recommendation_id": "fridge:standby_threshold_w:v1",
+                            "circuit_id": "fridge",
+                            "status": RecommendationStatus.APPLIED,
+                            "expires_at": datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+                        },
+                    ]
+                }
+            )
+            self.store_data = SimpleNamespace(
+                settings_recommendations={
+                    "fridge:daily_spike_ratio:v1": SimpleNamespace(
+                        circuit_id="fridge",
+                        status=RecommendationStatus.PENDING,
+                        expires_at=datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+                    )
+                }
+            )
+
+        def _now_fn(self) -> datetime:
+            return datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_apply_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_apply_setting_recommendation", (recommendation_id,))
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
+    )
+
+    assert coordinator.calls == [
+        ("async_apply_setting_recommendation", ("fridge:daily_spike_ratio:v1",))
+    ]
+
+
+@pytest.mark.asyncio
 async def test_setting_recommendation_entity_target_rejects_ambiguous_recommendations(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
