@@ -239,10 +239,12 @@
             "name": "Sensitivity",
             "description": "Controls how quickly this appliance or circuit raises possible-issue alerts.",
             "data": {
+              "reset_advanced_settings_to_defaults": "Reset This Circuit To Defaults",
               "reset_analysis_settings_to_defaults": "Reset Sensitivity To Defaults",
               "preset": "Sensitivity"
             },
             "data_description": {
+              "reset_advanced_settings_to_defaults": "Turn this on when saving to remove all custom advanced settings for this circuit.",
               "reset_analysis_settings_to_defaults": "Turn this on when saving to remove the custom sensitivity override and use the default Balanced preset.",
               "preset": "Controls alert sensitivity for this circuit only."
             }

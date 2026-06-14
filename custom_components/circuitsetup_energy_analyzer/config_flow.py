@@ -328,6 +328,7 @@ FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
+FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
 RECOMMENDATION_ACTION_APPLY = "apply"
 RECOMMENDATION_ACTION_DENY = "deny"
 RECOMMENDATION_ACTION_DISMISS = "dismiss"
@@ -1618,6 +1619,10 @@ def _add_advanced_section(
     if not fields:
         return
     section_fields: dict[Any, Any] = {}
+    if key == SECTION_ANALYSIS_SETTINGS:
+        section_fields[
+            vol.Optional(FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS, default=False)
+        ] = bool
     if reset_field := _ADVANCED_SECTION_RESET_FIELDS.get(key):
         section_fields[vol.Optional(reset_field, default=False)] = bool
     section_fields.update(fields)
@@ -3445,6 +3450,17 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 CONF_ADVANCED_SETTINGS,
             )
             settings_by_circuit[circuit_id] = settings
+            coordinator = _options_flow_coordinator(self)
+            if coordinator is not None:
+                replace_settings = getattr(
+                    coordinator,
+                    "async_replace_advanced_settings",
+                    None,
+                )
+                if callable(replace_settings):
+                    result = replace_settings(circuit_id, settings)
+                    if hasattr(result, "__await__"):
+                        await result
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
@@ -4697,6 +4713,8 @@ def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
 
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     user_input = _flatten_advanced_settings_input(user_input)
+    if bool(user_input.get(FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS, False)):
+        return {}
     settings: dict[str, Any] = {}
     preset = normalize_sensitivity(user_input.get(FIELD_PRESET) or DEFAULT_SENSITIVITY)
     if preset not in _SENSITIVITY_OPTIONS:

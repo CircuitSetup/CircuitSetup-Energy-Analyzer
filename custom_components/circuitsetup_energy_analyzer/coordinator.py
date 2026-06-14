@@ -961,7 +961,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.options,
             CONF_ADVANCED_SETTINGS,
         ).items():
-            self._apply_advanced_settings(circuit_id, settings)
+            self._replace_advanced_settings(circuit_id, settings)
+
+    def _replace_advanced_settings(
+        self: Self,
+        circuit_id: str,
+        settings: dict[str, Any],
+    ) -> None:
+        self._clear_advanced_settings(circuit_id)
+        self._apply_advanced_settings(circuit_id, settings)
+
+    def _clear_advanced_settings(self: Self, circuit_id: str) -> None:
+        self.store_data.sensitivity_by_circuit.pop(circuit_id, None)
+        self.store_data.energy_usage_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.energy_goal_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.activity_alert_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.billing_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.cost_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.demand_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.capacity_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.standby_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.leg_imbalance_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.metric_consistency_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.balance_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.solar_flow_settings_by_circuit.pop(circuit_id, None)
 
     def _apply_advanced_settings(
         self: Self,
@@ -1416,6 +1439,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         }
         self.async_set_updated_data(self.state)
+
+    async def async_replace_advanced_settings(
+        self: Self,
+        circuit_id: str,
+        settings: Mapping[str, Any],
+    ) -> None:
+        """Replace store-backed advanced settings for one circuit."""
+        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
+        if not isinstance(advanced_by_circuit, dict):
+            advanced_by_circuit = dict(advanced_by_circuit)
+            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
+        updated_settings = dict(settings)
+        advanced_by_circuit[circuit_id] = updated_settings
+        self._replace_advanced_settings(circuit_id, updated_settings)
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
 
     async def async_set_energy_usage_settings(
         self: Self,
