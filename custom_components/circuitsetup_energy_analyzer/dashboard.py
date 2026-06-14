@@ -31,7 +31,7 @@ MAINS_LOAD_MATCH_ENTITY_SPECS = (
 )
 UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS = (
     ("sensor", "nilm_unknown_loads", "Inventory"),
-    ("sensor", "nilm_discovered_signatures", "Signatures"),
+    ("sensor", "nilm_signature_count", "Signatures"),
     ("sensor", "monitored_coverage", "Known Load Share"),
 )
 SOLAR_FLOW_ENTITY_SPECS = (
@@ -56,6 +56,12 @@ WATER_FLOW_PROFILES = {
     "water_heater",
     "water_pump",
     "well_pump",
+}
+HVAC_WEATHER_PROFILES = {
+    "hvac",
+    "hvac_compressor",
+    "hvac_blower",
+    "electric_heat",
 }
 
 
@@ -789,7 +795,7 @@ def _is_mains_circuit(circuit: Any) -> bool:
 
 
 def _is_hvac_circuit(circuit: Any) -> bool:
-    return _circuit_profile(circuit) == "hvac"
+    return _circuit_profile(circuit) in HVAC_WEATHER_PROFILES
 
 
 def _normalized_value(value: Any) -> str:

@@ -277,6 +277,52 @@ def test_generated_dashboard_omits_dropdown_and_switch_controls() -> None:
     assert "Controls" not in str(dashboard)
 
 
+def test_dashboard_uses_nilm_signature_count_key_for_signature_card() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.mains_signatures": _registry_entry(
+                        "sensor.mains_signatures",
+                        "entry-1_mains_nilm_signature_count",
+                    ),
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    refs = _entity_refs(dashboard)
+
+    assert "sensor.mains_signatures" in refs
+    assert "sensor.mains_nilm_discovered_signatures" not in refs
+
+
+def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
+    dashboard = build_recommended_dashboard(
+        (
+            CircuitConfig(
+                circuit_id="compressor",
+                name="A/C Compressor",
+                appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+                mode=CircuitMode.DUAL_PHASE,
+                sensors=(
+                    SensorRef("sensor.compressor_power", SensorRole.REAL_POWER),
+                    SensorRef("sensor.compressor_energy", SensorRole.ENERGY),
+                ),
+            ),
+        ),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
+    refs = _entity_refs(hvac_section)
+
+    assert "sensor.compressor_weather_context" in refs
+    assert "sensor.compressor_run_cycle_runtime" in refs
+    assert "sensor.compressor_run_cycle_duty_cycle" in refs
+
+
 def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() -> None:
     dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_SIMPLE)
     refs = _entity_refs(dashboard)
