@@ -3966,38 +3966,39 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if missing_source_entities:
             desired.add((circuit_id, "missing_source_entities"))
-        dashboard_status = self.state.energy_dashboard_status_by_circuit.get(circuit_id)
-        if (
-            not missing_source_entities
-            and dashboard_status in {"needs_energy_source", "power_ready"}
-        ):
-            desired.add((circuit_id, "missing_energy_source"))
-        if (
-            self._setup_health_has_missing_mains_status(circuit_id)
-            and not self._has_mains_source_configured()
-        ):
-            desired.add((circuit_id, "missing_mains_source"))
-        if (
-            self.state.metric_consistency_status_by_circuit.get(circuit_id)
-            == "missing_metrics"
-        ):
-            desired.add((circuit_id, "missing_electrical_metrics"))
-        if self._setup_health_has_ct_direction_status(circuit_id):
-            desired.add((circuit_id, "check_ct_direction"))
-        if (
-            self.state.leg_imbalance_status_by_circuit.get(circuit_id)
-            == "missing_leg_power"
-        ):
-            desired.add((circuit_id, "dual_phase_missing_leg"))
-        if self._setup_health_has_missing_rain_context_source(circuit_id):
-            desired.add((circuit_id, "missing_rain_context_source"))
-        if self._setup_health_has_missing_water_flow_source(circuit_id):
-            desired.add((circuit_id, "missing_water_flow_source"))
-        utility_comparison_problem = (
-            self._setup_health_utility_comparison_repair_problem(circuit_id)
-        )
-        if utility_comparison_problem is not None:
-            desired.add((circuit_id, utility_comparison_problem))
+            utility_comparison_problem = None
+        else:
+            dashboard_status = self.state.energy_dashboard_status_by_circuit.get(
+                circuit_id
+            )
+            if dashboard_status in {"needs_energy_source", "power_ready"}:
+                desired.add((circuit_id, "missing_energy_source"))
+            if (
+                self._setup_health_has_missing_mains_status(circuit_id)
+                and not self._has_mains_source_configured()
+            ):
+                desired.add((circuit_id, "missing_mains_source"))
+            if (
+                self.state.metric_consistency_status_by_circuit.get(circuit_id)
+                == "missing_metrics"
+            ):
+                desired.add((circuit_id, "missing_electrical_metrics"))
+            if self._setup_health_has_ct_direction_status(circuit_id):
+                desired.add((circuit_id, "check_ct_direction"))
+            if (
+                self.state.leg_imbalance_status_by_circuit.get(circuit_id)
+                == "missing_leg_power"
+            ):
+                desired.add((circuit_id, "dual_phase_missing_leg"))
+            if self._setup_health_has_missing_rain_context_source(circuit_id):
+                desired.add((circuit_id, "missing_rain_context_source"))
+            if self._setup_health_has_missing_water_flow_source(circuit_id):
+                desired.add((circuit_id, "missing_water_flow_source"))
+            utility_comparison_problem = (
+                self._setup_health_utility_comparison_repair_problem(circuit_id)
+            )
+            if utility_comparison_problem is not None:
+                desired.add((circuit_id, utility_comparison_problem))
 
         current = {
             issue
@@ -4121,25 +4122,31 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return reasons.get(problem, f"Review setup for {circuit_name}.")
 
     def _setup_health_has_missing_source_entities(self: Self, circuit_id: str) -> bool:
+        config = self._config_for_circuit(circuit_id)
+        if config is not None and not self._setup_health_source_entities(circuit_id):
+            return True
         return (
             str(self.state.data_quality_by_circuit.get(circuit_id, ""))
             == "missing_source_entities"
         )
+
+    def _setup_health_source_entities(self: Self, circuit_id: str) -> list[str]:
+        config = self._config_for_circuit(circuit_id)
+        if config is None:
+            return []
+        return [
+            sensor.entity_id
+            for sensor in getattr(config, "sensors", ())
+            if isinstance(getattr(sensor, "entity_id", None), str)
+            and sensor.entity_id
+        ]
 
     def _setup_health_repair_source_entities(
         self: Self,
         circuit_id: str,
         problem: str,
     ) -> list[str]:
-        config = self._config_for_circuit(circuit_id)
-        if config is None:
-            return []
-        source_entities = [
-            sensor.entity_id
-            for sensor in getattr(config, "sensors", ())
-            if isinstance(getattr(sensor, "entity_id", None), str)
-            and sensor.entity_id
-        ]
+        source_entities = self._setup_health_source_entities(circuit_id)
         if problem == "dual_phase_missing_leg":
             return source_entities
         if problem in {

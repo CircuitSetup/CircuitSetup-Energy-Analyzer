@@ -2921,7 +2921,7 @@ async def test_setup_health_repair_includes_circuit_context(
 
 
 @pytest.mark.asyncio
-async def test_runtime_missing_source_entities_creates_setup_health_repair(
+async def test_process_update_missing_source_entities_creates_setup_health_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -2961,11 +2961,7 @@ async def test_runtime_missing_source_entities_creates_setup_health_repair(
         },
         now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
-    coordinator.state.data_quality_by_circuit["garage_freezer"] = (
-        "missing_source_entities"
-    )
-
-    await coordinator._sync_setup_health_repairs("garage_freezer")
+    await coordinator.async_process_update()
 
     assert repairs_created == [
         (
