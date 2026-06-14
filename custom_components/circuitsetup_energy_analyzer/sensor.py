@@ -1133,6 +1133,7 @@ def _numeric_count(value: Any) -> float:
 
 
 RECENT_ACTIVITY_ATTRIBUTE_MAX_ITEMS = 5
+RECENT_ACTIVITY_DETAIL_MAX_LENGTH = 65
 RECENT_ACTIVITY_ATTRIBUTE_FIELDS = (
     "timestamp",
     "title",
@@ -1147,6 +1148,8 @@ RECENT_ACTIVITY_ATTRIBUTE_FIELDS = (
     "change_ratio",
     "repeated_count",
 )
+
+LEARNING_PROGRESS_PENDING_SAMPLE_MAX_ITEMS = 5
 
 SOLAR_LOAD_SHIFT_CANDIDATE_MAX_ITEMS = 5
 SOLAR_LOAD_SHIFT_CANDIDATE_FIELDS = (
@@ -1181,10 +1184,52 @@ def _recent_activity_item_preview(item: Any) -> dict[str, Any]:
     if not isinstance(item, Mapping):
         return {}
     return {
-        field: item[field]
+        field: _recent_activity_attribute_value(field, item[field])
         for field in RECENT_ACTIVITY_ATTRIBUTE_FIELDS
         if field in item and item[field] is not None
     }
+
+
+def _recent_activity_attribute_value(field: str, value: Any) -> Any:
+    if field == "detail" and isinstance(value, str):
+        return _bounded_attribute_string(value, RECENT_ACTIVITY_DETAIL_MAX_LENGTH)
+    return value
+
+
+def _learning_progress_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
+    attributes = {
+        key: item for key, item in value.items() if key != "pending_feature_samples"
+    }
+    pending_samples = value.get("pending_feature_samples", {})
+    if isinstance(pending_samples, Mapping):
+        pending_items = list(pending_samples.items())
+    else:
+        pending_items = []
+
+    preview_items = pending_items[:LEARNING_PROGRESS_PENDING_SAMPLE_MAX_ITEMS]
+    attributes["pending_feature_sample_count"] = _pending_feature_sample_count(
+        pending_items,
+    )
+    attributes["pending_feature_samples_shown_count"] = len(preview_items)
+    attributes["pending_feature_samples_has_more"] = len(pending_items) > len(
+        preview_items
+    )
+    attributes["pending_feature_samples"] = dict(preview_items)
+    return attributes
+
+
+def _pending_feature_sample_count(pending_items: list[tuple[Any, Any]]) -> int | float:
+    total = sum(_numeric_count(value) for _, value in pending_items)
+    return int(total) if total.is_integer() else total
+
+
+def _bounded_attribute_string(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    suffix = "..."
+    if max_length <= len(suffix):
+        return suffix[:max_length]
+    return value[: max_length - len(suffix)] + suffix
 
 
 def _solar_load_shift_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -1228,6 +1273,8 @@ def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] 
             attributes = dict(value)
             if field_name == "data_quality_checklist_by_circuit":
                 attributes.pop("quality_issues_full", None)
+            if field_name == "learning_progress_by_circuit":
+                return _learning_progress_attributes(attributes)
             if field_name == "recent_activity_timeline_by_circuit":
                 return _recent_activity_attributes(attributes)
             if field_name == "solar_load_shift_evidence_by_circuit":

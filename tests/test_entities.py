@@ -1449,11 +1449,12 @@ def test_recent_activity_attributes_are_bounded() -> None:
     description = next(
         item for item in SENSOR_DESCRIPTIONS if item.key == "recent_activity"
     )
+    long_detail = "Retained activity detail " + ("with extra context " * 20)
     timeline_items = [
         {
             "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
             "title": f"Activity {index}",
-            "detail": "Retained activity detail",
+            "detail": long_detail,
             "extra_samples": [index] * 20,
         }
         for index in range(9)
@@ -1481,10 +1482,52 @@ def test_recent_activity_attributes_are_bounded() -> None:
             {
                 "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
                 "title": f"Activity {index}",
-                "detail": "Retained activity detail",
+                "detail": (
+                    "Retained activity detail with extra context with extra "
+                    "context..."
+                ),
             }
             for index in range(5)
         ],
+    }
+
+
+def test_learning_progress_attributes_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+    )
+
+    description = next(
+        item for item in SENSOR_DESCRIPTIONS if item.key == "learning_progress"
+    )
+    pending_samples = {
+        f"feature_{index:02d}": 100 + index for index in range(12)
+    }
+    state = AnalyzerState(
+        learning_progress_by_circuit={
+            "fridge": {
+                "baseline_age_days": 3,
+                "cycle_count": 2,
+                "learned_feature_count": 1,
+                "pending_feature_samples": pending_samples,
+                "alert_ready": False,
+            }
+        }
+    )
+
+    attrs = description.attributes_fn(state, "fridge")
+
+    assert attrs == {
+        "baseline_age_days": 3,
+        "cycle_count": 2,
+        "learned_feature_count": 1,
+        "pending_feature_sample_count": 1266,
+        "pending_feature_samples_shown_count": 5,
+        "pending_feature_samples_has_more": True,
+        "pending_feature_samples": {
+            f"feature_{index:02d}": 100 + index for index in range(5)
+        },
+        "alert_ready": False,
     }
 
 
@@ -3516,7 +3559,13 @@ def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
         entry_id="entry-1",
         circuit=circuit,
         description=descriptions["learning_progress"],
-    ).extra_state_attributes == progress
+    ).extra_state_attributes == {
+        "learned_feature_count": 5,
+        "pending_feature_sample_count": 3,
+        "pending_feature_samples_shown_count": 1,
+        "pending_feature_samples_has_more": False,
+        "pending_feature_samples": {"reactive_power": 3},
+    }
     assert CircuitAnalyzerSensor(
         coordinator,
         entry_id="entry-1",
