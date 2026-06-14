@@ -1252,7 +1252,11 @@ def _recommendation_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[st
     state = getattr(coordinator, "state", None)
     by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
     if isinstance(by_circuit, Mapping):
-        _collect_recommendation_ids(by_circuit.get(circuit_id, ()), recommendation_ids)
+        _collect_recommendation_ids(
+            by_circuit.get(circuit_id, ()),
+            recommendation_ids,
+            coordinator=coordinator,
+        )
 
     store_data = getattr(coordinator, "store_data", None)
     stored = getattr(store_data, "settings_recommendations", {})
@@ -1270,8 +1274,15 @@ def _recommendation_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[st
 def _collect_recommendation_ids(
     recommendations: Any,
     recommendation_ids: set[str],
+    *,
+    coordinator: Any | None = None,
 ) -> None:
     for recommendation in _iter_items(recommendations):
+        if coordinator is not None and not _recommendation_is_pending(
+            coordinator,
+            recommendation,
+        ):
+            continue
         if isinstance(recommendation, Mapping):
             recommendation_id = recommendation.get(ATTR_RECOMMENDATION_ID)
         else:
@@ -1314,6 +1325,11 @@ def _recommendation_is_pending(coordinator: Any, recommendation: Any) -> bool:
         if isinstance(recommendation, Mapping)
         else getattr(recommendation, "expires_at", None)
     )
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return True
     if not isinstance(expires_at, datetime):
         return True
     now_fn = getattr(coordinator, "_now_fn", None)
