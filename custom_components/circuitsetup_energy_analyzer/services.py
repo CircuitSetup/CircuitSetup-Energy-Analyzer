@@ -7,7 +7,7 @@ from typing import Any
 
 from . import notifications
 from .const import DOMAIN
-from .ux import normalize_sensitivity
+from .ux import FRIENDLY_SENSITIVITY_ALIASES
 
 try:
     from homeassistant.exceptions import HomeAssistantError
@@ -107,6 +107,7 @@ ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
 _SERVICES_KEY = "_services_setup"
+_SENSITIVITY_SERVICE_OPTIONS = ("quiet", "balanced", "sensitive")
 
 
 class _FallbackSchema:
@@ -571,7 +572,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 coordinator,
                 "async_set_circuit_sensitivity",
                 circuit_id,
-                normalize_sensitivity(data.get(ATTR_PRESET)),
+                _service_sensitivity_preset(data.get(ATTR_PRESET)),
             )
         elif service == SERVICE_SET_ENERGY_USAGE_SETTINGS:
             await _call_if_present(
@@ -740,6 +741,17 @@ def _service_circuit_id(
     if required:
         raise HomeAssistantError("Missing circuit_id.")
     return None
+
+
+def _service_sensitivity_preset(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in FRIENDLY_SENSITIVITY_ALIASES:
+        return FRIENDLY_SENSITIVITY_ALIASES[normalized]
+
+    choices = ", ".join(_SENSITIVITY_SERVICE_OPTIONS)
+    raise HomeAssistantError(
+        f"Cannot set alert sensitivity to {value!r}. Choose one of: {choices}."
+    )
 
 
 def _service_entity_ids(data: Mapping[str, Any]) -> tuple[str, ...]:
