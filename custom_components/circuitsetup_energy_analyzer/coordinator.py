@@ -213,6 +213,7 @@ _DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
 )
 _SETUP_HEALTH_REPAIR_PROBLEMS = frozenset(
     {
+        "missing_source_entities",
         "missing_energy_source",
         "missing_mains_source",
         "missing_electrical_metrics",
@@ -3960,8 +3961,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
         desired: set[tuple[str, str]] = set()
+        missing_source_entities = self._setup_health_has_missing_source_entities(
+            circuit_id,
+        )
+        if missing_source_entities:
+            desired.add((circuit_id, "missing_source_entities"))
         dashboard_status = self.state.energy_dashboard_status_by_circuit.get(circuit_id)
-        if dashboard_status in {"needs_energy_source", "power_ready"}:
+        if (
+            not missing_source_entities
+            and dashboard_status in {"needs_energy_source", "power_ready"}
+        ):
             desired.add((circuit_id, "missing_energy_source"))
         if (
             self._setup_health_has_missing_mains_status(circuit_id)
@@ -4029,6 +4038,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "missing_energy_source": (
                 f"Add a cumulative kWh sensor to {circuit_name}"
             ),
+            "missing_source_entities": (
+                f"Add at least one source sensor to {circuit_name}"
+            ),
             "missing_mains_source": "Add a mains or whole-home source",
             "missing_electrical_metrics": (
                 f"Add matching electrical metrics for {circuit_name}"
@@ -4074,6 +4086,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "missing_energy_source": (
                 "Daily Energy Usage needs a cumulative energy source."
             ),
+            "missing_source_entities": (
+                "No source sensors are configured for this circuit."
+            ),
             "missing_mains_source": (
                 "Mains balance, NILM, or solar-flow checks need a mains source."
             ),
@@ -4104,6 +4119,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         }
         return reasons.get(problem, f"Review setup for {circuit_name}.")
+
+    def _setup_health_has_missing_source_entities(self: Self, circuit_id: str) -> bool:
+        return (
+            str(self.state.data_quality_by_circuit.get(circuit_id, ""))
+            == "missing_source_entities"
+        )
 
     def _setup_health_repair_source_entities(
         self: Self,
