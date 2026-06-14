@@ -561,6 +561,9 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
     from custom_components.circuitsetup_energy_analyzer.balance import (
         DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
     )
+    from custom_components.circuitsetup_energy_analyzer.load_shift import (
+        FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+    )
     from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
         DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
         DEFAULT_MIN_APPARENT_POWER_VA,
@@ -571,6 +574,7 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         recommendation_setting_expected_effect,
     )
     from custom_components.circuitsetup_energy_analyzer.solar_flow import (
+        EXPORT_TOLERANCE_W,
         HIGH_SOLAR_SURPLUS_THRESHOLD_W,
         SOLAR_SURPLUS_THRESHOLD_W,
     )
@@ -582,8 +586,10 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
         "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
         "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+        "solar_export_tolerance_w": EXPORT_TOLERANCE_W,
         "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
         "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+        "flexible_load_running_threshold_w": FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
     }
 
     expected_effect_phrases = {
@@ -591,8 +597,10 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": "power-factor",
         "minimum_apparent_power_va": "low apparent-power",
         "balance_negative_tolerance_w": "mains-minus-load",
+        "solar_export_tolerance_w": "export",
         "solar_surplus_threshold_w": "solar surplus",
         "high_solar_surplus_threshold_w": "high solar surplus",
+        "flexible_load_running_threshold_w": "flexible load",
     }
 
     for setting_key, default_value in expected_defaults.items():
