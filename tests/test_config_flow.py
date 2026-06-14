@@ -1257,6 +1257,81 @@ async def test_options_flow_removes_demo_bundle_and_demo_assignments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_flow_removing_demo_bundle_preserves_data_circuits() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    real_circuit = {
+        "circuit_id": "kitchen_refrigerator",
+        "name": "Kitchen Refrigerator",
+        "appliance_profile": "refrigerator",
+        "mode": "single_phase",
+        "sensors": [
+            {
+                "entity_id": "sensor.kitchen_refrigerator_active_power",
+                "role": "real_power",
+            }
+        ],
+    }
+    entry = SimpleNamespace(
+        data={
+            CONF_DEMO_SOURCE_BUNDLE_ENABLED: True,
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.kitchen_refrigerator_active_power",
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.kitchen_refrigerator_active_power",
+                "sensor.cs_energy_analyzer_demo_washer_active_power",
+            ],
+            CONF_CIRCUITS: [
+                real_circuit,
+                {
+                    "circuit_id": "cs_energy_analyzer_demo_washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                    "sensors": [
+                        {
+                            "entity_id": (
+                                "sensor.cs_energy_analyzer_demo_washer_active_power"
+                            ),
+                            "role": "real_power",
+                        }
+                    ],
+                },
+            ],
+            CONF_KNOWN_LOAD_CIRCUITS: [
+                "kitchen_refrigerator",
+                "cs_energy_analyzer_demo_washer",
+            ],
+        },
+        options={},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_DEMO_SOURCE_BUNDLE_ENABLED: False,
+            CONF_SOURCE_DEVICES: [],
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.kitchen_refrigerator_active_power"],
+            CONF_RETENTION_MODE: "standard",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [real_circuit]
+    assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["kitchen_refrigerator"]
+    assert "kitchen_refrigerator" in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
+    assert "cs_energy_analyzer_demo_washer" not in result["data"][
+        CONF_CIRCUIT_ASSIGNMENTS
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_flow_creates_recommended_dashboard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
