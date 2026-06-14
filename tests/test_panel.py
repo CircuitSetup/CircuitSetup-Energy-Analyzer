@@ -389,6 +389,42 @@ def test_alert_evidence_payload_guides_always_on_recommendations() -> None:
     assert recommendation["evidence_preview"] == "P95 Always On W: 42.5"
 
 
+def test_alert_evidence_payload_guides_flexible_load_recommendations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="solar_flow")
+    coordinator = _coordinator(alert, config=_config("mains"))
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "mains": [
+            {
+                "recommendation_id": "mains:flexible_load_running_threshold_w:v1",
+                "circuit_id": "mains",
+                "setting_key": "flexible_load_running_threshold_w",
+                "setting_label": "Flexible Load Running Threshold W",
+                "current_value": 100.0,
+                "suggested_value": 175.0,
+                "reason": "Observed low idle draw on flexible loads.",
+                "evidence": {"observed_flexible_loads": 3},
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    recommendation = payload["setting_recommendations"][0]
+    assert recommendation["default_value"] == 100.0
+    assert recommendation["expected_effect"].startswith(
+        "Classify flexible loads as running only after"
+    )
+    assert recommendation["evidence_preview"] == "Observed Flexible Loads: 3"
+
+
 def test_alert_evidence_payload_bounds_recommendation_evidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
