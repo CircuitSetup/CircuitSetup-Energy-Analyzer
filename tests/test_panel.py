@@ -444,12 +444,14 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
         "signature_id": "signature_1",
     }
     assert payload["nilm"]["signatures"][0]["actions"]["merge"]["enabled"] is False
-    assert payload["nilm"]["signatures"][0]["actions"]["merge"][
-        "unavailable_reason"
-    ] == "no_merge_target"
-    assert payload["nilm"]["signatures"][0]["actions"]["merge"][
-        "unavailable_label"
-    ] == "No other NILM signature is available to merge into yet."
+    assert (
+        payload["nilm"]["signatures"][0]["actions"]["merge"]["unavailable_reason"]
+        == "no_merge_target"
+    )
+    assert (
+        payload["nilm"]["signatures"][0]["actions"]["merge"]["unavailable_label"]
+        == "No other NILM signature is available to merge into yet."
+    )
 
 
 def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None:
@@ -506,8 +508,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
         {
             "value": "signature_2",
             "label": (
-                "Pool pump-like load, 1.1 kW, confidence 65%, "
-                "first seen 2026-06-09"
+                "Pool pump-like load, 1.1 kW, confidence 65%, first seen 2026-06-09"
             ),
         }
     ]
@@ -594,9 +595,9 @@ def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
     assert expanded_merge_action["target_option_count"] == 7
     assert expanded_merge_action["target_options_has_more"] is False
     assert expanded_merge_action["target_options_omitted_count"] == 0
-    assert [
-        option["value"] for option in expanded_merge_action["target_options"]
-    ] == [f"signature_{index}" for index in range(1, 8)]
+    assert [option["value"] for option in expanded_merge_action["target_options"]] == [
+        f"signature_{index}" for index in range(1, 8)
+    ]
 
 
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:
@@ -620,6 +621,66 @@ def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None
     assert payload["alert"]["feature_name"] == "Demand Monthly Peak"
 
 
+def test_alert_evidence_payload_prefers_feature_for_circuit_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    requested_feature = _alert(
+        feature="leg_imbalance",
+        timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+    )
+    latest_other_feature = _alert(
+        feature="demand_monthly_peak",
+        timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(requested_feature, latest_other_feature)],
+        alert_id="stale-notification-id",
+        circuit_id="hvac",
+        feature="leg_imbalance",
+    )
+
+    assert payload["status"] == "latest_for_circuit"
+    assert payload["requested_feature"] == "leg_imbalance"
+    assert payload["alert"]["alert_id"] == notification_id_for_alert(requested_feature)
+    assert payload["alert"]["feature"] == "leg_imbalance"
+
+
+@pytest.mark.asyncio
+async def test_alert_evidence_view_forwards_requested_feature_for_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    requested_feature = _alert(
+        feature="leg_imbalance",
+        timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+    )
+    latest_other_feature = _alert(
+        feature="demand_monthly_peak",
+        timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+    )
+    coordinator = _coordinator(requested_feature, latest_other_feature)
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: hass},
+        query={
+            "alert_id": "stale-notification-id",
+            "circuit_id": "hvac",
+            "feature": "leg_imbalance",
+        },
+    )
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.AlertEvidenceView().get(request)
+
+    assert payload["requested_feature"] == "leg_imbalance"
+    assert payload["alert"]["alert_id"] == notification_id_for_alert(requested_feature)
+    assert payload["alert"]["feature"] == "leg_imbalance"
+
+
 def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
@@ -638,9 +699,7 @@ def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
         "alert": None,
         "circuit": None,
         "actions": {},
-        "message": (
-            "The requested alert or circuit evidence is no longer available."
-        ),
+        "message": ("The requested alert or circuit evidence is no longer available."),
         "next_step": (
             "Open a newer notification or review the appliance summary sensors."
         ),
@@ -754,9 +813,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
     assert panel_custom.panels[0].get("sidebar_title") is None
     assert panel_custom.panels[0].get("sidebar_icon") is None
-    assert panel_custom.panels[0]["module_url"].endswith(
-        f"?v={PANEL_MODULE_VERSION}"
-    )
+    assert panel_custom.panels[0]["module_url"].endswith(f"?v={PANEL_MODULE_VERSION}")
 
     await async_unload_panel(hass)
 
@@ -932,9 +989,7 @@ async def test_panel_setup_refreshes_existing_panel_path() -> None:
 
     assert await async_setup_panel(hass) is True
     assert len(panel_custom.panels) == 1
-    assert panel_custom.panels[0]["module_url"].endswith(
-        f"?v={PANEL_MODULE_VERSION}"
-    )
+    assert panel_custom.panels[0]["module_url"].endswith(f"?v={PANEL_MODULE_VERSION}")
     assert frontend.removed == [PANEL_URL_PATH]
 
     await async_unload_panel(hass)

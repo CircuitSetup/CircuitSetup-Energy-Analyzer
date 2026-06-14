@@ -97,6 +97,7 @@ class AlertEvidenceView(HomeAssistantView):
             _loaded_coordinators(hass),
             alert_id=request.query.get("alert_id"),
             circuit_id=request.query.get("circuit_id"),
+            feature=request.query.get("feature"),
             include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
         )
         return web.json_response(payload)
@@ -130,9 +131,7 @@ async def async_unload_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if remove_panel is not None:
-        await _maybe_await(
-            remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False)
-        )
+        await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
 
 
 def alert_evidence_payload(
@@ -140,11 +139,13 @@ def alert_evidence_payload(
     *,
     alert_id: str | None = None,
     circuit_id: str | None = None,
+    feature: str | None = None,
     include_all_nilm: bool = False,
 ) -> dict[str, Any]:
     """Return the dynamic panel payload for an alert or circuit fallback."""
     requested_alert_id = alert_id or None
     requested_circuit_id = circuit_id or None
+    requested_feature = str(feature or "").strip() or None
     coordinators = tuple(coordinators)
 
     if requested_alert_id:
@@ -157,96 +158,117 @@ def alert_evidence_payload(
                         alert,
                         requested_alert_id=requested_alert_id,
                         requested_circuit_id=requested_circuit_id,
+                        requested_feature=requested_feature,
                         include_all_nilm=include_all_nilm,
                     )
 
     fallback_circuit: tuple[Any, CircuitConfig] | None = None
     if requested_circuit_id:
         for coordinator in coordinators:
-            if alert := _latest_alert_for_circuit(coordinator, requested_circuit_id):
+            if alert := _latest_alert_for_circuit(
+                coordinator,
+                requested_circuit_id,
+                feature=requested_feature,
+            ):
                 return _payload_for_alert(
                     "latest_for_circuit",
                     coordinator,
                     alert,
                     requested_alert_id=requested_alert_id,
                     requested_circuit_id=requested_circuit_id,
+                    requested_feature=requested_feature,
                     include_all_nilm=include_all_nilm,
                 )
-            if detail := _state_alert_detail(coordinator, requested_circuit_id):
+            if detail := _state_alert_detail(
+                coordinator,
+                requested_circuit_id,
+                feature=requested_feature,
+            ):
                 config = _config_for_circuit(coordinator, requested_circuit_id)
-                return {
-                    "status": "latest_for_circuit",
-                    "requested_alert_id": requested_alert_id,
-                    "requested_circuit_id": requested_circuit_id,
-                    "alert": dict(detail),
-                    "circuit": _circuit_payload(config),
-                    "actions": _actions_for_context(
-                        coordinator,
-                        config=config,
-                        alert_id=detail.get("alert_id"),
-                        circuit_id=requested_circuit_id,
-                    ),
-                    "setting_recommendations": (
-                        _setting_recommendations_for_circuit(
+                return _with_requested_feature(
+                    {
+                        "status": "latest_for_circuit",
+                        "requested_alert_id": requested_alert_id,
+                        "requested_circuit_id": requested_circuit_id,
+                        "alert": dict(detail),
+                        "circuit": _circuit_payload(config),
+                        "actions": _actions_for_context(
+                            coordinator,
+                            config=config,
+                            alert_id=detail.get("alert_id"),
+                            circuit_id=requested_circuit_id,
+                        ),
+                        "setting_recommendations": (
+                            _setting_recommendations_for_circuit(
+                                coordinator,
+                                requested_circuit_id,
+                            )
+                        ),
+                        "nilm": _nilm_payload_for_circuit(
                             coordinator,
                             requested_circuit_id,
-                        )
-                    ),
-                    "nilm": _nilm_payload_for_circuit(
-                        coordinator,
-                        requested_circuit_id,
-                        include_all_nilm=include_all_nilm,
-                    ),
-                }
+                            include_all_nilm=include_all_nilm,
+                        ),
+                    },
+                    requested_feature,
+                )
             config = _config_for_circuit(coordinator, requested_circuit_id)
             if config is not None and fallback_circuit is None:
                 fallback_circuit = (coordinator, config)
 
     if requested_circuit_id and fallback_circuit is not None:
         coordinator, config = fallback_circuit
-        return {
-            "status": "circuit_found_no_evidence",
+        return _with_requested_feature(
+            {
+                "status": "circuit_found_no_evidence",
+                "requested_alert_id": requested_alert_id,
+                "requested_circuit_id": requested_circuit_id,
+                "alert": None,
+                "circuit": _circuit_payload(config),
+                "actions": _actions_for_context(
+                    coordinator,
+                    config=config,
+                    alert_id=None,
+                    circuit_id=requested_circuit_id,
+                ),
+                "setting_recommendations": (
+                    _setting_recommendations_for_circuit(
+                        coordinator,
+                        requested_circuit_id,
+                    )
+                ),
+                "nilm": _nilm_payload_for_circuit(
+                    coordinator,
+                    requested_circuit_id,
+                    include_all_nilm=include_all_nilm,
+                ),
+                "message": "No current alert evidence is available for this circuit.",
+                "next_step": (
+                    "Use the available circuit actions below, open Advanced "
+                    "Circuit Settings, or review the summary sensors for the "
+                    "latest state."
+                ),
+            },
+            requested_feature,
+        )
+
+    return _with_requested_feature(
+        {
+            "status": "not_found",
             "requested_alert_id": requested_alert_id,
             "requested_circuit_id": requested_circuit_id,
             "alert": None,
-            "circuit": _circuit_payload(config),
-            "actions": _actions_for_context(
-                coordinator,
-                config=config,
-                alert_id=None,
-                circuit_id=requested_circuit_id,
+            "circuit": None,
+            "actions": {},
+            "message": (
+                "The requested alert or circuit evidence is no longer available."
             ),
-            "setting_recommendations": (
-                _setting_recommendations_for_circuit(
-                    coordinator,
-                    requested_circuit_id,
-                )
-            ),
-            "nilm": _nilm_payload_for_circuit(
-                coordinator,
-                requested_circuit_id,
-                include_all_nilm=include_all_nilm,
-            ),
-            "message": "No current alert evidence is available for this circuit.",
             "next_step": (
-                "Use the available circuit actions below, open Advanced "
-                "Circuit Settings, or review the summary sensors for the "
-                "latest state."
+                "Open a newer notification or review the appliance summary sensors."
             ),
-        }
-
-    return {
-        "status": "not_found",
-        "requested_alert_id": requested_alert_id,
-        "requested_circuit_id": requested_circuit_id,
-        "alert": None,
-        "circuit": None,
-        "actions": {},
-        "message": "The requested alert or circuit evidence is no longer available.",
-        "next_step": (
-            "Open a newer notification or review the appliance summary sensors."
-        ),
-    }
+        },
+        requested_feature,
+    )
 
 
 def _payload_for_alert(
@@ -256,32 +278,45 @@ def _payload_for_alert(
     *,
     requested_alert_id: str | None,
     requested_circuit_id: str | None,
+    requested_feature: str | None,
     include_all_nilm: bool,
 ) -> dict[str, Any]:
     config = _config_for_circuit(coordinator, alert.circuit_id)
     detail = alert_evidence_detail(alert, config=config)
-    return {
-        "status": status,
-        "requested_alert_id": requested_alert_id,
-        "requested_circuit_id": requested_circuit_id,
-        "alert": detail,
-        "circuit": _circuit_payload(config),
-        "actions": _actions_for_context(
-            coordinator,
-            config=config,
-            alert_id=detail["alert_id"],
-            circuit_id=alert.circuit_id,
-        ),
-        "setting_recommendations": _setting_recommendations_for_circuit(
-            coordinator,
-            alert.circuit_id,
-        ),
-        "nilm": _nilm_payload_for_circuit(
-            coordinator,
-            alert.circuit_id,
-            include_all_nilm=include_all_nilm,
-        ),
-    }
+    return _with_requested_feature(
+        {
+            "status": status,
+            "requested_alert_id": requested_alert_id,
+            "requested_circuit_id": requested_circuit_id,
+            "alert": detail,
+            "circuit": _circuit_payload(config),
+            "actions": _actions_for_context(
+                coordinator,
+                config=config,
+                alert_id=detail["alert_id"],
+                circuit_id=alert.circuit_id,
+            ),
+            "setting_recommendations": _setting_recommendations_for_circuit(
+                coordinator,
+                alert.circuit_id,
+            ),
+            "nilm": _nilm_payload_for_circuit(
+                coordinator,
+                alert.circuit_id,
+                include_all_nilm=include_all_nilm,
+            ),
+        },
+        requested_feature,
+    )
+
+
+def _with_requested_feature(
+    payload: dict[str, Any],
+    requested_feature: str | None,
+) -> dict[str, Any]:
+    if requested_feature:
+        payload["requested_feature"] = requested_feature
+    return payload
 
 
 def _actions_for_context(
@@ -401,10 +436,14 @@ def _setting_recommendations_for_circuit(
         return []
     state = getattr(coordinator, "state", None)
     by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
-    recommendations = by_circuit.get(circuit_id, ()) if isinstance(
-        by_circuit,
-        dict,
-    ) else ()
+    recommendations = (
+        by_circuit.get(circuit_id, ())
+        if isinstance(
+            by_circuit,
+            dict,
+        )
+        else ()
+    )
     return [
         _recommendation_payload(item, coordinator=coordinator)
         for item in _iter_items(recommendations)
@@ -707,9 +746,7 @@ def _nilm_merge_target_options(
 
 def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        key: signature[key]
-        for key in NILM_SIGNATURE_PANEL_FIELDS
-        if key in signature
+        key: signature[key] for key in NILM_SIGNATURE_PANEL_FIELDS if key in signature
     }
 
 
@@ -857,22 +894,39 @@ def _circuit_payload(config: CircuitConfig | None) -> dict[str, str] | None:
 def _latest_alert_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    feature: str | None = None,
 ) -> AlertEvidence | None:
     alerts = [
         alert
         for alert in _coordinator_alerts(coordinator)
-        if alert.circuit_id == circuit_id
+        if alert.circuit_id == circuit_id and _feature_matches(alert.feature, feature)
     ]
     if not alerts:
         return None
     return max(alerts, key=lambda alert: alert.last_seen or alert.timestamp)
 
 
-def _state_alert_detail(coordinator: Any, circuit_id: str) -> dict[str, Any] | None:
+def _state_alert_detail(
+    coordinator: Any,
+    circuit_id: str,
+    *,
+    feature: str | None = None,
+) -> dict[str, Any] | None:
     state = getattr(coordinator, "state", None)
     details = getattr(state, "alert_evidence_by_circuit", {}) or {}
     detail = details.get(circuit_id)
-    return dict(detail) if isinstance(detail, dict) else None
+    if not isinstance(detail, dict):
+        return None
+    if not _feature_matches(detail.get("feature"), feature):
+        return None
+    return dict(detail)
+
+
+def _feature_matches(value: Any, requested_feature: str | None) -> bool:
+    if not requested_feature:
+        return True
+    return str(value or "").strip() == requested_feature
 
 
 def _coordinator_alerts(coordinator: Any) -> tuple[AlertEvidence, ...]:
