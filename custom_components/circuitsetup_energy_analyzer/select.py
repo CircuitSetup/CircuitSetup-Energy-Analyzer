@@ -140,7 +140,7 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
     @property
     def available(self) -> bool:
         """Return whether the sensitivity preset can currently be changed."""
-        return _select_action_available(
+        return self._coordinator_available() and _select_action_available(
             self.coordinator,
             "async_set_circuit_sensitivity",
         )
@@ -150,7 +150,19 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
         """Expose why the select is unavailable when relevant."""
         if self.available:
             return None
-        return _action_unavailable_attributes()
+        if not _select_action_available(
+            self.coordinator,
+            "async_set_circuit_sensitivity",
+        ):
+            return _action_unavailable_attributes()
+        return None
+
+    def _coordinator_available(self) -> bool:
+        """Return the backing coordinator availability when HA exposes it."""
+        try:
+            return bool(super().available)
+        except AttributeError:
+            return getattr(self.coordinator, "last_update_success", True) is not False
 
     async def async_select_option(self, option: str) -> None:
         """Persist a new sensitivity preset."""

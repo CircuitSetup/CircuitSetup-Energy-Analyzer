@@ -614,6 +614,30 @@ async def test_unavailable_selects_explain_missing_actions(
 
 
 @pytest.mark.asyncio
+async def test_circuit_select_preserves_coordinator_update_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    coordinator = _FakeCoordinator()
+    coordinator.last_update_success = False
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    entity = by_unique_id["entry-1_fridge_alert_sensitivity"]
+
+    assert entity.available is False
+    assert entity.extra_state_attributes is None
+
+
+@pytest.mark.asyncio
 async def test_number_setup_entry_adds_daily_energy_goal_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
