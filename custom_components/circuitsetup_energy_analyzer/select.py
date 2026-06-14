@@ -137,6 +137,21 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
         """Return the purpose-specific icon for fallback tests."""
         return self._attr_icon
 
+    @property
+    def available(self) -> bool:
+        """Return whether the sensitivity preset can currently be changed."""
+        return _select_action_available(
+            self.coordinator,
+            "async_set_circuit_sensitivity",
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose why the select is unavailable when relevant."""
+        if self.available:
+            return None
+        return _action_unavailable_attributes()
+
     async def async_select_option(self, option: str) -> None:
         """Persist a new sensitivity preset."""
         preset = _select_option_value(
@@ -209,6 +224,21 @@ class EntityDetailLevelSelect(SelectEntity):
             "name": "CircuitSetup Energy Analyzer",
             "manufacturer": "CircuitSetup",
         }
+
+    @property
+    def available(self) -> bool:
+        """Return whether the entity detail level can currently be changed."""
+        return _select_action_available(
+            self.coordinator,
+            "async_set_entity_detail_level",
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose why the select is unavailable when relevant."""
+        if self.available:
+            return None
+        return _action_unavailable_attributes()
 
     async def async_select_option(self, option: str) -> None:
         """Persist and apply a new entity detail profile."""
@@ -289,6 +319,21 @@ class DashboardLayoutSelect(SelectEntity):
             "manufacturer": "CircuitSetup",
         }
 
+    @property
+    def available(self) -> bool:
+        """Return whether the dashboard layout can currently be changed."""
+        return _select_action_available(
+            self.coordinator,
+            "async_set_dashboard_layout",
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose why the select is unavailable when relevant."""
+        if self.available:
+            return None
+        return _action_unavailable_attributes()
+
     async def async_select_option(self, option: str) -> None:
         """Persist a new recommended-dashboard layout."""
         layout = _select_option_value(
@@ -344,6 +389,18 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
+
+
+def _select_action_available(coordinator: Any, method_name: str) -> bool:
+    return callable(getattr(coordinator, method_name, None))
+
+
+def _action_unavailable_attributes() -> dict[str, str]:
+    return {
+        "availability_reason": "action_unavailable",
+        "availability_label": "The analyzer action is unavailable.",
+        "next_step": "Reload the integration or check the system log.",
+    }
 
 
 async def _call_or_raise(
