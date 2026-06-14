@@ -565,6 +565,66 @@ async def test_options_recommendations_step_guides_capacity_suggestions() -> Non
 
 
 @pytest.mark.asyncio
+async def test_recommendations_step_guides_standby_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "washer": [
+                    {
+                        "recommendation_id": "washer:window_hours:v1",
+                        "circuit_id": "washer",
+                        "circuit_name": "Washer",
+                        "setting_key": "window_hours",
+                        "setting_label": "Window Hours",
+                        "current_value": 48,
+                        "suggested_value": 72,
+                        "unit": "h",
+                        "confidence": 0.72,
+                        "reason": (
+                            "Observed enough standby history to extend the window."
+                        ),
+                        "evidence": {"observed_standby_samples": 96},
+                    },
+                    {
+                        "recommendation_id": "washer:always_on_alert_w:v1",
+                        "circuit_id": "washer",
+                        "circuit_name": "Washer",
+                        "setting_key": "always_on_alert_w",
+                        "setting_label": "Always On Alert W",
+                        "current_value": 0.0,
+                        "suggested_value": 35.0,
+                        "unit": "W",
+                        "confidence": 0.69,
+                        "reason": "Observed elevated always-on draw.",
+                        "evidence": {"p95_always_on_w": 42.5},
+                    },
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations()
+
+    summary = result["description_placeholders"]["recommendations"]
+    assert "Washer - Window Hours: 48 h -> 72 h" in summary
+    assert "Default value: 48" in summary
+    assert "Expected effect: Use enough standby history" in summary
+    assert "Observed Standby Samples: 96" in summary
+    assert "Washer - Always On Alert W: 0 W -> 35 W" in summary
+    assert "Expected effect: Surface unusually high Always On draw" in summary
+    assert "P95 Always On W: 42.5" in summary
+
+
+@pytest.mark.asyncio
 async def test_options_recommendations_step_guides_solar_flow_suggestions() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

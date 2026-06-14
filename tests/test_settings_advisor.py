@@ -574,6 +574,9 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         HIGH_SOLAR_SURPLUS_THRESHOLD_W,
         SOLAR_SURPLUS_THRESHOLD_W,
     )
+    from custom_components.circuitsetup_energy_analyzer.standby import (
+        DEFAULT_STANDBY_WINDOW_HOURS,
+    )
 
     expected_defaults = {
         "apparent_power_tolerance_percent": (
@@ -582,6 +585,8 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
         "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
         "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+        "window_hours": DEFAULT_STANDBY_WINDOW_HOURS,
+        "always_on_alert_w": 0.0,
         "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
         "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     }
@@ -591,6 +596,8 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": "power-factor",
         "minimum_apparent_power_va": "low apparent-power",
         "balance_negative_tolerance_w": "mains-minus-load",
+        "window_hours": "standby history",
+        "always_on_alert_w": "always on",
         "solar_surplus_threshold_w": "solar surplus",
         "high_solar_surplus_threshold_w": "high solar surplus",
     }

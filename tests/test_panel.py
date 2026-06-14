@@ -353,6 +353,42 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     }
 
 
+def test_alert_evidence_payload_guides_always_on_recommendations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="washer", feature="standby_always_on")
+    coordinator = _coordinator(alert, config=_config("washer"))
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "washer": [
+            {
+                "recommendation_id": "washer:always_on_alert_w:v1",
+                "circuit_id": "washer",
+                "setting_key": "always_on_alert_w",
+                "setting_label": "Always On Alert W",
+                "current_value": 0.0,
+                "suggested_value": 35.0,
+                "reason": "Observed elevated always-on draw.",
+                "evidence": {"p95_always_on_w": 42.5},
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    recommendation = payload["setting_recommendations"][0]
+    assert recommendation["default_value"] == 0.0
+    assert recommendation["expected_effect"].startswith(
+        "Surface unusually high Always On draw"
+    )
+    assert recommendation["evidence_preview"] == "P95 Always On W: 42.5"
+
+
 def test_alert_evidence_payload_bounds_recommendation_evidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
