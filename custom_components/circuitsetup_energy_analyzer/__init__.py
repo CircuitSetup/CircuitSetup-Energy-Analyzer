@@ -20,6 +20,8 @@ from .ux import canonicalize_sensitivity_config
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
 _SERVICES_SETUP_KEY = "_services_setup"
+_DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
+_DEMO_SOURCE_UNIQUE_ID_PREFIX = "demo_source_exact_"
 
 
 def _has_config_entries(domain_data: dict[str, Any]) -> bool:
@@ -139,7 +141,76 @@ def _source_entities_for_entry(
     for config in getattr(coordinator, "circuit_configs", ()):
         for sensor in getattr(config, "sensors", ()):
             entity_ids.append(sensor.entity_id)
-    return tuple(dict.fromkeys(entity_ids))
+    return tuple(
+        dict.fromkeys(
+            _resolve_registered_demo_source_entity_ids(
+                entity_ids,
+                entry_id=getattr(entry, "entry_id", "default"),
+                coordinator=coordinator,
+            )
+        )
+    )
+
+
+def _resolve_registered_demo_source_entity_ids(
+    entity_ids: list[str],
+    *,
+    entry_id: str,
+    coordinator: EnergyAnalyzerCoordinator,
+) -> list[str]:
+    registered_entity_ids = _registered_demo_source_entity_ids(
+        getattr(coordinator, "hass", None),
+        entry_id=entry_id,
+    )
+    if not registered_entity_ids:
+        return entity_ids
+    return [
+        registered_entity_ids.get(entity_id, entity_id)
+        if _is_demo_source_entity_id(entity_id)
+        else entity_id
+        for entity_id in entity_ids
+    ]
+
+
+def _registered_demo_source_entity_ids(
+    hass: Any,
+    *,
+    entry_id: str,
+) -> dict[str, str]:
+    if hass is None:
+        return {}
+    registry = None
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+    except (ImportError, AttributeError, TypeError):
+        registry = getattr(hass, "entity_registry", None)
+    if registry is None:
+        return {}
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    registered: dict[str, str] = {}
+    unique_id_prefix = f"{entry_id}_{_DEMO_SOURCE_UNIQUE_ID_PREFIX}"
+    for registry_entry in values:
+        unique_id = str(getattr(registry_entry, "unique_id", ""))
+        if not unique_id.startswith(unique_id_prefix):
+            continue
+        if getattr(registry_entry, "config_entry_id", entry_id) != entry_id:
+            continue
+        if getattr(registry_entry, "platform", DOMAIN) != DOMAIN:
+            continue
+        canonical_entity_id = (
+            f"sensor.{unique_id.removeprefix(unique_id_prefix)}"
+        )
+        registered[canonical_entity_id] = str(
+            getattr(registry_entry, "entity_id", canonical_entity_id)
+        )
+    return registered
+
+
+def _is_demo_source_entity_id(entity_id: str) -> bool:
+    return str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
 
 
 async def _async_load_feature_store(

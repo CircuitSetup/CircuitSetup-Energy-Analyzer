@@ -497,6 +497,36 @@ def _normalize_demo_source_entity_ids(entity_ids: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(normalized))
 
 
+def _resolve_discovered_demo_source_entity_ids(
+    entity_ids: Iterable[str],
+    discovered_entity_ids: Iterable[str] | None,
+) -> list[str]:
+    discovered_lookup: dict[str, list[str]] = {}
+    for entity_id in discovered_entity_ids or ():
+        if not _is_demo_source_entity_id(str(entity_id)):
+            continue
+        discovered_lookup.setdefault(
+            _demo_unsuffixed_source_entity_id(str(entity_id)),
+            [],
+        ).append(str(entity_id))
+
+    resolved: list[str] = []
+    for entity_id in entity_ids:
+        entity_id = str(entity_id)
+        if not _is_demo_source_entity_id(entity_id):
+            resolved.append(entity_id)
+            continue
+        unsuffixed_id = _demo_unsuffixed_source_entity_id(entity_id)
+        discovered_matches = discovered_lookup.get(unsuffixed_id, ())
+        if entity_id in discovered_matches or not discovered_matches:
+            resolved.append(entity_id)
+        elif len(discovered_matches) == 1:
+            resolved.append(discovered_matches[0])
+        else:
+            resolved.append(entity_id)
+    return list(dict.fromkeys(resolved))
+
+
 def _is_demo_source_entity_id(entity_id: str) -> bool:
     return str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
 
@@ -1246,11 +1276,19 @@ def _mains_schema(
             invalid_error_key="invalid_mains_source_entities",
         )
     )
+    mains_source_entities = _resolve_discovered_demo_source_entity_ids(
+        mains_source_entities,
+        source_entity_ids,
+    )
     source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
             _entry_value(config_entry, CONF_SOURCE_ENTITIES, []),
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
+    )
+    source_entities = _resolve_discovered_demo_source_entity_ids(
+        source_entities,
+        source_entity_ids,
     )
     selectable_source_entities = _selectable_source_entity_ids(
         source_entity_ids,
@@ -3839,6 +3877,10 @@ def _options_schema(
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
     )
+    source_entities = _resolve_discovered_demo_source_entity_ids(
+        source_entities,
+        source_entity_ids,
+    )
     source_devices = options.get(
         CONF_SOURCE_DEVICES,
         data.get(CONF_SOURCE_DEVICES, []),
@@ -3852,6 +3894,10 @@ def _options_schema(
             mains_source_entities,
             invalid_error_key="invalid_mains_source_entities",
         )
+    )
+    mains_source_entities = _resolve_discovered_demo_source_entity_ids(
+        mains_source_entities,
+        source_entity_ids,
     )
     outdoor_temperature_entity = options.get(
         CONF_OUTDOOR_TEMPERATURE_ENTITY,
@@ -3878,6 +3924,10 @@ def _options_schema(
             extra_source_entities,
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
+    )
+    extra_source_entities = _resolve_discovered_demo_source_entity_ids(
+        extra_source_entities,
+        source_entity_ids,
     )
     demo_source_bundle_enabled = _demo_source_bundle_enabled_for_entry_values(
         options,

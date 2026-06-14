@@ -3377,6 +3377,46 @@ def test_options_schema_includes_saved_demo_entity_ids_with_registry_suffixes(
     )
 
 
+def test_options_schema_uses_discovered_suffixed_demo_entity_ids(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
+            ],
+        },
+    )
+    discovered_entities = [
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2",
+        "sensor.cs_energy_analyzer_demo_mains_l1_energy",
+    ]
+
+    source_schema = config_flow._options_schema(entry, discovered_entities)
+    mains_schema = config_flow._mains_schema(entry, discovered_entities)
+
+    assert _schema_default(source_schema, CONF_EXTRA_SOURCE_ENTITIES) == [
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2",
+    ]
+    assert _schema_default(mains_schema, CONF_MAINS_SOURCE_ENTITIES) == [
+        "sensor.cs_energy_analyzer_demo_mains_l1_energy"
+    ]
+
+
 def test_options_source_entities_override_setup_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         _source_entities_for_entry,
@@ -3389,6 +3429,113 @@ def test_options_source_entities_override_setup_source_entities() -> None:
     coordinator = SimpleNamespace(circuit_configs=())
 
     assert _source_entities_for_entry(entry, coordinator) == ("sensor.option_power",)
+
+
+def test_source_entities_for_entry_uses_registered_demo_entity_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            ],
+        },
+    )
+    registry = SimpleNamespace(
+        entities={
+            "sensor.cs_energy_analyzer_demo_refrigerator_energy_2": SimpleNamespace(
+                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+                unique_id=(
+                    "entry-1_demo_source_exact_"
+                    "cs_energy_analyzer_demo_refrigerator_energy"
+                ),
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+            ),
+            "sensor.cs_energy_analyzer_demo_hvac_l1_active_power": SimpleNamespace(
+                entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+                unique_id=(
+                    "entry-1_demo_source_exact_"
+                    "cs_energy_analyzer_demo_hvac_l1_active_power"
+                ),
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+            ),
+        }
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        hass=SimpleNamespace(entity_registry=registry),
+    )
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+    )
+
+
+def test_source_entities_for_entry_falls_back_when_ha_registry_get_fails(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+
+    def async_get(_hass):
+        raise TypeError("unhashable type")
+
+    entity_registry_module.async_get = async_get
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+            ],
+        },
+    )
+    registry = SimpleNamespace(
+        entities={
+            "sensor.cs_energy_analyzer_demo_refrigerator_energy_2": SimpleNamespace(
+                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+                unique_id=(
+                    "entry-1_demo_source_exact_"
+                    "cs_energy_analyzer_demo_refrigerator_energy"
+                ),
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+            ),
+        }
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        hass=SimpleNamespace(entity_registry=registry),
+    )
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+    )
 
 
 def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
