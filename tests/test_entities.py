@@ -1656,6 +1656,39 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
     assert setup_health_attributes(ready_coordinator)["blocking_issue_count"] == 1
 
 
+def test_setup_health_reports_missing_source_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_by_circuit={"garage_freezer": "missing_source_entities"},
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="garage_freezer",
+                name="Garage Freezer",
+                appliance_profile=ApplianceProfile.FREEZER,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(),
+            ),
+        ),
+    )
+
+    assert setup_health_value(coordinator) == "Add source sensor"
+    attrs = setup_health_attributes(coordinator)
+    assert attrs["primary_issue"] == "missing_source_entities"
+    assert attrs["next_step"] == "Add at least one source sensor to Garage Freezer"
+    assert attrs["issues"][0]["reason"] == (
+        "No source sensors are configured for this circuit."
+    )
+    assert attrs["issues"][0]["fix"] == (
+        "Add at least one source sensor to Garage Freezer"
+    )
+
+
 def test_summary_sensors_answer_primary_user_questions() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         activity_summary_attributes,

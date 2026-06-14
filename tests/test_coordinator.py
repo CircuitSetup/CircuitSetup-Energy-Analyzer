@@ -2921,6 +2921,65 @@ async def test_setup_health_repair_includes_circuit_context(
 
 
 @pytest.mark.asyncio
+async def test_process_update_missing_source_entities_creates_setup_health_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    repairs_created: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        del hass, severity
+        repairs_created.append((circuit_id, problem, dict(kwargs.get("data") or {})))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_create_circuit_issue",
+        fake_issue,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "garage_freezer",
+                    "name": "Garage Freezer",
+                    "mode": "single_phase",
+                    "appliance_profile": "freezer",
+                    "sensors": [],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    await coordinator.async_process_update()
+
+    assert repairs_created == [
+        (
+            "garage_freezer",
+            "missing_source_entities",
+            {
+                "circuit_name": "Garage Freezer",
+                "reason": "No source sensors are configured for this circuit.",
+                "recommended_action": (
+                    "Add at least one source sensor to Garage Freezer"
+                ),
+                "source_entities": [],
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runtime_missing_mains_source_creates_setup_health_repair(
     monkeypatch,
 ) -> None:

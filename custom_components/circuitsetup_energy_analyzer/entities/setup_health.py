@@ -604,6 +604,14 @@ def _setup_health_data_quality_issue(
     ]
     issue_text = " ".join([data_quality, *quality_issues]).lower()
 
+    if "missing_source_entities" in issue_text:
+        return _setup_health_issue(
+            "Add source sensor",
+            f"Add at least one source sensor to {circuit.name}",
+            circuit,
+            "No source sensors are configured for this circuit.",
+            issue="missing_source_entities",
+        )
     if "negative_real_power_load" in issue_text:
         return _setup_health_issue(
             "Check CT direction",
