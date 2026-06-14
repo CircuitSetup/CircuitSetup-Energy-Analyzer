@@ -3114,15 +3114,15 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             return self.async_show_menu(
                 step_id="init",
                 menu_options=[
-                    "assign",
                     "sources",
                     "mains",
+                    "assign",
                     "nilm",
                     "utility",
-                    "advanced",
-                    "recommendations",
-                    "entity_detail",
                     "dashboard",
+                    "entity_detail",
+                    "recommendations",
+                    "advanced",
                 ],
             )
 

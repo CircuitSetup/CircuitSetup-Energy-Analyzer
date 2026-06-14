@@ -172,7 +172,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
 
 
 def test_config_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     data = strings["config"]["step"]["user"]["data"]
     descriptions = strings["config"]["step"]["user"]["data_description"]
 
@@ -201,21 +201,32 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     init_step = strings["options"]["step"]["init"]
     data = strings["options"]["step"]["sources"]["data"]
     descriptions = strings["options"]["step"]["sources"]["data_description"]
 
+    assert list(init_step["menu_options"]) == [
+        "sources",
+        "mains",
+        "assign",
+        "nilm",
+        "utility",
+        "dashboard",
+        "entity_detail",
+        "recommendations",
+        "advanced",
+    ]
     assert init_step["menu_options"] == {
-        "assign": "Review Circuit Assignments",
-        "sources": "Edit Source Selection",
-        "mains": "Edit Mains Sensors",
-        "nilm": "Experimental NILM Settings",
-        "utility": "Utility / Opower Comparison",
-        "advanced": "Advanced Circuit Settings",
-        "recommendations": "Review Suggested Settings",
-        "entity_detail": "Entity Detail Level",
-        "dashboard": "Create Or Update Dashboard",
+        "sources": "🔌 Edit Source Selection",
+        "mains": "⚡ Edit Mains Sensors",
+        "assign": "🏷️ Review Circuit Assignments",
+        "nilm": "🧠 Experimental NILM Settings",
+        "utility": "📊 Utility / Opower Comparison",
+        "dashboard": "📋 Create Or Update Dashboard",
+        "entity_detail": "👁️ Entity Detail Level",
+        "recommendations": "💡 Review Suggested Settings",
+        "advanced": "🛠️ Advanced Circuit Settings",
     }
     assert all("_" not in label for label in init_step["menu_options"].values())
     assert "choose" in init_step["description"].lower()
@@ -253,7 +264,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
 
     for section in ("config", "options"):
         utility_data = strings[section]["step"]["utility"]["data"]
@@ -279,7 +290,7 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
 
 
 def test_advanced_settings_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     picker_step = strings["options"]["step"]["select_advanced_circuit"]
     settings_step = strings["options"]["step"]["advanced_settings"]
     section_data = {}
@@ -319,7 +330,7 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
 
     for section in ("config", "options"):
         data = strings[section]["step"]["assign"]["data"]
@@ -346,7 +357,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_assignment_picker_text_is_human_readable() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
 
     data = strings["options"]["step"]["select_assignment"]["data"]
     descriptions = strings["options"]["step"]["select_assignment"]["data_description"]
@@ -363,9 +374,9 @@ def test_assignment_picker_text_is_human_readable() -> None:
 
 
 def test_runtime_english_translations_include_setup_and_options_text() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
     )
 
     for section, step in (
@@ -402,9 +413,9 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
 def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
     None
 ):
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
     )
 
     for payload in (strings, translations):
@@ -458,9 +469,9 @@ def test_readme_documents_normal_user_action_paths() -> None:
 
 def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text())
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
     translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text()
+        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
     )
 
     combined = "\n".join(
