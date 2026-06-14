@@ -550,6 +550,7 @@ class _VisibilitySetupFakeEntityRegistry:
     def __init__(self) -> None:
         self.entities: dict[str, SimpleNamespace] = {}
         self.updated: list[tuple[str, object]] = []
+        self.disabled_updates: list[tuple[str, object]] = []
 
     def async_remove(self, entity_id: str) -> None:
         self.entities.pop(entity_id, None)
@@ -559,6 +560,9 @@ class _VisibilitySetupFakeEntityRegistry:
         if "hidden_by" in kwargs:
             entry.hidden_by = kwargs["hidden_by"]
             self.updated.append((entity_id, kwargs["hidden_by"]))
+        if "disabled_by" in kwargs:
+            entry.disabled_by = kwargs["disabled_by"]
+            self.disabled_updates.append((entity_id, kwargs["disabled_by"]))
         if "entity_category" in kwargs:
             entry.entity_category = kwargs["entity_category"]
 
@@ -697,6 +701,70 @@ async def test_binary_sensor_setup_unhides_new_expert_entities_after_registratio
     ]
     assert hidden_entries == []
     assert fake_registry.updated
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import binary_sensor
+
+    fake_registry = _VisibilitySetupFakeEntityRegistry()
+    fake_registry.entities.update(
+        {
+            "binary_sensor.fridge_running": SimpleNamespace(
+                entity_id="binary_sensor.fridge_running",
+                unique_id="entry-1_fridge_running",
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+                disabled_by="integration",
+                hidden_by=None,
+                entity_category=None,
+            ),
+            "binary_sensor.freezer_running": SimpleNamespace(
+                entity_id="binary_sensor.freezer_running",
+                unique_id="entry-1_freezer_running",
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+                disabled_by="user",
+                hidden_by=None,
+                entity_category=None,
+            ),
+        }
+    )
+    _install_visibility_setup_registries(monkeypatch, fake_registry)
+    circuits = (
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+        ),
+        CircuitConfig(
+            circuit_id="freezer",
+            name="Garage Freezer",
+            appliance_profile=ApplianceProfile.FREEZER,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(SensorRef("sensor.freezer_power", SensorRole.REAL_POWER),),
+        ),
+    )
+    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=circuits)
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
+
+    assert ("binary_sensor.fridge_running", None) in fake_registry.disabled_updates
+    assert fake_registry.entities["binary_sensor.fridge_running"].disabled_by is None
+    assert fake_registry.entities["binary_sensor.freezer_running"].disabled_by == "user"
+    assert "entry-1_fridge_running" in {
+        entity.unique_id for entity in added_entities
+    }
 
 
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(

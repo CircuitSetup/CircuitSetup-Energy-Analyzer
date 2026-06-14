@@ -17,6 +17,7 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    enable_summary_registry_entries,
     entity_detail_level_for_coordinator,
     entity_enabled_default_for_tier,
     prune_stale_device_registry_entries,
@@ -328,6 +329,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entry_id=entry_id,
         entity_domain="binary_sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
+    )
+    enable_summary_registry_entries(
+        hass,
+        entry_id=entry_id,
+        entity_domain="binary_sensor",
+        tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
     )
     prune_stale_device_registry_entries(
         hass,
