@@ -1343,6 +1343,12 @@ async def test_setting_recommendation_entity_target_ignores_state_history(
                             "status": RecommendationStatus.APPLIED,
                             "expires_at": datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
                         },
+                        {
+                            "recommendation_id": "fridge:max_active_minutes:v1",
+                            "circuit_id": "fridge",
+                            "status": RecommendationStatus.PENDING,
+                            "expires_at": "2026-06-01T12:00:00+00:00",
+                        },
                     ]
                 }
             )

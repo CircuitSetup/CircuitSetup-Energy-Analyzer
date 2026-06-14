@@ -1325,6 +1325,11 @@ def _recommendation_is_pending(coordinator: Any, recommendation: Any) -> bool:
         if isinstance(recommendation, Mapping)
         else getattr(recommendation, "expires_at", None)
     )
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return True
     if not isinstance(expires_at, datetime):
         return True
     now_fn = getattr(coordinator, "_now_fn", None)
