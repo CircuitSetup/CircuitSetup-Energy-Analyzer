@@ -3111,7 +3111,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             updated_options = _options_with_updates(self._config_entry, validated)
             if remove_demo_source_bundle:
                 updated_options = _remove_demo_source_bundle_from_config(
-                    updated_options
+                    updated_options,
+                    fallback_config=_entry_config(self._config_entry),
                 )
             return self.async_create_entry(
                 title="",
@@ -4163,8 +4164,13 @@ def _demo_source_bundle_enabled_for_config_entry(
     )
 
 
-def _remove_demo_source_bundle_from_config(config: Mapping[str, Any]) -> dict[str, Any]:
+def _remove_demo_source_bundle_from_config(
+    config: Mapping[str, Any],
+    *,
+    fallback_config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     pruned_config = dict(config)
+    fallback_config = fallback_config or {}
     for key, invalid_error_key in (
         (CONF_SOURCE_ENTITIES, ERROR_INVALID_SOURCE_ENTITIES),
         (CONF_EXTRA_SOURCE_ENTITIES, ERROR_INVALID_SOURCE_ENTITIES),
@@ -4178,7 +4184,7 @@ def _remove_demo_source_bundle_from_config(config: Mapping[str, Any]) -> dict[st
         )
 
     pruned_circuits = _circuits_without_demo_source_bundle(
-        pruned_config.get(CONF_CIRCUITS, [])
+        pruned_config.get(CONF_CIRCUITS, fallback_config.get(CONF_CIRCUITS, []))
     )
     pruned_config[CONF_CIRCUITS] = pruned_circuits
     circuit_ids = {
@@ -4190,6 +4196,15 @@ def _remove_demo_source_bundle_from_config(config: Mapping[str, Any]) -> dict[st
             circuit_id
             for circuit_id in _strict_string_list(
                 pruned_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                invalid_error_key="invalid_known_load_circuits",
+            )
+            if circuit_id in circuit_ids
+        ]
+    elif CONF_KNOWN_LOAD_CIRCUITS in fallback_config:
+        pruned_config[CONF_KNOWN_LOAD_CIRCUITS] = [
+            circuit_id
+            for circuit_id in _strict_string_list(
+                fallback_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
                 invalid_error_key="invalid_known_load_circuits",
             )
             if circuit_id in circuit_ids
