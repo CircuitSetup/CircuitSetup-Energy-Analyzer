@@ -238,13 +238,13 @@ The fastest path is to let the integration create a starter dashboard:
 
 Choose one layout:
 
-1. **Simple**: Health, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and Running.
-2. **Standard**: Simple plus configured feature-status entities.
-3. **Expert**: Standard plus diagnostic entities and evidence links.
+1. **Simple**: appliance status, mains/NILM, and shared energy tracking sections.
+2. **Standard**: the same example-style dashboard while keeping the Standard entity visibility profile.
+3. **Expert**: the same example-style dashboard while keeping the Expert entity visibility profile.
 
 You can also choose the layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, then press `button.circuitsetup_energy_analyzer_create_dashboard`.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. When the registry is available, the dashboard treats absent analyzer entities as missing and shows a note instead of falling back to guessed IDs. When the related control entities exist, it also adds small action cards for dashboard layout, entity detail level, mapping checks, settings recalculation, daily energy goals, alert sensitivity, relearn baseline, maintenance, and pause alerts. These controls are created for both analyzer-managed circuits and circuits loaded from the config entry data. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape. After you press the Create Dashboard button, its attributes show the last dashboard action, layout, path, and any reason the action could not complete.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It matches the included example dashboard structure with appliance status, mains/NILM, shared energy tracking, and HVAC weather-context sections when those circuits exist. It keeps each appliance card to four summary rows: Activity, Electrical Health, Energy Summary, and Daily Energy Usage. It does not add dropdown, switch, number, or button control cards. When the registry is available, the dashboard treats absent analyzer entities as missing and shows a note instead of falling back to guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape. After you press the Create Dashboard button, its attributes show the last dashboard action, layout, path, and any reason the action could not complete.
 
 For manual dashboards, start with one simple card per important appliance:
 

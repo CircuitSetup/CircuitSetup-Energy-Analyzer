@@ -1327,8 +1327,13 @@ def test_readme_explains_generated_dashboard_controls() -> None:
         readme_text
     )
     assert "renamed analyzer entities are respected" in readme_text
-    assert "adds small action cards" in readme_text
+    assert "matches the included example dashboard structure" in readme_text
+    assert "does not add dropdown, switch, number, or button control cards" in (
+        readme_text
+    )
+    assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
+    assert "adds small action cards" not in readme_text
 
 
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
