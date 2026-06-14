@@ -3837,6 +3837,92 @@ def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> N
     }
 
 
+@pytest.mark.parametrize(
+    ("circuit_id", "expected_name", "expected_profile", "expected_mode", "suffixes"),
+    [
+        (
+            "car_charger",
+            "Car Charger",
+            "EV_CHARGER",
+            "DUAL_PHASE",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "hvac",
+            "Hvac",
+            "HVAC",
+            "DUAL_PHASE",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "dryer",
+            "Dryer",
+            "DRYER",
+            "DUAL_PHASE",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "water_heater",
+            "Water Heater",
+            "WATER_HEATER",
+            "DUAL_PHASE",
+            ("power_l1", "current_l1", "power_l2", "current_l2"),
+        ),
+        (
+            "refrigerator",
+            "Refrigerator",
+            "REFRIGERATOR",
+            "SINGLE_PHASE",
+            ("power_l1", "current_l1"),
+        ),
+    ],
+)
+def test_runtime_groups_appliance_sources_with_metric_before_leg(
+    circuit_id: str,
+    expected_name: str,
+    expected_profile: str,
+    expected_mode: str,
+    suffixes: tuple[str, ...],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitMode,
+        SensorRole,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                f"sensor.{circuit_id}_{suffix}" for suffix in suffixes
+            ],
+        },
+    )
+
+    assert [config.circuit_id for config in coordinator.circuit_configs] == [circuit_id]
+    config = coordinator.circuit_configs[0]
+    assert config.name == expected_name
+    assert config.appliance_profile is getattr(ApplianceProfile, expected_profile)
+    assert config.mode is getattr(CircuitMode, expected_mode)
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in config.sensors
+    } == {
+        (
+            f"sensor.{circuit_id}_{suffix}",
+            (
+                SensorRole.CURRENT
+                if suffix.startswith("current")
+                else SensorRole.REAL_POWER
+            ),
+            "b" if suffix.endswith("l2") else "a",
+        )
+        for suffix in suffixes
+    }
+
+
 def test_runtime_infers_recommended_v1_appliance_taxonomy_from_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
