@@ -565,6 +565,59 @@ async def test_options_recommendations_step_guides_capacity_suggestions() -> Non
 
 
 @pytest.mark.asyncio
+async def test_options_recommendations_step_guides_solar_flow_suggestions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            settings_recommendations_by_circuit={
+                "mains": [
+                    {
+                        "recommendation_id": (
+                            "mains:high_solar_surplus_threshold_w:v1"
+                        ),
+                        "circuit_id": "mains",
+                        "circuit_name": "Mains",
+                        "setting_key": "high_solar_surplus_threshold_w",
+                        "setting_label": "High Solar Surplus Threshold W",
+                        "current_value": 1500.0,
+                        "suggested_value": 2600.0,
+                        "unit": "W",
+                        "confidence": 0.74,
+                        "reason": (
+                            "High solar surplus should represent the upper end of "
+                            "observed export events."
+                        ),
+                        "evidence": {
+                            "observed_export_samples": 7,
+                            "p95_export_w": 2600.0,
+                            "source_entities": ["sensor.mains_power"],
+                        },
+                    }
+                ]
+            }
+        ),
+        async_recalculate_setting_recommendations=_async_recorder(),
+    )
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_recommendations()
+
+    summary = result["description_placeholders"]["recommendations"]
+    assert "Mains - High Solar Surplus Threshold W: 1500 W -> 2600 W" in summary
+    assert "Default value: 1500" in summary
+    assert "Expected effect: Reserve high solar surplus guidance" in summary
+    assert "Observed Export Samples: 7" in summary
+    assert "P95 Export W: 2600" in summary
+    assert "source_entities" not in summary
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "method_name"),
     [

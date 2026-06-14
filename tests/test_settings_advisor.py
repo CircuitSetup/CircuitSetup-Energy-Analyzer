@@ -557,6 +557,51 @@ def test_mains_and_solar_recommendations_use_aggregate_patterns() -> None:
     assert high_surplus.suggested_value == 2600.0
 
 
+def test_recommendation_guidance_covers_advanced_setting_families() -> None:
+    from custom_components.circuitsetup_energy_analyzer.balance import (
+        DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+    )
+    from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
+        DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+        DEFAULT_MIN_APPARENT_POWER_VA,
+        DEFAULT_POWER_FACTOR_TOLERANCE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.recommendation_guidance import (
+        recommendation_setting_default_value,
+        recommendation_setting_expected_effect,
+    )
+    from custom_components.circuitsetup_energy_analyzer.solar_flow import (
+        HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+        SOLAR_SURPLUS_THRESHOLD_W,
+    )
+
+    expected_defaults = {
+        "apparent_power_tolerance_percent": (
+            DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT
+        ),
+        "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
+        "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
+        "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+        "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
+        "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    }
+
+    expected_effect_phrases = {
+        "apparent_power_tolerance_percent": "metric consistency",
+        "power_factor_tolerance": "power-factor",
+        "minimum_apparent_power_va": "low apparent-power",
+        "balance_negative_tolerance_w": "mains-minus-load",
+        "solar_surplus_threshold_w": "solar surplus",
+        "high_solar_surplus_threshold_w": "high solar surplus",
+    }
+
+    for setting_key, default_value in expected_defaults.items():
+        assert recommendation_setting_default_value(setting_key) == default_value
+        assert expected_effect_phrases[setting_key] in (
+            recommendation_setting_expected_effect(setting_key).lower()
+        )
+
+
 def test_mains_balance_recommendation_does_not_raise_tolerance() -> None:
     advisor = _advisor()
     inputs = advisor.AdvisorInputs(
