@@ -25,7 +25,7 @@ from .entity import (
     prune_stale_entity_registry_entries,
 )
 from .sensor import sensitivity_value
-from .ux import friendly_sensitivity_label, normalize_sensitivity
+from .ux import friendly_sensitivity_label
 
 try:
     from homeassistant.components.select import SelectEntity
@@ -45,6 +45,22 @@ DASHBOARD_LAYOUT_LABELS = {
     DASHBOARD_LAYOUT_SIMPLE: "Simple",
     DASHBOARD_LAYOUT_STANDARD: "Standard",
     DASHBOARD_LAYOUT_EXPERT: "Expert",
+}
+SENSITIVITY_SELECT_ALIASES = {
+    "low": "quiet",
+    "quiet": "quiet",
+    "standard": "balanced",
+    "balanced": "balanced",
+    "high": "sensitive",
+    "sensitive": "sensitive",
+}
+DASHBOARD_LAYOUT_SELECT_ALIASES = {
+    DASHBOARD_LAYOUT_SIMPLE: DASHBOARD_LAYOUT_SIMPLE,
+    DASHBOARD_LAYOUT_STANDARD: DASHBOARD_LAYOUT_STANDARD,
+    DASHBOARD_LAYOUT_EXPERT: DASHBOARD_LAYOUT_EXPERT,
+    "simple": DASHBOARD_LAYOUT_SIMPLE,
+    "standard": DASHBOARD_LAYOUT_STANDARD,
+    "expert": DASHBOARD_LAYOUT_EXPERT,
 }
 
 
@@ -123,7 +139,12 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Persist a new sensitivity preset."""
-        preset = normalize_sensitivity(option)
+        preset = _select_option_value(
+            option,
+            aliases=SENSITIVITY_SELECT_ALIASES,
+            action_label=self.entity_description.name_suffix,
+            valid_options=SENSITIVITY_OPTIONS,
+        )
         await _call_or_raise(
             self.coordinator,
             "async_set_circuit_sensitivity",
@@ -191,13 +212,17 @@ class EntityDetailLevelSelect(SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Persist and apply a new entity detail profile."""
-        if option not in ENTITY_DETAIL_LEVELS:
-            return
+        detail_level = _select_option_value(
+            option,
+            aliases={level: level for level in ENTITY_DETAIL_LEVELS},
+            action_label="entity detail level",
+            valid_options=ENTITY_DETAIL_LEVELS,
+        )
         await _call_or_raise(
             self.coordinator,
             "async_set_entity_detail_level",
             "entity detail level",
-            option,
+            detail_level,
         )
 
 
@@ -214,9 +239,7 @@ class DashboardLayoutSelect(SelectEntity):
         self._entry_id = entry_id
         self._attr_name = "CircuitSetup Energy Analyzer Dashboard Layout"
         self._attr_unique_id = f"{entry_id}_dashboard_layout"
-        self._attr_suggested_object_id = (
-            "circuitsetup_energy_analyzer_dashboard_layout"
-        )
+        self._attr_suggested_object_id = "circuitsetup_energy_analyzer_dashboard_layout"
 
     @property
     def name(self) -> str:
@@ -268,11 +291,17 @@ class DashboardLayoutSelect(SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Persist a new recommended-dashboard layout."""
+        layout = _select_option_value(
+            option,
+            aliases=DASHBOARD_LAYOUT_SELECT_ALIASES,
+            action_label="dashboard layout",
+            valid_options=DASHBOARD_LAYOUT_OPTIONS,
+        )
         await _call_or_raise(
             self.coordinator,
             "async_set_dashboard_layout",
             "dashboard layout",
-            normalize_dashboard_layout(option),
+            layout,
         )
 
 
@@ -332,3 +361,20 @@ async def _call_or_raise(
     result = method(*args)
     if inspect.isawaitable(result):
         await result
+
+
+def _select_option_value(
+    option: Any,
+    *,
+    aliases: Mapping[str, str],
+    action_label: str,
+    valid_options: list[str] | tuple[str, ...],
+) -> str:
+    normalized = str(option or "").strip().lower()
+    if normalized in aliases:
+        return aliases[normalized]
+    choices = ", ".join(valid_options)
+    raise HomeAssistantError(
+        f"Cannot set {action_label.strip().lower()} to {option!r}. "
+        f"Choose one of: {choices}."
+    )
