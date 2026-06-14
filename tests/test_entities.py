@@ -506,8 +506,11 @@ def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
             self.updated: list[tuple[str, object]] = []
 
         def async_update_entity(self, entity_id, **kwargs) -> None:
-            self.updated.append((entity_id, kwargs.get("hidden_by")))
-            self.entities[entity_id].hidden_by = kwargs.get("hidden_by")
+            if "hidden_by" in kwargs:
+                self.updated.append((entity_id, kwargs["hidden_by"]))
+                self.entities[entity_id].hidden_by = kwargs["hidden_by"]
+            if "entity_category" in kwargs:
+                self.entities[entity_id].entity_category = kwargs["entity_category"]
 
     fake_registry = FakeRegistry()
     homeassistant_module = ModuleType("homeassistant")
@@ -708,6 +711,7 @@ async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor
+    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
 
     fake_registry = _VisibilitySetupFakeEntityRegistry()
     fake_registry.entities.update(
@@ -719,7 +723,7 @@ async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
                 platform=DOMAIN,
                 disabled_by="integration",
                 hidden_by=None,
-                entity_category=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
             "binary_sensor.freezer_running": SimpleNamespace(
                 entity_id="binary_sensor.freezer_running",
@@ -761,6 +765,10 @@ async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
 
     assert ("binary_sensor.fridge_running", None) in fake_registry.disabled_updates
     assert fake_registry.entities["binary_sensor.fridge_running"].disabled_by is None
+    assert (
+        fake_registry.entities["binary_sensor.fridge_running"].entity_category
+        is None
+    )
     assert fake_registry.entities["binary_sensor.freezer_running"].disabled_by == "user"
     assert "entry-1_fridge_running" in {
         entity.unique_id for entity in added_entities
@@ -4877,8 +4885,11 @@ async def test_binary_sensor_setup_entry_unhides_expert_diagnostics(
             self.removed.append(entity_id)
 
         def async_update_entity(self, entity_id, **kwargs) -> None:
-            self.updated.append((entity_id, kwargs.get("hidden_by")))
-            self.entities[entity_id].hidden_by = kwargs.get("hidden_by")
+            if "hidden_by" in kwargs:
+                self.updated.append((entity_id, kwargs["hidden_by"]))
+                self.entities[entity_id].hidden_by = kwargs["hidden_by"]
+            if "entity_category" in kwargs:
+                self.entities[entity_id].entity_category = kwargs["entity_category"]
 
     fake_registry = FakeRegistry()
     homeassistant_module = ModuleType("homeassistant")

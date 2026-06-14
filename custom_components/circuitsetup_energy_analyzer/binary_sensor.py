@@ -22,6 +22,7 @@ from .entity import (
     entity_enabled_default_for_tier,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
+    sync_entity_registry_categories,
     sync_entity_registry_visibility,
 )
 from .models import ApplianceProfile, SensorRole
@@ -352,6 +353,15 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             if description.entity_registry_visible_default is False
         },
         detail_level=entity_detail_level_for_coordinator(coordinator),
+    )
+    sync_entity_registry_categories(
+        hass,
+        entry_id=entry_id,
+        entity_domain="binary_sensor",
+        entity_category_by_unique_id_suffix={
+            description.key: description.entity_category
+            for description in BINARY_SENSOR_DESCRIPTIONS
+        },
     )
 
 
