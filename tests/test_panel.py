@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
+    EventType,
     SensorRef,
     SensorRole,
     Severity,
@@ -629,6 +630,45 @@ def test_alert_evidence_payload_prefers_feature_for_circuit_fallback() -> None:
     requested_feature = _alert(
         feature="leg_imbalance",
         timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+    )
+    latest_other_feature = _alert(
+        feature="demand_monthly_peak",
+        timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(requested_feature, latest_other_feature)],
+        alert_id="stale-notification-id",
+        circuit_id="hvac",
+        feature="leg_imbalance",
+    )
+
+    assert payload["status"] == "latest_for_circuit"
+    assert payload["requested_feature"] == "leg_imbalance"
+    assert payload["alert"]["alert_id"] == notification_id_for_alert(requested_feature)
+    assert payload["alert"]["feature"] == "leg_imbalance"
+
+
+def test_alert_evidence_payload_uses_event_type_for_feature_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    timestamp = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    requested_feature = AlertEvidence(
+        timestamp=timestamp,
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Possible issue: hvac leg imbalance",
+        feature="",
+        event_type=EventType.LEG_IMBALANCE,
+        observed_value=62.0,
+        baseline_value=20.0,
+        change_ratio=2.1,
+        repeated_count=3,
+        first_seen=timestamp - timedelta(hours=1),
+        last_seen=timestamp,
+        features={"leg_imbalance": 2.1},
     )
     latest_other_feature = _alert(
         feature="demand_monthly_peak",

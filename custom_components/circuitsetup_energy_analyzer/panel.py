@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from .alert_links import _feature_for_alert as _canonical_feature_for_alert
 from .const import DOMAIN
 from .models import AlertEvidence, CircuitConfig
 from .notifications import notification_id_for_alert
@@ -900,7 +901,8 @@ def _latest_alert_for_circuit(
     alerts = [
         alert
         for alert in _coordinator_alerts(coordinator)
-        if alert.circuit_id == circuit_id and _feature_matches(alert.feature, feature)
+        if alert.circuit_id == circuit_id
+        and _feature_matches(_canonical_feature_for_alert(alert), feature)
     ]
     if not alerts:
         return None
