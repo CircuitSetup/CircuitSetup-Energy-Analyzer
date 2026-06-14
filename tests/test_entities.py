@@ -541,6 +541,164 @@ def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
     )
 
 
+class _VisibilitySetupFakeHider:
+    INTEGRATION = "integration"
+    USER = "user"
+
+
+class _VisibilitySetupFakeEntityRegistry:
+    def __init__(self) -> None:
+        self.entities: dict[str, SimpleNamespace] = {}
+        self.updated: list[tuple[str, object]] = []
+
+    def async_remove(self, entity_id: str) -> None:
+        self.entities.pop(entity_id, None)
+
+    def async_update_entity(self, entity_id: str, **kwargs) -> None:
+        entry = self.entities[entity_id]
+        if "hidden_by" in kwargs:
+            entry.hidden_by = kwargs["hidden_by"]
+            self.updated.append((entity_id, kwargs["hidden_by"]))
+        if "entity_category" in kwargs:
+            entry.entity_category = kwargs["entity_category"]
+
+
+def _install_visibility_setup_registries(monkeypatch, fake_registry) -> None:
+    import sys
+    from types import ModuleType
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    device_registry_module = ModuleType("homeassistant.helpers.device_registry")
+    entity_registry_module.RegistryEntryHider = _VisibilitySetupFakeHider
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    device_registry_module.async_get = lambda hass: SimpleNamespace(devices={})
+    helpers_module.entity_registry = entity_registry_module
+    helpers_module.device_registry = device_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.device_registry",
+        device_registry_module,
+    )
+
+
+def _register_default_hidden_entities(
+    fake_registry: _VisibilitySetupFakeEntityRegistry,
+    entities,
+    *,
+    domain: str,
+    entry_id: str,
+) -> None:
+    for entity in entities:
+        if getattr(entity, "_attr_entity_registry_visible_default", True) is not False:
+            continue
+        unique_id = entity.unique_id
+        object_id = unique_id.removeprefix(f"{entry_id}_")
+        entity_id = f"{domain}.{object_id}"
+        fake_registry.entities[entity_id] = SimpleNamespace(
+            entity_id=entity_id,
+            unique_id=unique_id,
+            config_entry_id=entry_id,
+            platform=DOMAIN,
+            hidden_by="integration",
+            entity_category=getattr(entity, "_attr_entity_category", None),
+        )
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_unhides_new_expert_entities_after_registration(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import sensor
+
+    fake_registry = _VisibilitySetupFakeEntityRegistry()
+    _install_visibility_setup_registries(monkeypatch, fake_registry)
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _use_expert_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+
+    def async_add_entities(entities) -> None:
+        _register_default_hidden_entities(
+            fake_registry,
+            entities,
+            domain="sensor",
+            entry_id="entry-1",
+        )
+
+    await sensor.async_setup_entry(hass, entry, async_add_entities)
+
+    hidden_entries = [
+        entry
+        for entry in fake_registry.entities.values()
+        if entry.hidden_by == "integration"
+    ]
+    assert hidden_entries == []
+    assert fake_registry.updated
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_setup_unhides_new_expert_entities_after_registration(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import binary_sensor
+
+    fake_registry = _VisibilitySetupFakeEntityRegistry()
+    _install_visibility_setup_registries(monkeypatch, fake_registry)
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _use_expert_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+
+    def async_add_entities(entities) -> None:
+        _register_default_hidden_entities(
+            fake_registry,
+            entities,
+            domain="binary_sensor",
+            entry_id="entry-1",
+        )
+
+    await binary_sensor.async_setup_entry(hass, entry, async_add_entities)
+
+    hidden_entries = [
+        entry
+        for entry in fake_registry.entities.values()
+        if entry.hidden_by == "integration"
+    ]
+    assert hidden_entries == []
+    assert fake_registry.updated
+
+
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
     monkeypatch,
 ) -> None:
