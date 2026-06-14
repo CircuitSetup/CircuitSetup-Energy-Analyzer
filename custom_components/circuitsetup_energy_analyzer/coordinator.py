@@ -230,6 +230,7 @@ _UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS = {
     "missing_utility": "utility_comparison_missing_utility_source",
     "missing_measured": "utility_comparison_missing_measured_source",
 }
+_DEMO_SOURCE_UNIQUE_ID_PREFIX = "demo_source_exact_"
 
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
@@ -5351,8 +5352,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if get_state is None:
             return states
 
+        registered_demo_entity_ids = self._registered_demo_source_entity_ids()
         for sensor in config.sensors:
             raw_state = get_state(sensor.entity_id)
+            if raw_state is None and _is_demo_source_entity_id(sensor.entity_id):
+                registered_entity_id = registered_demo_entity_ids.get(
+                    sensor.entity_id
+                )
+                if (
+                    registered_entity_id is not None
+                    and registered_entity_id != sensor.entity_id
+                ):
+                    raw_state = get_state(registered_entity_id)
             if raw_state is None:
                 continue
             attributes = getattr(raw_state, "attributes", {}) or {}
@@ -5368,6 +5379,40 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 state_class=attributes.get("state_class"),
             )
         return states
+
+    def _registered_demo_source_entity_ids(self: Self) -> dict[str, str]:
+        if self.hass is None:
+            return {}
+        registry = None
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            registry = er.async_get(self.hass)
+        except (ImportError, AttributeError, TypeError):
+            registry = getattr(self.hass, "entity_registry", None)
+        if registry is None:
+            return {}
+        entries = getattr(registry, "entities", {})
+        values = entries.values() if hasattr(entries, "values") else entries
+        registered: dict[str, str] = {}
+        unique_id_prefix = f"{self.entry_id}_{_DEMO_SOURCE_UNIQUE_ID_PREFIX}"
+        for registry_entry in values:
+            unique_id = str(getattr(registry_entry, "unique_id", ""))
+            if not unique_id.startswith(unique_id_prefix):
+                continue
+            if (
+                getattr(registry_entry, "config_entry_id", self.entry_id)
+                != self.entry_id
+            ):
+                continue
+            if getattr(registry_entry, "platform", DOMAIN) != DOMAIN:
+                continue
+            canonical_entity_id = f"sensor.{unique_id.removeprefix(unique_id_prefix)}"
+            registered[canonical_entity_id] = str(
+                getattr(registry_entry, "entity_id", canonical_entity_id)
+            )
+        return registered
+
 
     def _activity_alert_settings_for_config(
         self: Self,

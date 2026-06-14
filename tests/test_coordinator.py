@@ -29,11 +29,16 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    ApplianceProfile,
     BaselineStats,
+    CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     EventType,
     PowerFlowMode,
     RetentionMode,
+    SensorRef,
+    SensorRole,
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
@@ -3204,6 +3209,64 @@ async def test_demo_source_entities_are_treated_as_current_for_data_quality() ->
     checklist = coordinator.state.data_quality_checklist_by_circuit[circuit_id]
     assert checklist["source_data_fresh"] is True
     assert not any("stale" in issue for issue in checklist["quality_issues"])
+
+
+def test_demo_source_states_use_registered_suffixed_entity_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
+    canonical_entity_id = "sensor.cs_energy_analyzer_demo_refrigerator_energy"
+    registered_entity_id = "sensor.cs_energy_analyzer_demo_refrigerator_energy_2"
+    config = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_refrigerator",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef(canonical_entity_id, SensorRole.ENERGY),),
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            if entity_id == canonical_entity_id:
+                return None
+            assert entity_id == registered_entity_id
+            return SimpleNamespace(
+                state="52.6",
+                attributes={"unit_of_measurement": "kWh"},
+                last_updated=now,
+            )
+
+    registry = SimpleNamespace(
+        entities={
+            registered_entity_id: SimpleNamespace(
+                entity_id=registered_entity_id,
+                unique_id=(
+                    "entry-1_demo_source_exact_"
+                    "cs_energy_analyzer_demo_refrigerator_energy"
+                ),
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+            )
+        }
+    )
+    hass = SimpleNamespace(
+        states=FakeStates(),
+        data={DOMAIN: {}},
+        entity_registry=registry,
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_id="entry-1",
+        entry_data={},
+        now_fn=lambda: now,
+    )
+
+    states = coordinator._source_states_for(config, now)
+
+    assert states[canonical_entity_id].state == "52.6"
+    assert states[canonical_entity_id].entity_id == canonical_entity_id
 
 
 @pytest.mark.asyncio
