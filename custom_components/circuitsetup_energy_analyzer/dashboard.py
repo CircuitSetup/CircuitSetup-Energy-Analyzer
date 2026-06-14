@@ -3,71 +3,66 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .button import CIRCUIT_BUTTON_DESCRIPTIONS, button_description_applies
 from .const import (
-    DASHBOARD_LAYOUT_EXPERT,
-    DASHBOARD_LAYOUT_STANDARD,
     DASHBOARD_LAYOUTS,
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
-from .number import CIRCUIT_NUMBER_DESCRIPTIONS, number_description_applies
 
 DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
 DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
-EVIDENCE_PANEL_PATH = "/circuitsetup-energy-analyzer-evidence"
 
-CORE_ENTITY_SPECS = (
-    ("sensor", "health_summary", "Health Summary"),
-    ("sensor", "activity_summary", "Activity Summary"),
+APPLIANCE_STATUS_ENTITY_SPECS = (
+    ("sensor", "activity_summary", "Activity"),
     ("sensor", "electrical_health", "Electrical Health"),
     ("sensor", "energy_summary", "Energy Summary"),
     ("sensor", "daily_energy_usage", "Daily Energy Usage"),
-    ("binary_sensor", "running", "Running"),
 )
-STANDARD_ENTITY_SPECS = (
-    ("sensor", "energy_usage_status", "Energy Usage Status"),
-    ("sensor", "energy_goal_status", "Energy Goal Status"),
-    ("sensor", "run_cycle_status", "Run Cycle Status"),
-    ("sensor", "weather_context", "Weather Context"),
-    ("sensor", "rain_pump_correlation", "Rain Pump Correlation"),
-    ("sensor", "water_flow_correlation", "Water Flow Correlation"),
-    ("sensor", "demand_status", "Demand Status"),
-    ("sensor", "capacity_status", "Capacity Status"),
-    ("sensor", "leg_imbalance_status", "Leg Imbalance Status"),
-    ("sensor", "metric_consistency_status", "Metric Consistency Status"),
-    ("sensor", "balance_status", "Balance Status"),
-    ("sensor", "solar_flow_status", "Solar Flow Status"),
-    ("sensor", "utility_comparison_status", "Utility Comparison Status"),
-    ("sensor", "standby_status", "Standby Status"),
-    ("sensor", "nilm_unknown_loads", "NILM Unknown Loads"),
+MAINS_ROLLUP_ENTITY_SPECS = (
+    ("sensor", "activity_summary", "Activity"),
+    ("sensor", "electrical_health", "Electrical"),
+    ("sensor", "energy_summary", "Energy"),
 )
-EXPERT_ENTITY_SPECS = (
-    ("sensor", "alert_evidence", "Alert Evidence"),
-    ("sensor", "power_quality_evidence", "Power Quality Evidence"),
-    ("sensor", "energy_dashboard_status", "Energy Dashboard Status"),
-    ("sensor", "data_quality_checklist", "Data Quality Checklist"),
-    ("sensor", "readiness", "Readiness"),
-    ("sensor", "learning_progress", "Learning Progress"),
-    ("sensor", "recent_activity", "Recent Activity"),
-    ("sensor", "settings_suggestions", "Settings Suggestions"),
+MAINS_LOAD_MATCH_ENTITY_SPECS = (
+    ("sensor", "monitored_power", "Known Appliance Load"),
+    ("sensor", "balance_power", "Unassigned Mains Load"),
+    ("sensor", "monitored_coverage", "Known Load Share"),
 )
-GLOBAL_CONTROL_SPECS = (
-    ("select", "dashboard_layout", "Dashboard Layout"),
-    ("select", "entity_detail_level", "Entity Detail Level"),
-    ("button", "run_mapping_checks", "Run Mapping Checks"),
-    ("button", "recalculate_suggestions", "Recalculate Suggestions"),
-    ("button", "create_dashboard", "Create Or Update Dashboard"),
+UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS = (
+    ("sensor", "nilm_unknown_loads", "Inventory"),
+    ("sensor", "nilm_signature_count", "Signatures"),
+    ("sensor", "monitored_coverage", "Known Load Share"),
 )
-CIRCUIT_CONTROL_SPECS = (
-    ("select", "alert_sensitivity", "Alert Sensitivity"),
-    ("number", "daily_energy_goal", "Daily Energy Goal"),
-    ("button", "relearn_baseline", "Relearn Baseline"),
-    ("button", "start_maintenance", "Start Maintenance"),
-    ("button", "end_maintenance", "End Maintenance"),
-    ("button", "pause_alerts", "Pause Alerts"),
+SOLAR_FLOW_ENTITY_SPECS = (
+    ("sensor", "solar_flow_status", "Solar Flow"),
+    ("sensor", "solar_surplus_power", "Solar Surplus"),
 )
+UTILITY_COMPARISON_ENTITY_SPECS = (
+    ("sensor", "utility_comparison_difference", "Utility Difference"),
+    ("sensor", "utility_comparison_status", "Utility Status"),
+)
+HVAC_WEATHER_ENTITY_SPECS = (
+    ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+    ("sensor", "outdoor_temperature", "Outdoor Temperature"),
+)
+HVAC_RUNTIME_ENTITY_SPECS = (
+    ("sensor", "run_cycle_runtime", "Run Cycle Runtime"),
+    ("sensor", "run_cycle_duty_cycle", "Run Cycle Duty Cycle"),
+)
+WATER_FLOW_PROFILES = {
+    "sump_pump",
+    "washer",
+    "water_heater",
+    "water_pump",
+    "well_pump",
+}
+HVAC_WEATHER_PROFILES = {
+    "hvac",
+    "hvac_compressor",
+    "hvac_blower",
+    "electric_heat",
+}
 
 
 def normalize_dashboard_layout(value: Any) -> str:
@@ -86,41 +81,53 @@ def build_recommended_dashboard(
     entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
-    normalized_layout = normalize_dashboard_layout(layout)
     circuit_list = [
         circuit
         for circuit in circuits
-        if str(getattr(circuit, "circuit_id", "")).strip()
+        if _circuit_id(circuit)
     ]
     registry_lookup = _registry_entity_lookup(hass, entry_id)
-    cards: list[dict[str, Any]] = [
-        _markdown_card(
-            "Use this dashboard as a starting point. It shows analyzer-created "
-            "entities only. If analyzer entities are missing or disabled, the "
-            "dashboard will show a note with the next thing to check."
+    appliance_circuits = [
+        circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
+    ]
+    mains_circuits = [circuit for circuit in circuit_list if _is_mains_circuit(circuit)]
+    hvac_circuits = [
+        circuit for circuit in appliance_circuits if _is_hvac_circuit(circuit)
+    ]
+
+    sections = [
+        _appliance_status_section(
+            appliance_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
         )
     ]
-    if global_controls_card := _global_controls_card(
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    ):
-        cards.append(global_controls_card)
-    for circuit in circuit_list:
-        cards.append(
-            _circuit_card(
-                circuit,
-                normalized_layout,
+    if mains_circuits:
+        sections.append(
+            _mains_section(
+                mains_circuits[0],
                 registry_lookup=registry_lookup,
                 hass=hass,
                 entry_id=entry_id,
             )
         )
-    if normalized_layout == DASHBOARD_LAYOUT_EXPERT:
-        cards.append(
-            _markdown_card(
-                f"Open detailed alert evidence from notifications or visit "
-                f"{EVIDENCE_PANEL_PATH}."
+    sections.append(
+        _energy_tracking_section(
+            appliance_circuits,
+            mains_circuits=mains_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+    )
+    if hvac_circuits:
+        sections.append(
+            _hvac_weather_section(
+                hvac_circuits[0],
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
             )
         )
 
@@ -128,17 +135,13 @@ def build_recommended_dashboard(
         "title": DASHBOARD_TITLE,
         "views": [
             {
-                "title": DASHBOARD_TITLE,
-                "path": DASHBOARD_URL_PATH,
+                "title": "Overview",
+                "path": "overview",
                 "icon": DASHBOARD_ICON,
                 "type": "sections",
-                "sections": [
-                    {
-                        "type": "grid",
-                        "title": _layout_title(normalized_layout),
-                        "cards": cards,
-                    }
-                ],
+                "max_columns": 4,
+                "dense_section_placement": True,
+                "sections": sections,
             }
         ],
     }
@@ -168,82 +171,536 @@ def dashboard_storage_payload(
     }
 
 
-def _layout_title(layout: str) -> str:
-    if layout == DASHBOARD_LAYOUT_EXPERT:
-        return "Expert Energy Analyzer"
-    if layout == DASHBOARD_LAYOUT_STANDARD:
-        return "Standard Energy Analyzer"
-    return "Simple Energy Analyzer"
-
-
-def _circuit_card(
-    circuit: Any,
-    layout: str,
+def _appliance_status_section(
+    circuits: Iterable[Any],
     *,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any]:
-    circuit_id = str(getattr(circuit, "circuit_id", "")).strip()
-    name = str(getattr(circuit, "name", "") or circuit_id).strip() or circuit_id
-    specs = list(CORE_ENTITY_SPECS)
-    if layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}:
-        specs.extend(STANDARD_ENTITY_SPECS)
-    if layout == DASHBOARD_LAYOUT_EXPERT:
-        specs.extend(EXPERT_ENTITY_SPECS)
+    cards: list[dict[str, Any]] = [
+        _markdown_card(
+            "These cards keep each appliance to Activity, Electrical Health, "
+            "Energy Summary, and Daily Energy Usage. Daily Energy Usage may show "
+            "Waiting For Energy Change until a cumulative kWh source increases."
+        )
+    ]
+    for circuit in circuits:
+        circuit_id = _circuit_id(circuit)
+        if not circuit_id:
+            continue
+        name = _circuit_name(circuit)
+        rows, notes = _resolved_entity_rows(
+            circuit_id,
+            APPLIANCE_STATUS_ENTITY_SPECS,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if notes:
+            cards.append(_markdown_card(_circuit_note(name, notes)))
+        if rows:
+            cards.append(_entities_card(name, rows))
 
-    entities, notes = _resolved_entity_ids(
+    return {
+        "type": "grid",
+        "title": "Appliance Status",
+        "cards": cards,
+    }
+
+
+def _mains_section(
+    circuit: Any,
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    circuit_id = _circuit_id(circuit)
+    cards: list[dict[str, Any]] = []
+
+    rollup_rows, rollup_notes = _resolved_entity_rows(
+        circuit_id,
+        MAINS_ROLLUP_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if rollup_notes:
+        cards.append(_markdown_card(_note_content("Mains rollups note", rollup_notes)))
+    if rollup_rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "Mains rollups",
+                "columns": 3,
+                "entities": rollup_rows,
+            }
+        )
+
+    coverage_entity = _resolved_entity_id(
+        circuit_id,
+        ("sensor", "monitored_coverage", "Known Load Share"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if coverage_entity:
+        cards.append(
+            {
+                "type": "gauge",
+                "entity": coverage_entity,
+                "name": "Known Load Share",
+                "min": 0,
+                "max": 100,
+                "severity": {"red": 0, "yellow": 40, "green": 70},
+            }
+        )
+
+    load_rows, load_notes = _resolved_entity_rows(
+        circuit_id,
+        MAINS_LOAD_MATCH_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if load_notes:
+        cards.append(_markdown_card(_note_content("Mains load match note", load_notes)))
+    if load_rows:
+        cards.append(_entities_card("Mains Load Match", load_rows))
+
+    cards.append(
+        _markdown_card(
+            "Known Load Share is how much of current mains power is explained "
+            "by the circuits you selected. Low values usually mean normal "
+            "unmonitored loads, not necessarily a problem."
+        )
+    )
+
+    unknown_inventory = _resolved_entity_id(
+        circuit_id,
+        ("sensor", "nilm_unknown_loads", "Unknown Load Inventory"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if unknown_inventory:
+        cards.append(
+            {
+                "type": "tile",
+                "entity": unknown_inventory,
+                "name": "Unknown Load Inventory",
+                "vertical": False,
+            }
+        )
+
+    unknown_rows, unknown_notes = _resolved_entity_rows(
+        circuit_id,
+        UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if unknown_notes:
+        cards.append(
+            _markdown_card(_note_content("Unknown load signals note", unknown_notes))
+        )
+    if unknown_rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "Unknown load signals",
+                "columns": 3,
+                "entities": unknown_rows,
+            }
+        )
+
+    if solar_card := _conditional_entities_card(
+        circuit_id,
+        SOLAR_FLOW_ENTITY_SPECS,
+        "Solar flow",
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    ):
+        cards.append(solar_card)
+    if utility_card := _conditional_entities_card(
+        circuit_id,
+        UTILITY_COMPARISON_ENTITY_SPECS,
+        "Utility comparison",
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    ):
+        cards.append(utility_card)
+
+    daily_energy = _resolved_entity_id(
+        circuit_id,
+        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if daily_energy:
+        cards.append(_statistics_graph_card("Mains daily energy", [daily_energy]))
+
+    return {
+        "type": "grid",
+        "title": "Mains, Solar, and NILM",
+        "cards": cards,
+    }
+
+
+def _energy_tracking_section(
+    circuits: Iterable[Any],
+    *,
+    mains_circuits: Iterable[Any],
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    appliance_circuits = list(circuits)
+    mains_list = list(mains_circuits)
+    daily_entities = _resolved_entities_for_circuits(
+        appliance_circuits,
+        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    activity_entities = _resolved_entities_for_circuits(
+        appliance_circuits,
+        ("sensor", "activity_summary", "Activity Summary"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    electrical_rows = _resolved_rows_for_circuits(
+        [*appliance_circuits, *mains_list],
+        ("sensor", "electrical_health", "Electrical Health"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+
+    cards: list[dict[str, Any]] = []
+    if daily_entities:
+        cards.append(_statistics_graph_card("Daily energy trend", daily_entities))
+    if activity_entities:
+        cards.append(
+            {
+                "type": "history-graph",
+                "title": "Appliance activity",
+                "hours_to_show": 48,
+                "entities": [
+                    {"entity": entity_id} for entity_id in activity_entities
+                ],
+            }
+        )
+    if electrical_rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "Electrical health rollups",
+                "columns": 4,
+                "entities": electrical_rows,
+            }
+        )
+    if water_flow_card := _water_flow_context_card(
+        appliance_circuits,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    ):
+        cards.append(water_flow_card)
+
+    if not cards:
+        cards.append(
+            _markdown_card(
+                "Energy tracking cards appear after analyzer summary entities are "
+                "created and available."
+            )
+        )
+
+    return {
+        "type": "grid",
+        "title": "Energy Tracking",
+        "cards": cards,
+    }
+
+
+def _hvac_weather_section(
+    circuit: Any,
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    circuit_id = _circuit_id(circuit)
+    weather_rows, weather_notes = _resolved_entity_rows(
+        circuit_id,
+        HVAC_WEATHER_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    weather_context = _resolved_entity_id(
+        circuit_id,
+        ("sensor", "weather_context", "Outdoor Weather Context"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    runtime_rows, runtime_notes = _resolved_entity_rows(
+        circuit_id,
+        HVAC_RUNTIME_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+        include_names=False,
+    )
+
+    cards: list[dict[str, Any]] = []
+    if weather_notes:
+        cards.append(_markdown_card(_note_content("HVAC weather note", weather_notes)))
+    if weather_rows:
+        weather_entities = [row["entity"] for row in weather_rows]
+        cards.append(
+            _conditional_card(
+                weather_entities,
+                {
+                    "type": "statistics-graph",
+                    "title": "HVAC daily energy and outdoor temperature",
+                    "days_to_show": 7,
+                    "period": "day",
+                    "stat_types": ["max"],
+                    "entities": weather_rows,
+                },
+            )
+        )
+    if weather_context:
+        cards.append(
+            _conditional_card(
+                [weather_context],
+                {
+                    "type": "tile",
+                    "entity": weather_context,
+                    "name": "Outdoor Weather Context",
+                    "vertical": False,
+                },
+            )
+        )
+    if runtime_notes:
+        cards.append(_markdown_card(_note_content("HVAC runtime note", runtime_notes)))
+    if runtime_rows:
+        cards.append(
+            _conditional_card(
+                [row["entity"] for row in runtime_rows],
+                {
+                    "type": "history-graph",
+                    "title": "Runtime and duty cycle",
+                    "hours_to_show": 72,
+                    "entities": runtime_rows,
+                },
+            )
+        )
+    cards.append(
+        _markdown_card(
+            "Notifications and repairs: appliance alerts use persistent "
+            "notifications with observed evidence. Repairs are reserved for "
+            "setup, configuration, missing sensors, stale data, or other "
+            "data-quality problems. Demand and capacity findings are "
+            "operational evidence from energy measurements, not electrical "
+            "safety verification, code compliance, or breaker sizing advice."
+        )
+    )
+
+    return {
+        "type": "grid",
+        "title": "HVAC Weather Context",
+        "cards": cards,
+    }
+
+
+def _conditional_entities_card(
+    circuit_id: str,
+    specs: Iterable[tuple[str, str, str]],
+    title: str,
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any] | None:
+    rows, _notes = _resolved_entity_rows(
         circuit_id,
         specs,
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
     )
-    cards: list[dict[str, Any]] = []
-    if notes:
-        cards.append(_markdown_card(_circuit_note(name, notes)))
-    if entities:
-        cards.append(
-            {
-                "type": "entities",
-                "title": name,
-                "show_header_toggle": False,
-                "entities": [{"entity": entity_id} for entity_id in _dedupe(entities)],
-            }
-        )
-    if control_card := _circuit_controls_card(
-        circuit,
-        name,
-        circuit_id,
+    if not rows:
+        return None
+    return _conditional_card(
+        [row["entity"] for row in rows],
+        _entities_card(title, rows),
+    )
+
+
+def _water_flow_context_card(
+    circuits: Iterable[Any],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any] | None:
+    rows = _resolved_rows_for_circuits(
+        [
+            circuit
+            for circuit in circuits
+            if _circuit_profile(circuit) in WATER_FLOW_PROFILES
+        ],
+        ("sensor", "water_flow_correlation", "Water Flow Correlation"),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
-    ):
-        cards.append(control_card)
-    if len(cards) == 1:
-        return cards[0]
+    )
+    if not rows:
+        return None
+    return _conditional_card(
+        [row["entity"] for row in rows],
+        {
+            "type": "glance",
+            "title": "Water flow context",
+            "columns": 2,
+            "entities": rows,
+        },
+    )
+
+
+def _statistics_graph_card(title: str, entity_ids: Iterable[str]) -> dict[str, Any]:
     return {
-        "type": "vertical-stack",
-        "title": name,
-        "cards": cards,
+        "type": "statistics-graph",
+        "title": title,
+        "days_to_show": 7,
+        "period": "day",
+        "stat_types": ["max"],
+        "entities": [{"entity": entity_id} for entity_id in _dedupe(entity_ids)],
     }
 
 
-def _resolved_entity_ids(
+def _conditional_card(
+    entity_ids: Iterable[str],
+    card: dict[str, Any],
+) -> dict[str, Any]:
+    conditions: list[dict[str, str]] = []
+    for entity_id in _dedupe(entity_ids):
+        conditions.extend(
+            (
+                {"entity": entity_id, "state_not": "unavailable"},
+                {"entity": entity_id, "state_not": "unknown"},
+            )
+        )
+    return {
+        "type": "conditional",
+        "conditions": conditions,
+        "card": card,
+    }
+
+
+def _entities_card(title: str, rows: Iterable[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "type": "entities",
+        "title": title,
+        "show_header_toggle": False,
+        "entities": list(_dedupe_entity_rows(rows)),
+    }
+
+
+def _resolved_entities_for_circuits(
+    circuits: Iterable[Any],
+    spec: tuple[str, str, str],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> list[str]:
+    entity_ids: list[str] = []
+    for circuit in circuits:
+        entity_id = _resolved_entity_id(
+            _circuit_id(circuit),
+            spec,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if entity_id:
+            entity_ids.append(entity_id)
+    return list(_dedupe(entity_ids))
+
+
+def _resolved_rows_for_circuits(
+    circuits: Iterable[Any],
+    spec: tuple[str, str, str],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for circuit in circuits:
+        entity_id = _resolved_entity_id(
+            _circuit_id(circuit),
+            spec,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if entity_id:
+            rows.append({"entity": entity_id, "name": _circuit_name(circuit)})
+    return list(_dedupe_entity_rows(rows))
+
+
+def _resolved_entity_id(
+    circuit_id: str,
+    spec: tuple[str, str, str],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> str | None:
+    rows, _notes = _resolved_entity_rows(
+        circuit_id,
+        (spec,),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+        include_names=False,
+    )
+    if not rows:
+        return None
+    return rows[0]["entity"]
+
+
+def _resolved_entity_rows(
     circuit_id: str,
     specs: Iterable[tuple[str, str, str]],
     *,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
-) -> tuple[list[str], list[str]]:
+    include_names: bool = True,
+) -> tuple[list[dict[str, str]], list[str]]:
     if not entry_id or registry_lookup is None:
         return [
-            _guessed_entity_id(circuit_id, entity_domain, entity_key)
-            for entity_domain, entity_key, _label in specs
+            _entity_row(
+                _guessed_entity_id(circuit_id, entity_domain, entity_key),
+                label,
+                include_name=include_names,
+            )
+            for entity_domain, entity_key, label in specs
         ], []
 
-    entity_ids: list[str] = []
+    rows: list[dict[str, str]] = []
     missing_labels: list[str] = []
     disabled_labels: list[str] = []
     unavailable_labels: list[str] = []
@@ -266,174 +723,13 @@ def _resolved_entity_ids(
             disabled_labels.append(label)
             continue
         entity_id = str(getattr(entry, "entity_id", "")).strip()
-        if not entity_id:
-            missing_labels.append(label)
-            continue
-        if not entity_id.startswith(f"{entity_domain}."):
-            missing_labels.append(label)
-            continue
-        if _entity_is_unavailable(hass, entity_id):
-            unavailable_labels.append(label)
-            continue
-        entity_ids.append(entity_id)
-
-    notes: list[str] = []
-    if disabled_labels:
-        notes.append(_dashboard_gap_note("disabled", disabled_labels))
-    if missing_labels:
-        notes.append(_dashboard_gap_note("missing", missing_labels))
-    if unavailable_labels:
-        notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
-    if ambiguous_labels:
-        notes.append(_dashboard_gap_note("ambiguous", ambiguous_labels))
-    return entity_ids, notes
-
-
-def _global_controls_card(
-    *,
-    registry_lookup: dict[str, Any] | None,
-    hass: Any | None,
-    entry_id: str | None,
-) -> dict[str, Any] | None:
-    entities, notes = _resolved_global_entity_ids(
-        GLOBAL_CONTROL_SPECS,
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    return _control_card(
-        "Dashboard Controls",
-        note_title="Dashboard controls note",
-        entities=entities,
-        notes=notes,
-    )
-
-
-def _circuit_controls_card(
-    circuit: Any,
-    name: str,
-    circuit_id: str,
-    *,
-    registry_lookup: dict[str, Any] | None,
-    hass: Any | None,
-    entry_id: str | None,
-) -> dict[str, Any] | None:
-    specs = _applicable_circuit_control_specs(circuit)
-    if not specs:
-        return None
-    entities, notes = _resolved_entity_ids(
-        circuit_id,
-        specs,
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    return _control_card(
-        f"{name} Controls",
-        note_title=f"{name} controls note",
-        entities=entities,
-        notes=notes,
-    )
-
-
-_CIRCUIT_BUTTON_DESCRIPTION_BY_KEY = {
-    description.key: description for description in CIRCUIT_BUTTON_DESCRIPTIONS
-}
-_CIRCUIT_NUMBER_DESCRIPTION_BY_KEY = {
-    description.key: description for description in CIRCUIT_NUMBER_DESCRIPTIONS
-}
-
-
-def _applicable_circuit_control_specs(
-    circuit: Any,
-) -> tuple[tuple[str, str, str], ...]:
-    specs: list[tuple[str, str, str]] = []
-    for entity_domain, entity_key, label in CIRCUIT_CONTROL_SPECS:
-        if entity_domain == "button":
-            description = _CIRCUIT_BUTTON_DESCRIPTION_BY_KEY.get(entity_key)
-            if description is not None and not button_description_applies(
-                description,
-                circuit,
-            ):
-                continue
-        if entity_domain == "number":
-            description = _CIRCUIT_NUMBER_DESCRIPTION_BY_KEY.get(entity_key)
-            if description is not None and not number_description_applies(
-                description,
-                circuit,
-            ):
-                continue
-        specs.append((entity_domain, entity_key, label))
-    return tuple(specs)
-
-
-def _control_card(
-    title: str,
-    *,
-    note_title: str,
-    entities: Iterable[str],
-    notes: Iterable[str],
-) -> dict[str, Any] | None:
-    cards: list[dict[str, Any]] = []
-    note_list = [note for note in notes if note]
-    entity_list = list(_dedupe(entities))
-    if note_list:
-        cards.append(_markdown_card(_note_content(note_title, note_list)))
-    if entity_list:
-        cards.append(
-            {
-                "type": "entities",
-                "title": title,
-                "show_header_toggle": False,
-                "entities": [{"entity": entity_id} for entity_id in entity_list],
-            }
-        )
-    if not cards:
-        return None
-    if len(cards) == 1:
-        return cards[0]
-    return {"type": "vertical-stack", "title": title, "cards": cards}
-
-
-def _resolved_global_entity_ids(
-    specs: Iterable[tuple[str, str, str]],
-    *,
-    registry_lookup: dict[str, Any] | None,
-    hass: Any | None,
-    entry_id: str | None,
-) -> tuple[list[str], list[str]]:
-    if not entry_id or registry_lookup is None:
-        return [], []
-
-    entity_ids: list[str] = []
-    missing_labels: list[str] = []
-    disabled_labels: list[str] = []
-    unavailable_labels: list[str] = []
-    ambiguous_labels: list[str] = []
-    for entity_domain, entity_key, label in specs:
-        entry, resolution_issue = _registry_entry_for_global_spec(
-            registry_lookup,
-            entry_id=entry_id,
-            entity_domain=entity_domain,
-            entity_key=entity_key,
-        )
-        if resolution_issue == "ambiguous":
-            ambiguous_labels.append(label)
-            continue
-        if entry is None:
-            missing_labels.append(label)
-            continue
-        if getattr(entry, "disabled_by", None):
-            disabled_labels.append(label)
-            continue
-        entity_id = str(getattr(entry, "entity_id", "")).strip()
         if not entity_id or not entity_id.startswith(f"{entity_domain}."):
             missing_labels.append(label)
             continue
         if _entity_is_unavailable(hass, entity_id):
             unavailable_labels.append(label)
             continue
-        entity_ids.append(entity_id)
+        rows.append(_entity_row(entity_id, label, include_name=include_names))
 
     notes: list[str] = []
     if disabled_labels:
@@ -444,7 +740,72 @@ def _resolved_global_entity_ids(
         notes.append(_dashboard_gap_note("unavailable", unavailable_labels))
     if ambiguous_labels:
         notes.append(_dashboard_gap_note("ambiguous", ambiguous_labels))
-    return entity_ids, notes
+    return list(_dedupe_entity_rows(rows)), notes
+
+
+def _entity_row(
+    entity_id: str,
+    name: str,
+    *,
+    include_name: bool,
+) -> dict[str, str]:
+    row = {"entity": entity_id}
+    if include_name:
+        row["name"] = name
+    return row
+
+
+def _dedupe_entity_rows(
+    rows: Iterable[dict[str, str]],
+) -> tuple[dict[str, str], ...]:
+    seen: set[str] = set()
+    result: list[dict[str, str]] = []
+    for row in rows:
+        entity_id = row.get("entity", "")
+        if not entity_id or entity_id in seen:
+            continue
+        seen.add(entity_id)
+        result.append(row)
+    return tuple(result)
+
+
+def _circuit_id(circuit: Any) -> str:
+    return str(_circuit_value(circuit, "circuit_id") or "").strip()
+
+
+def _circuit_name(circuit: Any) -> str:
+    circuit_id = _circuit_id(circuit)
+    return str(_circuit_value(circuit, "name") or circuit_id).strip() or circuit_id
+
+
+def _circuit_profile(circuit: Any) -> str:
+    return _normalized_value(_circuit_value(circuit, "appliance_profile"))
+
+
+def _circuit_mode(circuit: Any) -> str:
+    return _normalized_value(_circuit_value(circuit, "mode"))
+
+
+def _is_mains_circuit(circuit: Any) -> bool:
+    return "mains_nilm" in {
+        _circuit_profile(circuit),
+        _circuit_mode(circuit),
+        _circuit_id(circuit),
+    }
+
+
+def _is_hvac_circuit(circuit: Any) -> bool:
+    return _circuit_profile(circuit) in HVAC_WEATHER_PROFILES
+
+
+def _normalized_value(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _circuit_value(circuit: Any, key: str) -> Any:
+    if isinstance(circuit, Mapping):
+        return circuit.get(key)
+    return getattr(circuit, key, None)
 
 
 def _registry_entity_lookup(
@@ -523,10 +884,6 @@ def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
     return f"{entry_id}_{circuit_id}_{entity_key}"
 
 
-def _expected_global_unique_id(entry_id: str, entity_key: str) -> str:
-    return f"{entry_id}_{entity_key}"
-
-
 def _registry_entry_for_spec(
     registry_lookup: Mapping[str, Any],
     *,
@@ -544,30 +901,6 @@ def _registry_entry_for_spec(
         for entry in registry_lookup.values()
         if _entry_entity_domain(entry) == entity_domain
         and _entry_matches_circuit_key(entry, entry_id, circuit_id, entity_key)
-    ]
-    if len(candidates) == 1:
-        return candidates[0], None
-    if len(candidates) > 1:
-        return None, "ambiguous"
-    return None, None
-
-
-def _registry_entry_for_global_spec(
-    registry_lookup: Mapping[str, Any],
-    *,
-    entry_id: str,
-    entity_domain: str,
-    entity_key: str,
-) -> tuple[Any | None, str | None]:
-    exact = registry_lookup.get(_expected_global_unique_id(entry_id, entity_key))
-    if exact is not None:
-        return exact, None
-
-    candidates = [
-        entry
-        for entry in registry_lookup.values()
-        if _entry_entity_domain(entry) == entity_domain
-        and _entry_matches_global_key(entry, entity_key)
     ]
     if len(candidates) == 1:
         return candidates[0], None
@@ -597,21 +930,6 @@ def _entry_matches_circuit_key(
     return unique_id == _expected_unique_id(entry_id, circuit_id, entity_key)
 
 
-def _entry_matches_global_key(entry: Any, entity_key: str) -> bool:
-    entry_key = _entry_value(
-        entry,
-        "entity_key",
-        "description_key",
-        "translation_key",
-        "key",
-    )
-    if entry_key == entity_key and not _entry_value(entry, "circuit_id", "circuit"):
-        return True
-
-    unique_id = str(_entry_value(entry, "unique_id") or "").strip()
-    return unique_id.endswith(f"_{entity_key}")
-
-
 def _entry_entity_domain(entry: Any) -> str:
     entity_id = str(_entry_value(entry, "entity_id") or "").strip()
     return entity_id.split(".", 1)[0] if "." in entity_id else ""
@@ -629,10 +947,6 @@ def _entry_value(entry: Any, *keys: str) -> Any:
 
 def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> str:
     return f"{entity_domain}.{circuit_id}_{entity_key}"
-
-
-def _sensor_entity(circuit_id: str, suffix: str) -> str:
-    return f"sensor.{circuit_id}_{suffix}"
 
 
 def _markdown_card(content: str) -> dict[str, str]:
