@@ -344,6 +344,81 @@ SECTION_POWER_QUALITY_SETTINGS = "power_quality_settings"
 SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
 SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
 SECTION_WATER_CONTEXT_SETTINGS = "water_context_settings"
+_ADVANCED_SECTION_RESET_FIELDS = {
+    SECTION_ANALYSIS_SETTINGS: "reset_analysis_settings_to_defaults",
+    SECTION_ENERGY_SETTINGS: "reset_energy_settings_to_defaults",
+    SECTION_ACTIVITY_SETTINGS: "reset_activity_settings_to_defaults",
+    SECTION_BILLING_COST_SETTINGS: "reset_billing_cost_settings_to_defaults",
+    SECTION_DEMAND_CAPACITY_SETTINGS: "reset_demand_capacity_settings_to_defaults",
+    SECTION_STANDBY_SETTINGS: "reset_standby_settings_to_defaults",
+    SECTION_WATER_CONTEXT_SETTINGS: "reset_water_context_settings_to_defaults",
+    SECTION_DUAL_PHASE_SETTINGS: "reset_dual_phase_settings_to_defaults",
+    SECTION_POWER_QUALITY_SETTINGS: "reset_power_quality_settings_to_defaults",
+    SECTION_MAINS_BALANCE_SETTINGS: "reset_mains_balance_settings_to_defaults",
+    SECTION_SOLAR_FLOW_SETTINGS: "reset_solar_flow_settings_to_defaults",
+}
+_ADVANCED_RESET_SETTING_KEYS = {
+    "reset_analysis_settings_to_defaults": (FIELD_PRESET,),
+    "reset_energy_settings_to_defaults": (
+        FIELD_WINDOW_DAYS,
+        FIELD_DAILY_SPIKE_RATIO,
+        FIELD_DAILY_GOAL_KWH,
+        FIELD_GOAL_ALERT_RATIO,
+    ),
+    "reset_activity_settings_to_defaults": (
+        FIELD_MAX_ACTIVE_MINUTES,
+        FIELD_MAX_IDLE_MINUTES,
+    ),
+    "reset_billing_cost_settings_to_defaults": (
+        FIELD_CYCLE_START_DAY,
+        FIELD_BUDGET_KWH,
+        FIELD_BUDGET_ALERT_RATIO,
+        "min_elapsed_days",
+        FIELD_DEFAULT_RATE_PER_KWH,
+        FIELD_TOU_RATE_PER_KWH,
+        FIELD_TOU_START,
+        FIELD_TOU_END,
+        FIELD_TOU_WEEKDAYS,
+        FIELD_TOU_NAME,
+    ),
+    "reset_demand_capacity_settings_to_defaults": (
+        FIELD_WINDOW_MINUTES,
+        FIELD_DEMAND_LIMIT_W,
+        FIELD_BREAKER_AMPS,
+        FIELD_WARNING_RATIO,
+    ),
+    "reset_standby_settings_to_defaults": (
+        FIELD_WINDOW_HOURS,
+        FIELD_STANDBY_THRESHOLD_W,
+        FIELD_ALWAYS_ON_ALERT_W,
+        "min_samples",
+    ),
+    "reset_water_context_settings_to_defaults": (
+        CONF_RAIN_PUMP_CORRELATION_ENABLED,
+        CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+        CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+        CONF_WATER_FLOW_CORRELATION_ENABLED,
+        CONF_LINKED_FLOW_SENSOR_ENTITIES,
+        CONF_EXPECTS_WATER_FLOW,
+        CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    ),
+    "reset_dual_phase_settings_to_defaults": (
+        FIELD_LEG_IMBALANCE_WARNING_RATIO,
+        FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    ),
+    "reset_power_quality_settings_to_defaults": (
+        FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+        FIELD_POWER_FACTOR_TOLERANCE,
+        FIELD_MINIMUM_APPARENT_POWER_VA,
+    ),
+    "reset_mains_balance_settings_to_defaults": (FIELD_BALANCE_NEGATIVE_TOLERANCE_W,),
+    "reset_solar_flow_settings_to_defaults": (
+        FIELD_SOLAR_EXPORT_TOLERANCE_W,
+        FIELD_SOLAR_SURPLUS_THRESHOLD_W,
+        FIELD_HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+        FIELD_FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+    ),
+}
 _ADVANCED_SECTION_KEYS = {
     SECTION_ANALYSIS_SETTINGS,
     SECTION_ENERGY_SETTINGS,
@@ -1542,8 +1617,12 @@ def _add_advanced_section(
 ) -> None:
     if not fields:
         return
+    section_fields: dict[Any, Any] = {}
+    if reset_field := _ADVANCED_SECTION_RESET_FIELDS.get(key):
+        section_fields[vol.Optional(reset_field, default=False)] = bool
+    section_fields.update(fields)
     schema[vol.Optional(key)] = section(
-        vol.Schema(dict(fields)),
+        vol.Schema(section_fields),
         {"collapsed": collapsed},
     )
 
@@ -4680,7 +4759,19 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
         CONF_LINKED_FLOW_SENSOR_ENTITIES,
         invalid_error_key="invalid_water_flow_sensor_entities",
     )
+    _reset_advanced_setting_sections(settings, user_input)
     return settings
+
+
+def _reset_advanced_setting_sections(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+) -> None:
+    for reset_field, setting_keys in _ADVANCED_RESET_SETTING_KEYS.items():
+        if not bool(user_input.get(reset_field, False)):
+            continue
+        for setting_key in setting_keys:
+            settings.pop(setting_key, None)
 
 
 def _flatten_advanced_settings_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
