@@ -102,17 +102,17 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose whether to review circuit appliance assignments, edit source sensors, mains sensors, NILM settings, utility comparison, recommended dashboard, entity detail level, or advanced circuit settings.",
+        "description": "Choose an options area to configure. Start with source selection, then mains sensors and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
         "menu_options": {
-          "assign": "Review Circuit Assignments",
-          "sources": "Edit Source Selection",
-          "mains": "Edit Mains Sensors",
-          "nilm": "Experimental NILM Settings",
-          "utility": "Utility / Opower Comparison",
-          "advanced": "Advanced Circuit Settings",
-          "recommendations": "Review Suggested Settings",
-          "entity_detail": "Entity Detail Level",
-          "dashboard": "Create Or Update Dashboard"
+          "sources": "🔌 Edit Source Selection",
+          "mains": "⚡ Edit Mains Sensors",
+          "assign": "🏷️ Review Circuit Assignments",
+          "nilm": "🧠 Experimental NILM Settings",
+          "utility": "📊 Utility / Opower Comparison",
+          "dashboard": "📋 Create Or Update Dashboard",
+          "entity_detail": "👁️ Entity Detail Level",
+          "recommendations": "💡 Review Suggested Settings",
+          "advanced": "🛠️ Advanced Circuit Settings"
         }
       },
       "sources": {

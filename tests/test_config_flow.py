@@ -413,15 +413,15 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
     assert result["type"] == "menu"
     assert result["step_id"] == "init"
     assert result["menu_options"] == [
-        "assign",
         "sources",
         "mains",
+        "assign",
         "nilm",
         "utility",
-        "advanced",
-        "recommendations",
-        "entity_detail",
         "dashboard",
+        "entity_detail",
+        "recommendations",
+        "advanced",
     ]
     _assert_no_description_placeholders(result)
 
