@@ -468,7 +468,8 @@
     },
     "error": {
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
-      "invalid_recommendation": "Choose one of the pending suggested settings."
+      "invalid_recommendation": "Choose one of the pending suggested settings.",
+      "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again."
     }
   },
   "entity": {

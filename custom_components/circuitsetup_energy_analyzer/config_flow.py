@@ -3589,9 +3589,18 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         await result
                 create_dashboard = getattr(coordinator, "async_create_dashboard", None)
                 if callable(create_dashboard):
-                    result = create_dashboard()
-                    if hasattr(result, "__await__"):
-                        await result
+                    dashboard_result = create_dashboard()
+                    if hasattr(dashboard_result, "__await__"):
+                        dashboard_result = await dashboard_result
+                    if _dashboard_creation_unavailable(
+                        dashboard_result,
+                        coordinator,
+                    ):
+                        return self.async_show_form(
+                            step_id="dashboard",
+                            data_schema=_dashboard_schema(self._config_entry),
+                            errors={"base": "dashboard_creation_unavailable"},
+                        )
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
@@ -3706,6 +3715,16 @@ def _options_flow_coordinator(flow: Any) -> Any | None:
         return None
     entry_id = getattr(getattr(flow, "_config_entry", None), "entry_id", None)
     return domain_data.get(entry_id)
+
+
+def _dashboard_creation_unavailable(result: Any, coordinator: Any) -> bool:
+    if isinstance(result, Mapping):
+        return result.get("action") == "unavailable"
+    last_request = getattr(coordinator, "last_dashboard_create_request", None)
+    return (
+        isinstance(last_request, Mapping)
+        and last_request.get("action") == "unavailable"
+    )
 
 
 async def _async_refresh_setting_recommendations(coordinator: Any) -> None:
