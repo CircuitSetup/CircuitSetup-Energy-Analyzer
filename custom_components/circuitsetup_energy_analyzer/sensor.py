@@ -3046,6 +3046,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         }
         if unique_id.startswith(f"{entry_id}_demo_source_")
     }
+    prune_stale_device_registry_entries(
+        hass,
+        entry_id=entry_id,
+        desired_identifiers=device_identifiers_for_entities(entities),
+    )
+    async_add_entities(entities)
     sync_entity_registry_visibility(
         hass,
         entry_id=entry_id,
@@ -3068,9 +3074,3 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in SENSOR_DESCRIPTIONS
         },
     )
-    prune_stale_device_registry_entries(
-        hass,
-        entry_id=entry_id,
-        desired_identifiers=device_identifiers_for_entities(entities),
-    )
-    async_add_entities(entities)

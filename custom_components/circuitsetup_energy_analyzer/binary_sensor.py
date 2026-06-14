@@ -329,6 +329,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="binary_sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
+    prune_stale_device_registry_entries(
+        hass,
+        entry_id=entry_id,
+        desired_identifiers=device_identifiers_for_entities(entities),
+    )
+    async_add_entities(entities)
     sync_entity_registry_visibility(
         hass,
         entry_id=entry_id,
@@ -340,12 +346,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         },
         detail_level=entity_detail_level_for_coordinator(coordinator),
     )
-    prune_stale_device_registry_entries(
-        hass,
-        entry_id=entry_id,
-        desired_identifiers=device_identifiers_for_entities(entities),
-    )
-    async_add_entities(entities)
 
 
 def binary_sensor_description_applies(
