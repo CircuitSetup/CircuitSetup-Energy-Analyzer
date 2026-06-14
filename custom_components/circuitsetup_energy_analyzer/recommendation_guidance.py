@@ -20,7 +20,7 @@ from .solar_flow import (
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
 )
-from .standby import DEFAULT_STANDBY_THRESHOLD_W
+from .standby import DEFAULT_STANDBY_THRESHOLD_W, DEFAULT_STANDBY_WINDOW_HOURS
 from .usage import DEFAULT_DAILY_USAGE_SPIKE_RATIO
 from .ux import friendly_feature_name
 
@@ -29,7 +29,9 @@ _SETTING_DEFAULTS: dict[str, Any] = {
     "max_active_minutes": None,
     "max_idle_minutes": None,
     "warning_ratio": DEFAULT_CAPACITY_WARNING_RATIO,
+    "window_hours": DEFAULT_STANDBY_WINDOW_HOURS,
     "standby_threshold_w": DEFAULT_STANDBY_THRESHOLD_W,
+    "always_on_alert_w": 0.0,
     "standby_min_samples": 24,
     "leg_imbalance_warning_ratio": DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
     "leg_imbalance_min_total_power_w": DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -61,8 +63,16 @@ _SETTING_EXPECTED_EFFECTS = {
         "Warn earlier when usage approaches capacity, without changing breaker "
         "or safety assumptions."
     ),
+    "window_hours": (
+        "Use enough standby history to distinguish normal idle draw from "
+        "short-lived power changes."
+    ),
     "standby_threshold_w": (
         "Separate normal standby draw from runs so idle alerts are less noisy."
+    ),
+    "always_on_alert_w": (
+        "Surface unusually high Always On draw without changing run-cycle or "
+        "standby detection."
     ),
     "standby_min_samples": (
         "Require enough standby samples before changing idle detection behavior."
