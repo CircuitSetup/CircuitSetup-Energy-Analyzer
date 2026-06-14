@@ -3,11 +3,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .capacity import DEFAULT_CAPACITY_WARNING_RATIO
+from .metric_consistency import (
+    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+    DEFAULT_MIN_APPARENT_POWER_VA,
+    DEFAULT_POWER_FACTOR_TOLERANCE,
+)
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
+from .solar_flow import (
+    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    SOLAR_SURPLUS_THRESHOLD_W,
+)
+from .standby import DEFAULT_STANDBY_THRESHOLD_W
 from .usage import DEFAULT_DAILY_USAGE_SPIKE_RATIO
 from .ux import friendly_feature_name
 
@@ -16,10 +27,18 @@ _SETTING_DEFAULTS: dict[str, Any] = {
     "max_active_minutes": None,
     "max_idle_minutes": None,
     "warning_ratio": DEFAULT_CAPACITY_WARNING_RATIO,
-    "standby_threshold_w": 8.0,
+    "standby_threshold_w": DEFAULT_STANDBY_THRESHOLD_W,
     "standby_min_samples": 24,
     "leg_imbalance_warning_ratio": DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
     "leg_imbalance_min_total_power_w": DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    "apparent_power_tolerance_percent": (
+        DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT
+    ),
+    "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
+    "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
+    "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+    "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
+    "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
 }
 
 _SETTING_EXPECTED_EFFECTS = {
@@ -48,6 +67,30 @@ _SETTING_EXPECTED_EFFECTS = {
     ),
     "leg_imbalance_min_total_power_w": (
         "Avoid imbalance alerts when the circuit is below meaningful total load."
+    ),
+    "apparent_power_tolerance_percent": (
+        "Tune metric consistency checks for W, VA, current, and power-factor "
+        "relationships toward this circuit's observed sensor residuals."
+    ),
+    "power_factor_tolerance": (
+        "Tune power-factor relationship checks to this circuit's observed "
+        "sensor behavior without hiding larger metric mismatches."
+    ),
+    "minimum_apparent_power_va": (
+        "Ignore low apparent-power samples where sensor noise can dominate "
+        "metric consistency checks."
+    ),
+    "balance_negative_tolerance_w": (
+        "Tune mains-minus-load balance checks while still surfacing mapping, "
+        "solar, or CT-orientation problems."
+    ),
+    "solar_surplus_threshold_w": (
+        "Start solar surplus guidance near typical observed export so load "
+        "shifting prompts are less noisy."
+    ),
+    "high_solar_surplus_threshold_w": (
+        "Reserve high solar surplus guidance for the upper end of observed "
+        "export events."
     ),
 }
 
