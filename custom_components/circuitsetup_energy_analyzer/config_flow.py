@@ -123,6 +123,7 @@ from .const import (
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_DASHBOARD_LAYOUT,
+    CONF_DEMO_SOURCE_BUNDLE_ENABLED,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
@@ -496,6 +497,66 @@ def _normalize_demo_source_entity_ids(entity_ids: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(normalized))
 
 
+def _is_demo_source_entity_id(entity_id: str) -> bool:
+    return str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
+
+
+def _with_demo_source_bundle(entity_ids: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys([*entity_ids, *_DEMO_SOURCE_ENTITY_IDS]))
+
+
+def _without_demo_source_bundle(entity_ids: Iterable[str]) -> list[str]:
+    return [
+        entity_id
+        for entity_id in entity_ids
+        if not _is_demo_source_entity_id(entity_id)
+    ]
+
+
+def _has_demo_source_entity_ids(*entity_id_groups: Iterable[str]) -> bool:
+    return any(
+        _is_demo_source_entity_id(entity_id)
+        for entity_ids in entity_id_groups
+        for entity_id in entity_ids
+    )
+
+
+def _demo_source_entity_ids_from_circuits(
+    circuits: Iterable[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    return tuple(
+        str(sensor.get("entity_id"))
+        for circuit in circuits
+        if isinstance(circuit, Mapping)
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping)
+        and sensor.get("entity_id")
+        and _is_demo_source_entity_id(str(sensor.get("entity_id")))
+    )
+
+
+def _demo_source_bundle_enabled_for_entry_values(
+    options: Mapping[str, Any],
+    data: Mapping[str, Any],
+    *,
+    source_entities: Iterable[str] = (),
+    extra_source_entities: Iterable[str] = (),
+    mains_source_entities: Iterable[str] = (),
+) -> bool:
+    explicitly_enabled = False
+    if CONF_DEMO_SOURCE_BUNDLE_ENABLED in options:
+        explicitly_enabled = bool(options[CONF_DEMO_SOURCE_BUNDLE_ENABLED])
+    elif CONF_DEMO_SOURCE_BUNDLE_ENABLED in data:
+        explicitly_enabled = bool(data[CONF_DEMO_SOURCE_BUNDLE_ENABLED])
+    circuits = options.get(CONF_CIRCUITS, data.get(CONF_CIRCUITS, []))
+    return explicitly_enabled or _has_demo_source_entity_ids(
+        source_entities,
+        extra_source_entities,
+        mains_source_entities,
+        _demo_source_entity_ids_from_circuits(circuits),
+    )
+
+
 def _current_demo_source_entity_ids(entity_id: str) -> tuple[str, ...]:
     entity_id = str(entity_id).strip()
     if entity_id in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
@@ -568,6 +629,9 @@ def _demo_voltage_source_entity_ids(object_id: str) -> tuple[str, ...]:
 
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize setup data without requiring Home Assistant."""
+    demo_source_bundle_enabled = bool(
+        user_input.get(CONF_DEMO_SOURCE_BUNDLE_ENABLED, False)
+    )
     source_devices = _strict_string_list(
         user_input.get(CONF_SOURCE_DEVICES, []),
         invalid_error_key="invalid_source_devices",
@@ -577,6 +641,8 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
     extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
+    if demo_source_bundle_enabled:
+        extra_source_entities = _with_demo_source_bundle(extra_source_entities)
     legacy_source_entities = _strict_string_list(
         user_input.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
@@ -585,6 +651,8 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     source_entities = list(
         dict.fromkeys([*extra_source_entities, *legacy_source_entities])
     )
+    if demo_source_bundle_enabled:
+        source_entities = _with_demo_source_bundle(source_entities)
     if not source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
@@ -611,6 +679,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
         CONF_SOURCE_ENTITIES: source_entities,
+        CONF_DEMO_SOURCE_BUNDLE_ENABLED: demo_source_bundle_enabled,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -642,8 +711,16 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     return validated
 
 
-def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+def validate_options_input(
+    user_input: Mapping[str, Any],
+    *,
+    remove_demo_source_bundle: bool = False,
+    allow_empty_sources: bool = False,
+) -> dict[str, Any]:
     """Validate and normalize options flow data without requiring Home Assistant."""
+    demo_source_bundle_enabled = bool(
+        user_input.get(CONF_DEMO_SOURCE_BUNDLE_ENABLED, False)
+    )
     source_devices = _strict_string_list(
         user_input.get(CONF_SOURCE_DEVICES, []),
         invalid_error_key="invalid_source_devices",
@@ -653,6 +730,10 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
     extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
+    if demo_source_bundle_enabled:
+        extra_source_entities = _with_demo_source_bundle(extra_source_entities)
+    elif remove_demo_source_bundle:
+        extra_source_entities = _without_demo_source_bundle(extra_source_entities)
     outdoor_temperature_entity = str(
         user_input.get(CONF_OUTDOOR_TEMPERATURE_ENTITY) or ""
     ).strip()
@@ -672,6 +753,7 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
+        CONF_DEMO_SOURCE_BUNDLE_ENABLED: demo_source_bundle_enabled,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             user_input.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -704,11 +786,23 @@ def validate_options_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
         source_entities = _normalize_demo_source_entity_ids(source_entities)
+        if demo_source_bundle_enabled:
+            source_entities = _with_demo_source_bundle(source_entities)
+        elif remove_demo_source_bundle:
+            source_entities = _without_demo_source_bundle(source_entities)
         merged_source_entities.extend(source_entities)
     merged_source_entities = list(dict.fromkeys(merged_source_entities))
-    if not merged_source_entities:
+    if demo_source_bundle_enabled:
+        merged_source_entities = _with_demo_source_bundle(merged_source_entities)
+    elif remove_demo_source_bundle:
+        merged_source_entities = _without_demo_source_bundle(merged_source_entities)
+    if not merged_source_entities and not allow_empty_sources:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
     validated[CONF_SOURCE_ENTITIES] = merged_source_entities
+    if remove_demo_source_bundle:
+        validated[CONF_MAINS_SOURCE_ENTITIES] = _without_demo_source_bundle(
+            validated[CONF_MAINS_SOURCE_ENTITIES]
+        )
     return validated
 
 
@@ -1045,6 +1139,10 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             ): _energy_entity_list_selector(
                 _selectable_source_entity_ids(source_entity_ids)
             ),
+            vol.Optional(
+                CONF_DEMO_SOURCE_BUNDLE_ENABLED,
+                default=False,
+            ): bool,
             vol.Optional(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
                 default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
@@ -2994,18 +3092,30 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     CONF_ENTITY_DETAIL_LEVEL,
                     DEFAULT_ENTITY_DETAIL_LEVEL,
                 )
+            remove_demo_source_bundle = (
+                CONF_DEMO_SOURCE_BUNDLE_ENABLED in source_input
+                and not bool(source_input.get(CONF_DEMO_SOURCE_BUNDLE_ENABLED))
+                and _demo_source_bundle_enabled_for_config_entry(self._config_entry)
+            )
             try:
                 validated = validate_options_input(
                     await _async_source_selection_with_device_entities(
                         getattr(self, "hass", None),
                         source_input,
-                    )
+                    ),
+                    remove_demo_source_bundle=remove_demo_source_bundle,
+                    allow_empty_sources=remove_demo_source_bundle,
                 )
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
+            updated_options = _options_with_updates(self._config_entry, validated)
+            if remove_demo_source_bundle:
+                updated_options = _remove_demo_source_bundle_from_config(
+                    updated_options
+                )
             return self.async_create_entry(
                 title="",
-                data=_options_with_updates(self._config_entry, validated),
+                data=updated_options,
             )
 
         return await self._async_show_options_form()
@@ -3751,6 +3861,13 @@ def _options_schema(
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
     )
+    demo_source_bundle_enabled = _demo_source_bundle_enabled_for_entry_values(
+        options,
+        data,
+        source_entities=source_entities,
+        extra_source_entities=extra_source_entities,
+        mains_source_entities=mains_source_entities,
+    )
     selectable_source_entities = _selectable_source_entity_ids(
         source_entity_ids,
         source_entities,
@@ -3777,6 +3894,10 @@ def _options_schema(
                 CONF_EXTRA_SOURCE_ENTITIES,
                 default=extra_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
+            vol.Optional(
+                CONF_DEMO_SOURCE_BUNDLE_ENABLED,
+                default=demo_source_bundle_enabled,
+            ): bool,
             _optional_entity_marker(
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
                 outdoor_temperature_entity,
@@ -3865,9 +3986,19 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
     extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
+    demo_source_bundle_enabled = bool(
+        options.get(
+            CONF_DEMO_SOURCE_BUNDLE_ENABLED,
+            data.get(CONF_DEMO_SOURCE_BUNDLE_ENABLED, False),
+        )
+    )
+    if demo_source_bundle_enabled:
+        extra_source_entities = _with_demo_source_bundle(extra_source_entities)
     merged_source_entities = list(
         dict.fromkeys([*extra_source_entities, *source_entities])
     )
+    if demo_source_bundle_enabled:
+        merged_source_entities = _with_demo_source_bundle(merged_source_entities)
     if not merged_source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
@@ -3878,6 +4009,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         ),
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
         CONF_SOURCE_ENTITIES: merged_source_entities,
+        CONF_DEMO_SOURCE_BUNDLE_ENABLED: demo_source_bundle_enabled,
         CONF_ENABLE_EXPERIMENTAL_NILM: bool(
             options.get(
                 CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -3991,6 +4123,109 @@ def _options_with_updates(
     options = dict(getattr(config_entry, "options", {}) or {})
     options.update(dict(updates))
     return options
+
+
+def _demo_source_bundle_enabled_for_config_entry(
+    config_entry: config_entries.ConfigEntry,
+) -> bool:
+    options = getattr(config_entry, "options", {}) or {}
+    data = getattr(config_entry, "data", {}) or {}
+    source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            options.get(CONF_SOURCE_ENTITIES, data.get(CONF_SOURCE_ENTITIES, [])),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
+    extra_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            options.get(
+                CONF_EXTRA_SOURCE_ENTITIES,
+                data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
+            ),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            options.get(
+                CONF_MAINS_SOURCE_ENTITIES,
+                data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    return _demo_source_bundle_enabled_for_entry_values(
+        options,
+        data,
+        source_entities=source_entities,
+        extra_source_entities=extra_source_entities,
+        mains_source_entities=mains_source_entities,
+    )
+
+
+def _remove_demo_source_bundle_from_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    pruned_config = dict(config)
+    for key, invalid_error_key in (
+        (CONF_SOURCE_ENTITIES, ERROR_INVALID_SOURCE_ENTITIES),
+        (CONF_EXTRA_SOURCE_ENTITIES, ERROR_INVALID_SOURCE_ENTITIES),
+        (CONF_MAINS_SOURCE_ENTITIES, "invalid_mains_source_entities"),
+    ):
+        pruned_config[key] = _without_demo_source_bundle(
+            _strict_string_list(
+                pruned_config.get(key, []),
+                invalid_error_key=invalid_error_key,
+            )
+        )
+
+    pruned_circuits = _circuits_without_demo_source_bundle(
+        pruned_config.get(CONF_CIRCUITS, [])
+    )
+    pruned_config[CONF_CIRCUITS] = pruned_circuits
+    circuit_ids = {
+        str(circuit.get("circuit_id") or circuit.get("id") or "")
+        for circuit in pruned_circuits
+    }
+    if CONF_KNOWN_LOAD_CIRCUITS in pruned_config:
+        pruned_config[CONF_KNOWN_LOAD_CIRCUITS] = [
+            circuit_id
+            for circuit_id in _strict_string_list(
+                pruned_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                invalid_error_key="invalid_known_load_circuits",
+            )
+            if circuit_id in circuit_ids
+        ]
+    if CONF_CIRCUIT_ASSIGNMENTS in pruned_config or CONF_CIRCUITS in pruned_config:
+        pruned_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
+            pruned_circuits
+        )
+    pruned_config[CONF_DEMO_SOURCE_BUNDLE_ENABLED] = False
+    return pruned_config
+
+
+def _circuits_without_demo_source_bundle(
+    circuits: Iterable[Any],
+) -> list[dict[str, Any]]:
+    pruned_circuits: list[dict[str, Any]] = []
+    for circuit in circuits:
+        if not isinstance(circuit, Mapping):
+            continue
+        circuit_id = str(circuit.get("circuit_id") or circuit.get("id") or "")
+        if circuit_id.startswith("cs_energy_analyzer_demo_"):
+            continue
+
+        sensors = [
+            dict(sensor)
+            for sensor in circuit.get("sensors", ())
+            if isinstance(sensor, Mapping)
+            and not _is_demo_source_entity_id(str(sensor.get("entity_id") or ""))
+        ]
+        if not sensors:
+            continue
+
+        pruned_circuit = dict(circuit)
+        pruned_circuit["sensors"] = sensors
+        pruned_circuits.append(pruned_circuit)
+    return pruned_circuits
 
 
 async def _async_save_assignment_edit_and_return_to_picker(

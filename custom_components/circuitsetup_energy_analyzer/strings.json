@@ -8,6 +8,7 @@
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
+          "demo_source_bundle_enabled": "Load Bundled Demo Sources",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "outdoor_temperature_entity": "Outdoor Temperature Entity",
@@ -20,6 +21,7 @@
         "data_description": {
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+          "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
@@ -119,6 +121,7 @@
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
+          "demo_source_bundle_enabled": "Load Bundled Demo Sources",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "outdoor_temperature_entity": "Outdoor Temperature Entity",
           "rain_sensor_entity": "Rain Sensor",
@@ -130,6 +133,7 @@
         "data_description": {
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
+          "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
