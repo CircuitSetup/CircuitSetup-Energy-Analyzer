@@ -184,7 +184,7 @@ def _registered_demo_source_entity_ids(
         from homeassistant.helpers import entity_registry as er
 
         registry = er.async_get(hass)
-    except (ImportError, AttributeError):
+    except (ImportError, AttributeError, TypeError):
         registry = getattr(hass, "entity_registry", None)
     if registry is None:
         return {}

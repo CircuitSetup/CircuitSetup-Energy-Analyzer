@@ -3479,6 +3479,65 @@ def test_source_entities_for_entry_uses_registered_demo_entity_ids() -> None:
     )
 
 
+def test_source_entities_for_entry_falls_back_when_ha_registry_get_fails(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+
+    def async_get(_hass):
+        raise TypeError("unhashable type")
+
+    entity_registry_module.async_get = async_get
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
+            ],
+        },
+    )
+    registry = SimpleNamespace(
+        entities={
+            "sensor.cs_energy_analyzer_demo_refrigerator_energy_2": SimpleNamespace(
+                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+                unique_id=(
+                    "entry-1_demo_source_exact_"
+                    "cs_energy_analyzer_demo_refrigerator_energy"
+                ),
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+            ),
+        }
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        hass=SimpleNamespace(entity_registry=registry),
+    )
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
+    )
+
+
 def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
