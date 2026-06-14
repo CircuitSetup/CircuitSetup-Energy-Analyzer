@@ -2595,6 +2595,36 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert "solar_export_tolerance_w" not in _schema_keys(schema)
 
 
+def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_schema,
+    )
+
+    schema = _advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "refrigerator",
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    for field_name in (
+        "reset_analysis_settings_to_defaults",
+        "reset_energy_settings_to_defaults",
+        "reset_activity_settings_to_defaults",
+        "reset_billing_cost_settings_to_defaults",
+        "reset_demand_capacity_settings_to_defaults",
+        "reset_standby_settings_to_defaults",
+        "reset_power_quality_settings_to_defaults",
+    ):
+        assert _schema_default(schema, field_name) is False
+
+
 def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
@@ -2848,6 +2878,48 @@ def test_advanced_settings_from_sectioned_input_saves_flat_settings() -> None:
         "standby_threshold_w": 6.0,
         "always_on_alert_w": 12.0,
         "min_samples": 36,
+    }
+
+
+def test_advanced_settings_from_input_resets_selected_sections_to_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "analysis_settings": {
+                "preset": "high",
+            },
+            "energy_settings": {
+                "window_days": 14,
+                "daily_spike_ratio": 0.35,
+                "daily_goal_kwh": 2.5,
+                "goal_alert_ratio": 0.9,
+                "reset_energy_settings_to_defaults": True,
+            },
+            "billing_cost_settings": {
+                "cycle_start_day": 15,
+                "budget_kwh": 90.0,
+                "budget_alert_ratio": 0.85,
+                "billing_min_elapsed_days": 5,
+            },
+            "standby_settings": {
+                "window_hours": 72,
+                "standby_threshold_w": 6.0,
+                "always_on_alert_w": 12.0,
+                "standby_min_samples": 36,
+                "reset_standby_settings_to_defaults": True,
+            },
+        }
+    )
+
+    assert settings == {
+        "preset": "sensitive",
+        "cycle_start_day": 15,
+        "budget_kwh": 90.0,
+        "budget_alert_ratio": 0.85,
+        "min_elapsed_days": 5,
     }
 
 

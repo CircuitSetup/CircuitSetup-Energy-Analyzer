@@ -239,9 +239,11 @@
             "name": "Sensitivity",
             "description": "Controls how quickly this appliance or circuit raises possible-issue alerts.",
             "data": {
+              "reset_analysis_settings_to_defaults": "Reset Sensitivity To Defaults",
               "preset": "Sensitivity"
             },
             "data_description": {
+              "reset_analysis_settings_to_defaults": "Turn this on when saving to remove the custom sensitivity override and use the default Balanced preset.",
               "preset": "Controls alert sensitivity for this circuit only."
             }
           },
@@ -249,12 +251,14 @@
             "name": "Energy Usage And Goals",
             "description": "Daily kWh spike and goal settings for circuits with energy sensors.",
             "data": {
+              "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
               "window_days": "Energy Window Days",
               "daily_spike_ratio": "Daily Spike Ratio",
               "daily_goal_kwh": "Daily Goal kWh",
               "goal_alert_ratio": "Goal Alert Ratio"
             },
             "data_description": {
+              "reset_energy_settings_to_defaults": "Turn this on when saving to remove custom energy spike and daily-goal settings for this circuit.",
               "window_days": "Number of days used for daily kWh spike comparison.",
               "daily_spike_ratio": "Fraction over the rolling window total that counts as a usage spike.",
               "daily_goal_kwh": "Optional daily kWh goal for this circuit.",
@@ -265,10 +269,12 @@
             "name": "Run And Activity Alerts",
             "description": "Optional active and idle duration limits for dedicated appliance circuits.",
             "data": {
+              "reset_activity_settings_to_defaults": "Reset Activity Settings To Defaults",
               "max_active_minutes": "Max Active Minutes",
               "max_idle_minutes": "Max Idle Minutes"
             },
             "data_description": {
+              "reset_activity_settings_to_defaults": "Turn this on when saving to remove custom active and idle duration limits.",
               "max_active_minutes": "Optional longest expected active period before an activity alert.",
               "max_idle_minutes": "Optional longest expected idle period before an activity alert."
             }
@@ -277,6 +283,7 @@
             "name": "Billing And Cost",
             "description": "Billing-cycle budgets and time-of-use cost tracking.",
             "data": {
+              "reset_billing_cost_settings_to_defaults": "Reset Billing Settings To Defaults",
               "cycle_start_day": "Cycle Start Day",
               "budget_kwh": "Budget kWh",
               "budget_alert_ratio": "Budget Alert Ratio",
@@ -289,6 +296,7 @@
               "tou_name": "TOU Name"
             },
             "data_description": {
+              "reset_billing_cost_settings_to_defaults": "Turn this on when saving to remove custom billing, budget, and time-of-use cost settings.",
               "cycle_start_day": "Billing or cost cycle start day of the month.",
               "budget_kwh": "Optional billing-cycle kWh budget for this circuit.",
               "budget_alert_ratio": "Alert when projected cycle usage reaches this fraction of the budget.",
@@ -305,12 +313,14 @@
             "name": "Demand And Capacity",
             "description": "Rolling demand and breaker-capacity thresholds for high-load circuits.",
             "data": {
+              "reset_demand_capacity_settings_to_defaults": "Reset Demand And Capacity To Defaults",
               "window_minutes": "Demand Window Minutes",
               "demand_limit_w": "Demand Limit W",
               "breaker_amps": "Breaker Amps",
               "warning_ratio": "Capacity Warning Ratio"
             },
             "data_description": {
+              "reset_demand_capacity_settings_to_defaults": "Turn this on when saving to remove custom demand limits and breaker-capacity thresholds.",
               "window_minutes": "Demand calculation window in minutes.",
               "demand_limit_w": "Optional watt limit for demand alerts.",
               "breaker_amps": "Optional breaker size in amps for capacity alerts.",
@@ -321,12 +331,14 @@
             "name": "Always On And Standby",
             "description": "Standby and always-on thresholds for appliance circuits.",
             "data": {
+              "reset_standby_settings_to_defaults": "Reset Standby Settings To Defaults",
               "window_hours": "Standby Window Hours",
               "standby_threshold_w": "Standby Threshold W",
               "always_on_alert_w": "Always On Alert W",
               "standby_min_samples": "Standby Minimum Samples"
             },
             "data_description": {
+              "reset_standby_settings_to_defaults": "Turn this on when saving to remove custom standby, always-on, and sample-count settings.",
               "window_hours": "Hours used to learn the low-power standby watermark.",
               "standby_threshold_w": "Minimum watts considered standby or always-on usage.",
               "always_on_alert_w": "Optional watts limit for always-on usage alerts.",
@@ -337,6 +349,7 @@
             "name": "Water Context",
             "description": "Rain, HVAC condensate, and optional flow-sensor context for pump and water-using appliances.",
             "data": {
+              "reset_water_context_settings_to_defaults": "Reset Water Context To Defaults",
               "rain_pump_correlation_enabled": "Rain and Pump Correlation",
               "rain_response_window_minutes": "Rain Response Window Minutes",
               "rain_activity_delta_threshold_pct": "Rain Activity Threshold Percent",
@@ -346,6 +359,7 @@
               "flow_mismatch_threshold_minutes": "Flow Mismatch Threshold Minutes"
             },
             "data_description": {
+              "reset_water_context_settings_to_defaults": "Turn this on when saving to remove custom rain, pump, and water-flow context settings.",
               "rain_pump_correlation_enabled": "Compare pump activity with rain and HVAC compressor activity before flagging unusual pump runtime.",
               "rain_response_window_minutes": "Minutes after rain starts or continues where higher pump activity may be expected.",
               "rain_activity_delta_threshold_pct": "Percent above the weather-adjusted expected pump runtime before repeated possible-issue evidence can be raised.",
@@ -359,10 +373,12 @@
             "name": "Dual-Phase Leg Imbalance",
             "description": "Split-phase imbalance thresholds for 240 V circuits.",
             "data": {
+              "reset_dual_phase_settings_to_defaults": "Reset Dual-Phase Settings To Defaults",
               "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
               "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W"
             },
             "data_description": {
+              "reset_dual_phase_settings_to_defaults": "Turn this on when saving to remove custom split-phase imbalance thresholds.",
               "leg_imbalance_warning_ratio": "Split-phase imbalance ratio that can trigger repeated possible-issue alerts.",
               "leg_imbalance_min_total_power_w": "Minimum combined watts before dual-phase leg imbalance is evaluated."
             }
@@ -371,11 +387,13 @@
             "name": "Power Metric Consistency",
             "description": "Tolerance settings for W, VA, current, and power-factor consistency checks.",
             "data": {
+              "reset_power_quality_settings_to_defaults": "Reset Power Quality To Defaults",
               "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
               "power_factor_tolerance": "Power Factor Tolerance",
               "minimum_apparent_power_va": "Minimum Apparent Power VA"
             },
             "data_description": {
+              "reset_power_quality_settings_to_defaults": "Turn this on when saving to remove custom W, VA, current, and power-factor tolerance settings.",
               "apparent_power_tolerance_percent": "Allowed percent mismatch between reported VA and voltage-current VA.",
               "power_factor_tolerance": "Allowed mismatch between reported and expected power factor.",
               "minimum_apparent_power_va": "Minimum apparent power before W, VA, and power-factor consistency is evaluated."
@@ -385,9 +403,11 @@
             "name": "Mains Balance",
             "description": "Mains-minus-monitored-load tolerance for aggregate mains circuits.",
             "data": {
+              "reset_mains_balance_settings_to_defaults": "Reset Mains Balance To Defaults",
               "balance_negative_tolerance_w": "Balance Negative Tolerance W"
             },
             "data_description": {
+              "reset_mains_balance_settings_to_defaults": "Turn this on when saving to remove custom mains balance tolerance settings.",
               "balance_negative_tolerance_w": "Negative mains balance watts allowed before monitored loads are flagged."
             }
           },
@@ -395,12 +415,14 @@
             "name": "Solar Flow",
             "description": "Solar export and flexible-load thresholds for mains circuits with generation sources.",
             "data": {
+              "reset_solar_flow_settings_to_defaults": "Reset Solar Flow To Defaults",
               "solar_export_tolerance_w": "Solar Export Tolerance W",
               "solar_surplus_threshold_w": "Solar Surplus Threshold W",
               "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
               "flexible_load_running_threshold_w": "Flexible Load Running Threshold W"
             },
             "data_description": {
+              "reset_solar_flow_settings_to_defaults": "Turn this on when saving to remove custom solar export, surplus, and flexible-load thresholds.",
               "solar_export_tolerance_w": "Extra export watts allowed before solar flow is considered inconsistent.",
               "solar_surplus_threshold_w": "Export watts required before solar surplus is considered available.",
               "high_solar_surplus_threshold_w": "Export watts required before solar surplus is classified as high.",
