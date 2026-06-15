@@ -412,7 +412,7 @@ def select_description_applies(
 ) -> bool:
     """Return whether a select control is useful for this circuit."""
     del coordinator
-    if description.key != "alert_sensitivity":
+    if description.key == "alert_sensitivity":
         return True
     return supports_daily_circuit_controls(circuit)
 

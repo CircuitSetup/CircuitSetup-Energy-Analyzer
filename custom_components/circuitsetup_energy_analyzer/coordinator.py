@@ -7207,6 +7207,16 @@ async def _async_delete_lovelace_dashboard_config(
     if dashboards is None:
         return False
 
+    dashboard_store = dashboards.get(url_path)
+    if dashboard_store is None:
+        return False
+
+    dashboard_mode = getattr(dashboard_store, "mode", None)
+    if callable(dashboard_mode):
+        dashboard_mode = dashboard_mode()
+    if str(dashboard_mode or "").strip().lower() != "storage":
+        return False
+
     dashboard_store = dashboards.pop(url_path, None)
     if dashboard_store is None:
         return False
