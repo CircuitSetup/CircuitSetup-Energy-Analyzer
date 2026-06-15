@@ -179,8 +179,8 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
     validated = validate_setup_input(payload)
 
     assert validated[CONF_SOURCE_DEVICES] == payload[CONF_SOURCE_DEVICES]
-    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == payload[CONF_EXTRA_SOURCE_ENTITIES]
-    assert validated[CONF_SOURCE_ENTITIES] == payload[CONF_EXTRA_SOURCE_ENTITIES]
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.fridge_power"]
+    assert validated[CONF_SOURCE_ENTITIES] == ["sensor.fridge_power"]
     assert validated[CONF_ENABLE_EXPERIMENTAL_NILM] is True
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
     assert validated[CONF_SENSITIVITY] == "sensitive"
@@ -237,10 +237,44 @@ async def test_user_flow_auto_routes_mains_sources_to_mains_sensors() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
+    assert flow._pending_config[CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power"
+    ]
+    assert flow._pending_config[CONF_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
     assert _schema_default(result["data_schema"], "circuit_name") == "Refrigerator"
     assert _schema_default(result["data_schema"], "included_sensors") == [
         "sensor.refrigerator_power"
     ]
+
+
+@pytest.mark.asyncio
+async def test_user_flow_mains_only_sources_skip_assignment_review() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+    assert flow._pending_final_config[CONF_EXTRA_SOURCE_ENTITIES] == []
+    assert flow._pending_final_config[CONF_SOURCE_ENTITIES] == []
+    assert flow._pending_final_config[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+    assert flow._pending_final_config[CONF_CIRCUITS] == []
+    assert flow._pending_final_config[CONF_CIRCUIT_ASSIGNMENTS] == ""
 
 
 def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
@@ -253,10 +287,23 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
     )
 
     validated = validate_setup_input({CONF_DEMO_SOURCE_BUNDLE_ENABLED: True})
+    demo_mains_source_entity_ids = {
+        entity_id
+        for entity_id in DEMO_SOURCE_ENTITY_IDS
+        if "_demo_mains_" in entity_id
+    }
+    demo_assignable_source_entity_ids = (
+        set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
+    )
 
     assert validated[CONF_DEMO_SOURCE_BUNDLE_ENABLED] is True
-    assert set(DEMO_SOURCE_ENTITY_IDS) <= set(validated[CONF_EXTRA_SOURCE_ENTITIES])
-    assert set(DEMO_SOURCE_ENTITY_IDS) <= set(validated[CONF_SOURCE_ENTITIES])
+    assert demo_assignable_source_entity_ids <= set(
+        validated[CONF_EXTRA_SOURCE_ENTITIES]
+    )
+    assert demo_assignable_source_entity_ids <= set(validated[CONF_SOURCE_ENTITIES])
+    assert demo_mains_source_entity_ids <= set(
+        validated[CONF_MAINS_SOURCE_ENTITIES]
+    )
 
     groups = assignment_groups_from_sources(validated[CONF_SOURCE_ENTITIES])
     car_charger = next(
@@ -339,6 +386,29 @@ def test_validate_options_input_parses_source_entity_values() -> None:
         "sensor.fridge_power",
         "sensor.fridge_current",
     ]
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+
+
+def test_validate_options_input_moves_mains_sources_out_of_assignable_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+    )
+
+    validated = validate_options_input(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.fridge_power",
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+            ],
+        }
+    )
+
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.fridge_power"]
+    assert validated[CONF_SOURCE_ENTITIES] == ["sensor.fridge_power"]
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == [
         "sensor.main_l1_power",
         "sensor.main_l2_power",
@@ -1486,9 +1556,11 @@ async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power"
+    ]
     assert result["data"][CONF_SOURCE_ENTITIES] == [
         "sensor.refrigerator_power",
-        "sensor.main_l2_power",
     ]
     assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
         "sensor.main_l1_power",
@@ -1529,10 +1601,23 @@ async def test_options_flow_adds_complete_demo_bundle_from_toggle() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_DEMO_SOURCE_BUNDLE_ENABLED] is True
-    assert set(DEMO_SOURCE_ENTITY_IDS) <= set(
+    demo_mains_source_entity_ids = {
+        entity_id
+        for entity_id in DEMO_SOURCE_ENTITY_IDS
+        if "_demo_mains_" in entity_id
+    }
+    demo_assignable_source_entity_ids = (
+        set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
+    )
+    assert demo_assignable_source_entity_ids <= set(
         result["data"][CONF_EXTRA_SOURCE_ENTITIES]
     )
-    assert set(DEMO_SOURCE_ENTITY_IDS) <= set(result["data"][CONF_SOURCE_ENTITIES])
+    assert demo_assignable_source_entity_ids <= set(
+        result["data"][CONF_SOURCE_ENTITIES]
+    )
+    assert demo_mains_source_entity_ids <= set(
+        result["data"][CONF_MAINS_SOURCE_ENTITIES]
+    )
 
 
 @pytest.mark.asyncio
@@ -2174,6 +2259,20 @@ async def test_user_flow_groups_appliance_sources_with_metric_before_leg(
     circuit = flow._pending_final_config[CONF_CIRCUITS][0]
     assert circuit["circuit_id"] == circuit_id
     assert [sensor["entity_id"] for sensor in circuit["sensors"]] == source_entities
+
+
+def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    assert (
+        assignment_groups_from_sources(
+            ["sensor.main_l1_power", "sensor.main_l2_power"],
+            mains_source_entities=["sensor.main_l1_power", "sensor.main_l2_power"],
+        )
+        == []
+    )
 
 
 def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
@@ -4041,6 +4140,9 @@ async def test_options_forms_replace_removed_demo_source_entities(monkeypatch) -
     assert _schema_default(source_schema, CONF_EXTRA_SOURCE_ENTITIES) == [
         "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
         "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+    ]
+    mains_schema = config_flow._mains_schema(entry)
+    assert _schema_default(mains_schema, CONF_MAINS_SOURCE_ENTITIES) == [
         "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
         "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
     ]

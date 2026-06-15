@@ -776,7 +776,20 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     )
     if demo_source_bundle_enabled:
         source_entities = _with_demo_source_bundle(source_entities)
-    if not source_entities:
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
+    if not source_entities and not mains_source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     retention_mode = _validate_retention_mode(user_input)
@@ -798,12 +811,6 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         if entity_id.strip()
     ]
 
-    mains_source_entities = _normalize_demo_source_entity_ids(
-        _strict_string_list(
-            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
-            invalid_error_key="invalid_mains_source_entities",
-        )
-    )
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
@@ -818,10 +825,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _with_auto_mains_source_entities(
-            source_entities,
-            mains_source_entities,
-        ),
+        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
         ),
@@ -924,13 +928,22 @@ def validate_options_input(
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
     elif remove_demo_source_bundle:
         merged_source_entities = _without_demo_source_bundle(merged_source_entities)
-    if not merged_source_entities and not allow_empty_sources:
-        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
-    validated[CONF_SOURCE_ENTITIES] = merged_source_entities
-    validated[CONF_MAINS_SOURCE_ENTITIES] = _with_auto_mains_source_entities(
-        merged_source_entities,
-        validated[CONF_MAINS_SOURCE_ENTITIES],
+    extra_source_entities, merged_source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            merged_source_entities,
+            validated[CONF_MAINS_SOURCE_ENTITIES],
+        )
     )
+    if (
+        not merged_source_entities
+        and not mains_source_entities
+        and not allow_empty_sources
+    ):
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    validated[CONF_EXTRA_SOURCE_ENTITIES] = extra_source_entities
+    validated[CONF_SOURCE_ENTITIES] = merged_source_entities
+    validated[CONF_MAINS_SOURCE_ENTITIES] = mains_source_entities
     if remove_demo_source_bundle:
         validated[CONF_MAINS_SOURCE_ENTITIES] = _without_demo_source_bundle(
             validated[CONF_MAINS_SOURCE_ENTITIES]
@@ -958,6 +971,32 @@ def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
         if item:
             items.append(item)
     return items
+
+
+def _partition_mains_source_entities(
+    extra_source_entities: Iterable[str],
+    source_entities: Iterable[str],
+    mains_source_entities: Iterable[str],
+) -> tuple[list[str], list[str], list[str]]:
+    all_source_entities = list(
+        dict.fromkeys([*extra_source_entities, *source_entities])
+    )
+    canonical_mains = _with_auto_mains_source_entities(
+        all_source_entities,
+        mains_source_entities,
+    )
+    mains_set = set(canonical_mains)
+    assignable_extra = [
+        entity_id
+        for entity_id in dict.fromkeys(extra_source_entities)
+        if entity_id not in mains_set and not _looks_like_mains_source_entity(entity_id)
+    ]
+    assignable_sources = [
+        entity_id
+        for entity_id in dict.fromkeys(source_entities)
+        if entity_id not in mains_set and not _looks_like_mains_source_entity(entity_id)
+    ]
+    return assignable_extra, assignable_sources, canonical_mains
 
 
 def _with_auto_mains_source_entities(
@@ -2256,7 +2295,7 @@ def assignment_groups_from_sources(
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
     ]
-    grouped_entities = non_mains_entities or source_entity_list
+    grouped_entities = non_mains_entities
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
@@ -2482,6 +2521,17 @@ def _start_assignment_review(
     if show_picker:
         return _assignment_picker_form(flow)
     return _assignment_review_form(flow)
+
+
+def _final_config_without_assignment_review(
+    pending_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    final_config = dict(pending_config)
+    final_config[CONF_EXTRA_SOURCE_ENTITIES] = []
+    final_config[CONF_SOURCE_ENTITIES] = []
+    final_config[CONF_CIRCUITS] = []
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = ""
+    return final_config
 
 
 def _assignment_review_source_entities(config: Mapping[str, Any]) -> list[str]:
@@ -3153,7 +3203,14 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             except SetupValidationError as err:
                 errors["base"] = err.error_key
             else:
-                return _start_assignment_review(self, validated)
+                assignment_result = _start_assignment_review(self, validated)
+                if not self._assignment_groups:
+                    final_config = _final_config_without_assignment_review(validated)
+                    self._pending_final_config = final_config
+                    if _should_show_setup_nilm_step(final_config):
+                        return await self.async_step_nilm()
+                    return await self.async_step_utility()
+                return assignment_result
 
         return self.async_show_form(
             step_id="user",
@@ -3377,13 +3434,22 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 pending_config = _options_source_payload(self._config_entry)
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            return _start_assignment_review(
+            assignment_result = _start_assignment_review(
                 self,
                 pending_config,
                 existing_circuits=_options_existing_circuits(self._config_entry),
                 show_picker=True,
                 update_existing=True,
             )
+            if not self._assignment_groups:
+                return self.async_create_entry(
+                    title="",
+                    data=_options_with_updates(
+                        self._config_entry,
+                        _final_config_without_assignment_review(pending_config),
+                    ),
+                )
+            return assignment_result
 
         if user_input is not None:
             try:
@@ -4168,6 +4234,13 @@ def _options_schema(
         extra_source_entities=extra_source_entities,
         mains_source_entities=mains_source_entities,
     )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
     selectable_source_entities = _selectable_source_entity_ids(
         source_entity_ids,
         source_entities,
@@ -4289,8 +4362,28 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
     )
     if demo_source_bundle_enabled:
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            options.get(
+                CONF_MAINS_SOURCE_ENTITIES,
+                data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
+    merged_source_entities = list(
+        dict.fromkeys([*extra_source_entities, *source_entities])
+    )
     if not merged_source_entities:
-        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+        if not mains_source_entities:
+            raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     return {
         CONF_SOURCE_DEVICES: _strict_string_list(
@@ -4315,15 +4408,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
                 data.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL),
             )
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
-            _strict_string_list(
-                options.get(
-                    CONF_MAINS_SOURCE_ENTITIES,
-                    data.get(CONF_MAINS_SOURCE_ENTITIES, []),
-                ),
-                invalid_error_key="invalid_mains_source_entities",
-            )
-        ),
+        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
             options.get(
                 CONF_KNOWN_LOAD_CIRCUITS,
@@ -4933,7 +5018,10 @@ def _known_load_circuits_from_entry(
 
 
 def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
-    return bool(config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False))
+    return bool(
+        config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)
+        and _known_load_circuit_options_from_config(config)
+    )
 
 
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
