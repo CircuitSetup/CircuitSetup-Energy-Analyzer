@@ -309,6 +309,11 @@ _SOURCE_LEG_SUFFIXES = (
     "_l1",
     "_l2",
 )
+_ANALYZER_SOURCE_ENTITY_PREFIXES = (
+    "circuitsetup_energy_analyzer_",
+    "cs_energy_analyzer_",
+)
+_PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 FIELD_WARNING_RATIO = "warning_ratio"
 FIELD_WINDOW_HOURS = "window_hours"
 FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
@@ -2250,12 +2255,16 @@ def _saved_circuit_for_group(
     existing_circuits: Iterable[Mapping[str, Any]],
 ) -> Mapping[str, Any] | None:
     group_entities = set(group.get("entity_ids", ()))
-    group_id = str(group.get("group_id") or "")
+    group_id = _canonical_assignment_circuit_id(group.get("group_id"))
     for circuit in existing_circuits:
         sensor_entities = set(_sensor_entity_ids_from_circuit(circuit))
         if group_entities and group_entities <= sensor_entities:
             return circuit
-        if str(circuit.get("circuit_id") or circuit.get("id") or "") == group_id:
+        circuit_id = _canonical_assignment_circuit_id(
+            circuit.get("circuit_id") or circuit.get("id")
+        )
+        circuit_name = _canonical_assignment_circuit_id(circuit.get("name"))
+        if group_id in {circuit_id, circuit_name}:
             return circuit
         if group_entities and sensor_entities and group_entities & sensor_entities:
             return circuit
@@ -2889,7 +2898,20 @@ def _assignment_leg_hint(entity_id: str) -> str | None:
 
 def _assignment_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = str(entity_id).split(".")[-1].strip().lower()
-    return _strip_trailing_source_detail_tokens(object_id)
+    return _canonical_assignment_circuit_id(
+        _strip_trailing_source_detail_tokens(object_id)
+    )
+
+
+def _canonical_assignment_circuit_id(value: Any) -> str:
+    circuit_id = _slugify(str(value or ""))
+    for preserved_prefix in _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES:
+        if circuit_id.startswith(preserved_prefix):
+            return circuit_id
+    for prefix in _ANALYZER_SOURCE_ENTITY_PREFIXES:
+        if circuit_id.startswith(prefix):
+            return circuit_id.removeprefix(prefix) or circuit_id
+    return circuit_id
 
 
 def _strip_trailing_source_detail_tokens(object_id: str) -> str:
@@ -3253,6 +3275,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     updated_options,
                     fallback_config=_entry_config(self._config_entry),
                 )
+            updated_options = _options_with_merged_source_circuit_sensors(
+                self._config_entry,
+                updated_options,
+            )
             return self.async_create_entry(
                 title="",
                 data=updated_options,
@@ -4305,6 +4331,102 @@ def _options_with_updates(
     options = dict(getattr(config_entry, "options", {}) or {})
     options.update(dict(updates))
     return options
+
+
+def _options_with_merged_source_circuit_sensors(
+    config_entry: config_entries.ConfigEntry,
+    options: Mapping[str, Any],
+) -> dict[str, Any]:
+    updated_options = dict(options)
+    merged_circuits = _circuits_with_merged_source_circuit_sensors(
+        updated_options,
+        updated_options.get(CONF_CIRCUITS, _options_existing_circuits(config_entry)),
+    )
+    if merged_circuits is None:
+        return updated_options
+
+    updated_options[CONF_CIRCUITS] = merged_circuits
+    updated_options[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
+        merged_circuits
+    )
+    return updated_options
+
+
+def _circuits_with_merged_source_circuit_sensors(
+    config: Mapping[str, Any],
+    existing_circuits: Iterable[Any],
+) -> list[dict[str, Any]] | None:
+    circuits = [
+        {**circuit, "sensors": _copied_circuit_sensors(circuit)}
+        for circuit in existing_circuits
+        if isinstance(circuit, Mapping)
+    ]
+    if not circuits:
+        return None
+
+    circuit_index = _circuit_index_by_assignment_id(circuits)
+    assigned_source_entities = {
+        entity_id
+        for circuit in circuits
+        for entity_id in _sensor_entity_ids_from_circuit(circuit)
+    }
+    mains_source_entities = set(
+        _strict_string_list(
+            config.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    changed = False
+    for entity_id in _strict_string_list(
+        config.get(CONF_SOURCE_ENTITIES, []),
+        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+    ):
+        if entity_id in mains_source_entities or entity_id in assigned_source_entities:
+            continue
+        circuit_index_value = circuit_index.get(
+            _assignment_circuit_id_from_entity_id(entity_id)
+        )
+        if circuit_index_value is None:
+            continue
+        circuits[circuit_index_value]["sensors"].append(
+            _source_sensor_dict_from_entity_id(entity_id)
+        )
+        assigned_source_entities.add(entity_id)
+        changed = True
+
+    return circuits if changed else None
+
+
+def _copied_circuit_sensors(circuit: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [
+        dict(sensor)
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+    ]
+
+
+def _circuit_index_by_assignment_id(
+    circuits: Iterable[Mapping[str, Any]],
+) -> dict[str, int]:
+    circuit_index: dict[str, int] = {}
+    for index, circuit in enumerate(circuits):
+        for value in (
+            circuit.get("circuit_id"),
+            circuit.get("id"),
+            circuit.get("name"),
+        ):
+            circuit_id = _canonical_assignment_circuit_id(value)
+            if circuit_id:
+                circuit_index.setdefault(circuit_id, index)
+    return circuit_index
+
+
+def _source_sensor_dict_from_entity_id(entity_id: str) -> dict[str, Any]:
+    return {
+        "entity_id": entity_id,
+        "role": _assignment_sensor_role(entity_id).value,
+        "leg": _assignment_leg_hint(entity_id),
+    }
 
 
 def _demo_source_bundle_enabled_for_config_entry(

@@ -1715,6 +1715,85 @@ async def test_options_sources_step_preserves_existing_mains_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_sources_step_merges_new_sensor_into_existing_appliance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    existing_circuit = {
+        "circuit_id": "car_charger",
+        "name": "Car Charger",
+        "appliance_profile": "ev_charger",
+        "mode": "dual_phase",
+        "power_flow": "load",
+        "retention_mode": "diagnostic",
+        "daily_energy_goal_kwh": 12.5,
+        "sensors": [
+            {
+                "entity_id": "sensor.car_charger_l1_active_power",
+                "role": "real_power",
+                "leg": "a",
+            },
+            {
+                "entity_id": "sensor.car_charger_l2_active_power",
+                "role": "real_power",
+                "leg": "b",
+            },
+        ],
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+            ],
+            CONF_CIRCUITS: [existing_circuit],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+                "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            ],
+            CONF_RETENTION_MODE: "diagnostic",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [
+        {
+            **existing_circuit,
+            "sensors": [
+                *existing_circuit["sensors"],
+                {
+                    "entity_id": (
+                        "sensor.circuitsetup_energy_analyzer_car_charger_l1_current"
+                    ),
+                    "role": "current",
+                    "leg": "a",
+                },
+            ],
+        }
+    ]
+    assignment_lines = [
+        line
+        for line in result["data"][CONF_CIRCUIT_ASSIGNMENTS].splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert len(assignment_lines) == 1
+    assert assignment_lines[0].startswith("Car Charger | ev_charger | dual_phase |")
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_preserves_outdoor_temperature_entity() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

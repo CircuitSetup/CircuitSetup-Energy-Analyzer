@@ -4050,6 +4050,68 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     assert lights.mode is CircuitMode.MIXED
 
 
+def test_runtime_merges_new_prefixed_source_sensor_into_existing_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import SensorRole
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+                "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "car_charger",
+                    "name": "Car Charger",
+                    "appliance_profile": "ev_charger",
+                    "mode": "dual_phase",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.car_charger_l1_active_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.car_charger_l2_active_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert [config.circuit_id for config in coordinator.circuit_configs] == [
+        "car_charger"
+    ]
+    assert {
+        (sensor.entity_id, sensor.role, sensor.leg)
+        for sensor in coordinator.circuit_configs[0].sensors
+    } == {
+        (
+            "sensor.car_charger_l1_active_power",
+            SensorRole.REAL_POWER,
+            "a",
+        ),
+        (
+            "sensor.car_charger_l2_active_power",
+            SensorRole.REAL_POWER,
+            "b",
+        ),
+        (
+            "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            SensorRole.CURRENT,
+            "a",
+        ),
+    }
+
+
 def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
