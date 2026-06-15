@@ -18,6 +18,28 @@ def _load_release_workflow() -> dict[str, object]:
     )
 
 
+def _load_ci_workflow() -> dict[str, object]:
+    return yaml.load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+
+
+def test_ci_workflow_emits_required_home_assistant_contract_check() -> None:
+    workflow = _load_ci_workflow()
+    jobs = workflow["jobs"]
+
+    required_check_jobs = [
+        job_id
+        for job_id, job in jobs.items()
+        if job.get("name") == "Home Assistant control entity contract"
+    ]
+
+    assert required_check_jobs == ["home-assistant-control-entity-contract"]
+    required_check = jobs[required_check_jobs[0]]
+    assert required_check["needs"] == "home-assistant-contract"
+
+
 def test_release_workflow_runs_for_version_tags_and_manual_dispatch() -> None:
     workflow = _load_release_workflow()
 
