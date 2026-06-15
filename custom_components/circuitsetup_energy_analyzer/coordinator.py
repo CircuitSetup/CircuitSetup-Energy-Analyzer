@@ -2700,10 +2700,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if not callable(update_method):
                 return "unavailable", "dashboard_update_unavailable"
             item_id = _lovelace_dashboard_item_id(existing, payload)
+            allowed_update_keys = {
+                "icon",
+                "require_admin",
+                "show_in_sidebar",
+                "title",
+            }
             update_payload = {
                 key: value
                 for key, value in storage_payload.items()
-                if key != "url_path"
+                if key in allowed_update_keys
             }
             updated_item = await _async_lovelace_method_result(
                 update_method(item_id, update_payload)
