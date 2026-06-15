@@ -2913,9 +2913,15 @@ def _assignment_sensor_role(entity_id: str) -> SensorRole:
 
 def _assignment_leg_hint(entity_id: str) -> str | None:
     object_id = str(entity_id).split(".")[-1].lower()
-    if re.search(r"(?:^|_)(?:l1|leg_a|line_a|phase_a|ct1)(?:_|$)", object_id):
+    if re.search(
+        r"(?:^|_)(?:l1|leg_a|line_a|phase_a|leg_1|line_1|phase_1|ct1)(?:_|$)",
+        object_id,
+    ):
         return "a"
-    if re.search(r"(?:^|_)(?:l2|leg_b|line_b|phase_b|ct2)(?:_|$)", object_id):
+    if re.search(
+        r"(?:^|_)(?:l2|leg_b|line_b|phase_b|leg_2|line_2|phase_2|ct2)(?:_|$)",
+        object_id,
+    ):
         return "b"
     return None
 

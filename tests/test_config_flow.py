@@ -2011,6 +2011,44 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     }
 
 
+@pytest.mark.parametrize("leg_token", ["leg", "line", "phase"])
+@pytest.mark.asyncio
+async def test_user_flow_detects_numeric_leg_suffixes_as_dual_phase(
+    leg_token: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    source_entities = [
+        f"sensor.dryer_{leg_token}_1_power",
+        f"sensor.dryer_{leg_token}_2_power",
+    ]
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user({CONF_EXTRA_SOURCE_ENTITIES: source_entities})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "circuit_name") == "Dryer"
+    assert _schema_default(result["data_schema"], "appliance_profile") == "dryer"
+    assert result["description_placeholders"]["circuit_mode"] == "dual_phase"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Dryer",
+            "appliance_profile": "dryer",
+            "included_sensors": source_entities,
+        }
+    )
+
+    assert result["type"] == "form"
+    circuit = flow._pending_final_config[CONF_CIRCUITS][0]
+    assert circuit["mode"] == "dual_phase"
+    assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
+
+
 @pytest.mark.asyncio
 async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg() -> (
     None
