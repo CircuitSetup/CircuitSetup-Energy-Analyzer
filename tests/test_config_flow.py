@@ -1859,7 +1859,10 @@ async def test_options_flow_creates_recommended_dashboard(
     entry = SimpleNamespace(
         entry_id="entry-1",
         data={},
-        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+        options={
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+        },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
     flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -1883,6 +1886,7 @@ async def test_options_flow_creates_recommended_dashboard(
         }
     }
     assert _schema_default(form["data_schema"], "remove_dashboard") is False
+    assert _schema_default(form["data_schema"], "apply_entity_detail_profile") is False
     assert result["type"] == "create_entry"
     assert result["data"][CONF_DASHBOARD_LAYOUT] == DASHBOARD_LAYOUT_EXPERT
     assert coordinator.calls == [
@@ -1919,7 +1923,10 @@ async def test_options_flow_reports_dashboard_creation_failure(
     entry = SimpleNamespace(
         entry_id="entry-1",
         data={},
-        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+        options={
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+        },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
     flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -1932,8 +1939,124 @@ async def test_options_flow_reports_dashboard_creation_failure(
     assert result["step_id"] == "dashboard"
     assert result["errors"] == {"base": "dashboard_creation_unavailable"}
     assert _schema_default(result["data_schema"], CONF_DASHBOARD_LAYOUT) == (
-        DASHBOARD_LAYOUT_STANDARD
+        DASHBOARD_LAYOUT_EXPERT
     )
+    assert coordinator.calls == [
+        ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
+        ("async_create_dashboard", ()),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_options_flow_dashboard_warns_when_layout_exceeds_entity_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def async_set_dashboard_layout(self, layout: str) -> None:
+            self.calls.append(("async_set_dashboard_layout", (layout,)))
+
+        async def async_create_dashboard(self) -> None:
+            self.calls.append(("async_create_dashboard", ()))
+
+    coordinator = Coordinator()
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_SIMPLE,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_dashboard(
+        {CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "dashboard"
+    assert result["errors"] == {
+        "base": "dashboard_layout_requires_higher_entity_detail"
+    }
+    assert _schema_default(result["data_schema"], CONF_DASHBOARD_LAYOUT) == (
+        DASHBOARD_LAYOUT_EXPERT
+    )
+    assert (
+        _schema_default(result["data_schema"], "apply_entity_detail_profile")
+        is False
+    )
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_options_flow_dashboard_can_match_entity_detail_to_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    calls: list[tuple[object, object, str]] = []
+
+    def fake_apply(hass, entry, detail_level):
+        calls.append((hass, entry, detail_level))
+        return {"total": 8, "will_enable": 5}
+
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def async_set_dashboard_layout(self, layout: str) -> None:
+            self.calls.append(("async_set_dashboard_layout", (layout,)))
+
+        async def async_create_dashboard(self) -> None:
+            self.calls.append(("async_create_dashboard", ()))
+
+    monkeypatch.setattr(
+        config_flow,
+        "_apply_entity_detail_profile_to_existing_entities",
+        fake_apply,
+    )
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    coordinator = Coordinator()
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_SIMPLE,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = hass
+
+    result = await flow.async_step_dashboard(
+        {
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT,
+            "apply_entity_detail_profile": True,
+        }
+    )
+
+    _assert_create_entry_result(
+        result,
+        {
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+        },
+    )
+    assert calls == [(hass, entry, ENTITY_DETAIL_EXPERT)]
     assert coordinator.calls == [
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
         ("async_create_dashboard", ()),
@@ -1967,7 +2090,10 @@ async def test_options_flow_removes_recommended_dashboard_without_changing_layou
     entry = SimpleNamespace(
         entry_id="entry-1",
         data={},
-        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+        options={
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD,
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+        },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
     flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})

@@ -232,6 +232,16 @@ _DASHBOARD_LAYOUT_LABELS = {
     DASHBOARD_LAYOUT_STANDARD: "Standard",
     DASHBOARD_LAYOUT_EXPERT: "Expert",
 }
+_ENTITY_DETAIL_LEVEL_ORDER = {
+    ENTITY_DETAIL_SIMPLE: 0,
+    ENTITY_DETAIL_STANDARD: 1,
+    ENTITY_DETAIL_EXPERT: 2,
+}
+_ENTITY_DETAIL_FOR_DASHBOARD_LAYOUT = {
+    DASHBOARD_LAYOUT_SIMPLE: ENTITY_DETAIL_SIMPLE,
+    DASHBOARD_LAYOUT_STANDARD: ENTITY_DETAIL_STANDARD,
+    DASHBOARD_LAYOUT_EXPERT: ENTITY_DETAIL_EXPERT,
+}
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_REMOVE_FROM_ANALYSIS = "remove_from_analysis"
 FIELD_INCLUDED_SENSORS = "included_sensors"
@@ -1293,6 +1303,25 @@ def entity_detail_level_options() -> list[dict[str, str]]:
             "label": "Expert",
         },
     ]
+
+
+def entity_detail_level_for_dashboard_layout(layout: Any) -> str:
+    """Return the minimum entity detail level needed for a dashboard layout."""
+    normalized_layout = normalize_dashboard_layout(layout)
+    return _ENTITY_DETAIL_FOR_DASHBOARD_LAYOUT[normalized_layout]
+
+
+def dashboard_layout_exceeds_entity_detail(
+    layout: Any,
+    detail_level: Any,
+) -> bool:
+    """Return whether a dashboard layout expects more entities than enabled."""
+    required_detail = entity_detail_level_for_dashboard_layout(layout)
+    normalized_detail = normalize_entity_detail_level(detail_level)
+    return (
+        _ENTITY_DETAIL_LEVEL_ORDER[required_detail]
+        > _ENTITY_DETAIL_LEVEL_ORDER[normalized_detail]
+    )
 
 
 def appliance_profile_options() -> list[dict[str, str]]:
@@ -3800,9 +3829,46 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         """Create or update the recommended dashboard."""
         if user_input is not None:
             remove_dashboard = bool(user_input.get(FIELD_REMOVE_DASHBOARD, False))
+            apply_entity_detail_profile = bool(
+                user_input.get(FIELD_APPLY_ENTITY_DETAIL_PROFILE, False)
+            )
             layout = normalize_dashboard_layout(
                 user_input.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
             )
+            detail_updates: dict[str, Any] = {}
+            if not remove_dashboard:
+                current_detail_level = normalize_entity_detail_level(
+                    _entry_value(
+                        self._config_entry,
+                        CONF_ENTITY_DETAIL_LEVEL,
+                        DEFAULT_ENTITY_DETAIL_LEVEL,
+                    )
+                )
+                if dashboard_layout_exceeds_entity_detail(layout, current_detail_level):
+                    if not apply_entity_detail_profile:
+                        return self.async_show_form(
+                            step_id="dashboard",
+                            data_schema=_dashboard_schema(
+                                self._config_entry,
+                                layout=layout,
+                                remove_dashboard=remove_dashboard,
+                                apply_entity_detail_profile=apply_entity_detail_profile,
+                            ),
+                            errors={
+                                "base": (
+                                    "dashboard_layout_requires_higher_entity_detail"
+                                )
+                            },
+                        )
+                    matching_detail_level = entity_detail_level_for_dashboard_layout(
+                        layout
+                    )
+                    _apply_entity_detail_profile_to_existing_entities(
+                        getattr(self, "hass", None),
+                        self._config_entry,
+                        matching_detail_level,
+                    )
+                    detail_updates[CONF_ENTITY_DETAIL_LEVEL] = matching_detail_level
             coordinator = _options_flow_coordinator(self)
             if coordinator is not None:
                 if remove_dashboard:
@@ -3821,7 +3887,14 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         ):
                             return self.async_show_form(
                                 step_id="dashboard",
-                                data_schema=_dashboard_schema(self._config_entry),
+                                data_schema=_dashboard_schema(
+                                    self._config_entry,
+                                    layout=layout,
+                                    remove_dashboard=remove_dashboard,
+                                    apply_entity_detail_profile=(
+                                        apply_entity_detail_profile
+                                    ),
+                                ),
                                 errors={"base": "dashboard_removal_unavailable"},
                             )
                 else:
@@ -3849,14 +3922,28 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         ):
                             return self.async_show_form(
                                 step_id="dashboard",
-                                data_schema=_dashboard_schema(self._config_entry),
+                                data_schema=_dashboard_schema(
+                                    self._config_entry,
+                                    layout=layout,
+                                    remove_dashboard=remove_dashboard,
+                                    apply_entity_detail_profile=(
+                                        apply_entity_detail_profile
+                                    ),
+                                ),
                                 errors={"base": "dashboard_creation_unavailable"},
                             )
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
                     self._config_entry,
-                    {} if remove_dashboard else {CONF_DASHBOARD_LAYOUT: layout},
+                    (
+                        {}
+                        if remove_dashboard
+                        else {
+                            CONF_DASHBOARD_LAYOUT: layout,
+                            **detail_updates,
+                        }
+                    ),
                 ),
             )
 
@@ -4396,19 +4483,31 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
     )
 
 
-def _dashboard_schema(config_entry: config_entries.ConfigEntry) -> Any:
-    layout = normalize_dashboard_layout(
-        _entry_value(config_entry, CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
+def _dashboard_schema(
+    config_entry: config_entries.ConfigEntry,
+    *,
+    layout: Any | None = None,
+    remove_dashboard: bool = False,
+    apply_entity_detail_profile: bool = False,
+) -> Any:
+    selected_layout = normalize_dashboard_layout(
+        layout
+        if layout is not None
+        else _entry_value(config_entry, CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
     )
     return vol.Schema(
         {
             vol.Optional(
                 CONF_DASHBOARD_LAYOUT,
-                default=layout,
+                default=selected_layout,
             ): _select_selector(dashboard_layout_options()),
             vol.Optional(
+                FIELD_APPLY_ENTITY_DETAIL_PROFILE,
+                default=apply_entity_detail_profile,
+            ): bool,
+            vol.Optional(
                 FIELD_REMOVE_DASHBOARD,
-                default=False,
+                default=remove_dashboard,
             ): bool,
         }
     )

@@ -280,11 +280,23 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     )
     dashboard = strings["options"]["step"]["dashboard"]
     assert dashboard["data"]["dashboard_layout"] == "Dashboard Layout"
+    assert (
+        dashboard["data"]["apply_entity_detail_profile"]
+        == "Match Entity Detail Level To Layout"
+    )
     assert dashboard["data"]["remove_dashboard"] == "Remove Existing Dashboard"
     assert "summary" in dashboard["data_description"]["dashboard_layout"].lower()
     assert (
+        "raise entity detail level to match the layout"
+        in dashboard["data_description"]["apply_entity_detail_profile"].lower()
+    )
+    assert (
         "instead of creating or updating"
         in dashboard["data_description"]["remove_dashboard"].lower()
+    )
+    assert (
+        "dashboard_layout_requires_higher_entity_detail"
+        in strings["options"]["error"]
     )
 
 
