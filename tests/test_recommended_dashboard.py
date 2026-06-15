@@ -765,6 +765,7 @@ class _FakeDashboardsCollection:
         self._existing = existing
         self.created: list[dict[str, object]] = []
         self.updated: list[tuple[str, dict[str, object]]] = []
+        self.deleted: list[str] = []
         self.dashboard_stores: dict[str, _FakeLovelaceStorage] | None = None
 
     async def async_items(self) -> list[dict[str, object]]:
@@ -787,14 +788,25 @@ class _FakeDashboardsCollection:
         self.updated.append((item_id, data))
         return {"id": item_id, **data}
 
+    async def async_delete_item(self, item_id: str) -> None:
+        self.deleted.append(item_id)
+        if self.dashboard_stores is not None:
+            dashboard_store = self.dashboard_stores.pop(DASHBOARD_URL_PATH, None)
+            if dashboard_store is not None:
+                await dashboard_store.async_delete()
+
 
 class _FakeLovelaceStorage:
     def __init__(self, config: dict[str, object]) -> None:
         self.config = config
         self.saved: list[dict[str, object]] = []
+        self.deleted = False
 
     async def async_save(self, config: dict[str, object]) -> None:
         self.saved.append(config)
+
+    async def async_delete(self) -> None:
+        self.deleted = True
 
 
 class _FakeAttributeDashboardsCollection:
@@ -1154,6 +1166,67 @@ async def test_coordinator_skips_duplicate_dashboard_when_update_unavailable() -
         coordinator.last_dashboard_create_request["reason"]
         == "dashboard_update_unavailable"
     )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_removes_existing_recommended_dashboard() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=True)
+    dashboard_store = _FakeLovelaceStorage(
+        {"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}
+    )
+    dashboards = {DASHBOARD_URL_PATH: dashboard_store}
+    collection.dashboard_stores = dashboards
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": dashboards,
+                "dashboards_collection": collection,
+            }
+        }
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_remove_dashboard()
+
+    assert collection.deleted == [DASHBOARD_URL_PATH]
+    assert DASHBOARD_URL_PATH not in dashboards
+    assert dashboard_store.deleted is True
+    assert coordinator.last_dashboard_remove_request == {
+        "entry_id": coordinator.entry_id,
+        "dashboard_path": f"/{DASHBOARD_URL_PATH}",
+        "title": "CircuitSetup Energy Analyzer",
+        "action": "deleted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_coordinator_reports_missing_dashboard_on_remove() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=False)
+    hass = SimpleNamespace(
+        data={"lovelace": {"dashboards": {}, "dashboards_collection": collection}}
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_remove_dashboard()
+
+    assert collection.deleted == []
+    assert coordinator.last_dashboard_remove_request["action"] == "missing"
 
 
 @pytest.mark.asyncio

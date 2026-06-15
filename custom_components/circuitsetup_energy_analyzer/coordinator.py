@@ -709,6 +709,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.entry_data.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT),
             )
         )
+        self.last_dashboard_create_request: dict[str, Any] | None = None
+        self.last_dashboard_remove_request: dict[str, Any] | None = None
         self._apply_config_entry_settings()
         self._detectors = {
             config.circuit_id: CircuitEventDetector()
@@ -2644,6 +2646,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         return payload
 
+    async def async_remove_dashboard(self: Self) -> dict[str, Any]:
+        """Remove the recommended Home Assistant dashboard."""
+        action, reason = await self._async_remove_lovelace_dashboard()
+        payload = {
+            "entry_id": self.entry_id,
+            "dashboard_path": f"/{DASHBOARD_URL_PATH}",
+            "title": DASHBOARD_TITLE,
+            "action": action,
+        }
+        if reason is not None:
+            payload["reason"] = reason
+        self.last_dashboard_remove_request = payload
+        bus = getattr(self.hass, "bus", None)
+        fire = getattr(bus, "async_fire", None)
+        if fire is not None:
+            fire(f"{DOMAIN}_remove_dashboard", payload)
+        self.async_set_updated_data(self.state)
+        return payload
+
     async def async_set_dashboard_layout(self: Self, layout: str) -> None:
         """Persist the selected recommended-dashboard layout."""
         normalized = normalize_dashboard_layout(layout)
@@ -2742,6 +2763,51 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ):
             return "unavailable", "dashboard_config_save_unavailable"
         return "created", None
+
+    async def _async_remove_lovelace_dashboard(self: Self) -> tuple[str, str | None]:
+        lovelace_data = _lovelace_data_from_hass(self.hass)
+        collection = _lovelace_dashboard_item_value(
+            lovelace_data,
+            "dashboards_collection",
+        )
+        if collection is None and _lovelace_dashboards(lovelace_data) is not None:
+            collection = await _async_load_lovelace_dashboards_collection(
+                self.hass,
+                lovelace_data,
+            )
+
+        payload = {"url_path": DASHBOARD_URL_PATH}
+        if collection is not None:
+            items_method = getattr(collection, "async_items", None)
+            delete_method = getattr(collection, "async_delete_item", None)
+            if not callable(items_method) or not callable(delete_method):
+                return "unavailable", "lovelace_dashboard_delete_unavailable"
+
+            items = await _async_lovelace_method_result(items_method())
+            existing = next(
+                (
+                    item
+                    for item in items
+                    if _lovelace_dashboard_matches(item, payload)
+                ),
+                None,
+            )
+            if existing is None:
+                return "missing", None
+
+            item_id = _lovelace_dashboard_item_id(existing, payload)
+            if not item_id:
+                return "unavailable", "lovelace_dashboard_delete_unavailable"
+            await _async_lovelace_method_result(delete_method(item_id))
+            return "deleted", None
+
+        if await _async_delete_lovelace_dashboard_config(
+            self.hass,
+            lovelace_data,
+            DASHBOARD_URL_PATH,
+        ):
+            return "deleted", None
+        return "missing", None
 
     async def async_label_nilm_signature(
         self: Self,
@@ -7118,6 +7184,34 @@ async def _async_save_lovelace_dashboard_config(
         return False
     await _async_lovelace_method_result(save(dict(config)))
     _register_lovelace_dashboard_panel(hass, item, update=update)
+    return True
+
+
+async def _async_delete_lovelace_dashboard_config(
+    hass: Any,
+    lovelace_data: Any,
+    url_path: str,
+) -> bool:
+    dashboards = _lovelace_dashboards(lovelace_data)
+    if dashboards is None:
+        return False
+
+    dashboard_store = dashboards.pop(url_path, None)
+    if dashboard_store is None:
+        return False
+
+    try:
+        from homeassistant.components import frontend
+    except ImportError:
+        frontend = None
+
+    remove_panel = getattr(frontend, "async_remove_panel", None)
+    if callable(remove_panel):
+        remove_panel(hass, url_path)
+
+    delete = getattr(dashboard_store, "async_delete", None)
+    if callable(delete):
+        await _async_lovelace_method_result(delete())
     return True
 
 

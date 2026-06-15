@@ -171,6 +171,9 @@ class _FakeCoordinator:
     async def async_create_dashboard(self) -> None:
         self.calls.append(("async_create_dashboard", ()))
 
+    async def async_remove_dashboard(self) -> None:
+        self.calls.append(("async_remove_dashboard", ()))
+
     async def async_set_dashboard_layout(self, layout: str) -> None:
         self.calls.append(("async_set_dashboard_layout", (layout,)))
 
@@ -236,6 +239,7 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
         "entry-1_create_dashboard",
+        "entry-1_remove_dashboard",
     }
     assert by_unique_id["entry-1_fridge_relearn_baseline"].device_info == {
         "identifiers": {(DOMAIN, "entry-1_fridge")},
@@ -263,6 +267,7 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
         "entry-1_create_dashboard",
+        "entry-1_remove_dashboard",
     ):
         await by_unique_id[unique_id].async_press()
 
@@ -280,6 +285,7 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         ("async_run_mapping_checks", ()),
         ("async_recalculate_setting_recommendations", (None,)),
         ("async_create_dashboard", ()),
+        ("async_remove_dashboard", ()),
     ]
 
 
@@ -308,6 +314,7 @@ async def test_button_setup_skips_inapplicable_controls_and_keeps_single_globals
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
         "entry-1_create_dashboard",
+        "entry-1_remove_dashboard",
     } <= unique_ids
     create_dashboard_entities = [
         entity
