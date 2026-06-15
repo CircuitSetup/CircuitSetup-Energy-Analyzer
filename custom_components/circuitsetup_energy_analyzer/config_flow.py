@@ -314,6 +314,18 @@ _ANALYZER_SOURCE_ENTITY_PREFIXES = (
     "cs_energy_analyzer_",
 )
 _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
+_MAINS_SOURCE_CIRCUIT_IDS = {
+    "main",
+    "mains",
+    "panel",
+    "utility",
+    "whole_home",
+    "whole_house",
+    "home_total",
+    "house_total",
+    "total_home",
+    "total_house",
+}
 FIELD_WARNING_RATIO = "warning_ratio"
 FIELD_WINDOW_HOURS = "window_hours"
 FIELD_STANDBY_THRESHOLD_W = "standby_threshold_w"
@@ -763,7 +775,20 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     )
     if demo_source_bundle_enabled:
         source_entities = _with_demo_source_bundle(source_entities)
-    if not source_entities:
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
+    if not source_entities and not mains_source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     retention_mode = _validate_retention_mode(user_input)
@@ -799,12 +824,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
-            _strict_string_list(
-                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
-                invalid_error_key="invalid_mains_source_entities",
-            )
-        ),
+        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
         ),
@@ -860,6 +880,12 @@ def validate_options_input(
         for entity_id in water_flow_sensor_entities
         if entity_id.strip()
     ]
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
         CONF_EXTRA_SOURCE_ENTITIES: extra_source_entities,
@@ -873,12 +899,7 @@ def validate_options_input(
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
-            _strict_string_list(
-                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
-                invalid_error_key="invalid_mains_source_entities",
-            )
-        ),
+        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
         ),
@@ -906,9 +927,22 @@ def validate_options_input(
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
     elif remove_demo_source_bundle:
         merged_source_entities = _without_demo_source_bundle(merged_source_entities)
-    if not merged_source_entities and not allow_empty_sources:
+    extra_source_entities, merged_source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            merged_source_entities,
+            validated[CONF_MAINS_SOURCE_ENTITIES],
+        )
+    )
+    if (
+        not merged_source_entities
+        and not mains_source_entities
+        and not allow_empty_sources
+    ):
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    validated[CONF_EXTRA_SOURCE_ENTITIES] = extra_source_entities
     validated[CONF_SOURCE_ENTITIES] = merged_source_entities
+    validated[CONF_MAINS_SOURCE_ENTITIES] = mains_source_entities
     if remove_demo_source_bundle:
         validated[CONF_MAINS_SOURCE_ENTITIES] = _without_demo_source_bundle(
             validated[CONF_MAINS_SOURCE_ENTITIES]
@@ -936,6 +970,62 @@ def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
         if item:
             items.append(item)
     return items
+
+
+def _partition_mains_source_entities(
+    extra_source_entities: Iterable[str],
+    source_entities: Iterable[str],
+    mains_source_entities: Iterable[str],
+) -> tuple[list[str], list[str], list[str]]:
+    all_source_entities = list(
+        dict.fromkeys([*extra_source_entities, *source_entities])
+    )
+    canonical_mains = _with_auto_mains_source_entities(
+        all_source_entities,
+        mains_source_entities,
+    )
+    mains_set = set(canonical_mains)
+    assignable_extra = [
+        entity_id
+        for entity_id in dict.fromkeys(extra_source_entities)
+        if entity_id not in mains_set and not _looks_like_mains_source_entity(entity_id)
+    ]
+    assignable_sources = [
+        entity_id
+        for entity_id in dict.fromkeys(source_entities)
+        if entity_id not in mains_set and not _looks_like_mains_source_entity(entity_id)
+    ]
+    return assignable_extra, assignable_sources, canonical_mains
+
+
+def _with_auto_mains_source_entities(
+    source_entities: Iterable[str],
+    mains_source_entities: Iterable[str],
+) -> list[str]:
+    return list(
+        dict.fromkeys(
+            [
+                *mains_source_entities,
+                *[
+                    entity_id
+                    for entity_id in source_entities
+                    if _looks_like_mains_source_entity(entity_id)
+                ],
+            ]
+        )
+    )
+
+
+def _looks_like_mains_source_entity(entity_id: str) -> bool:
+    circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
+    if circuit_id in _MAINS_SOURCE_CIRCUIT_IDS:
+        return True
+    tokens = set(circuit_id.split("_"))
+    if "mains" in tokens:
+        return True
+    if "panel" in tokens and tokens & {"main", "mains", "total"}:
+        return True
+    return bool("whole" in tokens and tokens & {"home", "house"})
 
 
 def _validate_retention_mode(user_input: Mapping[str, Any]) -> str:
@@ -1346,6 +1436,7 @@ def _mains_schema(
     config_entry: config_entries.ConfigEntry,
     source_entity_ids: Iterable[str] | None = None,
 ) -> Any:
+    config = _entry_config(config_entry)
     mains_source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
             _entry_value(
@@ -1360,6 +1451,14 @@ def _mains_schema(
         mains_source_entities,
         source_entity_ids,
     )
+    enable_experimental_nilm = bool(
+        _entry_value(
+            config_entry,
+            CONF_ENABLE_EXPERIMENTAL_NILM,
+            DEFAULT_ENABLE_EXPERIMENTAL_NILM,
+        )
+    )
+    known_load_circuits = _known_load_circuits_from_entry(config_entry)
     source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
             _entry_value(config_entry, CONF_SOURCE_ENTITIES, []),
@@ -1375,12 +1474,24 @@ def _mains_schema(
         source_entities,
         mains_source_entities,
     )
+    mains_source_entities = _with_auto_mains_source_entities(
+        source_entities,
+        mains_source_entities,
+    )
     return vol.Schema(
         {
+            vol.Optional(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                default=enable_experimental_nilm,
+            ): bool,
             vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
                 default=mains_source_entities,
             ): _energy_entity_list_selector(selectable_source_entities),
+            vol.Optional(
+                CONF_KNOWN_LOAD_CIRCUITS,
+                default=known_load_circuits,
+            ): _multi_select_selector(_known_load_circuit_options_from_config(config)),
         }
     )
 
@@ -2202,7 +2313,7 @@ def assignment_groups_from_sources(
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
     ]
-    grouped_entities = non_mains_entities or source_entity_list
+    grouped_entities = non_mains_entities
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
@@ -2430,6 +2541,17 @@ def _start_assignment_review(
     if show_picker:
         return _assignment_picker_form(flow)
     return _assignment_review_form(flow)
+
+
+def _final_config_without_assignment_review(
+    pending_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    final_config = dict(pending_config)
+    final_config[CONF_EXTRA_SOURCE_ENTITIES] = []
+    final_config[CONF_SOURCE_ENTITIES] = []
+    final_config[CONF_CIRCUITS] = []
+    final_config[CONF_CIRCUIT_ASSIGNMENTS] = ""
+    return final_config
 
 
 def _assignment_review_source_entities(config: Mapping[str, Any]) -> list[str]:
@@ -3118,7 +3240,14 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             except SetupValidationError as err:
                 errors["base"] = err.error_key
             else:
-                return _start_assignment_review(self, validated)
+                assignment_result = _start_assignment_review(self, validated)
+                if not self._assignment_groups:
+                    final_config = _final_config_without_assignment_review(validated)
+                    self._pending_final_config = final_config
+                    if _should_show_setup_nilm_step(final_config):
+                        return await self.async_step_nilm()
+                    return await self.async_step_utility()
+                return assignment_result
 
         return self.async_show_form(
             step_id="user",
@@ -3264,7 +3393,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "sources",
                     "mains",
                     "assign",
-                    "nilm",
                     "utility",
                     "dashboard",
                     "entity_detail",
@@ -3287,6 +3415,12 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     self._config_entry,
                     CONF_MAINS_SOURCE_ENTITIES,
                     [],
+                )
+            if CONF_ENABLE_EXPERIMENTAL_NILM not in source_input:
+                source_input[CONF_ENABLE_EXPERIMENTAL_NILM] = _entry_value(
+                    self._config_entry,
+                    CONF_ENABLE_EXPERIMENTAL_NILM,
+                    DEFAULT_ENABLE_EXPERIMENTAL_NILM,
                 )
             if CONF_ENTITY_DETAIL_LEVEL not in source_input:
                 source_input[CONF_ENTITY_DETAIL_LEVEL] = _entry_value(
@@ -3337,13 +3471,22 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 pending_config = _options_source_payload(self._config_entry)
             except SetupValidationError as err:
                 return await self._async_show_options_form({"base": err.error_key})
-            return _start_assignment_review(
+            assignment_result = _start_assignment_review(
                 self,
                 pending_config,
                 existing_circuits=_options_existing_circuits(self._config_entry),
                 show_picker=True,
                 update_existing=True,
             )
+            if not self._assignment_groups:
+                return self.async_create_entry(
+                    title="",
+                    data=_options_with_updates(
+                        self._config_entry,
+                        _final_config_without_assignment_review(pending_config),
+                    ),
+                )
+            return assignment_result
 
         if user_input is not None:
             try:
@@ -3391,12 +3534,17 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Edit aggregate mains source sensors."""
+        """Edit aggregate mains source sensors and experimental NILM settings."""
+        config = _entry_config(self._config_entry)
         if user_input is not None:
             try:
                 mains_source_entities = _strict_string_list(
                     user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
                     invalid_error_key="invalid_mains_source_entities",
+                )
+                known_load_circuits = _known_load_circuits_from_input(
+                    user_input,
+                    config,
                 )
             except SetupValidationError as err:
                 return await self._async_show_mains_form({"base": err.error_key})
@@ -3404,7 +3552,13 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 title="",
                 data=_options_with_updates(
                     self._config_entry,
-                    {CONF_MAINS_SOURCE_ENTITIES: mains_source_entities},
+                    {
+                        CONF_ENABLE_EXPERIMENTAL_NILM: bool(
+                            user_input.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)
+                        ),
+                        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
+                        CONF_KNOWN_LOAD_CIRCUITS: known_load_circuits,
+                    },
                 ),
             )
 
@@ -4117,6 +4271,13 @@ def _options_schema(
         extra_source_entities=extra_source_entities,
         mains_source_entities=mains_source_entities,
     )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
     selectable_source_entities = _selectable_source_entity_ids(
         source_entity_ids,
         source_entities,
@@ -4125,16 +4286,6 @@ def _options_schema(
     )
     return vol.Schema(
         {
-            vol.Optional(
-                CONF_ENABLE_EXPERIMENTAL_NILM,
-                default=options.get(
-                    CONF_ENABLE_EXPERIMENTAL_NILM,
-                    data.get(
-                        CONF_ENABLE_EXPERIMENTAL_NILM,
-                        DEFAULT_ENABLE_EXPERIMENTAL_NILM,
-                    ),
-                ),
-            ): bool,
             vol.Optional(
                 CONF_SOURCE_DEVICES,
                 default=source_devices,
@@ -4248,8 +4399,28 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
     )
     if demo_source_bundle_enabled:
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
+    mains_source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            options.get(
+                CONF_MAINS_SOURCE_ENTITIES,
+                data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_mains_source_entities",
+        )
+    )
+    extra_source_entities, source_entities, mains_source_entities = (
+        _partition_mains_source_entities(
+            extra_source_entities,
+            source_entities,
+            mains_source_entities,
+        )
+    )
+    merged_source_entities = list(
+        dict.fromkeys([*extra_source_entities, *source_entities])
+    )
     if not merged_source_entities:
-        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+        if not mains_source_entities:
+            raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     return {
         CONF_SOURCE_DEVICES: _strict_string_list(
@@ -4274,15 +4445,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
                 data.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL),
             )
         ),
-        CONF_MAINS_SOURCE_ENTITIES: _normalize_demo_source_entity_ids(
-            _strict_string_list(
-                options.get(
-                    CONF_MAINS_SOURCE_ENTITIES,
-                    data.get(CONF_MAINS_SOURCE_ENTITIES, []),
-                ),
-                invalid_error_key="invalid_mains_source_entities",
-            )
-        ),
+        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_KNOWN_LOAD_CIRCUITS: _strict_string_list(
             options.get(
                 CONF_KNOWN_LOAD_CIRCUITS,
@@ -4892,7 +5055,10 @@ def _known_load_circuits_from_entry(
 
 
 def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
-    return bool(config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False))
+    return bool(
+        config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)
+        and _known_load_circuit_options_from_config(config)
+    )
 
 
 def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
