@@ -505,23 +505,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           border-radius: 4px;
           padding: 2px 5px;
         }
-        .source-entity-chip {
-          align-items: center;
-          background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 999px;
-          color: var(--primary-text-color, #111827);
-          cursor: pointer;
-          display: inline-flex;
-          font: inherit;
-          gap: 6px;
-          padding: 6px 10px;
-        }
-        .source-entity-chip:hover,
-        .source-entity-chip:focus {
-          border-color: var(--primary-color, #03a9f4);
-          outline: none;
-        }
         .nilm-label-field {
           display: grid;
           gap: 4px;
@@ -601,11 +584,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("[data-load-all-nilm]")) {
       button.addEventListener("click", () => this._loadExpandedNilm());
     }
-    for (const button of this.shadowRoot.querySelectorAll("[data-source-entity]")) {
-      button.addEventListener("click", () => {
-        this._openSourceEntity(button.dataset.sourceEntity);
-      });
-    }
   }
 
   _renderAlert(alert, circuit) {
@@ -639,7 +617,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric("Last Seen", alert.last_seen)}
         ${this._metric("Check First", alert.what_to_check_first)}
       </section>
-      ${this._renderSourceEntities(alert)}
       <section class="panel">
         <h2>Evidence Window</h2>
         <p>${this._escape(alert.graph_window_start)} to ${this._escape(alert.graph_window_end)}</p>
@@ -664,47 +641,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ${this._renderRecommendations()}
       ${this._renderNilmActions()}
     `;
-  }
-
-  _renderSourceEntities(alert) {
-    const entities = alert.source_entities || [];
-    if (!entities.length) {
-      return "";
-    }
-    const totalCount = Number(alert.source_entities_count || entities.length);
-    const omittedCount = Number(alert.source_entities_omitted_count || 0);
-    const summary = omittedCount > 0
-      ? `<p class="muted">Showing ${entities.length} of ${totalCount} source entities. ${omittedCount} more available in the circuit configuration.</p>`
-      : "";
-    return `
-      <section class="panel">
-        <h2>Source Entities</h2>
-        ${summary}
-        <div class="entity-list">
-          ${entities.map((entityId) => this._sourceEntityChip(entityId)).join("")}
-        </div>
-      </section>
-    `;
-  }
-
-  _sourceEntityChip(entityId) {
-    const escapedEntityId = this._escape(entityId);
-    return `
-      <button class="source-entity-chip" data-source-entity="${escapedEntityId}" title="Open ${escapedEntityId} details">
-        <code>${escapedEntityId}</code><span>Open details</span>
-      </button>
-    `;
-  }
-
-  _openSourceEntity(entityId) {
-    if (!entityId) {
-      return;
-    }
-    this.dispatchEvent(new CustomEvent("hass-more-info", {
-      bubbles: true,
-      composed: true,
-      detail: { entityId },
-    }));
   }
 
   _renderNilmActions() {
@@ -920,7 +856,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }).join("");
     const legend = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
-      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><code>${this._escape(item.entity_id)}</code></div>`;
+      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><strong>${this._escape(item.name)}</strong></div>`;
     }).join("");
     const minLabel = this._formatNumber(minValue);
     const maxLabel = this._formatNumber(maxValue);
@@ -958,10 +894,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
       }
       if (points.length) {
-        parsed.push({ entity_id: entityId, points });
+        parsed.push({ entity_id: entityId, name: this._friendlyEntityName(entityId), points });
       }
     }
     return parsed;
+  }
+
+  _friendlyEntityName(entityId) {
+    const state = this._hass && this._hass.states && this._hass.states[entityId];
+    const friendlyName = state && state.attributes && state.attributes.friendly_name;
+    if (typeof friendlyName === "string" && friendlyName.trim()) {
+      return friendlyName.trim();
+    }
+    const objectId = String(entityId || "")
+      .replace(/^[^.]+\./, "")
+      .replace(/^(cs|circuitsetup)_energy_analyzer_/, "");
+    return this._friendlyFeature(objectId || entityId);
   }
 
   _historyApiPath(alert) {

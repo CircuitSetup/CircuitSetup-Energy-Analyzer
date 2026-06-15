@@ -1011,11 +1011,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_friendlyFeature",
         "Safety Notice",
         "alert.safety_notice",
-        "Source Entities",
-        "source-entity-chip",
-        "data-source-entity",
-        "hass-more-info",
-        "_openSourceEntity",
         "Default:",
         "Expected effect:",
         "Evidence:",
@@ -1040,6 +1035,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_guardActionCall",
         "Action unavailable",
         "Home Assistant service calls are not available",
+        "_friendlyEntityName",
+        "friendly_name",
+        "item.name",
     ):
         assert expected in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset
@@ -1054,6 +1052,11 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
         not in asset
     )
+    assert "Source Entities" not in asset
+    assert "source-entity-chip" not in asset
+    assert "data-source-entity" not in asset
+    assert "_openSourceEntity" not in asset
+    assert "${this._escape(item.entity_id)}" not in asset
     assert "this._escape(signature.signature_id)}</strong>" not in asset
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
 

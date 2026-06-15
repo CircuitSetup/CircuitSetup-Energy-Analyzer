@@ -10,6 +10,7 @@ DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
     "/circuitsetup-energy-analyzer/alert-evidence"
 )
 MAX_GRAPH_ENTITIES = 8
+MAX_GRAPH_CONTEXT_PADDING = timedelta(hours=24)
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
@@ -125,9 +126,13 @@ def alert_graph_window(
     alert: AlertEvidence, *, padding: timedelta = timedelta(hours=2)
 ) -> tuple[datetime, datetime]:
     """Return the graph start/end datetimes around the alert evidence window."""
-    start = alert.first_seen or alert.timestamp
-    end = alert.last_seen or alert.timestamp
-    return (start - padding, end + padding)
+    raw_start = alert.first_seen or alert.timestamp
+    raw_end = alert.last_seen or alert.timestamp
+    start = min(raw_start, raw_end)
+    end = max(raw_start, raw_end)
+    span_padding = min((end - start) / 2, MAX_GRAPH_CONTEXT_PADDING)
+    context_padding = max(padding, span_padding)
+    return (start - context_padding, end + context_padding)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
