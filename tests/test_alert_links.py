@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -244,4 +245,23 @@ def test_alert_graph_window_wraps_first_and_last_seen() -> None:
     assert window == (
         datetime(2026, 6, 5, 8, 0, tzinfo=UTC),
         datetime(2026, 6, 5, 14, 30, tzinfo=UTC),
+    )
+
+
+def test_alert_graph_window_adds_proportional_context_for_longer_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    alert = replace(
+        _alert(),
+        first_seen=datetime(2026, 6, 4, 0, 0, tzinfo=UTC),
+        last_seen=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+    )
+
+    window = alert_graph_window(alert)
+
+    assert window == (
+        datetime(2026, 6, 3, 18, 0, tzinfo=UTC),
+        datetime(2026, 6, 4, 18, 0, tzinfo=UTC),
     )
