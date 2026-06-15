@@ -1364,36 +1364,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Acknowledge an active alert evidence item."""
         if self._alert_for_id(alert_id) is None:
             return False
-        self.store_data.alerts = [
-            alert
-            for alert in self.store_data.alerts
-            if notifications.notification_id_for_alert(alert) != alert_id
-        ]
-        self._mark_store_dirty()
-        self.state.active_alerts_by_circuit = {
-            circuit_id: [
-                alert
-                for alert in alerts
-                if notifications.notification_id_for_alert(alert) != alert_id
-            ]
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-        }
-        self.state.active_alerts_by_circuit = {
-            circuit_id: alerts
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-            if alerts
-        }
-        self.state.anomaly_score_by_circuit = {
-            circuit_id: (
-                max(_alert_anomaly_score(alert) for alert in alerts)
-                if alerts
-                else 0.0
-            )
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-        }
-        self._refresh_all_ux_state(self._now_fn())
+        self._retire_alert_id(alert_id)
+        now = self._now_fn()
+        self._refresh_all_ux_state(now)
         self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
+        await self._async_save_store(now)
         return True
 
     async def async_set_circuit_sensitivity(
@@ -5170,21 +5145,49 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         alert = self._alert_for_id(alert_id)
         if alert is None:
             return False
+        now = self._now_fn()
         self.store_data.alert_feedback[_alert_feedback_key(alert)] = {
             "action": action,
             "alert_id": alert_id,
-            "created_at": self._now_fn().isoformat(),
+            "created_at": now.isoformat(),
             "circuit_id": alert.circuit_id,
             "feature": _alert_feature(alert),
             "change_ratio": alert.change_ratio,
             "observed_value": alert.observed_value,
             "baseline_value": alert.baseline_value,
         }
+        self._retire_alert_id(alert_id)
         self._mark_store_dirty()
-        self._refresh_ux_state_for_circuit(alert.circuit_id, self._now_fn())
+        self._refresh_all_ux_state(now)
         self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
+        await self._async_save_store(now)
         return True
+
+    def _retire_alert_id(self: Self, alert_id: str) -> None:
+        """Remove an alert from stored and active evidence after user action."""
+        self.store_data.alerts = [
+            alert
+            for alert in self.store_data.alerts
+            if notifications.notification_id_for_alert(alert) != alert_id
+        ]
+        self.state.active_alerts_by_circuit = {
+            circuit_id: [
+                alert
+                for alert in alerts
+                if notifications.notification_id_for_alert(alert) != alert_id
+            ]
+            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
+        }
+        self.state.active_alerts_by_circuit = {
+            circuit_id: alerts
+            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
+            if alerts
+        }
+        self.state.anomaly_score_by_circuit = {
+            circuit_id: max(_alert_anomaly_score(alert) for alert in alerts)
+            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
+        }
+        self._mark_store_dirty()
 
     def _alert_for_id(self: Self, alert_id: str) -> AlertEvidence | None:
         alerts = list(self.store_data.alerts)

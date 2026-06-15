@@ -299,7 +299,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     history.pushState(null, "", path);
-    window.dispatchEvent(new Event("location-changed"));
+    window.dispatchEvent(
+      new CustomEvent("location-changed", {
+        detail: { replace: false },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   _guardActionCall(action, label) {

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -114,6 +116,47 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
+
+
+def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="car_charger", feature="demand_monthly_peak")
+    coordinator = _coordinator(alert, config=_config("car_charger"))
+    coordinator.entry_id = "entry-car-charger"
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+        circuit_id="car_charger",
+        feature="demand_monthly_peak",
+    )
+
+    action = payload["actions"]["open_advanced_circuit_settings"]
+    parsed = urlparse(action["path"])
+    params = parse_qs(parsed.fragment)
+    assert parsed.path == (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+    )
+    assert params["config_entry"] == ["entry-car-charger"]
+    assert params["circuit_id"] == ["car_charger"]
+    assert params["options_step"] == ["advanced_settings"]
+    assert action["entry_id"] == "entry-car-charger"
+    assert action["circuit_id"] == "car_charger"
+    assert action["options_step"] == "advanced_settings"
+
+
+def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
+    panel_script = Path(
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'new CustomEvent("location-changed"' in panel_script
+    assert "detail: { replace: false }" in panel_script
 
 
 def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
@@ -843,6 +886,33 @@ def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
+
+
+def test_alert_evidence_payload_keeps_requested_circuit_after_stale_alert_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    coordinator = _coordinator(config=_config("car_charger"))
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id="old-car-charger-alert",
+        circuit_id="car_charger",
+        feature="demand_monthly_peak",
+    )
+
+    assert payload["status"] == "circuit_found_no_evidence"
+    assert payload["requested_alert_id"] == "old-car-charger-alert"
+    assert payload["requested_circuit_id"] == "car_charger"
+    assert payload["requested_feature"] == "demand_monthly_peak"
+    assert payload["circuit"]["circuit_id"] == "car_charger"
+    assert payload["actions"]["pause_alerts"]["data"] == {
+        "circuit_id": "car_charger"
+    }
+    assert payload["actions"]["start_maintenance"]["data"] == {
+        "circuit_id": "car_charger"
+    }
 
 
 def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback() -> (
