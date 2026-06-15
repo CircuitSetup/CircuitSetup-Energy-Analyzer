@@ -23,6 +23,7 @@ from .entity import (
     entity_detail_level_for_coordinator,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
+    supports_daily_circuit_controls,
 )
 from .sensor import sensitivity_value
 from .ux import friendly_sensitivity_label
@@ -380,6 +381,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 description=description,
             )
             for description in CIRCUIT_SELECT_DESCRIPTIONS
+            if select_description_applies(description, raw_circuit, coordinator)
         )
 
     entities.extend(
@@ -401,6 +403,18 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
+
+
+def select_description_applies(
+    description: CircuitSelectDescription,
+    circuit: Any,
+    coordinator: Any | None = None,
+) -> bool:
+    """Return whether a select control is useful for this circuit."""
+    del coordinator
+    if description.key != "alert_sensitivity":
+        return True
+    return supports_daily_circuit_controls(circuit)
 
 
 def _select_action_available(coordinator: Any, method_name: str) -> bool:

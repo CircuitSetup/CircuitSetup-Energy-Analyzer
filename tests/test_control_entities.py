@@ -546,6 +546,30 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
 
 
 @pytest.mark.asyncio
+async def test_select_setup_skips_mains_daily_sensitivity_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    coordinator = _FakeCoordinator(circuits=(_circuit(), _mains_circuit()))
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    unique_ids = [entity.unique_id for entity in added_entities]
+
+    assert "entry-1_fridge_alert_sensitivity" in unique_ids
+    assert "entry-1_mains_alert_sensitivity" not in unique_ids
+    assert unique_ids.count("entry-1_entity_detail_level") == 1
+    assert unique_ids.count("entry-1_dashboard_layout") == 1
+
+
+@pytest.mark.asyncio
 async def test_select_controls_reject_invalid_options_without_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

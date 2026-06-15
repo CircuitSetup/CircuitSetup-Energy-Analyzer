@@ -15,6 +15,7 @@ from .const import (
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
+from .models import ApplianceProfile, SensorRole
 
 try:
     from homeassistant.helpers.entity import EntityCategory
@@ -383,6 +384,63 @@ def circuits_for_entities(entry: Any, coordinator: Any) -> tuple[Any, ...]:
     if runtime_circuits:
         return runtime_circuits
     return tuple(getattr(entry, "data", {}).get(CONF_CIRCUITS, []))
+
+
+def supports_daily_circuit_controls(circuit: Any) -> bool:
+    """Return whether daily controls are useful for this circuit."""
+    profile = _appliance_profile(_circuit_value(circuit, "appliance_profile"))
+    if profile in {
+        ApplianceProfile.MAINS_NILM,
+        ApplianceProfile.SOLAR_INVERTER,
+        ApplianceProfile.MIXED,
+    }:
+        return False
+    return _has_real_power_sensor(circuit)
+
+
+def _has_real_power_sensor(circuit: Any) -> bool:
+    return any(
+        _sensor_role(sensor) is SensorRole.REAL_POWER
+        for sensor in _circuit_sensors(circuit)
+    )
+
+
+def _sensor_role(sensor: Any) -> SensorRole | None:
+    role = (
+        sensor.get("role")
+        if isinstance(sensor, Mapping)
+        else getattr(sensor, "role", None)
+    )
+    if isinstance(role, SensorRole):
+        return role
+    try:
+        return SensorRole(str(role))
+    except (TypeError, ValueError):
+        return None
+
+
+def _circuit_sensors(circuit: Any) -> tuple[Any, ...]:
+    sensors = _circuit_value(circuit, "sensors", ())
+    if isinstance(sensors, tuple):
+        return sensors
+    if isinstance(sensors, list):
+        return tuple(sensors)
+    return ()
+
+
+def _circuit_value(circuit: Any, key: str, default: Any = None) -> Any:
+    if isinstance(circuit, Mapping):
+        return circuit.get(key, default)
+    return getattr(circuit, key, default)
+
+
+def _appliance_profile(value: Any) -> ApplianceProfile | None:
+    if isinstance(value, ApplianceProfile):
+        return value
+    try:
+        return ApplianceProfile(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def stale_entity_registry_entity_ids(
