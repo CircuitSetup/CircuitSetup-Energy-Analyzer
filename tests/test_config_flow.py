@@ -415,6 +415,52 @@ def test_validate_options_input_moves_mains_sources_out_of_assignable_sources() 
     ]
 
 
+@pytest.mark.parametrize(
+    "mains_entities",
+    [
+        [
+            "sensor.panel_mains_l1_active_power",
+            "sensor.panel_mains_l2_active_power",
+        ],
+        [
+            "sensor.whole_home_l1_power",
+            "sensor.whole_home_l2_power",
+        ],
+        [
+            "sensor.utility_l1_energy",
+            "sensor.utility_l2_energy",
+        ],
+        [
+            "sensor.circuitsetup_energy_analyzer_mains_l1_current",
+            "sensor.circuitsetup_energy_analyzer_mains_l2_current",
+        ],
+    ],
+)
+def test_validate_options_input_moves_real_mains_patterns_from_sources(
+    mains_entities: list[str],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+    )
+
+    validated = validate_options_input(
+        {
+            CONF_SOURCE_ENTITIES: [
+                *mains_entities,
+                "sensor.kitchen_refrigerator_active_power",
+                "sensor.main_bedroom_light_power",
+            ],
+        }
+    )
+
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == []
+    assert validated[CONF_SOURCE_ENTITIES] == [
+        "sensor.kitchen_refrigerator_active_power",
+        "sensor.main_bedroom_light_power",
+    ]
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == mains_entities
+
+
 def test_validate_options_input_preserves_outdoor_temperature_entity() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_options_input,
