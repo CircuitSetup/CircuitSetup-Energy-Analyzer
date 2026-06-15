@@ -160,6 +160,13 @@ def _schema_section_keys(schema) -> set[str]:
     return keys
 
 
+def _schema_top_level_keys(schema) -> list[str]:
+    return [
+        getattr(marker, "schema", getattr(marker, "key", marker))
+        for marker in schema.schema
+    ]
+
+
 def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
@@ -2118,6 +2125,60 @@ async def test_options_sources_step_preserves_string_sensors_when_merging() -> N
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_updates_dual_phase_mode_from_available_legs() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    existing_circuit = {
+        "circuit_id": "car_charger",
+        "name": "Car Charger",
+        "appliance_profile": "ev_charger",
+        "mode": "single_phase",
+        "sensors": [
+            {
+                "entity_id": "sensor.car_charger_l1_active_power",
+                "role": "real_power",
+                "leg": "a",
+            },
+        ],
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+            ],
+            CONF_CIRCUITS: [existing_circuit],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    await flow.async_step_assign()
+    await flow.async_step_select_assignment({"selected_assignment": "car_charger"})
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+            ],
+            "circuit_name": "Car Charger",
+            "appliance_profile": "ev_charger",
+            "circuit_retention_mode": "standard",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS][0]["mode"] == "dual_phase"
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_preserves_outdoor_temperature_entity() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -2214,6 +2275,42 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "circuit_mode": "dual_phase",
         "power_flow": "load",
     }
+
+
+@pytest.mark.asyncio
+async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.garage_vehicle_charging_l1_active_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "appliance_profile") == "ev_charger"
+    assert result["description_placeholders"]["circuit_mode"] == "single_phase"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Garage Vehicle Charging",
+            "appliance_profile": "ev_charger",
+            "included_sensors": ["sensor.garage_vehicle_charging_l1_active_power"],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert flow._pending_final_config[CONF_CIRCUITS][0]["mode"] == "single_phase"
 
 
 @pytest.mark.parametrize(
@@ -3340,8 +3437,6 @@ def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
     ]
 
     reset_fields = (
-        "reset_advanced_settings_to_defaults",
-        "reset_analysis_settings_to_defaults",
         "reset_energy_settings_to_defaults",
         "reset_activity_settings_to_defaults",
         "reset_billing_cost_settings_to_defaults",
@@ -3363,6 +3458,12 @@ def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
 
     assert set(defaults) == set(reset_fields)
     assert all(default is False for default in defaults.values())
+    for schema in schemas:
+        assert _schema_top_level_keys(schema)[0] == (
+            "reset_advanced_settings_to_defaults"
+        )
+        assert _schema_default(schema, "reset_advanced_settings_to_defaults") is False
+        assert "reset_analysis_settings_to_defaults" not in _schema_keys(schema)
 
 
 def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None:
