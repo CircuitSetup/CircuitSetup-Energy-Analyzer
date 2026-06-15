@@ -205,10 +205,12 @@
         "description": "Create or update a CircuitSetup Energy Analyzer dashboard using the selected layout.",
         "data": {
           "dashboard_layout": "Dashboard Layout",
+          "apply_entity_detail_profile": "Match Entity Detail Level To Layout",
           "remove_dashboard": "Remove Existing Dashboard"
         },
         "data_description": {
           "dashboard_layout": "Simple keeps the summary dashboard cards compact. Standard adds feature-level mains, HVAC, solar, and utility status cards. Expert also adds analyzer evidence links for each circuit.",
+          "apply_entity_detail_profile": "If the selected dashboard layout needs more analyzer entities than the current Entity Detail Level enables, check this to raise Entity Detail Level to match the layout and apply that profile to current entities. Entities you manually disabled remain disabled.",
           "remove_dashboard": "Check this to delete the existing CircuitSetup Energy Analyzer dashboard instead of creating or updating it."
         }
       },
@@ -472,6 +474,7 @@
     "error": {
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
+      "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
     }
