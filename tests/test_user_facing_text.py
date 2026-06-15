@@ -1127,6 +1127,24 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
     assert "Evidence Window" not in asset
 
 
+def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "new Date(value)" in asset
+    assert "raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T" not in asset
+    assert "const year = String(date.getFullYear());" in asset
+    assert (
+        "return this._formatDateParts(year, month, day, date.getHours(), minute);"
+        in asset
+    )
+
+
 def test_daily_action_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")

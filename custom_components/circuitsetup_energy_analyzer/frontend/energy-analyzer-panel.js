@@ -1097,15 +1097,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (value === null || value === undefined || value === "") {
       return "Unknown";
     }
-    const raw = String(value);
-    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-    if (isoMatch) {
-      const [, year, month, day, hour, minute] = isoMatch;
-      return this._formatDateParts(year, month, day, Number(hour), minute);
-    }
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) {
-      return raw;
+      return String(value);
     }
     const year = String(date.getFullYear());
     const month = String(date.getMonth() + 1).padStart(2, "0");
