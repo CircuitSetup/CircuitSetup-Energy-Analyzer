@@ -882,8 +882,16 @@ class _FakeDashboardsCollection:
 
 
 class _FakeLovelaceStorage:
-    def __init__(self, config: dict[str, object]) -> None:
+    def __init__(
+        self,
+        config: dict[str, object],
+        *,
+        mode: str = "storage",
+        delete_error: Exception | None = None,
+    ) -> None:
         self.config = config
+        self.mode = mode
+        self.delete_error = delete_error
         self.saved: list[dict[str, object]] = []
         self.deleted = False
 
@@ -891,6 +899,8 @@ class _FakeLovelaceStorage:
         self.saved.append(config)
 
     async def async_delete(self) -> None:
+        if self.delete_error is not None:
+            raise self.delete_error
         self.deleted = True
 
 
@@ -925,6 +935,11 @@ class _FakeSyncItemsDashboardsCollection(_FakeDashboardsCollection):
         if not self._existing:
             return []
         return [{"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}]
+
+
+class _FakeDetachedDashboardsCollection(_FakeDashboardsCollection):
+    async def async_delete_item(self, item_id: str) -> None:
+        self.deleted.append(item_id)
 
 
 class _FakeExistingDashboardWithoutUpdate:
@@ -1341,6 +1356,85 @@ async def test_coordinator_removes_orphaned_recommended_dashboard_config() -> No
 
     assert collection.deleted == []
     assert DASHBOARD_URL_PATH not in dashboards
+    assert dashboard_store.deleted is True
+    assert coordinator.last_dashboard_remove_request["action"] == "deleted"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_does_not_remove_yaml_dashboard_as_orphan() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=False)
+    dashboard_store = _FakeLovelaceStorage(
+        {"config": {"views": []}},
+        mode="yaml",
+        delete_error=RuntimeError("YAML dashboards should not be deleted"),
+    )
+    dashboards = {DASHBOARD_URL_PATH: dashboard_store}
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": dashboards,
+                "dashboards_collection": collection,
+            }
+        }
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_remove_dashboard()
+
+    assert collection.deleted == []
+    assert dashboards[DASHBOARD_URL_PATH] is dashboard_store
+    assert dashboard_store.deleted is False
+    assert coordinator.last_dashboard_remove_request["action"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_removes_live_dashboard_after_loading_fresh_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDetachedDashboardsCollection(existing=True)
+    dashboard_store = _FakeLovelaceStorage(
+        {"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}
+    )
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=object(),
+        yaml_dashboards={},
+    )
+
+    async def load_collection(hass: object, data: object) -> object:
+        assert data is lovelace_data
+        return collection
+
+    monkeypatch.setattr(
+        module,
+        "_async_load_lovelace_dashboards_collection",
+        load_collection,
+        raising=False,
+    )
+    hass = SimpleNamespace(data={"lovelace": lovelace_data})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_remove_dashboard()
+
+    assert collection.deleted == [DASHBOARD_URL_PATH]
+    assert DASHBOARD_URL_PATH not in lovelace_data.dashboards
     assert dashboard_store.deleted is True
     assert coordinator.last_dashboard_remove_request["action"] == "deleted"
 

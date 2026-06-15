@@ -240,7 +240,7 @@ _ENTITY_DETAIL_LEVEL_ORDER = {
 _ENTITY_DETAIL_FOR_DASHBOARD_LAYOUT = {
     DASHBOARD_LAYOUT_SIMPLE: ENTITY_DETAIL_SIMPLE,
     DASHBOARD_LAYOUT_STANDARD: ENTITY_DETAIL_STANDARD,
-    DASHBOARD_LAYOUT_EXPERT: ENTITY_DETAIL_EXPERT,
+    DASHBOARD_LAYOUT_EXPERT: ENTITY_DETAIL_STANDARD,
 }
 FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_REMOVE_FROM_ANALYSIS = "remove_from_analysis"
@@ -3836,14 +3836,22 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 user_input.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
             )
             detail_updates: dict[str, Any] = {}
-            if not remove_dashboard:
-                current_detail_level = normalize_entity_detail_level(
-                    _entry_value(
-                        self._config_entry,
-                        CONF_ENTITY_DETAIL_LEVEL,
-                        DEFAULT_ENTITY_DETAIL_LEVEL,
-                    )
+            current_layout = normalize_dashboard_layout(
+                _entry_value(
+                    self._config_entry,
+                    CONF_DASHBOARD_LAYOUT,
+                    DEFAULT_DASHBOARD_LAYOUT,
                 )
+            )
+            current_detail_level = normalize_entity_detail_level(
+                _entry_value(
+                    self._config_entry,
+                    CONF_ENTITY_DETAIL_LEVEL,
+                    DEFAULT_ENTITY_DETAIL_LEVEL,
+                )
+            )
+            matching_detail_level: str | None = None
+            if not remove_dashboard:
                 if dashboard_layout_exceeds_entity_detail(layout, current_detail_level):
                     if not apply_entity_detail_profile:
                         return self.async_show_form(
@@ -3862,11 +3870,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         )
                     matching_detail_level = entity_detail_level_for_dashboard_layout(
                         layout
-                    )
-                    _apply_entity_detail_profile_to_existing_entities(
-                        getattr(self, "hass", None),
-                        self._config_entry,
-                        matching_detail_level,
                     )
                     detail_updates[CONF_ENTITY_DETAIL_LEVEL] = matching_detail_level
             coordinator = _options_flow_coordinator(self)
@@ -3903,10 +3906,22 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         "async_set_dashboard_layout",
                         None,
                     )
+                    layout_was_changed = False
                     if callable(set_layout):
                         result = set_layout(layout)
                         if hasattr(result, "__await__"):
                             await result
+                        layout_was_changed = layout != current_layout
+                    detail_profile_was_changed = False
+                    if matching_detail_level is not None:
+                        _apply_entity_detail_profile_to_existing_entities(
+                            getattr(self, "hass", None),
+                            self._config_entry,
+                            matching_detail_level,
+                        )
+                        detail_profile_was_changed = (
+                            matching_detail_level != current_detail_level
+                        )
                     create_dashboard = getattr(
                         coordinator,
                         "async_create_dashboard",
@@ -3920,6 +3935,16 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                             dashboard_result,
                             coordinator,
                         ):
+                            if detail_profile_was_changed:
+                                _apply_entity_detail_profile_to_existing_entities(
+                                    getattr(self, "hass", None),
+                                    self._config_entry,
+                                    current_detail_level,
+                                )
+                            if callable(set_layout) and layout_was_changed:
+                                rollback = set_layout(current_layout)
+                                if hasattr(rollback, "__await__"):
+                                    await rollback
                             return self.async_show_form(
                                 step_id="dashboard",
                                 data_schema=_dashboard_schema(

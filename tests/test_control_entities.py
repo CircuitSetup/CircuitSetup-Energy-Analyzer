@@ -504,7 +504,7 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
 
 
 @pytest.mark.asyncio
-async def test_select_setup_skips_mains_daily_sensitivity_control(
+async def test_select_setup_keeps_mains_sensitivity_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import select
@@ -522,7 +522,7 @@ async def test_select_setup_skips_mains_daily_sensitivity_control(
     unique_ids = [entity.unique_id for entity in added_entities]
 
     assert "entry-1_fridge_alert_sensitivity" in unique_ids
-    assert "entry-1_mains_alert_sensitivity" not in unique_ids
+    assert "entry-1_mains_alert_sensitivity" in unique_ids
     assert unique_ids.count("entry-1_entity_detail_level") == 1
     assert unique_ids.count("entry-1_dashboard_layout") == 1
 
