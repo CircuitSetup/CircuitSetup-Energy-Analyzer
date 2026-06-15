@@ -2793,12 +2793,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 None,
             )
             if existing is None:
+                if await _async_delete_lovelace_dashboard_config(
+                    self.hass,
+                    lovelace_data,
+                    DASHBOARD_URL_PATH,
+                ):
+                    return "deleted", None
                 return "missing", None
 
             item_id = _lovelace_dashboard_item_id(existing, payload)
             if not item_id:
                 return "unavailable", "lovelace_dashboard_delete_unavailable"
             await _async_lovelace_method_result(delete_method(item_id))
+            await _async_delete_lovelace_dashboard_config(
+                self.hass,
+                lovelace_data,
+                DASHBOARD_URL_PATH,
+            )
             return "deleted", None
 
         if await _async_delete_lovelace_dashboard_config(

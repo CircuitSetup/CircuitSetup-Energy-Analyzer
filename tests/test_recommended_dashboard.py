@@ -1230,6 +1230,37 @@ async def test_coordinator_reports_missing_dashboard_on_remove() -> None:
 
 
 @pytest.mark.asyncio
+async def test_coordinator_removes_orphaned_recommended_dashboard_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeDashboardsCollection(existing=False)
+    dashboard_store = _FakeLovelaceStorage({"config": {"views": []}})
+    dashboards = {DASHBOARD_URL_PATH: dashboard_store}
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": dashboards,
+                "dashboards_collection": collection,
+            }
+        }
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_remove_dashboard()
+
+    assert collection.deleted == []
+    assert DASHBOARD_URL_PATH not in dashboards
+    assert dashboard_store.deleted is True
+    assert coordinator.last_dashboard_remove_request["action"] == "deleted"
+
+
+@pytest.mark.asyncio
 async def test_coordinator_records_reason_when_lovelace_collection_is_missing() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
