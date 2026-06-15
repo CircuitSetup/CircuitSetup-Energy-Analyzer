@@ -345,6 +345,7 @@ FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
+FIELD_REMOVE_DASHBOARD = "remove_dashboard"
 FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
 RECOMMENDATION_ACTION_APPLY = "apply"
 RECOMMENDATION_ACTION_DENY = "deny"
@@ -3798,35 +3799,64 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     ) -> config_entries.ConfigFlowResult:
         """Create or update the recommended dashboard."""
         if user_input is not None:
+            remove_dashboard = bool(user_input.get(FIELD_REMOVE_DASHBOARD, False))
             layout = normalize_dashboard_layout(
                 user_input.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT)
             )
             coordinator = _options_flow_coordinator(self)
             if coordinator is not None:
-                set_layout = getattr(coordinator, "async_set_dashboard_layout", None)
-                if callable(set_layout):
-                    result = set_layout(layout)
-                    if hasattr(result, "__await__"):
-                        await result
-                create_dashboard = getattr(coordinator, "async_create_dashboard", None)
-                if callable(create_dashboard):
-                    dashboard_result = create_dashboard()
-                    if hasattr(dashboard_result, "__await__"):
-                        dashboard_result = await dashboard_result
-                    if _dashboard_creation_unavailable(
-                        dashboard_result,
+                if remove_dashboard:
+                    delete_dashboard = getattr(
                         coordinator,
-                    ):
-                        return self.async_show_form(
-                            step_id="dashboard",
-                            data_schema=_dashboard_schema(self._config_entry),
-                            errors={"base": "dashboard_creation_unavailable"},
-                        )
+                        "async_remove_dashboard",
+                        None,
+                    )
+                    if callable(delete_dashboard):
+                        dashboard_result = delete_dashboard()
+                        if hasattr(dashboard_result, "__await__"):
+                            dashboard_result = await dashboard_result
+                        if _dashboard_removal_unavailable(
+                            dashboard_result,
+                            coordinator,
+                        ):
+                            return self.async_show_form(
+                                step_id="dashboard",
+                                data_schema=_dashboard_schema(self._config_entry),
+                                errors={"base": "dashboard_removal_unavailable"},
+                            )
+                else:
+                    set_layout = getattr(
+                        coordinator,
+                        "async_set_dashboard_layout",
+                        None,
+                    )
+                    if callable(set_layout):
+                        result = set_layout(layout)
+                        if hasattr(result, "__await__"):
+                            await result
+                    create_dashboard = getattr(
+                        coordinator,
+                        "async_create_dashboard",
+                        None,
+                    )
+                    if callable(create_dashboard):
+                        dashboard_result = create_dashboard()
+                        if hasattr(dashboard_result, "__await__"):
+                            dashboard_result = await dashboard_result
+                        if _dashboard_creation_unavailable(
+                            dashboard_result,
+                            coordinator,
+                        ):
+                            return self.async_show_form(
+                                step_id="dashboard",
+                                data_schema=_dashboard_schema(self._config_entry),
+                                errors={"base": "dashboard_creation_unavailable"},
+                            )
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
                     self._config_entry,
-                    {CONF_DASHBOARD_LAYOUT: layout},
+                    {} if remove_dashboard else {CONF_DASHBOARD_LAYOUT: layout},
                 ),
             )
 
@@ -3942,6 +3972,16 @@ def _dashboard_creation_unavailable(result: Any, coordinator: Any) -> bool:
     if isinstance(result, Mapping):
         return result.get("action") == "unavailable"
     last_request = getattr(coordinator, "last_dashboard_create_request", None)
+    return (
+        isinstance(last_request, Mapping)
+        and last_request.get("action") == "unavailable"
+    )
+
+
+def _dashboard_removal_unavailable(result: Any, coordinator: Any) -> bool:
+    if isinstance(result, Mapping):
+        return result.get("action") == "unavailable"
+    last_request = getattr(coordinator, "last_dashboard_remove_request", None)
     return (
         isinstance(last_request, Mapping)
         and last_request.get("action") == "unavailable"
@@ -4366,6 +4406,10 @@ def _dashboard_schema(config_entry: config_entries.ConfigEntry) -> Any:
                 CONF_DASHBOARD_LAYOUT,
                 default=layout,
             ): _select_selector(dashboard_layout_options()),
+            vol.Optional(
+                FIELD_REMOVE_DASHBOARD,
+                default=False,
+            ): bool,
         }
     )
 

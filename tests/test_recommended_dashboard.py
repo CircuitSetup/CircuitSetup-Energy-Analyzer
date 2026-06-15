@@ -220,6 +220,51 @@ def _registry_entry(
     )
 
 
+def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
+    return {
+        "sensor.fridge_activity": _registry_entry(
+            "sensor.fridge_activity",
+            "entry-1_fridge_activity_summary",
+        ),
+        "sensor.fridge_electrical": _registry_entry(
+            "sensor.fridge_electrical",
+            "entry-1_fridge_electrical_health",
+        ),
+        "sensor.fridge_energy": _registry_entry(
+            "sensor.fridge_energy",
+            "entry-1_fridge_energy_summary",
+        ),
+        "sensor.fridge_daily": _registry_entry(
+            "sensor.fridge_daily",
+            "entry-1_fridge_daily_energy_usage",
+        ),
+        "sensor.mains_activity": _registry_entry(
+            "sensor.mains_activity",
+            "entry-1_mains_activity_summary",
+        ),
+        "sensor.mains_electrical": _registry_entry(
+            "sensor.mains_electrical",
+            "entry-1_mains_electrical_health",
+        ),
+        "sensor.mains_energy": _registry_entry(
+            "sensor.mains_energy",
+            "entry-1_mains_energy_summary",
+        ),
+        "sensor.mains_daily": _registry_entry(
+            "sensor.mains_daily",
+            "entry-1_mains_daily_energy_usage",
+        ),
+        "sensor.mains_unknown_inventory": _registry_entry(
+            "sensor.mains_unknown_inventory",
+            "entry-1_mains_nilm_unknown_loads",
+        ),
+        "sensor.mains_signatures": _registry_entry(
+            "sensor.mains_signatures",
+            "entry-1_mains_nilm_signature_count",
+        ),
+    }
+
+
 def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
@@ -334,8 +379,8 @@ def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() ->
         "sensor.fridge_electrical_health",
         "sensor.fridge_energy_summary",
         "sensor.fridge_daily_energy_usage",
-        "sensor.mains_nilm_unknown_loads",
     } <= refs
+    assert "sensor.mains_nilm_unknown_loads" not in refs
     assert "sensor.fridge_health_summary" not in refs
     assert "binary_sensor.fridge_running" not in refs
     assert "sensor.fridge_metric_consistency_status" not in refs
@@ -353,7 +398,44 @@ def test_standard_dashboard_layout_keeps_appliance_cards_compact() -> None:
     assert "sensor.fridge_alert_evidence" not in refs
 
 
-def test_expert_dashboard_layout_does_not_duplicate_diagnostics_per_appliance() -> None:
+def test_simple_dashboard_layout_omits_feature_level_mains_gap_notes() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(entities=_summary_only_registry_entries())
+        ),
+        entry_id="entry-1",
+    )
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "Mains rollups note" not in markdown
+    assert "Mains load match note" not in markdown
+    assert "Unknown load signals note" not in markdown
+
+
+def test_standard_dashboard_layout_surfaces_feature_level_mains_gap_notes() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(entities=_summary_only_registry_entries())
+        ),
+        entry_id="entry-1",
+    )
+    markdown = "\n".join(_markdown_contents(dashboard))
+
+    assert "Mains rollups note" not in markdown
+    assert "Mains load match note" in markdown
+    assert "Unknown load signals note" in markdown
+    assert (
+        "Missing entities: Known Appliance Load, Unassigned Mains Load, "
+        "Known Load Share"
+    ) in markdown
+    assert "Missing entities: Known Load Share" in markdown
+
+
+def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> None:
     dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_EXPERT)
     refs = _entity_refs(dashboard)
     markdown = str(dashboard)
@@ -362,7 +444,10 @@ def test_expert_dashboard_layout_does_not_duplicate_diagnostics_per_appliance() 
     assert "sensor.fridge_alert_evidence" not in refs
     assert "sensor.fridge_power_quality_evidence" not in refs
     assert "sensor.fridge_energy_dashboard_status" not in refs
-    assert "/circuitsetup-energy-analyzer-evidence" not in markdown
+    assert (
+        "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge" in markdown
+    )
+    assert "/circuitsetup-energy-analyzer-evidence?circuit_id=mains" in markdown
 
 
 def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:

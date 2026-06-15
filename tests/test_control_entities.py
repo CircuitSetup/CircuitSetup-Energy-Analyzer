@@ -238,8 +238,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
-        "entry-1_create_dashboard",
-        "entry-1_remove_dashboard",
     }
     assert by_unique_id["entry-1_fridge_relearn_baseline"].device_info == {
         "identifiers": {(DOMAIN, "entry-1_fridge")},
@@ -266,8 +264,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
-        "entry-1_create_dashboard",
-        "entry-1_remove_dashboard",
     ):
         await by_unique_id[unique_id].async_press()
 
@@ -284,8 +280,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
         ("async_pause_alerts", ("fridge", None)),
         ("async_run_mapping_checks", ()),
         ("async_recalculate_setting_recommendations", (None,)),
-        ("async_create_dashboard", ()),
-        ("async_remove_dashboard", ()),
     ]
 
 
@@ -313,47 +307,11 @@ async def test_button_setup_skips_inapplicable_controls_and_keeps_single_globals
     assert {
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
-        "entry-1_create_dashboard",
-        "entry-1_remove_dashboard",
     } <= unique_ids
-    create_dashboard_entities = [
-        entity
+    assert not any(
+        entity.unique_id.endswith(("create_dashboard", "remove_dashboard"))
         for entity in added_entities
-        if entity.unique_id.endswith("create_dashboard")
-    ]
-    assert len(create_dashboard_entities) == 1
-
-
-@pytest.mark.asyncio
-async def test_create_dashboard_button_exposes_last_dashboard_result(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import button
-
-    _disable_registry_pruning(monkeypatch, button)
-    coordinator = _FakeCoordinator()
-    coordinator.last_dashboard_create_request = {
-        "action": "unavailable",
-        "reason": "dashboard_update_unavailable",
-        "dashboard_path": "/circuitsetup-energy-analyzer",
-        "layout": "standard",
-    }
-    added_entities = []
-
-    await button.async_setup_entry(
-        _hass_with(coordinator),
-        SimpleNamespace(entry_id="entry-1", data={}),
-        added_entities.extend,
     )
-
-    by_unique_id = {entity.unique_id: entity for entity in added_entities}
-
-    assert by_unique_id["entry-1_create_dashboard"].extra_state_attributes == {
-        "last_dashboard_action": "unavailable",
-        "last_dashboard_reason": "dashboard_update_unavailable",
-        "last_dashboard_path": "/circuitsetup-energy-analyzer",
-        "last_dashboard_layout": "standard",
-    }
 
 
 @pytest.mark.asyncio
