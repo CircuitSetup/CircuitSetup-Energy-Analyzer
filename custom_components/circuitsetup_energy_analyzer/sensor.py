@@ -365,9 +365,9 @@ def weather_context_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     """Return weather-context evidence attributes for an HVAC circuit."""
     evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
     if isinstance(evidence, Mapping):
-        return dict(evidence)
+        return _weather_context_attributes(evidence)
     if is_dataclass(evidence) and not isinstance(evidence, type):
-        return asdict(evidence)
+        return _weather_context_attributes(asdict(evidence))
     return {}
 
 
@@ -1159,6 +1159,77 @@ SOLAR_LOAD_SHIFT_CANDIDATE_FIELDS = (
     "current_power_w",
     "state",
 )
+
+WEATHER_CONTEXT_ATTRIBUTE_MAX_ITEMS = 5
+WEATHER_CONTEXT_TEXT_MAX_LENGTH = 65
+
+
+def _weather_context_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, str):
+            attributes[key] = _bounded_attribute_string(
+                item,
+                WEATHER_CONTEXT_TEXT_MAX_LENGTH,
+            )
+        elif isinstance(item, Mapping):
+            attributes.update(_bounded_mapping_attribute(key, item))
+        elif _is_attribute_sequence(item):
+            attributes.update(_bounded_sequence_attribute(key, item))
+        else:
+            attributes[key] = item
+    return attributes
+
+
+def _bounded_mapping_attribute(
+    key: str,
+    value: Mapping[Any, Any],
+) -> dict[str, Any]:
+    items = list(value.items())
+    preview_items = items[:WEATHER_CONTEXT_ATTRIBUTE_MAX_ITEMS]
+    return {
+        f"{key}_count": len(items),
+        f"{key}_shown_count": len(preview_items),
+        f"{key}_has_more": len(items) > len(preview_items),
+        key: {
+            item_key: _weather_context_preview_value(item_value)
+            for item_key, item_value in preview_items
+        },
+    }
+
+
+def _bounded_sequence_attribute(key: str, value: Any) -> dict[str, Any]:
+    items = list(value)
+    preview_items = items[:WEATHER_CONTEXT_ATTRIBUTE_MAX_ITEMS]
+    return {
+        f"{key}_count": len(items),
+        f"{key}_shown_count": len(preview_items),
+        f"{key}_has_more": len(items) > len(preview_items),
+        key: [_weather_context_preview_value(item) for item in preview_items],
+    }
+
+
+def _weather_context_preview_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _bounded_attribute_string(value, WEATHER_CONTEXT_TEXT_MAX_LENGTH)
+    if isinstance(value, Mapping):
+        return {
+            key: _weather_context_preview_value(item)
+            for key, item in value.items()
+            if not _is_attribute_sequence(item)
+        }
+    if is_dataclass(value) and not isinstance(value, type):
+        return _weather_context_preview_value(asdict(value))
+    if _is_attribute_sequence(value):
+        return []
+    return value
+
+
+def _is_attribute_sequence(value: Any) -> bool:
+    return isinstance(value, Iterable) and not isinstance(
+        value,
+        str | bytes | Mapping,
+    )
 
 
 def _recent_activity_attributes(value: Mapping[str, Any]) -> dict[str, Any]:

@@ -2826,6 +2826,64 @@ def test_weather_context_sensor_exposes_readable_status_and_evidence() -> None:
     assert weather_context_attributes(state, "missing") == {}
 
 
+def test_weather_context_attributes_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        weather_context_attributes,
+    )
+
+    long_explanation = "Weather adjusted context " + ("with detail " * 20)
+    comparison_samples = [
+        {
+            "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
+            "runtime_minutes": 20 + index,
+            "duty_cycle_percent": 10 + index,
+            "extra_debug": [index] * 20,
+        }
+        for index in range(9)
+    ]
+    state = SimpleNamespace(
+        weather_context_by_circuit={
+            "hvac": {
+                "status": "above_weather_adjusted_range",
+                "temperature_f": 92.0,
+                "expected_high_w": 2400.0,
+                "explanation": long_explanation,
+                "comparison_samples": comparison_samples,
+                "temperature_bins": {
+                    f"bin_{index:02d}": {"sample_count": index}
+                    for index in range(8)
+                },
+            }
+        }
+    )
+
+    attrs = weather_context_attributes(state, "hvac")
+
+    assert attrs["status"] == "above_weather_adjusted_range"
+    assert attrs["temperature_f"] == 92.0
+    assert attrs["expected_high_w"] == 2400.0
+    assert attrs["explanation"] == (
+        "Weather adjusted context with detail with detail with detail w..."
+    )
+    assert attrs["comparison_samples_count"] == 9
+    assert attrs["comparison_samples_shown_count"] == 5
+    assert attrs["comparison_samples_has_more"] is True
+    assert attrs["comparison_samples"] == [
+        {
+            "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
+            "runtime_minutes": 20 + index,
+            "duty_cycle_percent": 10 + index,
+        }
+        for index in range(5)
+    ]
+    assert attrs["temperature_bins_count"] == 8
+    assert attrs["temperature_bins_shown_count"] == 5
+    assert attrs["temperature_bins_has_more"] is True
+    assert attrs["temperature_bins"] == {
+        f"bin_{index:02d}": {"sample_count": index} for index in range(5)
+    }
+
+
 def test_outdoor_temperature_sensor_exposes_graphable_display_temperature() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
