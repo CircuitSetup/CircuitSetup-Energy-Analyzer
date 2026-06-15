@@ -110,20 +110,6 @@ GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
         args=(None,),
         icon="mdi:tune-variant",
     ),
-    GlobalButtonDescription(
-        key="create_dashboard",
-        name="CircuitSetup Energy Analyzer Create Dashboard",
-        method_name="async_create_dashboard",
-        args=(),
-        icon="mdi:view-dashboard-plus-outline",
-    ),
-    GlobalButtonDescription(
-        key="remove_dashboard",
-        name="CircuitSetup Energy Analyzer Remove Dashboard",
-        method_name="async_remove_dashboard",
-        args=(),
-        icon="mdi:view-dashboard-minus-outline",
-    ),
 )
 
 

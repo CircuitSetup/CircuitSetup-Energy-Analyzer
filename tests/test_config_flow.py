@@ -1882,6 +1882,7 @@ async def test_options_flow_creates_recommended_dashboard(
             ]
         }
     }
+    assert _schema_default(form["data_schema"], "remove_dashboard") is False
     assert result["type"] == "create_entry"
     assert result["data"][CONF_DASHBOARD_LAYOUT] == DASHBOARD_LAYOUT_EXPERT
     assert coordinator.calls == [
@@ -1937,6 +1938,50 @@ async def test_options_flow_reports_dashboard_creation_failure(
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
         ("async_create_dashboard", ()),
     ]
+
+
+@pytest.mark.asyncio
+async def test_options_flow_removes_recommended_dashboard_without_changing_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def async_set_dashboard_layout(self, layout: str) -> None:
+            self.calls.append(("async_set_dashboard_layout", (layout,)))
+
+        async def async_create_dashboard(self) -> None:
+            self.calls.append(("async_create_dashboard", ()))
+
+        async def async_remove_dashboard(self) -> None:
+            self.calls.append(("async_remove_dashboard", ()))
+
+    coordinator = Coordinator()
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_STANDARD},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    result = await flow.async_step_dashboard(
+        {
+            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT,
+            "remove_dashboard": True,
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_DASHBOARD_LAYOUT] == DASHBOARD_LAYOUT_STANDARD
+    assert coordinator.calls == [("async_remove_dashboard", ())]
 
 
 @pytest.mark.asyncio

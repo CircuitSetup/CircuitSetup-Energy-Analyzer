@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import (
+    DASHBOARD_LAYOUT_EXPERT,
+    DASHBOARD_LAYOUT_STANDARD,
     DASHBOARD_LAYOUTS,
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
@@ -81,6 +84,9 @@ def build_recommended_dashboard(
     entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
+    normalized_layout = normalize_dashboard_layout(layout)
+    include_feature_cards = _layout_includes_feature_cards(normalized_layout)
+    include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
     circuit_list = [
         circuit
         for circuit in circuits
@@ -107,6 +113,7 @@ def build_recommended_dashboard(
         sections.append(
             _mains_section(
                 mains_circuits[0],
+                include_feature_cards=include_feature_cards,
                 registry_lookup=registry_lookup,
                 hass=hass,
                 entry_id=entry_id,
@@ -116,12 +123,13 @@ def build_recommended_dashboard(
         _energy_tracking_section(
             appliance_circuits,
             mains_circuits=mains_circuits,
+            include_feature_cards=include_feature_cards,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
         )
     )
-    if hvac_circuits:
+    if include_feature_cards and hvac_circuits:
         sections.append(
             _hvac_weather_section(
                 hvac_circuits[0],
@@ -130,6 +138,8 @@ def build_recommended_dashboard(
                 entry_id=entry_id,
             )
         )
+    if include_expert_links:
+        sections.append(_expert_evidence_section(circuit_list))
 
     return {
         "title": DASHBOARD_TITLE,
@@ -212,6 +222,7 @@ def _appliance_status_section(
 def _mains_section(
     circuit: Any,
     *,
+    include_feature_cards: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
@@ -238,101 +249,106 @@ def _mains_section(
             }
         )
 
-    coverage_entity = _resolved_entity_id(
-        circuit_id,
-        ("sensor", "monitored_coverage", "Known Load Share"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    if coverage_entity:
+    if include_feature_cards:
+        coverage_entity = _resolved_entity_id(
+            circuit_id,
+            ("sensor", "monitored_coverage", "Known Load Share"),
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if coverage_entity:
+            cards.append(
+                {
+                    "type": "gauge",
+                    "entity": coverage_entity,
+                    "name": "Known Load Share",
+                    "min": 0,
+                    "max": 100,
+                    "severity": {"red": 0, "yellow": 40, "green": 70},
+                }
+            )
+
+        load_rows, load_notes = _resolved_entity_rows(
+            circuit_id,
+            MAINS_LOAD_MATCH_ENTITY_SPECS,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if load_notes:
+            cards.append(
+                _markdown_card(_note_content("Mains load match note", load_notes))
+            )
+        if load_rows:
+            cards.append(_entities_card("Mains Load Match", load_rows))
+
         cards.append(
-            {
-                "type": "gauge",
-                "entity": coverage_entity,
-                "name": "Known Load Share",
-                "min": 0,
-                "max": 100,
-                "severity": {"red": 0, "yellow": 40, "green": 70},
-            }
+            _markdown_card(
+                "Known Load Share is how much of current mains power is explained "
+                "by the circuits you selected. Low values usually mean normal "
+                "unmonitored loads, not necessarily a problem."
+            )
         )
 
-    load_rows, load_notes = _resolved_entity_rows(
-        circuit_id,
-        MAINS_LOAD_MATCH_ENTITY_SPECS,
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    if load_notes:
-        cards.append(_markdown_card(_note_content("Mains load match note", load_notes)))
-    if load_rows:
-        cards.append(_entities_card("Mains Load Match", load_rows))
-
-    cards.append(
-        _markdown_card(
-            "Known Load Share is how much of current mains power is explained "
-            "by the circuits you selected. Low values usually mean normal "
-            "unmonitored loads, not necessarily a problem."
+        unknown_inventory = _resolved_entity_id(
+            circuit_id,
+            ("sensor", "nilm_unknown_loads", "Unknown Load Inventory"),
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
         )
-    )
+        if unknown_inventory:
+            cards.append(
+                {
+                    "type": "tile",
+                    "entity": unknown_inventory,
+                    "name": "Unknown Load Inventory",
+                    "vertical": False,
+                }
+            )
 
-    unknown_inventory = _resolved_entity_id(
-        circuit_id,
-        ("sensor", "nilm_unknown_loads", "Unknown Load Inventory"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    if unknown_inventory:
-        cards.append(
-            {
-                "type": "tile",
-                "entity": unknown_inventory,
-                "name": "Unknown Load Inventory",
-                "vertical": False,
-            }
+        unknown_rows, unknown_notes = _resolved_entity_rows(
+            circuit_id,
+            UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
         )
+        if unknown_notes:
+            cards.append(
+                _markdown_card(
+                    _note_content("Unknown load signals note", unknown_notes)
+                )
+            )
+        if unknown_rows:
+            cards.append(
+                {
+                    "type": "glance",
+                    "title": "Unknown load signals",
+                    "columns": 3,
+                    "entities": unknown_rows,
+                }
+            )
 
-    unknown_rows, unknown_notes = _resolved_entity_rows(
-        circuit_id,
-        UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS,
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    if unknown_notes:
-        cards.append(
-            _markdown_card(_note_content("Unknown load signals note", unknown_notes))
-        )
-    if unknown_rows:
-        cards.append(
-            {
-                "type": "glance",
-                "title": "Unknown load signals",
-                "columns": 3,
-                "entities": unknown_rows,
-            }
-        )
-
-    if solar_card := _conditional_entities_card(
-        circuit_id,
-        SOLAR_FLOW_ENTITY_SPECS,
-        "Solar flow",
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    ):
-        cards.append(solar_card)
-    if utility_card := _conditional_entities_card(
-        circuit_id,
-        UTILITY_COMPARISON_ENTITY_SPECS,
-        "Utility comparison",
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    ):
-        cards.append(utility_card)
+        if solar_card := _conditional_entities_card(
+            circuit_id,
+            SOLAR_FLOW_ENTITY_SPECS,
+            "Solar flow",
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ):
+            cards.append(solar_card)
+        if utility_card := _conditional_entities_card(
+            circuit_id,
+            UTILITY_COMPARISON_ENTITY_SPECS,
+            "Utility comparison",
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ):
+            cards.append(utility_card)
 
     daily_energy = _resolved_entity_id(
         circuit_id,
@@ -355,6 +371,7 @@ def _energy_tracking_section(
     circuits: Iterable[Any],
     *,
     mains_circuits: Iterable[Any],
+    include_feature_cards: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
@@ -406,13 +423,14 @@ def _energy_tracking_section(
                 "entities": electrical_rows,
             }
         )
-    if water_flow_card := _water_flow_context_card(
-        appliance_circuits,
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    ):
-        cards.append(water_flow_card)
+    if include_feature_cards:
+        if water_flow_card := _water_flow_context_card(
+            appliance_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ):
+            cards.append(water_flow_card)
 
     if not cards:
         cards.append(
@@ -519,6 +537,18 @@ def _hvac_weather_section(
         "type": "grid",
         "title": "HVAC Weather Context",
         "cards": cards,
+    }
+
+
+def _expert_evidence_section(circuits: Iterable[Any]) -> dict[str, Any]:
+    return {
+        "type": "grid",
+        "title": "Diagnostics and Evidence",
+        "cards": [
+            _markdown_card(
+                _expert_evidence_markdown(circuits)
+            )
+        ],
     }
 
 
@@ -798,6 +828,10 @@ def _is_hvac_circuit(circuit: Any) -> bool:
     return _circuit_profile(circuit) in HVAC_WEATHER_PROFILES
 
 
+def _layout_includes_feature_cards(layout: str) -> bool:
+    return layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
+
+
 def _normalized_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
@@ -951,6 +985,26 @@ def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> 
 
 def _markdown_card(content: str) -> dict[str, str]:
     return {"type": "markdown", "content": content}
+
+
+def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:
+    lines = [
+        "**Analyzer evidence links**",
+        (
+            "Open these views when you want alert evidence, analyzer actions, "
+            "and troubleshooting context without adding more diagnostic rows "
+            "to every appliance card."
+        ),
+    ]
+    for circuit in circuits:
+        circuit_id = _circuit_id(circuit)
+        if not circuit_id:
+            continue
+        lines.append(
+            f"- [{_circuit_name(circuit)} evidence]"
+            f"({DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id})"
+        )
+    return "\n".join(lines)
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
