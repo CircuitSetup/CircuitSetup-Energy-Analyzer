@@ -102,12 +102,11 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose an options area to configure. Start with source selection, then mains sensors and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
+        "description": "Choose an options area to configure. Start with source selection, then mains sensors and NILM settings, and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
         "menu_options": {
           "sources": "🔌 Edit Source Selection",
-          "mains": "⚡ Edit Mains Sensors",
+          "mains": "⚡ Edit Mains Sensors & NILM Setting",
           "assign": "🏷️ Review Circuit Assignments",
-          "nilm": "🧠 Experimental NILM Settings",
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
           "entity_detail": "👁️ Entity Detail Level",
@@ -117,12 +116,11 @@
       },
       "sources": {
         "title": "Edit Source Selection",
-        "description": "Tune source devices, extra source sensors, diagnostics, and NILM. Submit saves these source settings.",
+        "description": "Tune source devices, extra source sensors, diagnostics, and related context. Submit saves these source settings.",
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-          "enable_experimental_nilm": "Enable Experimental NILM",
           "outdoor_temperature_entity": "Outdoor Temperature Entity",
           "rain_sensor_entity": "Rain Sensor",
           "rain_intensity_entity": "Rain Intensity Sensor",
@@ -134,7 +132,6 @@
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
-          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
           "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
@@ -144,13 +141,17 @@
         }
       },
       "mains": {
-        "title": "Edit Mains Sensors",
-        "description": "Select optional aggregate mains sensors used for Mains NILM and whole-home comparison features.",
+        "title": "Edit Mains Sensors & NILM Setting",
+        "description": "Select optional aggregate mains sensors used for Mains NILM and whole-home comparison features, and choose the experimental NILM settings that use them.",
         "data": {
-          "mains_source_entities": "Mains Source Entities"
+          "enable_experimental_nilm": "Enable Experimental NILM",
+          "mains_source_entities": "Mains Source Entities",
+          "known_load_circuits": "Known Load Circuits"
         },
         "data_description": {
-          "mains_source_entities": "Optional aggregate mains sensors for Mains NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names."
+          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
+          "mains_source_entities": "Optional aggregate mains sensors for Mains NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "known_load_circuits": "Select individual load circuits, not mains circuits. These known loads help separate expected events from unknown aggregate mains events."
         }
       },
       "nilm": {

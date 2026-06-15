@@ -213,6 +213,36 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_user_flow_auto_routes_mains_sources_to_mains_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.main_l1_power",
+                "sensor.main_l2_power",
+                "sensor.refrigerator_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert flow._pending_config[CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
+    assert _schema_default(result["data_schema"], "circuit_name") == "Refrigerator"
+    assert _schema_default(result["data_schema"], "included_sensors") == [
+        "sensor.refrigerator_power"
+    ]
+
+
 def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
@@ -416,7 +446,6 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "sources",
         "mains",
         "assign",
-        "nilm",
         "utility",
         "dashboard",
         "entity_detail",
@@ -1020,15 +1049,82 @@ async def test_options_mains_step_updates_mains_source_entities() -> None:
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
 
     result = await flow.async_step_mains(
-        {CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"]}
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: False,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"],
+            CONF_KNOWN_LOAD_CIRCUITS: [],
+        }
     )
 
     _assert_create_entry_result(
         result,
         {
+            CONF_ENABLE_EXPERIMENTAL_NILM: False,
             CONF_MAINS_SOURCE_ENTITIES: ["sensor.new_mains_l1_energy"],
+            CONF_KNOWN_LOAD_CIRCUITS: [],
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: False,
+            CONF_KNOWN_LOAD_CIRCUITS: ["fridge"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.old_mains_power"],
+            CONF_CIRCUITS: [
+                {"circuit_id": "fridge", "name": "Fridge"},
+                {"circuit_id": "hvac", "name": "HVAC"},
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    menu = await flow.async_step_init()
+
+    assert menu["type"] == "menu"
+    assert "mains" in menu["menu_options"]
+    assert "nilm" not in menu["menu_options"]
+
+    form = await flow.async_step_mains()
+
+    assert form["type"] == "form"
+    assert form["step_id"] == "mains"
+    assert _schema_keys(form["data_schema"]) == {
+        CONF_ENABLE_EXPERIMENTAL_NILM,
+        CONF_MAINS_SOURCE_ENTITIES,
+        CONF_KNOWN_LOAD_CIRCUITS,
+    }
+    assert (
+        _schema_default(form["data_schema"], CONF_ENABLE_EXPERIMENTAL_NILM) is False
+    )
+    assert _schema_default(form["data_schema"], CONF_MAINS_SOURCE_ENTITIES) == [
+        "sensor.old_mains_power"
+    ]
+    assert _schema_default(form["data_schema"], CONF_KNOWN_LOAD_CIRCUITS) == [
+        "fridge"
+    ]
+
+    result = await flow.async_step_mains(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_l1_power"],
+            CONF_KNOWN_LOAD_CIRCUITS: ["hvac"],
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.panel_mains_l1_power"
+    ]
+    assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["hvac"]
 
 
 @pytest.mark.asyncio
@@ -1359,6 +1455,45 @@ async def test_options_flow_preserves_valid_options() -> None:
         "sensor.main_l2_power",
     ]
     assert result["data"][CONF_SENSITIVITY] == "sensitive"
+
+
+@pytest.mark.asyncio
+async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_SOURCE_ENTITIES: ["sensor.refrigerator_power"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power"],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.main_l2_power",
+            ],
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power",
+        "sensor.main_l2_power",
+    ]
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
 
 
 @pytest.mark.asyncio
@@ -2401,17 +2536,24 @@ async def test_options_nilm_step_updates_known_load_circuits() -> None:
     result = await flow.async_step_init()
 
     assert result["type"] == "menu"
-    assert "nilm" in result["menu_options"]
+    assert "mains" in result["menu_options"]
+    assert "nilm" not in result["menu_options"]
 
-    result = await flow.async_step_nilm()
+    result = await flow.async_step_mains()
 
     assert result["type"] == "form"
-    assert result["step_id"] == "nilm"
+    assert result["step_id"] == "mains"
     assert _schema_default(result["data_schema"], CONF_KNOWN_LOAD_CIRCUITS) == [
         "fridge"
     ]
 
-    result = await flow.async_step_nilm({CONF_KNOWN_LOAD_CIRCUITS: ["hvac"]})
+    result = await flow.async_step_mains(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: [],
+            CONF_KNOWN_LOAD_CIRCUITS: ["hvac"],
+        }
+    )
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["hvac"]

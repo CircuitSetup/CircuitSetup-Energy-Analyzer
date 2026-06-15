@@ -29,7 +29,6 @@ EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-    "enable_experimental_nilm": "Enable Experimental NILM",
     "outdoor_temperature_entity": "Outdoor Temperature Entity",
     "rain_sensor_entity": "Rain Sensor",
     "rain_intensity_entity": "Rain Intensity Sensor",
@@ -39,7 +38,9 @@ EXPECTED_OPTIONS_LABELS = {
 }
 
 EXPECTED_MAINS_LABELS = {
+    "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
+    "known_load_circuits": "Known Load Circuits",
 }
 
 EXPECTED_UTILITY_LABELS = {
@@ -224,7 +225,6 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "sources",
         "mains",
         "assign",
-        "nilm",
         "utility",
         "dashboard",
         "entity_detail",
@@ -233,9 +233,8 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     ]
     assert init_step["menu_options"] == {
         "sources": "🔌 Edit Source Selection",
-        "mains": "⚡ Edit Mains Sensors",
+        "mains": "⚡ Edit Mains Sensors & NILM Setting",
         "assign": "🏷️ Review Circuit Assignments",
-        "nilm": "🧠 Experimental NILM Settings",
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
         "entity_detail": "👁️ Entity Detail Level",
@@ -299,8 +298,10 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
     mains_descriptions = strings["options"]["step"]["mains"]["data_description"]
     assert mains_data == EXPECTED_MAINS_LABELS
     assert mains_descriptions.keys() == EXPECTED_MAINS_LABELS.keys()
+    assert "experimental" in mains_descriptions["enable_experimental_nilm"].lower()
     assert "optional" in mains_descriptions["mains_source_entities"].lower()
     assert "mains nilm" in mains_descriptions["mains_source_entities"].lower()
+    assert "known loads" in mains_descriptions["known_load_circuits"].lower()
 
 
 def test_advanced_settings_labels_are_human_readable_and_described() -> None:
