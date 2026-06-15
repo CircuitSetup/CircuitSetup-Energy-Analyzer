@@ -630,6 +630,80 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
     ]
 
 
+def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="nilm_unknown_load")
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(alert, config=config)
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_1",
+                    "display_name": "Motor-like load",
+                    "likely_type": "motor",
+                    "typical_watts": 3800.0,
+                },
+                {
+                    "signature_id": "signature_2",
+                    "display_name": "Pump-like load",
+                    "likely_type": "pump",
+                },
+                {
+                    "signature_id": "signature_3",
+                    "display_name": "Heater-like load",
+                    "likely_type": "heater",
+                },
+            ]
+        }
+    }
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
+            {
+                "signature_id": "signature_1",
+                "user_label": "Pool Pump",
+                "review_state": "expected",
+                "expected": True,
+            },
+            {
+                "signature_id": "signature_2",
+                "ignored": True,
+            },
+            {
+                "signature_id": "signature_3",
+                "review_state": "merged",
+                "merged_into": "signature_1",
+            },
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    signatures = payload["nilm"]["signatures"]
+    assert signatures[0]["user_label"] == "Pool Pump"
+    assert signatures[0]["display_label"] == "Pool Pump, 3.8 kW"
+    assert signatures[0]["review_state"] == "expected"
+    assert signatures[0]["expected"] is True
+    assert signatures[1]["review_state"] == "ignored"
+    assert signatures[1]["ignored"] is True
+    assert signatures[2]["review_state"] == "merged"
+    assert signatures[2]["merged_into"] == "signature_1"
+
+
 def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

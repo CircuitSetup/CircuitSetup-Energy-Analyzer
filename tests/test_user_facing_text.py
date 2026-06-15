@@ -1101,6 +1101,32 @@ def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() ->
         assert expected in asset
 
 
+def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    for expected in (
+        "_actionRefreshRouteKey(actionKey)",
+        'routeUrl.searchParams.delete("alert_id")',
+        'this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) })',
+        "_formatDateTime(value)",
+        "${year}-${month}-${day} ${hour12}:${minute}${suffix}",
+        "_chartSvg(series, alert)",
+        "Date.parse(alert.graph_window_start)",
+        "Date.parse(alert.graph_window_end)",
+        "Action complete",
+        "Saved label:",
+        "Review state:",
+    ):
+        assert expected in asset
+    assert "Evidence Window" not in asset
+
+
 def test_daily_action_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")

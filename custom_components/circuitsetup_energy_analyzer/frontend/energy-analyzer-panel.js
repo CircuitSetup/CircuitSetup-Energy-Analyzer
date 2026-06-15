@@ -55,6 +55,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._error = "";
     this._historyError = "";
     this._busyAction = "";
+    this._lastActionMessage = "";
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
@@ -210,7 +211,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      await this._loadEvidence({ routeKey: this._routeKey() });
+      this._lastActionMessage = "Action complete.";
+      this._busyAction = "";
+      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
@@ -258,7 +261,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (actionKey === "label") {
         this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
       }
-      await this._loadEvidence({ routeKey: this._routeKey() });
+      this._lastActionMessage = this._nilmActionMessage(actionKey, data);
+      this._busyAction = "";
+      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
@@ -337,6 +342,49 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _routeKey() {
     return `${window.location.pathname}${window.location.search}`;
+  }
+
+  _actionRefreshRouteKey(actionKey) {
+    const routeUrl = new URL(this._routeKey(), window.location.origin);
+    const alert = this._payload && this._payload.alert;
+    const circuit = this._payload && this._payload.circuit;
+    const circuitId = (alert && alert.circuit_id)
+      || (circuit && circuit.circuit_id)
+      || routeUrl.searchParams.get("circuit_id");
+    const feature = (alert && alert.feature)
+      || (this._payload && this._payload.requested_feature)
+      || routeUrl.searchParams.get("feature");
+    routeUrl.searchParams.delete("alert_id");
+    if (circuitId) {
+      routeUrl.searchParams.set("circuit_id", circuitId);
+    }
+    if (feature) {
+      routeUrl.searchParams.set("feature", feature);
+    }
+    if (actionKey.startsWith("nilm_")) {
+      routeUrl.searchParams.set(EXPAND_NILM_QUERY_PARAM, routeUrl.searchParams.get(EXPAND_NILM_QUERY_PARAM) || "1");
+    }
+    const refreshRouteKey = `${routeUrl.pathname}${routeUrl.search}`;
+    if (refreshRouteKey !== this._routeKey()) {
+      history.replaceState(null, "", refreshRouteKey);
+    }
+    return refreshRouteKey;
+  }
+
+  _nilmActionMessage(actionKey, data) {
+    if (actionKey === "label") {
+      return `Saved label: ${data.label}.`;
+    }
+    if (actionKey === "ignore") {
+      return "Ignored signature.";
+    }
+    if (actionKey === "mark_expected") {
+      return "Marked signature expected.";
+    }
+    if (actionKey === "merge") {
+      return "Merged signature.";
+    }
+    return "Action complete.";
   }
 
   _isCurrentRequest(requestId, routeKey) {
@@ -546,6 +594,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <p class="muted">${this._escape((alert && alert.message) || "Historical alert not found")}</p>
         </section>
         ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
+        ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
         ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
         ${alert ? this._renderAlert(alert, circuit) : this._renderNotFound()}
       </main>
@@ -613,17 +662,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric("Expected", alert.expected_value)}
         ${this._metric("Threshold", alert.threshold)}
         ${this._metric("Samples", alert.sample_count)}
-        ${this._metric("First Seen", alert.first_seen)}
-        ${this._metric("Last Seen", alert.last_seen)}
+        ${this._metric("First Seen", this._formatDateTime(alert.first_seen))}
+        ${this._metric("Last Seen", this._formatDateTime(alert.last_seen))}
         ${this._metric("Check First", alert.what_to_check_first)}
       </section>
       <section class="panel">
-        <h2>Evidence Window</h2>
-        <p>${this._escape(alert.graph_window_start)} to ${this._escape(alert.graph_window_end)}</p>
-      </section>
-      <section class="panel">
         <h2>Graph</h2>
-        ${this._renderChart()}
+        ${this._renderChart(alert)}
       </section>
       <section class="panel">
         <h2>Actions</h2>
@@ -662,6 +707,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>NILM signature</span>
             <strong>${this._escape(signature.display_label || signature.display_name || signature.likely_type || "Unknown load")}</strong>
+            ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
+            ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
+            ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
             ${this._renderNilmLabelField(signature, index)}
             ${this._renderNilmMergeTarget(signature, index)}
             <div class="actions">
@@ -812,7 +860,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
-  _renderChart() {
+  _renderChart(alert) {
     if (this._historyLoading) {
       return `<p class="muted">Loading history samples...</p>`;
     }
@@ -823,10 +871,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!series.length) {
       return `<p class="muted">No history samples were available for this graph window.</p>`;
     }
-    return this._chartSvg(series);
+    return this._chartSvg(series, alert);
   }
 
-  _chartSvg(series) {
+  _chartSvg(series, alert) {
     const width = 900;
     const height = 320;
     const padLeft = 54;
@@ -839,8 +887,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         allPoints.push(point);
       }
     }
-    const minTime = Math.min(...allPoints.map((point) => point.time));
-    const maxTime = Math.max(...allPoints.map((point) => point.time));
+    const sampleMinTime = Math.min(...allPoints.map((point) => point.time));
+    const sampleMaxTime = Math.max(...allPoints.map((point) => point.time));
+    const graphStart = Date.parse(alert.graph_window_start);
+    const graphEnd = Date.parse(alert.graph_window_end);
+    const minTime = Number.isFinite(graphStart) ? graphStart : sampleMinTime;
+    const maxTime = Number.isFinite(graphEnd) && graphEnd > minTime ? graphEnd : sampleMaxTime;
     const minValue = Math.min(...allPoints.map((point) => point.value));
     const maxValue = Math.max(...allPoints.map((point) => point.value));
     const timeRange = Math.max(maxTime - minTime, 1);
@@ -860,8 +912,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }).join("");
     const minLabel = this._formatNumber(minValue);
     const maxLabel = this._formatNumber(maxValue);
-    const startLabel = new Date(minTime).toLocaleString();
-    const endLabel = new Date(maxTime).toLocaleString();
+    const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
+    const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
 
     return `
       <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Alert evidence chart">
@@ -982,7 +1034,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _metric(label, value) {
-    return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(value === null || value === undefined ? "Unknown" : value)}</strong></div>`;
+    return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
   }
 
   _actionButton(actionKey, label, secondary = false) {
@@ -1029,6 +1081,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatNumber(value) {
     return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  _formatMetricValue(value) {
+    if (value === null || value === undefined || value === "") {
+      return "Unknown";
+    }
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      return this._formatDateTime(value);
+    }
+    return value;
+  }
+
+  _formatDateTime(value) {
+    if (value === null || value === undefined || value === "") {
+      return "Unknown";
+    }
+    const raw = String(value);
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (isoMatch) {
+      const [, year, month, day, hour, minute] = isoMatch;
+      return this._formatDateParts(year, month, day, Number(hour), minute);
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return raw;
+    }
+    const year = String(date.getFullYear());
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    return this._formatDateParts(year, month, day, date.getHours(), minute);
+  }
+
+  _formatDateParts(year, month, day, hour, minute) {
+    const suffix = hour >= 12 ? "PM" : "AM";
+    const hour12 = hour % 12 || 12;
+    return `${year}-${month}-${day} ${hour12}:${minute}${suffix}`;
   }
 
   _friendlyFeature(value) {

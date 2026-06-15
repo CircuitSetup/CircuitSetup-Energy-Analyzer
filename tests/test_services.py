@@ -109,6 +109,7 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
     message = alert_notification_message(alert, config=config)
 
     assert "Possible issue: HVAC leg imbalance" in message
+    assert "## HVAC" in message
     assert (
         "[Open evidence graph](/circuitsetup-energy-analyzer-evidence?"
         in message
