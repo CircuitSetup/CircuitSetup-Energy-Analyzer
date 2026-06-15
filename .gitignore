@@ -11,3 +11,4 @@ htmlcov/
 /docs/qa/
 /.vscode
 *.egg-info/
+/.codex-remote-attachments
