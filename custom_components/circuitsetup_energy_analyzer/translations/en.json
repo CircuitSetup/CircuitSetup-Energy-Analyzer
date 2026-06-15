@@ -33,7 +33,7 @@
         }
       },
       "assign": {
-        "title": "Assign Circuit Appliances",
+        "title": "Appliance Circuit Assignments",
         "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Include Circuit",
@@ -106,7 +106,7 @@
         "menu_options": {
           "sources": "🔌 Edit Source Selection",
           "mains": "⚡ Edit Mains Sensors",
-          "assign": "🏷️ Review Circuit Assignments",
+          "assign": "🏷️ Appliance Circuit Assignments",
           "nilm": "🧠 Experimental NILM Settings",
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
@@ -210,7 +210,7 @@
         }
       },
       "select_assignment": {
-        "title": "Select Assignment",
+        "title": "Appliance Circuit Assignments",
         "description": "Choose one current appliance or circuit assignment to edit.",
         "data": {
           "selected_assignment": "Assignment"
@@ -231,21 +231,21 @@
       },
       "advanced_settings": {
         "title": "Advanced Circuit Settings",
-        "description": "**{circuit_name}**\n\nAppliance type: {appliance_profile}. Circuit mode: {circuit_mode}. Power flow: {power_flow}. This form shows only the sections that apply to the selected appliance or circuit, including billing, standby, power-quality, mains, and solar sections when relevant.",
-        "data": {},
-        "data_description": {},
+        "description": "**{circuit_name}**\n\nAppliance type: {appliance_profile}. This form shows only the sections that apply to the selected appliance or circuit, including billing, standby, power-quality, mains, and solar sections when relevant.",
+        "data": {
+          "reset_advanced_settings_to_defaults": "Reset All Advanced Circuit Settings to Default"
+        },
+        "data_description": {
+          "reset_advanced_settings_to_defaults": "Turn this on when saving to remove all custom advanced settings for this circuit."
+        },
         "sections": {
           "analysis_settings": {
             "name": "Sensitivity",
             "description": "Controls how quickly this appliance or circuit raises possible-issue alerts.",
             "data": {
-              "reset_advanced_settings_to_defaults": "Reset This Circuit To Defaults",
-              "reset_analysis_settings_to_defaults": "Reset Sensitivity To Defaults",
               "preset": "Sensitivity"
             },
             "data_description": {
-              "reset_advanced_settings_to_defaults": "Turn this on when saving to remove all custom advanced settings for this circuit.",
-              "reset_analysis_settings_to_defaults": "Turn this on when saving to remove the custom sensitivity override and use the default Balanced preset.",
               "preset": "Controls alert sensitivity for this circuit only."
             }
           },
@@ -446,7 +446,7 @@
         }
       },
       "assign": {
-        "title": "Assign Circuit Appliances",
+        "title": "Appliance Circuit Assignments",
         "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Include Circuit",

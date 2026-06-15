@@ -57,9 +57,13 @@ EXPECTED_ADVANCED_CIRCUIT_LABELS = {
     "circuit_id": "Circuit",
 }
 
+EXPECTED_ADVANCED_TOP_LEVEL_LABELS = {
+    "reset_advanced_settings_to_defaults": (
+        "Reset All Advanced Circuit Settings to Default"
+    ),
+}
+
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
-    "reset_advanced_settings_to_defaults": "Reset This Circuit To Defaults",
-    "reset_analysis_settings_to_defaults": "Reset Sensitivity To Defaults",
     "preset": "Sensitivity",
     "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
     "window_days": "Energy Window Days",
@@ -234,7 +238,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert init_step["menu_options"] == {
         "sources": "🔌 Edit Source Selection",
         "mains": "⚡ Edit Mains Sensors",
-        "assign": "🏷️ Review Circuit Assignments",
+        "assign": "🏷️ Appliance Circuit Assignments",
         "nilm": "🧠 Experimental NILM Settings",
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
@@ -319,18 +323,31 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert picker_step["data_description"].keys() == (
         EXPECTED_ADVANCED_CIRCUIT_LABELS.keys()
     )
-    assert settings_step["data"] == {}
-    assert settings_step["data_description"] == {}
+    assert settings_step["data"] == {
+        "reset_advanced_settings_to_defaults": (
+            "Reset All Advanced Circuit Settings to Default"
+        )
+    }
+    assert settings_step["data_description"] == {
+        "reset_advanced_settings_to_defaults": (
+            "Turn this on when saving to remove all custom advanced settings "
+            "for this circuit."
+        )
+    }
     assert section_labels == EXPECTED_ADVANCED_SECTION_LABELS
     assert section_data == EXPECTED_ADVANCED_SETTINGS_LABELS
     assert section_descriptions.keys() == (
         EXPECTED_ADVANCED_SETTINGS_LABELS.keys()
     )
+    assert settings_step["data"] == EXPECTED_ADVANCED_TOP_LEVEL_LABELS
     assert all("_" not in label for label in section_data.values())
     assert "selected_appliance" not in settings_step["description"]
     assert settings_step["description"].startswith("**{circuit_name}**")
     assert "service" not in settings_step["description"].lower()
     assert "appliance type" in settings_step["description"].lower()
+    assert "circuit mode" not in settings_step["description"].lower()
+    assert "power flow" not in settings_step["description"].lower()
+    assert " - " not in settings_step["description"]
     assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
@@ -368,6 +385,9 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("14 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
+        assert strings[section]["step"]["assign"]["title"] == (
+            "Appliance Circuit Assignments"
+        )
 
 
 def test_assignment_picker_text_is_human_readable() -> None:
@@ -385,6 +405,9 @@ def test_assignment_picker_text_is_human_readable() -> None:
     assert "x of" not in strings["options"]["step"]["select_assignment"][
         "description"
     ].lower()
+    assert strings["options"]["step"]["select_assignment"]["title"] == (
+        "Appliance Circuit Assignments"
+    )
 
 
 def test_runtime_english_translations_include_setup_and_options_text() -> None:
@@ -1320,7 +1343,7 @@ def test_readme_includes_practical_usage_guide() -> None:
     for phrase in (
         "do not need to enable every diagnostic entity",
         "let the analyzer learn for at least 7 days",
-        "Review Circuit Assignments",
+        "Appliance Circuit Assignments",
         "Advanced Circuit Settings",
         "Settings > Devices & services",
         "only shows settings that apply",

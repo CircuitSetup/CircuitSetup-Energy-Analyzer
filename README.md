@@ -113,7 +113,7 @@ During setup, you choose:
 
 Use the integration in this order:
 
-- **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Review Circuit Assignments**.
+- **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
 - **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as adding a cumulative kWh source, fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
 - **Classify circuits deliberately**: choose the appliance type, circuit mode, power-flow mode, and source sensors before trusting appliance evidence.
 - **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
@@ -134,7 +134,7 @@ You do not need to enable every diagnostic entity. For behavior alerts, let the 
 6. Add an outdoor temperature entity if you want HVAC activity compared with outdoor conditions.
 7. Add a rain sensor if you want sump, well, or water-pump activity adjusted for rainfall.
 8. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
-9. Open **Review Circuit Assignments**.
+9. Open **Appliance Circuit Assignments**.
 10. For each detected group, confirm:
    - Whether to include the circuit.
    - The circuit name.

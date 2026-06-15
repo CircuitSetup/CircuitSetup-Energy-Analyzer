@@ -351,7 +351,6 @@ SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
 SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
 SECTION_WATER_CONTEXT_SETTINGS = "water_context_settings"
 _ADVANCED_SECTION_RESET_FIELDS = {
-    SECTION_ANALYSIS_SETTINGS: "reset_analysis_settings_to_defaults",
     SECTION_ENERGY_SETTINGS: "reset_energy_settings_to_defaults",
     SECTION_ACTIVITY_SETTINGS: "reset_activity_settings_to_defaults",
     SECTION_BILLING_COST_SETTINGS: "reset_billing_cost_settings_to_defaults",
@@ -1541,7 +1540,9 @@ def _advanced_settings_schema(
 ) -> Any:
     settings = dict(current_settings or {})
     circuit_context = _advanced_circuit_context(context)
-    schema: dict[Any, Any] = {}
+    schema: dict[Any, Any] = {
+        vol.Optional(FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS, default=False): bool
+    }
 
     _add_advanced_section(
         schema,
@@ -1624,10 +1625,6 @@ def _add_advanced_section(
     if not fields:
         return
     section_fields: dict[Any, Any] = {}
-    if key == SECTION_ANALYSIS_SETTINGS:
-        section_fields[
-            vol.Optional(FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS, default=False)
-        ] = bool
     if reset_field := _ADVANCED_SECTION_RESET_FIELDS.get(key):
         section_fields[vol.Optional(reset_field, default=False)] = bool
     section_fields.update(fields)
@@ -1985,9 +1982,7 @@ def _advanced_circuit_context(
 def _advanced_context_display(context: Mapping[str, str]) -> str:
     circuit_id = context.get("circuit_id", "selected")
     name = context.get("name") or circuit_id
-    profile = _profile_label(context.get("profile", ""))
-    mode = _CIRCUIT_MODE_LABELS.get(context.get("mode", ""), "Single Phase")
-    return f"{name} ({circuit_id}) - {profile}, {mode}"
+    return f"{name} ({circuit_id})"
 
 
 def _advanced_show_energy_settings(context: Mapping[str, str]) -> bool:
@@ -2172,6 +2167,29 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
     return CircuitMode.SINGLE_PHASE.value
 
 
+def _assignment_mode_for_profile_and_entities(
+    profile: str,
+    entity_ids: Iterable[str],
+) -> str:
+    default_mode = _default_mode_for_assignment_profile(profile)
+    if default_mode != CircuitMode.DUAL_PHASE.value:
+        return default_mode
+    return (
+        CircuitMode.DUAL_PHASE.value
+        if _assignment_entities_have_both_legs(entity_ids)
+        else CircuitMode.SINGLE_PHASE.value
+    )
+
+
+def _assignment_entities_have_both_legs(entity_ids: Iterable[str]) -> bool:
+    legs = {
+        leg
+        for leg in (_assignment_leg_hint(entity_id) for entity_id in entity_ids)
+        if leg in {"a", "b"}
+    }
+    return legs == {"a", "b"}
+
+
 def assignment_groups_from_sources(
     source_entities: Iterable[str],
     *,
@@ -2212,6 +2230,14 @@ def assignment_groups_from_sources(
                 for entity_id in entity_ids
                 if entity_id in saved_sensor_entities
             ) or tuple(entity_ids)
+            saved_profile = _normalize_assignment_profile(
+                str(
+                    saved_circuit.get(
+                        "appliance_profile",
+                        group["appliance_profile"],
+                    )
+                )
+            )
             stable_circuit_id = str(
                 saved_circuit.get("circuit_id")
                 or saved_circuit.get("id")
@@ -2221,16 +2247,10 @@ def assignment_groups_from_sources(
                 {
                     "circuit_id": stable_circuit_id or group["group_id"],
                     "name": str(saved_circuit.get("name") or group["name"]),
-                    "appliance_profile": _normalize_assignment_profile(
-                        str(
-                            saved_circuit.get(
-                                "appliance_profile",
-                                group["appliance_profile"],
-                            )
-                        )
-                    ),
-                    "mode": _normalize_assignment_mode(
-                        str(saved_circuit.get("mode", group["mode"]))
+                    "appliance_profile": saved_profile,
+                    "mode": _assignment_mode_for_profile_and_entities(
+                        saved_profile,
+                        selected_entity_ids,
                     ),
                     "power_flow": _normalize_power_flow(
                         str(saved_circuit.get("power_flow") or "")
@@ -2367,7 +2387,7 @@ def _assignment_description_placeholders(
     total: int,
 ) -> dict[str, str]:
     profile = str(group.get("appliance_profile") or "")
-    mode = _default_mode_for_assignment_profile(profile)
+    mode = str(group.get("mode") or _default_mode_for_assignment_profile(profile))
     power_flow = _default_power_flow_for_assignment(profile, mode)
     return {
         "circuit_name": str(group.get("name") or ""),
@@ -2485,8 +2505,6 @@ def _circuit_from_assignment_group(
             or ApplianceProfile.MIXED.value
         )
     )
-    mode = _default_mode_for_assignment_profile(profile)
-    power_flow = _default_power_flow_for_assignment(profile, mode)
     retention_mode = _normalize_retention_mode(
         str(
             user_input.get(FIELD_CIRCUIT_RETENTION_MODE)
@@ -2498,6 +2516,8 @@ def _circuit_from_assignment_group(
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
 
     entity_ids = _included_entity_ids_for_assignment(group, user_input)
+    mode = _assignment_mode_for_profile_and_entities(profile, entity_ids)
+    power_flow = _default_power_flow_for_assignment(profile, mode)
     sensors = [
         {
             "entity_id": entity_id,
@@ -2933,24 +2953,32 @@ def _suggest_assignment_profile_mode(
     circuit_id: str,
     entity_ids: Iterable[str],
 ) -> tuple[str, str]:
-    text = f"_{circuit_id}_{' '.join(entity_ids)}_".lower()
-    is_dual = any(
-        _assignment_leg_hint(entity_id) in {"a", "b"} for entity_id in entity_ids
-    ) and any(_assignment_leg_hint(entity_id) == "b" for entity_id in entity_ids)
+    entity_id_list = list(entity_ids)
+    text = f"_{circuit_id}_{' '.join(entity_id_list)}_".lower()
     if any(token in text for token in ("_air_handler_", "_blower_")):
         return ApplianceProfile.HVAC_BLOWER.value, CircuitMode.SINGLE_PHASE.value
     if any(
         token in text for token in ("_aux_heat_", "_electric_heat_", "_heat_strip_")
     ):
-        return ApplianceProfile.ELECTRIC_HEAT.value, CircuitMode.DUAL_PHASE.value
+        profile = ApplianceProfile.ELECTRIC_HEAT.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
     if any(
         token in text
         for token in ("_compressor_", "_heat_pump_", "_air_conditioner_", "_ac_")
     ):
-        return ApplianceProfile.HVAC_COMPRESSOR.value, CircuitMode.DUAL_PHASE.value
+        profile = ApplianceProfile.HVAC_COMPRESSOR.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
     if "_hvac_" in text:
-        return ApplianceProfile.HVAC.value, (
-            CircuitMode.DUAL_PHASE.value if is_dual else CircuitMode.SINGLE_PHASE.value
+        profile = ApplianceProfile.HVAC.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
         )
     if "_water_pump_" in text or "_well_pump_" in text or "_booster_pump_" in text:
         return ApplianceProfile.WATER_PUMP.value, CircuitMode.SINGLE_PHASE.value
@@ -2958,7 +2986,7 @@ def _suggest_assignment_profile_mode(
         return ApplianceProfile.SUMP_PUMP.value, CircuitMode.SINGLE_PHASE.value
     if "_pool_pump_" in text:
         return ApplianceProfile.POOL_PUMP.value, CircuitMode.SINGLE_PHASE.value
-    for token, profile, mode in (
+    for token, profile, _mode in (
         (
             "_fridge_",
             ApplianceProfile.REFRIGERATOR.value,
@@ -3034,7 +3062,10 @@ def _suggest_assignment_profile_mode(
         ("_evse_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
     ):
         if token in text:
-            return profile, mode
+            return profile, _assignment_mode_for_profile_and_entities(
+                profile,
+                entity_id_list,
+            )
     return ApplianceProfile.MIXED.value, CircuitMode.MIXED.value
 
 
