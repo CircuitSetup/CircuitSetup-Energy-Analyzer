@@ -35,14 +35,20 @@ def alert_notification_message(
 
     lines = [
         alert.message,
-        "",
+    ]
+    if config is not None and config.name:
+        lines.extend(["", f"## {config.name}"])
+    lines.extend(
+        [
+            "",
         "[Open evidence graph]"
         f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
         "",
         f"- Observed value: {alert.observed_value}",
         f"- Baseline value: {alert.baseline_value}",
         f"- Repeated observations: {alert.repeated_count}",
-    ]
+        ]
+    )
     if feature_needs_electrical_safety_notice(alert.feature):
         lines.extend(
             (

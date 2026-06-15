@@ -55,11 +55,15 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "running_state",
     "current_runtime_minutes",
     "estimated_energy_today_kwh",
+    "review_state",
+    "expected",
+    "ignored",
+    "merged_into",
 )
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260614-duplicate-define-guard"
+PANEL_MODULE_VERSION = "20260615-action-time-polish"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -672,6 +676,23 @@ def _nilm_signatures_for_circuit(
     coordinator: Any,
     circuit_id: str,
 ) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
+    stored_signatures = (
+        [
+            dict(item)
+            for item in _iter_items(signatures_by_circuit.get(circuit_id, ()))
+            if isinstance(item, dict)
+        ]
+        if isinstance(signatures_by_circuit, dict)
+        else []
+    )
+    stored_by_id = {
+        str(signature[ATTR_SIGNATURE_ID]): signature
+        for signature in stored_signatures
+        if signature.get(ATTR_SIGNATURE_ID)
+    }
+
     state = getattr(coordinator, "state", None)
     inventory_by_circuit = getattr(state, "nilm_unknown_loads_by_circuit", {})
     inventory = (
@@ -686,17 +707,24 @@ def _nilm_signatures_for_circuit(
             if isinstance(item, dict)
         ]
         if unknown_loads:
-            return unknown_loads
+            signatures: list[dict[str, Any]] = []
+            seen_ids: set[str] = set()
+            for signature in unknown_loads:
+                signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+                if signature_id:
+                    seen_ids.add(signature_id)
+                stored = stored_by_id.get(signature_id)
+                signatures.append(
+                    {**signature, **stored} if stored is not None else signature
+                )
+            signatures.extend(
+                signature
+                for signature in stored_signatures
+                if str(signature.get(ATTR_SIGNATURE_ID) or "").strip() not in seen_ids
+            )
+            return signatures
 
-    store_data = getattr(coordinator, "store_data", None)
-    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
-    if not isinstance(signatures_by_circuit, dict):
-        return []
-    return [
-        dict(item)
-        for item in _iter_items(signatures_by_circuit.get(circuit_id, ()))
-        if isinstance(item, dict)
-    ]
+    return stored_signatures
 
 
 def _nilm_actions_for_signature(
@@ -777,14 +805,34 @@ def _nilm_merge_target_options(
 
 
 def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         key: signature[key] for key in NILM_SIGNATURE_PANEL_FIELDS if key in signature
     }
+    review_state = _nilm_review_state(signature)
+    if review_state:
+        payload["review_state"] = review_state
+    return payload
+
+
+def _nilm_review_state(signature: Mapping[str, Any]) -> str | None:
+    review_state = str(signature.get("review_state") or "").strip()
+    if review_state:
+        return review_state
+    if signature.get("ignored"):
+        return "ignored"
+    if signature.get("expected"):
+        return "expected"
+    if signature.get("merged_into"):
+        return "merged"
+    if str(signature.get("user_label") or "").strip():
+        return "labeled"
+    return None
 
 
 def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
     label = (
-        str(signature.get("display_name") or "").strip()
+        str(signature.get("user_label") or "").strip()
+        or str(signature.get("display_name") or "").strip()
         or str(signature.get("likely_type") or "").strip()
         or fallback
     )
