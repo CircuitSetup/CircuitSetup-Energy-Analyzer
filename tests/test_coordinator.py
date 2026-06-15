@@ -5969,7 +5969,10 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
     )
 
-    await coordinator.async_mark_alert_expected(notification_id_for_alert(alert))
+    assert (
+        await coordinator.async_mark_alert_expected(notification_id_for_alert(alert))
+        is True
+    )
 
     assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
         "action"
@@ -5978,11 +5981,82 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         "alert_id"
     ] == notification_id_for_alert(alert)
 
-    await coordinator.async_mark_alert_unhelpful(notification_id_for_alert(alert))
+    unhelpful_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 1, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="power_factor",
+        observed_value=0.62,
+        baseline_value=0.95,
+        change_ratio=-0.35,
+    )
+    coordinator.store_data.alerts.append(unhelpful_alert)
 
+    assert (
+        await coordinator.async_mark_alert_unhelpful(
+            notification_id_for_alert(unhelpful_alert)
+        )
+        is True
+    )
+
+    assert coordinator.store_data.alert_feedback["fridge:power_factor"]["action"] == (
+        "unhelpful"
+    )
+
+
+@pytest.mark.parametrize(
+    ("method_name", "feedback_action"),
+    [
+        ("async_mark_alert_expected", "expected"),
+        ("async_mark_alert_unhelpful", "unhelpful"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_alert_feedback_methods_store_feedback_and_retire_visible_alert(
+    method_name: str,
+    feedback_action: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="reactive_power",
+        observed_value=42.0,
+        baseline_value=20.0,
+        change_ratio=1.1,
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(alerts=[alert]),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
+    )
+    coordinator.state.active_alerts_by_circuit = {"fridge": [alert]}
+    coordinator.state.anomaly_score_by_circuit = {"fridge": 1.1}
+
+    alert_id = notification_id_for_alert(alert)
+    result = await getattr(coordinator, method_name)(alert_id)
+
+    assert result is True
     assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
         "action"
-    ] == "unhelpful"
+    ] == feedback_action
+    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
+        "alert_id"
+    ] == alert_id
+    assert [
+        notification_id_for_alert(stored_alert)
+        for stored_alert in coordinator.store_data.alerts
+    ] == []
+    assert coordinator.state.active_alerts_by_circuit.get("fridge", []) == []
 
 
 @pytest.mark.asyncio
@@ -6012,7 +6086,7 @@ async def test_alert_feedback_methods_report_stale_alert_ids() -> None:
 
     alert_id = notification_id_for_alert(alert)
     assert await coordinator.async_mark_alert_expected(alert_id) is True
-    assert await coordinator.async_acknowledge_alert(alert_id) is True
+    assert await coordinator.async_acknowledge_alert(alert_id) is False
 
 
 @pytest.mark.asyncio

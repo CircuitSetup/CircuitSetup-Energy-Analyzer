@@ -381,10 +381,9 @@ def _actions_for_context(
                     "service": SERVICE_RELEARN_BASELINE,
                     "data": circuit_data,
                 },
-                "open_advanced_circuit_settings": {
-                    "type": "navigate",
-                    "path": _advanced_circuit_settings_path(config),
-                },
+                "open_advanced_circuit_settings": (
+                    _advanced_circuit_settings_action(coordinator, config)
+                ),
             }
         )
         actions.update(maintenance_action)
@@ -420,13 +419,45 @@ def _actions_for_context(
     return actions
 
 
-def _advanced_circuit_settings_path(config: CircuitConfig | None) -> str:
-    if config is None:
-        return "/config/integrations/integration/circuitsetup_energy_analyzer"
-    return (
-        "/config/integrations/integration/circuitsetup_energy_analyzer"
-        f"?circuit_id={config.circuit_id}"
-    )
+def _advanced_circuit_settings_action(
+    coordinator: Any,
+    config: CircuitConfig | None,
+) -> dict[str, Any]:
+    action: dict[str, Any] = {
+        "type": "navigate",
+        "path": _advanced_circuit_settings_path(coordinator, config),
+    }
+    entry_id = _coordinator_entry_id(coordinator)
+    if entry_id:
+        action[ATTR_ENTRY_ID] = entry_id
+    if config is not None:
+        action[ATTR_CIRCUIT_ID] = config.circuit_id
+        action["options_step"] = "advanced_settings"
+    return action
+
+
+def _advanced_circuit_settings_path(
+    coordinator: Any,
+    config: CircuitConfig | None,
+) -> str:
+    path = "/config/integrations/integration/circuitsetup_energy_analyzer"
+    params: dict[str, str] = {}
+    entry_id = _coordinator_entry_id(coordinator)
+    if entry_id:
+        params["config_entry"] = entry_id
+    if config is not None:
+        params[ATTR_CIRCUIT_ID] = config.circuit_id
+        params["options_step"] = "advanced_settings"
+    if not params:
+        return path
+    return f"{path}#{urlencode(params)}"
+
+
+def _coordinator_entry_id(coordinator: Any) -> str | None:
+    entry_id = getattr(coordinator, "entry_id", None)
+    if isinstance(entry_id, str) and entry_id:
+        return entry_id
+    return None
 
 
 def _setting_recommendations_for_circuit(
