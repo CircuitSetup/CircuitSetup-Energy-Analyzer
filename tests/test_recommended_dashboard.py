@@ -842,6 +842,24 @@ class _FakeExistingDashboardWithoutUpdate:
         return {"id": DASHBOARD_URL_PATH, **data}
 
 
+class _FakeStrictUpdateDashboardsCollection(_FakeDashboardsCollection):
+    async def async_update_item(
+        self,
+        item_id: str,
+        data: dict[str, object],
+    ) -> dict[str, object]:
+        allowed_update_keys = {
+            "icon",
+            "require_admin",
+            "show_in_sidebar",
+            "title",
+        }
+        extra = set(data) - allowed_update_keys
+        if extra:
+            raise AssertionError(f"Unexpected dashboard update keys: {extra}")
+        return await super().async_update_item(item_id, data)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_creates_recommended_dashboard_with_selected_layout() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -921,6 +939,38 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     assert "sensor.fridge_activity_summary" in saved_dashboard
     assert "sensor.fridge_alert_evidence" not in saved_dashboard
     assert coordinator.last_dashboard_create_request["action"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_updates_existing_dashboard_with_valid_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    collection = _FakeStrictUpdateDashboardsCollection(existing=True)
+    dashboard_store = _FakeLovelaceStorage(
+        {"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}
+    )
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards": {DASHBOARD_URL_PATH: dashboard_store},
+                "dashboards_collection": collection,
+            }
+        }
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={"circuits": _circuit_dicts()},
+        options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+
+    await coordinator.async_create_dashboard()
+
+    assert len(collection.updated) == 1
+    _item_id, update = collection.updated[0]
+    assert "mode" not in update
+    assert "url_path" not in update
 
 
 @pytest.mark.asyncio
