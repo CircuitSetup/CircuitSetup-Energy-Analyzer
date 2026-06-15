@@ -1794,6 +1794,64 @@ async def test_options_sources_step_merges_new_sensor_into_existing_appliance() 
 
 
 @pytest.mark.asyncio
+async def test_options_sources_step_preserves_string_sensors_when_merging() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    existing_circuit = {
+        "circuit_id": "car_charger",
+        "name": "Car Charger",
+        "appliance_profile": "ev_charger",
+        "mode": "dual_phase",
+        "sensors": [
+            "sensor.car_charger_l1_active_power",
+            "sensor.car_charger_l2_active_power",
+        ],
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            ],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            ],
+            CONF_CIRCUITS: [existing_circuit],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_sources(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.circuitsetup_energy_analyzer_car_charger_l1_current",
+            ],
+            CONF_RETENTION_MODE: "standard",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [
+        {
+            **existing_circuit,
+            "sensors": [
+                "sensor.car_charger_l1_active_power",
+                "sensor.car_charger_l2_active_power",
+                {
+                    "entity_id": (
+                        "sensor.circuitsetup_energy_analyzer_car_charger_l1_current"
+                    ),
+                    "role": "current",
+                    "leg": "a",
+                },
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_preserves_outdoor_temperature_entity() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

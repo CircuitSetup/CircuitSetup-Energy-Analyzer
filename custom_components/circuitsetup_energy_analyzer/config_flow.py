@@ -2273,10 +2273,18 @@ def _saved_circuit_for_group(
 
 def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(
-        str(sensor.get("entity_id"))
+        entity_id
         for sensor in circuit.get("sensors", ())
-        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+        if (entity_id := _sensor_entity_id_from_raw(sensor))
     )
+
+
+def _sensor_entity_id_from_raw(sensor: Any) -> str:
+    if isinstance(sensor, str):
+        return sensor
+    if isinstance(sensor, Mapping) and sensor.get("entity_id"):
+        return str(sensor["entity_id"])
+    return ""
 
 
 def _assignment_group_value(group: Mapping[str, Any]) -> str:
@@ -2707,11 +2715,7 @@ def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str
                     str(circuit.get("name") or circuit.get("circuit_id") or "Circuit"),
                     str(circuit.get("appliance_profile") or ApplianceProfile.MIXED),
                     str(circuit.get("mode") or CircuitMode.MIXED),
-                    ", ".join(
-                        str(sensor.get("entity_id"))
-                        for sensor in circuit.get("sensors", ())
-                        if isinstance(sensor, Mapping) and sensor.get("entity_id")
-                    ),
+                    ", ".join(_sensor_entity_ids_from_circuit(circuit)),
                 )
             )
         )
@@ -4397,12 +4401,14 @@ def _circuits_with_merged_source_circuit_sensors(
     return circuits if changed else None
 
 
-def _copied_circuit_sensors(circuit: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [
-        dict(sensor)
-        for sensor in circuit.get("sensors", ())
-        if isinstance(sensor, Mapping) and sensor.get("entity_id")
-    ]
+def _copied_circuit_sensors(circuit: Mapping[str, Any]) -> list[Any]:
+    sensors: list[Any] = []
+    for sensor in circuit.get("sensors", ()):
+        if isinstance(sensor, str) and sensor:
+            sensors.append(sensor)
+        elif isinstance(sensor, Mapping) and sensor.get("entity_id"):
+            sensors.append(dict(sensor))
+    return sensors
 
 
 def _circuit_index_by_assignment_id(
