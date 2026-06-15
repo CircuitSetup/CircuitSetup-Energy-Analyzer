@@ -81,3 +81,17 @@ jobs:
 
       - name: Run Home Assistant contract tests
         run: python -m pytest tests/test_control_entities.py tests/test_config_flow.py tests_homeassistant -q
+
+  home-assistant-control-entity-contract:
+    name: Home Assistant control entity contract
+    runs-on: ubuntu-latest
+    needs: home-assistant-contract
+    if: ${{ always() }}
+    steps:
+      - name: Require Home Assistant contract matrix
+        run: |
+          if [ "${{ needs.home-assistant-contract.result }}" != "success" ]; then
+            echo "Home Assistant contract matrix result: ${{ needs.home-assistant-contract.result }}"
+            exit 1
+          fi
+          echo "Home Assistant contract matrix completed successfully."
