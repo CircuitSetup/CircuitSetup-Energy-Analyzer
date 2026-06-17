@@ -44,18 +44,29 @@ class ConservativeAlertPolicy:
         self.min_average_score = min_average_score
         self.min_baseline_confidence = min_baseline_confidence
         self._observations: defaultdict[tuple[str, str], deque[Observation]] = (
-            defaultdict(lambda: deque(maxlen=self.min_repeated))
+            defaultdict(deque)
         )
 
-    def observe(self: Self, observation: Observation) -> AlertEvidence | None:
+    def observe(
+        self: Self,
+        observation: Observation,
+        *,
+        min_repeated: int | None = None,
+    ) -> AlertEvidence | None:
         if observation.baseline_confidence < self.min_baseline_confidence:
             return None
 
+        required_min_repeated = max(
+            self.min_repeated,
+            int(min_repeated) if min_repeated is not None else self.min_repeated,
+        )
         key = (observation.circuit_id, observation.feature)
         observations = self._observations[key]
         observations.append(observation)
+        while len(observations) > required_min_repeated:
+            observations.popleft()
 
-        if len(observations) < self.min_repeated:
+        if len(observations) < required_min_repeated:
             return None
 
         total_score = sum(item.score for item in observations)
@@ -99,6 +110,31 @@ class ConservativeAlertPolicy:
             return 0.0
 
         return (observed_value - baseline_value) / baseline_value
+
+
+def alert_feedback_fingerprint_for_observation(
+    observation: Observation,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    """Return the alert feedback key an observation would produce if promoted."""
+    return alert_feedback_fingerprint(
+        AlertEvidence(
+            timestamp=observation.observed_at,
+            circuit_id=observation.circuit_id,
+            severity=Severity.WARNING,
+            message=observation.message,
+            feature=observation.feature,
+            observed_value=observation.observed_value,
+            baseline_value=observation.baseline_value,
+            change_ratio=ConservativeAlertPolicy._change_ratio(
+                observation.observed_value,
+                observation.baseline_value,
+            ),
+            features=observation.features,
+        ),
+        config=config,
+    )
 
 
 def alert_feedback_fingerprint(

@@ -19,7 +19,12 @@ from .activity_timeline import (
     timeline_payload,
 )
 from .aggregation import aggregate_dual_phase
-from .alerting import ConservativeAlertPolicy, alert_feedback_fingerprint
+from .alerting import (
+    ConservativeAlertPolicy,
+    Observation,
+    alert_feedback_fingerprint,
+    alert_feedback_fingerprint_for_observation,
+)
 from .balance import (
     DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
 )
@@ -243,6 +248,7 @@ ALERT_FEEDBACK_MAX_ITEMS = 500
 ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
 ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
 ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
+ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
@@ -306,6 +312,40 @@ except ModuleNotFoundError:
 
         def async_set_updated_data(self, data: Any) -> None:
             self.data = data
+
+
+class _FeedbackAwareAlertPolicy:
+    """Apply persisted alert feedback before delegating to the scoring policy."""
+
+    def __init__(self: Self, coordinator: Any, policy: ConservativeAlertPolicy) -> None:
+        self._coordinator = coordinator
+        self._policy = policy
+
+    @property
+    def min_repeated(self: Self) -> int:
+        return self._policy.min_repeated
+
+    @property
+    def min_total_score(self: Self) -> float:
+        return self._policy.min_total_score
+
+    @property
+    def min_average_score(self: Self) -> float:
+        return self._policy.min_average_score
+
+    @property
+    def min_baseline_confidence(self: Self) -> float:
+        return self._policy.min_baseline_confidence
+
+    def observe(self: Self, observation: Observation) -> AlertEvidence | None:
+        min_repeated = self._coordinator._adjusted_min_repeated_for_observation(
+            observation,
+            self._policy.min_repeated,
+        )
+        alert = self._policy.observe(observation, min_repeated=min_repeated)
+        if alert is None or min_repeated == self._policy.min_repeated:
+            return alert
+        return replace(alert, adjusted_min_repeated=min_repeated)
 
 
 @dataclass(slots=True)
@@ -4989,10 +5029,47 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
         )
 
+    def _feedback_aware_alert_policy(
+        self: Self,
+        policy: ConservativeAlertPolicy,
+    ) -> _FeedbackAwareAlertPolicy:
+        return _FeedbackAwareAlertPolicy(self, policy)
+
+    def _adjusted_min_repeated_for_observation(
+        self: Self,
+        observation: Observation,
+        base_min_repeated: int,
+    ) -> int:
+        _fingerprint, feedback = self._alert_feedback_for_observation(observation)
+        if _alert_feedback_status(feedback) != "unhelpful":
+            return base_min_repeated
+        return base_min_repeated + ALERT_UNHELPFUL_EXTRA_REPEATED
+
+    def _alert_feedback_for_observation(
+        self: Self,
+        observation: Observation,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        candidates = (
+            alert_feedback_fingerprint_for_observation(
+                observation,
+                config=self._config_for_circuit(observation.circuit_id),
+            ),
+            alert_feedback_fingerprint_for_observation(observation),
+            _legacy_alert_feedback_key_for_observation(observation),
+        )
+        for fingerprint in candidates:
+            feedback = self.store_data.alert_feedback.get(fingerprint)
+            if not isinstance(feedback, Mapping):
+                continue
+            if _alert_feedback_is_expired(feedback, self._now_fn()):
+                continue
+            return fingerprint, feedback
+        return None, {}
+
     def _alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5000,12 +5077,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if policy is None:
             policy = _alert_policy_for_sensitivity(policy_name)
             self._alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _usage_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5019,12 +5096,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=0.8,
             )
             self._usage_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _goal_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5038,12 +5115,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._goal_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _billing_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5057,12 +5134,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._billing_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _demand_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5076,12 +5153,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._demand_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _capacity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5095,12 +5172,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._capacity_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _leg_imbalance_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5114,12 +5191,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._leg_imbalance_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _standby_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5133,12 +5210,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._standby_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _utility_comparison_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5152,12 +5229,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._utility_comparison_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _nilm_topology_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5171,12 +5248,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._nilm_topology_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _cycle_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5190,12 +5267,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
             )
             self._cycle_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _activity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5209,13 +5286,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._activity_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _water_context_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
         feature: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, feature, policy_name)
@@ -5229,7 +5306,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=0.7,
             )
             self._water_context_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> bool:
         alert = self._alert_for_id(alert_id)
@@ -5306,7 +5383,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
         _fingerprint, feedback = self._alert_feedback_for(alert)
-        return _alert_feedback_status(feedback) in {"expected", "unhelpful"}
+        return _alert_feedback_status(feedback) == "expected"
 
     def _alert_feedback_for(
         self: Self,
@@ -6083,6 +6160,10 @@ def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
     return f"{alert.circuit_id}:{_alert_feature(alert)}"
 
 
+def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
+    return f"{observation.circuit_id}:{observation.feature or 'alert'}"
+
+
 def _alert_feedback_status(feedback: Mapping[str, Any]) -> str | None:
     status = feedback.get("status") or feedback.get("action")
     if not isinstance(status, str):
@@ -6095,7 +6176,7 @@ def _alert_feedback_effect(status: str) -> str:
     if status == "expected":
         return "Notifications suppressed for this expected pattern"
     if status == "unhelpful":
-        return "Notifications suppressed for this not-helpful pattern"
+        return "Future matching alerts require stronger repeated evidence"
     return "Feedback recorded for this alert pattern"
 
 

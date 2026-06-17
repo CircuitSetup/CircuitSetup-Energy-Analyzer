@@ -400,7 +400,7 @@ This keeps IDs inside the integration wherever possible. You should not need to 
 
 When you mark an alert as expected, the analyzer remembers that evidence pattern by a stable local fingerprint. Future matching evidence under similar conditions is retained for review, but it is shown as an expected pattern instead of repeatedly creating a new active possible-issue alert or notification. Expected alert feedback expires after about 90 days unless refreshed.
 
-When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Not-helpful feedback is kept for conservative future tuning work and expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
+When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Future matching evidence must repeat more times before it can become a new alert, and the evidence panel shows the adjusted repeated-evidence requirement when it applies. Not-helpful feedback expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
 
 When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Stable NILM fingerprint matching across reclustering is still experimental and will continue to improve.
 

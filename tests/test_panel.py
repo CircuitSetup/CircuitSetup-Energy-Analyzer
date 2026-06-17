@@ -150,6 +150,34 @@ def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
     assert payload["alert"]["matching_feedback_fingerprint"] == fingerprint
 
 
+def test_alert_evidence_payload_explains_unhelpful_adjusted_requirement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    fingerprint = (
+        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
+    )
+    alert = _alert(
+        feedback_status="unhelpful",
+        feedback_effect="Future matching alerts require stronger repeated evidence",
+        feedback_expires_at=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        matching_feedback_fingerprint=fingerprint,
+        adjusted_min_repeated=5,
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(alert)],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["alert"]["feedback_status"] == "unhelpful"
+    assert payload["alert"]["feedback_effect"] == (
+        "Future matching alerts require stronger repeated evidence"
+    )
+    assert payload["alert"]["adjusted_min_repeated"] == 5
+
+
 def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit() -> (
     None
 ):

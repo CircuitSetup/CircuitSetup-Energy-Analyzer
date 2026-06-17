@@ -198,6 +198,8 @@ def alert_evidence_detail(
         detail["matching_feedback_fingerprint"] = (
             alert.matching_feedback_fingerprint
         )
+    if alert.adjusted_min_repeated is not None:
+        detail["adjusted_min_repeated"] = alert.adjusted_min_repeated
     return detail
 
 

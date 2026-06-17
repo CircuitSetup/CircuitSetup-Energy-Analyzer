@@ -1928,6 +1928,80 @@ async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
     assert coordinator.store_data.alerts == [unrelated_alert]
 
 
+def test_unhelpful_feedback_raises_future_alert_requirement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        Observation,
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    prior_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_usage_spike",
+        observed_value=2.6,
+        baseline_value=2.0,
+        change_ratio=0.3,
+    )
+    fingerprint = alert_feedback_fingerprint(prior_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=45)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_usage_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+    policy = coordinator._usage_alert_policy_for_circuit("fridge")
+
+    for index in range(4):
+        assert (
+            policy.observe(
+                Observation(
+                    circuit_id="fridge",
+                    feature="daily_energy_usage_spike",
+                    score=1.6,
+                    baseline_confidence=1.0,
+                    observed_at=now + timedelta(hours=index),
+                    observed_value=2.61,
+                    baseline_value=2.0,
+                )
+            )
+            is None
+        )
+
+    alert = policy.observe(
+        Observation(
+            circuit_id="fridge",
+            feature="daily_energy_usage_spike",
+            score=1.6,
+            baseline_confidence=1.0,
+            observed_at=now + timedelta(hours=4),
+            observed_value=2.62,
+            baseline_value=2.0,
+        )
+    )
+
+    assert alert is not None
+    assert alert.repeated_count == 5
+    assert alert.adjusted_min_repeated == 5
+
+
 def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         settings_advisor as advisor,

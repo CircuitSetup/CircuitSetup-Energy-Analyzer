@@ -17,7 +17,7 @@
 - Future expected alerts were blocked from notifications but could still be promoted as active possible-issue evidence.
 - Alert evidence did not expose feedback status, effect, expiration, or the matching feedback fingerprint.
 - Expected and unhelpful alert feedback did not have status-specific expiration defaults.
-- Unhelpful alert feedback still needs the planned scoring-threshold adjustment and settings-recommendation hook.
+- Unhelpful alert feedback still needs the planned settings-recommendation hook.
 - NILM feedback still needs stable fingerprint persistence across reclustering order changes.
 - Recommendation undo/reset behavior remains a follow-up.
 
@@ -37,15 +37,16 @@
 
 ## Implementation plan
 
-This first slice follows the suggested first PR scope:
+This work follows the suggested early PR scope:
 
 1. Add a deterministic alert feedback fingerprint helper.
 2. Keep the existing `alert_feedback` storage key but store fingerprint-shaped payloads with status, source alert, timestamps, expiration, circuit, feature, and evidence count.
 3. Preserve legacy `circuit_id:feature` feedback lookup as a backward-compatible fallback.
 4. Annotate future matching alert evidence with feedback metadata.
 5. Keep matching expected evidence in retained history while preventing it from becoming a new active possible-issue alert or notification.
-6. Surface feedback metadata in alert evidence payloads.
-7. Document the remaining feedback-loop gaps for follow-up PRs.
+6. Require stronger repeated evidence for future alerts that match not-helpful feedback.
+7. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
+8. Document the remaining feedback-loop gaps for follow-up PRs.
 
 ## Tests added
 
@@ -55,3 +56,6 @@ This first slice follows the suggested first PR scope:
 - `test_expected_alert_feedback_suppresses_matching_future_notification`
 - `test_expected_alert_feedback_does_not_suppress_unrelated_feature`
 - `test_alert_evidence_payload_explains_expected_feedback_state`
+- `test_policy_supports_adjusted_min_repeated_requirement`
+- `test_unhelpful_feedback_raises_future_alert_requirement`
+- `test_alert_evidence_payload_explains_unhelpful_adjusted_requirement`

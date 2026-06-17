@@ -84,6 +84,42 @@ def test_policy_blocks_repeated_weak_scores() -> None:
     )
 
 
+def test_policy_supports_adjusted_min_repeated_requirement() -> None:
+    policy = ConservativeAlertPolicy(min_repeated=3, min_baseline_confidence=0.6)
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+
+    for index in range(4):
+        assert (
+            policy.observe(
+                Observation(
+                    "fridge",
+                    "cycle_duration",
+                    2.0,
+                    0.8,
+                    now + timedelta(hours=index),
+                ),
+                min_repeated=5,
+            )
+            is None
+        )
+
+    alert = policy.observe(
+        Observation(
+            "fridge",
+            "cycle_duration",
+            2.0,
+            0.8,
+            now + timedelta(hours=4),
+        ),
+        min_repeated=5,
+    )
+
+    assert alert is not None
+    assert alert.repeated_count == 5
+    assert alert.first_seen == now
+    assert alert.last_seen == now + timedelta(hours=4)
+
+
 def test_alert_evidence_features_are_readable_but_immutable() -> None:
     features = {"cycle_duration": 1.8}
     alert = AlertEvidence(

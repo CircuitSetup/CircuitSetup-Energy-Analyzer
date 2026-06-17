@@ -196,6 +196,8 @@ def alert_to_dict(alert: AlertEvidence) -> dict[str, Any]:
         payload["matching_feedback_fingerprint"] = (
             alert.matching_feedback_fingerprint
         )
+    if alert.adjusted_min_repeated is not None:
+        payload["adjusted_min_repeated"] = alert.adjusted_min_repeated
     return payload
 
 
@@ -233,6 +235,11 @@ def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
         matching_feedback_fingerprint=(
             str(raw["matching_feedback_fingerprint"])
             if raw.get("matching_feedback_fingerprint")
+            else None
+        ),
+        adjusted_min_repeated=(
+            int(raw["adjusted_min_repeated"])
+            if raw.get("adjusted_min_repeated") is not None
             else None
         ),
     )
