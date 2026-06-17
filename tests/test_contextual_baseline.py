@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
+    ContextDimension,
+    ContextKey,
+    ContextualBaselineSample,
+    build_context_for_sample,
+    build_contextual_baseline,
+    day_type_for_datetime,
+    rain_intensity_bin,
+    rain_state,
+    season_for_datetime,
+    select_contextual_baseline,
+    solar_flow_state,
+    temperature_bin,
+    time_of_day_bucket,
+    water_flow_state,
+    weather_mode_for_temperature,
+)
+from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    PowerFlowMode,
+)
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    NormalizedCircuitSample,
+)
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+def test_context_fingerprint_stable_and_order_independent() -> None:
+    first = ContextKey(
+        (
+            ContextDimension("season", "summer"),
+            ContextDimension("temperature_bin", "very_hot"),
+            ContextDimension("weather_mode", "cooling"),
+        )
+    )
+    second = ContextKey.from_mapping(
+        {
+            "weather_mode": "cooling",
+            "temperature_bin": "very_hot",
+            "season": "summer",
+        }
+    )
+
+    assert first.fingerprint() == (
+        "season=summer|temperature_bin=very_hot|weather_mode=cooling"
+    )
+    assert second.fingerprint() == first.fingerprint()
+    assert second.as_dict() == {
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "weather_mode": "cooling",
+    }
+
+
+def test_context_bucket_helpers() -> None:
+    assert season_for_datetime(datetime(2026, 1, 15, tzinfo=UTC)) == "winter"
+    assert season_for_datetime(datetime(2026, 4, 15, tzinfo=UTC)) == "spring"
+    assert season_for_datetime(datetime(2026, 7, 15, tzinfo=UTC)) == "summer"
+    assert season_for_datetime(datetime(2026, 10, 15, tzinfo=UTC)) == "fall"
+    assert time_of_day_bucket(datetime(2026, 6, 17, 3, tzinfo=UTC)) == "night"
+    assert time_of_day_bucket(datetime(2026, 6, 17, 9, tzinfo=UTC)) == "morning"
+    assert time_of_day_bucket(datetime(2026, 6, 17, 15, tzinfo=UTC)) == "afternoon"
+    assert time_of_day_bucket(datetime(2026, 6, 17, 21, tzinfo=UTC)) == "evening"
+    assert day_type_for_datetime(datetime(2026, 6, 20, tzinfo=UTC)) == "weekend"
+    assert temperature_bin(20.0) == "very_cold"
+    assert temperature_bin(50.0) == "cool"
+    assert temperature_bin(62.0) == "mild"
+    assert temperature_bin(92.0) == "very_hot"
+    assert weather_mode_for_temperature(50.0) == "heating"
+    assert weather_mode_for_temperature(62.0) == "neutral"
+    assert weather_mode_for_temperature(80.0) == "cooling"
+    assert rain_intensity_bin(None) == "unknown"
+    assert rain_intensity_bin(0.0) == "none"
+    assert rain_intensity_bin(0.08) == "light"
+    assert rain_intensity_bin(0.4) == "moderate"
+    assert rain_intensity_bin(0.9) == "heavy"
+    assert rain_state(False, None) == "dry"
+    assert rain_state(True, 0.9) == "heavy_rain"
+    assert water_flow_state(True, 12.0) == "active_flow"
+    assert water_flow_state(False, 3.0) == "recent_flow"
+    assert water_flow_state(False, 0.0) == "no_flow"
+    assert solar_flow_state("exporting", "high_surplus") == "high_surplus"
+    assert solar_flow_state("exporting", "no_surplus") == "exporting"
+
+
+def test_contextual_baseline_builds_robust_stats() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, day, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=value,
+            context=context,
+        )
+        for day, value in enumerate([7.0, 8.0, 8.0, 9.0, 40.0], start=1)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=5,
+    )
+
+    assert stats is not None
+    assert stats.context_fingerprint == "season=summer"
+    assert stats.sample_count == 5
+    assert stats.median == 8.0
+    assert stats.p90 == 40.0
+    assert stats.confidence == 1.0
+    assert stats.first_seen == datetime(2026, 6, 1, tzinfo=UTC)
+    assert stats.last_seen == datetime(2026, 6, 5, tzinfo=UTC)
+
+
+def test_contextual_baseline_fallback_prefers_reliable_context() -> None:
+    exact = ContextKey.from_mapping(
+        {"season": "summer", "temperature_bin": "very_hot"}
+    )
+    temperature = ContextKey.from_mapping({"temperature_bin": "very_hot"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC) + timedelta(days=offset),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=8.0 + offset,
+            context=exact if offset < 3 else temperature,
+        )
+        for offset in range(11)
+    ]
+
+    selected = select_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        samples=samples,
+        fallback_contexts=[
+            ("exact_context", exact, 7),
+            ("temperature_context", temperature, 8),
+        ],
+    )
+
+    assert selected is not None
+    assert selected.fallback_level == "temperature_context"
+    assert selected.sample_count == 11
+    assert selected.context == {"temperature_bin": "very_hot"}
+
+
+def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
+    now = datetime(2026, 6, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    state = AnalyzerState(
+        weather_context_by_circuit={
+            "hvac": {
+                "temperature_f": 94.0,
+                "mode": "cooling",
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("hvac", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict() == {
+        "appliance_profile": "hvac",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "time_of_day": "afternoon",
+        "weather_mode": "cooling",
+    }
+
+
+def test_build_context_for_water_and_solar_state() -> None:
+    now = datetime(2026, 6, 17, 21, tzinfo=UTC)
+    water_config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    solar_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    state = AnalyzerState(
+        water_flow_context_by_circuit={
+            "water_heater": {
+                "flow_sensor_active": True,
+                "flow_active_minutes": 8.0,
+            }
+        },
+        solar_flow_status_by_circuit={"mains": "exporting"},
+        solar_flow_evidence_by_circuit={
+            "mains": {"solar_surplus_status": "high_surplus"}
+        },
+    )
+
+    water_context = build_context_for_sample(
+        circuit_config=water_config,
+        sample=_sample("water_heater", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="runtime_minutes",
+    )
+    solar_context = build_context_for_sample(
+        circuit_config=solar_config,
+        sample=_sample("mains", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="grid_export_power",
+    )
+
+    assert water_context.as_dict()["water_flow_state"] == "active_flow"
+    assert water_context.as_dict()["time_of_day"] == "evening"
+    assert solar_context.as_dict()["solar_flow_state"] == "high_surplus"
+    assert solar_context.as_dict()["power_flow_mode"] == "mains_net"
+
+
+def _sample(circuit_id: str, timestamp: datetime) -> NormalizedCircuitSample:
+    return NormalizedCircuitSample(
+        timestamp=timestamp,
+        circuit_id=circuit_id,
+        real_power=120.0,
+        current=1.0,
+        voltage=120.0,
+        energy=10.0,
+    )

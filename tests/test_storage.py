@@ -286,6 +286,148 @@ def test_feature_store_round_trips_water_correlation_state() -> None:
     )
 
 
+def test_feature_store_loads_without_contextual_baselines() -> None:
+    restored = feature_store_data_from_dict({"events": []})
+
+    assert restored.contextual_baseline_samples_by_circuit == {}
+    assert restored.contextual_baselines_by_circuit == {}
+
+
+def test_feature_store_round_trips_contextual_baselines() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    data = FeatureStoreData(
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": now.isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": 8.4,
+                    "context": {
+                        "season": "summer",
+                        "temperature_bin": "very_hot",
+                    },
+                    "source": "energy_usage",
+                }
+            ]
+        },
+        contextual_baselines_by_circuit={
+            "hvac": {
+                "daily_energy_kwh|season=summer|temperature_bin=very_hot": {
+                    "feature": "daily_energy_kwh",
+                    "context_fingerprint": (
+                        "season=summer|temperature_bin=very_hot"
+                    ),
+                    "context": {
+                        "season": "summer",
+                        "temperature_bin": "very_hot",
+                    },
+                    "sample_count": 12,
+                    "median": 7.8,
+                    "mad": 0.9,
+                    "p10": 6.4,
+                    "p90": 9.2,
+                    "confidence": 0.8,
+                    "fallback_level": "exact_context",
+                    "first_seen": "2026-06-01T00:00:00+00:00",
+                    "last_seen": now.isoformat(),
+                }
+            }
+        },
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.contextual_baseline_samples_by_circuit == (
+        data.contextual_baseline_samples_by_circuit
+    )
+    assert restored.contextual_baselines_by_circuit == (
+        data.contextual_baselines_by_circuit
+    )
+
+
+def test_prune_events_prunes_contextual_samples_and_enforces_cap() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    samples = [
+        {
+            "timestamp": (now - timedelta(days=day)).isoformat(),
+            "feature": "daily_energy_kwh",
+            "value": float(day),
+            "context": {"season": "summer"},
+        }
+        for day in range(20, -1, -1)
+    ]
+    data = FeatureStoreData(
+        contextual_baseline_samples_by_circuit={"hvac": samples},
+        contextual_baselines_by_circuit={"hvac": {"old": {"feature": "x"}}},
+    )
+
+    pruned = prune_events(
+        data,
+        RetentionMode.LIGHTWEIGHT,
+        now,
+        contextual_sample_cap_per_circuit=5,
+    )
+
+    retained = pruned.contextual_baseline_samples_by_circuit["hvac"]
+    assert len(retained) == 5
+    assert [sample["value"] for sample in retained] == [4.0, 3.0, 2.0, 1.0, 0.0]
+    assert (
+        pruned.contextual_baselines_by_circuit
+        is data.contextual_baselines_by_circuit
+    )
+
+
+def test_feature_store_drops_malformed_contextual_baseline_entries() -> None:
+    restored = feature_store_data_from_dict(
+        {
+            "contextual_baseline_samples_by_circuit": {
+                "hvac": [
+                    {
+                        "timestamp": "not-a-date",
+                        "feature": "daily_energy_kwh",
+                        "value": "bad",
+                        "context": [],
+                    },
+                    {
+                        "timestamp": "2026-06-17T12:00:00+00:00",
+                        "feature": "daily_energy_kwh",
+                        "value": 8.4,
+                        "context": {"season": "summer"},
+                    },
+                ]
+            },
+            "contextual_baselines_by_circuit": {
+                "hvac": {
+                    "bad": [],
+                    "good": {
+                        "feature": "daily_energy_kwh",
+                        "context_fingerprint": "season=summer",
+                        "context": {"season": "summer"},
+                        "sample_count": 7,
+                        "median": 8.0,
+                        "mad": 1.0,
+                        "p10": 6.0,
+                        "p90": 10.0,
+                        "confidence": 0.8,
+                    },
+                }
+            },
+        }
+    )
+
+    assert restored.contextual_baseline_samples_by_circuit == {
+        "hvac": [
+            {
+                "timestamp": "2026-06-17T12:00:00+00:00",
+                "feature": "daily_energy_kwh",
+                "value": 8.4,
+                "context": {"season": "summer"},
+            }
+        ]
+    }
+    assert list(restored.contextual_baselines_by_circuit["hvac"]) == ["good"]
+
+
 def test_event_round_trip_serialization_uses_current_shape() -> None:
     event = CircuitEvent(
         timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),

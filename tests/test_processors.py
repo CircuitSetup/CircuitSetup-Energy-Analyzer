@@ -356,6 +356,190 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9
 
 
+def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "hvac",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "time_of_day": "afternoon",
+        "weather_mode": "cooling",
+    }
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "days": [
+                    {
+                        "date": (now.date() - timedelta(days=offset)).isoformat(),
+                        "usage_kwh": 10.0,
+                    }
+                    for offset in range(1, 6)
+                ],
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": value,
+                    "context": context_key,
+                    "source": "energy_usage",
+                }
+                for offset, value in enumerate(
+                    [13.1, 13.6, 14.0, 14.4, 14.7, 15.0, 15.2],
+                    start=1,
+                )
+            ]
+        },
+    )
+    state = AnalyzerState(
+        weather_context_by_circuit={
+            "hvac": {
+                "temperature_f": 94.0,
+                "mode": "cooling",
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(
+            window_days=5,
+            daily_spike_ratio=0.25,
+        ),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(114.0), config, context)
+
+    assert result.alerts == []
+    assert policy.observations == []
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("energy_usage_evidence_by_circuit", "hvac")]
+    assert evidence["status"] == "context_explained"
+    assert evidence["comparison_basis"] == "contextual"
+    assert evidence["baseline_fallback_level"] == "exact_context"
+    assert evidence["baseline_sample_count"] == 7
+    assert evidence["contextual_baseline_median_kwh"] == 14.4
+    assert evidence["contextual_baseline_p90_kwh"] == 15.0
+    assert "daily_energy_kwh" in (
+        store_data.contextual_baseline_samples_by_circuit["hvac"][-1]["feature"]
+    )
+
+
+def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "days": [
+                    {
+                        "date": (now.date() - timedelta(days=offset)).isoformat(),
+                        "usage_kwh": 10.0,
+                    }
+                    for offset in range(1, 6)
+                ],
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": 14.0,
+                    "context": {
+                        "season": "summer",
+                        "temperature_bin": "very_hot",
+                        "weather_mode": "cooling",
+                    },
+                    "source": "energy_usage",
+                }
+                for offset in range(1, 4)
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(
+            weather_context_by_circuit={
+                "hvac": {
+                    "temperature_f": 94.0,
+                    "mode": "cooling",
+                }
+            }
+        ),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(
+            window_days=5,
+            daily_spike_ratio=0.25,
+        ),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(114.0), config, context)
+
+    assert len(result.alerts) == 1
+    assert policy.observations[0].baseline_value == 12.5
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("energy_usage_evidence_by_circuit", "hvac")]
+    assert evidence["status"] == "over_threshold"
+    assert evidence["comparison_basis"] == "rolling"
+    assert evidence["baseline_fallback_level"] == "not_enough_data"
+
+
 def test_energy_goal_processor_updates_state_and_returns_goal_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (

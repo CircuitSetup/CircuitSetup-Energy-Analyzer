@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self
 
 from .const import STORAGE_KEY, STORAGE_VERSION
+from .contextual_baseline import contextual_sample_from_dict
 from .models import (
     AlertEvidence,
     BaselineStats,
@@ -36,6 +38,11 @@ RETENTION_WINDOWS: dict[RetentionMode, timedelta] = {
     RetentionMode.STANDARD: timedelta(days=45),
     RetentionMode.DIAGNOSTIC: timedelta(days=180),
 }
+CONTEXTUAL_SAMPLE_CAPS: dict[RetentionMode, int] = {
+    RetentionMode.LIGHTWEIGHT: 500,
+    RetentionMode.STANDARD: 2000,
+    RetentionMode.DIAGNOSTIC: 10000,
+}
 
 
 @dataclass(slots=True)
@@ -62,6 +69,12 @@ class FeatureStoreData:
         default_factory=dict
     )
     water_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    contextual_baseline_samples_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    contextual_baselines_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
@@ -241,6 +254,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "water_context_history_by_circuit": _dict_of_list_dicts(
             data.water_context_history_by_circuit
         ),
+        "contextual_baseline_samples_by_circuit": _dict_of_list_dicts(
+            data.contextual_baseline_samples_by_circuit
+        ),
+        "contextual_baselines_by_circuit": _dict_of_dicts(
+            data.contextual_baselines_by_circuit
+        ),
         "sensitivity_by_circuit": {
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
@@ -340,6 +359,14 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         water_context_history_by_circuit=_dict_of_list_dicts(
             raw.get("water_context_history_by_circuit", {})
         ),
+        contextual_baseline_samples_by_circuit=(
+            _contextual_samples_by_circuit(
+                raw.get("contextual_baseline_samples_by_circuit", {})
+            )
+        ),
+        contextual_baselines_by_circuit=_contextual_baselines_by_circuit(
+            raw.get("contextual_baselines_by_circuit", {})
+        ),
         sensitivity_by_circuit={
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in raw.get(
@@ -425,9 +452,16 @@ def prune_events(
     data: FeatureStoreData,
     retention_mode: RetentionMode,
     now: datetime,
+    *,
+    contextual_sample_cap_per_circuit: int | None = None,
 ) -> FeatureStoreData:
     """Return a new payload with events pruned according to retention mode."""
     cutoff = now - RETENTION_WINDOWS[retention_mode]
+    contextual_sample_cap = (
+        CONTEXTUAL_SAMPLE_CAPS[retention_mode]
+        if contextual_sample_cap_per_circuit is None
+        else max(int(contextual_sample_cap_per_circuit), 0)
+    )
     return FeatureStoreData(
         events=[event for event in data.events if event.timestamp >= cutoff],
         baselines=data.baselines,
@@ -439,6 +473,14 @@ def prune_events(
         rain_pump_context_by_circuit=data.rain_pump_context_by_circuit,
         water_flow_context_by_circuit=data.water_flow_context_by_circuit,
         water_context_history_by_circuit=data.water_context_history_by_circuit,
+        contextual_baseline_samples_by_circuit=(
+            _prune_contextual_samples(
+                data.contextual_baseline_samples_by_circuit,
+                cutoff,
+                contextual_sample_cap,
+            )
+        ),
+        contextual_baselines_by_circuit=data.contextual_baselines_by_circuit,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
@@ -529,3 +571,87 @@ def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
         str(key): [dict(item) for item in list(value)]
         for key, value in dict(values).items()
     }
+
+
+def _contextual_samples_by_circuit(values: Any) -> dict[str, list[dict[str, Any]]]:
+    sanitized: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(values, Mapping):
+        return sanitized
+    for circuit_id, raw_samples in values.items():
+        samples: list[dict[str, Any]] = []
+        if not isinstance(raw_samples, list):
+            continue
+        for raw_sample in raw_samples:
+            if not isinstance(raw_sample, Mapping):
+                continue
+            sample = contextual_sample_from_dict(str(circuit_id), raw_sample)
+            if sample is None:
+                continue
+            payload = dict(raw_sample)
+            payload["feature"] = sample.feature
+            payload["value"] = sample.value
+            payload["context"] = sample.context.as_dict()
+            payload["timestamp"] = sample.timestamp.isoformat()
+            samples.append(payload)
+        if samples:
+            sanitized[str(circuit_id)] = samples
+    return sanitized
+
+
+def _contextual_baselines_by_circuit(values: Any) -> dict[str, dict[str, Any]]:
+    sanitized: dict[str, dict[str, Any]] = {}
+    if not isinstance(values, Mapping):
+        return sanitized
+    for circuit_id, raw_stats_by_key in values.items():
+        if not isinstance(raw_stats_by_key, Mapping):
+            continue
+        stats_by_key: dict[str, Any] = {}
+        for key, raw_stats in raw_stats_by_key.items():
+            if not isinstance(raw_stats, Mapping):
+                continue
+            context = raw_stats.get("context", {})
+            if not isinstance(context, Mapping):
+                continue
+            try:
+                stats_by_key[str(key)] = {
+                    "feature": str(raw_stats["feature"]),
+                    "context_fingerprint": str(raw_stats["context_fingerprint"]),
+                    "context": {str(k): str(v) for k, v in context.items()},
+                    "sample_count": int(raw_stats["sample_count"]),
+                    "median": float(raw_stats["median"]),
+                    "mad": float(raw_stats["mad"]),
+                    "p10": float(raw_stats["p10"]),
+                    "p90": float(raw_stats["p90"]),
+                    "confidence": float(raw_stats["confidence"]),
+                    "fallback_level": str(
+                        raw_stats.get("fallback_level", "exact_context")
+                    ),
+                    "first_seen": raw_stats.get("first_seen"),
+                    "last_seen": raw_stats.get("last_seen"),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+        if stats_by_key:
+            sanitized[str(circuit_id)] = stats_by_key
+    return sanitized
+
+
+def _prune_contextual_samples(
+    samples_by_circuit: dict[str, list[dict[str, Any]]],
+    cutoff: datetime,
+    cap_per_circuit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    pruned: dict[str, list[dict[str, Any]]] = {}
+    for circuit_id, raw_samples in samples_by_circuit.items():
+        retained: list[dict[str, Any]] = []
+        for raw_sample in raw_samples:
+            sample = contextual_sample_from_dict(circuit_id, raw_sample)
+            if sample is None or sample.timestamp < cutoff:
+                continue
+            retained.append(dict(raw_sample))
+        retained.sort(key=lambda item: str(item.get("timestamp", "")))
+        if cap_per_circuit:
+            retained = retained[-cap_per_circuit:]
+        if retained:
+            pruned[circuit_id] = retained
+    return pruned
