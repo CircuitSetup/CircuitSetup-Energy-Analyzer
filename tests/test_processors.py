@@ -1249,6 +1249,96 @@ def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
     ]
 
 
+def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "ev_charger",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "day_type": "weekday",
+        "time_of_day": "afternoon",
+    }
+    store_data = FeatureStoreData(
+        demand_by_circuit={
+            "ev": {
+                "monthly_peak_windows": [
+                    {
+                        "timestamp": (now - timedelta(days=offset + 1)).isoformat(),
+                        "demand_w": demand_w,
+                        "window_minutes": 15,
+                    }
+                    for offset, demand_w in enumerate((5000.0, 4500.0, 4000.0))
+                ]
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "ev": [
+                {
+                    "timestamp": (now - timedelta(days=offset + 2)).isoformat(),
+                    "feature": "peak_demand_w",
+                    "value": value,
+                    "context": context_key,
+                    "source": "demand",
+                }
+                for offset, value in enumerate(
+                    (3300.0, 3400.0, 3500.0, 3600.0, 3700.0, 3800.0, 3900.0)
+                )
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+            peak_rank_count=3,
+            peak_warning_ratio=0.9,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+
+    result = processor.process(_sample(0, 3700.0), config, context)
+
+    assert result.store_dirty is True
+    assert result.alerts == []
+    assert policy.observations == []
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("demand_evidence_by_circuit", "ev")]
+    assert evidence["status"] == "context_explained"
+    assert evidence["comparison_basis"] == "contextual"
+    assert evidence["baseline_fallback_level"] == "exact_context"
+    assert evidence["baseline_sample_count"] == 7
+    assert evidence["contextual_baseline_p90_w"] == 3800.0
+    assert (
+        store_data.contextual_baseline_samples_by_circuit["ev"][-1]["feature"]
+        == "peak_demand_w"
+    )
+
+
 def test_capacity_processor_records_current_and_returns_capacity_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -2606,6 +2696,107 @@ def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
         "always_on_limit_usage_percent": 180.0,
         "status": "on",
     }
+
+
+def test_standby_processor_alert_features_include_contextual_baseline_details() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "water_heater",
+        "circuit_mode": "single_phase",
+        "season": "summer",
+        "day_type": "weekday",
+        "time_of_day": "afternoon",
+        "water_flow_state": "active_flow",
+    }
+    store_data = FeatureStoreData(
+        standby_by_circuit={
+            "water_heater": {
+                "samples": [
+                    {
+                        "timestamp": (now - timedelta(hours=offset + 1)).isoformat(),
+                        "real_power_w": 45.0,
+                    }
+                    for offset in range(6)
+                ]
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "water_heater": [
+                {
+                    "timestamp": (now - timedelta(days=offset + 2)).isoformat(),
+                    "feature": "standby_power_w",
+                    "value": value,
+                    "context": context_key,
+                    "source": "standby",
+                }
+                for offset, value in enumerate(
+                    (41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0)
+                )
+            ]
+        },
+    )
+    state = AnalyzerState()
+    state.water_flow_context_by_circuit["water_heater"] = {
+        "flow_sensor_active": True,
+        "flow_active_minutes": 12.0,
+    }
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = processors.StandbyProcessor(
+        settings_for_config=lambda _config, _circuit_id: StandbySettings(
+            standby_threshold_w=8.0,
+            always_on_alert_w=25.0,
+            min_samples=6,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        seed_demo_history=lambda _config, _sample, _context, _settings: None,
+    )
+
+    result = processor.process(_sample(0, 46.0), config, context)
+
+    assert len(result.alerts) == 1
+    assert policy.observations[0].feature == "always_on_power"
+    assert policy.observations[0].baseline_value == 25.0
+    assert policy.observations[0].features["comparison_basis"] == "contextual"
+    assert policy.observations[0].features["baseline_fallback_level"] == (
+        "exact_context"
+    )
+    assert policy.observations[0].features["baseline_sample_count"] == 7
+    assert policy.observations[0].features["contextual_baseline_p90_w"] == 46.0
+
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("standby_evidence_by_circuit", "water_heater")]
+    assert evidence["comparison_basis"] == "contextual"
+    assert evidence["contextual_baseline_median_w"] == 44.0
+    assert (
+        store_data.contextual_baseline_samples_by_circuit["water_heater"][-1][
+            "feature"
+        ]
+        == "standby_power_w"
+    )
 
 
 def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> None:
