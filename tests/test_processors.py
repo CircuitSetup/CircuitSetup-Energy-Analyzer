@@ -540,6 +540,103 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
     assert evidence["baseline_fallback_level"] == "not_enough_data"
 
 
+def test_energy_usage_alert_features_include_contextual_baseline_details() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "hvac",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "time_of_day": "afternoon",
+        "weather_mode": "cooling",
+    }
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "days": [
+                    {
+                        "date": (now.date() - timedelta(days=offset)).isoformat(),
+                        "usage_kwh": 10.0,
+                    }
+                    for offset in range(1, 6)
+                ],
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": value,
+                    "context": context_key,
+                    "source": "energy_usage",
+                }
+                for offset, value in enumerate(
+                    [10.8, 11.0, 11.4, 11.8, 12.0, 12.2, 12.5],
+                    start=1,
+                )
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(
+            weather_context_by_circuit={
+                "hvac": {
+                    "temperature_f": 94.0,
+                    "mode": "cooling",
+                }
+            }
+        ),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(
+            window_days=5,
+            daily_spike_ratio=0.25,
+        ),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(114.0), config, context)
+
+    assert len(result.alerts) == 1
+    assert policy.observations[0].features["comparison_basis"] == "contextual"
+    assert policy.observations[0].features["baseline_context"] == (
+        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+    )
+    assert policy.observations[0].features["baseline_fallback_level"] == (
+        "exact_context"
+    )
+    assert policy.observations[0].features["contextual_baseline_confidence"] == 1.0
+    assert result.alerts[0].features["baseline_context"] == (
+        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+    )
+
+
 def test_energy_goal_processor_updates_state_and_returns_goal_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -1805,6 +1902,11 @@ def test_water_context_alert_processor_returns_flow_alert() -> None:
         "flow_active_minutes": 14.0,
         "flow_mismatch_threshold_minutes": 5,
         "confidence": 0.84,
+        "baseline_context": "active_flow",
+        "baseline_fallback_level": "water_flow_context",
+        "baseline_sample_count": 12,
+        "contextual_baseline_confidence": 0.84,
+        "contextual_status": "possible_flow_without_load",
     }
     context = ProcessingContext(
         now=now,
@@ -1845,6 +1947,11 @@ def test_water_context_alert_processor_returns_flow_alert() -> None:
         "mismatch_minutes": 14.0,
         "flow_active_minutes": 14.0,
         "confidence": 0.84,
+        "baseline_context": "active_flow",
+        "baseline_fallback_level": "water_flow_context",
+        "baseline_sample_count": 12.0,
+        "contextual_baseline_confidence": 0.84,
+        "contextual_status": "possible_flow_without_load",
     }
 
 

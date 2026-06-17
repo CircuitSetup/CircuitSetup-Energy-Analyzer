@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Self
+from typing import Any, Self
 
 from .models import AlertEvidence, Severity
 from .ux import friendly_feature_name
@@ -23,7 +23,7 @@ class Observation:
     observed_value: float = 0.0
     baseline_value: float = 0.0
     message: str = ""
-    features: Mapping[str, float] = field(default_factory=dict)
+    features: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))

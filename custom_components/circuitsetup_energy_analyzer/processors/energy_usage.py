@@ -134,9 +134,7 @@ class EnergyUsageProcessor:
             )
         )
         alert_features = dict(spike.features)
-        alert_features.update(
-            _numeric_contextual_alert_features(contextual_comparison)
-        )
+        alert_features.update(_contextual_alert_features(contextual_comparison))
         alert = self._alert_policy_for_circuit(circuit_id).observe(
             Observation(
                 circuit_id=circuit_id,
@@ -288,10 +286,18 @@ def _contextual_daily_energy_comparison(
     return attrs
 
 
-def _numeric_contextual_alert_features(
+def _contextual_alert_features(
     contextual_comparison: dict[str, Any],
-) -> dict[str, float]:
-    features: dict[str, float] = {}
+) -> dict[str, Any]:
+    features: dict[str, Any] = {}
+    for key in (
+        "comparison_basis",
+        "baseline_context",
+        "baseline_fallback_level",
+    ):
+        value = contextual_comparison.get(key)
+        if value is not None:
+            features[key] = value
     for source, target in (
         ("baseline_sample_count", "baseline_sample_count"),
         ("contextual_baseline_median_kwh", "contextual_baseline_median_kwh"),
