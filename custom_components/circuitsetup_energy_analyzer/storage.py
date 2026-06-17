@@ -43,6 +43,11 @@ CONTEXTUAL_SAMPLE_CAPS: dict[RetentionMode, int] = {
     RetentionMode.STANDARD: 2000,
     RetentionMode.DIAGNOSTIC: 10000,
 }
+CONTEXTUAL_BUCKET_CAPS: dict[RetentionMode, int] = {
+    RetentionMode.LIGHTWEIGHT: 64,
+    RetentionMode.STANDARD: 128,
+    RetentionMode.DIAGNOSTIC: 512,
+}
 
 
 @dataclass(slots=True)
@@ -454,13 +459,17 @@ def prune_events(
     now: datetime,
     *,
     contextual_sample_cap_per_circuit: int | None = None,
+    contextual_bucket_cap_per_feature: int | None = None,
 ) -> FeatureStoreData:
     """Return a new payload with events pruned according to retention mode."""
     cutoff = now - RETENTION_WINDOWS[retention_mode]
-    contextual_sample_cap = (
-        CONTEXTUAL_SAMPLE_CAPS[retention_mode]
-        if contextual_sample_cap_per_circuit is None
-        else max(int(contextual_sample_cap_per_circuit), 0)
+    contextual_samples, contextual_stats = prune_contextual_baseline_state(
+        data.contextual_baseline_samples_by_circuit,
+        data.contextual_baselines_by_circuit,
+        retention_mode,
+        now,
+        contextual_sample_cap_per_circuit=contextual_sample_cap_per_circuit,
+        contextual_bucket_cap_per_feature=contextual_bucket_cap_per_feature,
     )
     return FeatureStoreData(
         events=[event for event in data.events if event.timestamp >= cutoff],
@@ -473,14 +482,8 @@ def prune_events(
         rain_pump_context_by_circuit=data.rain_pump_context_by_circuit,
         water_flow_context_by_circuit=data.water_flow_context_by_circuit,
         water_context_history_by_circuit=data.water_context_history_by_circuit,
-        contextual_baseline_samples_by_circuit=(
-            _prune_contextual_samples(
-                data.contextual_baseline_samples_by_circuit,
-                cutoff,
-                contextual_sample_cap,
-            )
-        ),
-        contextual_baselines_by_circuit=data.contextual_baselines_by_circuit,
+        contextual_baseline_samples_by_circuit=contextual_samples,
+        contextual_baselines_by_circuit=contextual_stats,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
@@ -513,6 +516,33 @@ def prune_events(
         settings_recommendation_notification_episode_key=(
             data.settings_recommendation_notification_episode_key
         ),
+    )
+
+
+def prune_contextual_baseline_state(
+    samples_by_circuit: dict[str, list[dict[str, Any]]],
+    baselines_by_circuit: dict[str, dict[str, Any]],
+    retention_mode: RetentionMode,
+    now: datetime,
+    *,
+    contextual_sample_cap_per_circuit: int | None = None,
+    contextual_bucket_cap_per_feature: int | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    """Prune contextual samples and cap retained stats buckets."""
+    cutoff = now - RETENTION_WINDOWS[retention_mode]
+    sample_cap = (
+        CONTEXTUAL_SAMPLE_CAPS[retention_mode]
+        if contextual_sample_cap_per_circuit is None
+        else max(int(contextual_sample_cap_per_circuit), 0)
+    )
+    bucket_cap = (
+        CONTEXTUAL_BUCKET_CAPS[retention_mode]
+        if contextual_bucket_cap_per_feature is None
+        else max(int(contextual_bucket_cap_per_feature), 0)
+    )
+    return (
+        _prune_contextual_samples(samples_by_circuit, cutoff, sample_cap),
+        _prune_contextual_baselines(baselines_by_circuit, bucket_cap),
     )
 
 
@@ -655,3 +685,63 @@ def _prune_contextual_samples(
         if retained:
             pruned[circuit_id] = retained
     return pruned
+
+
+def _prune_contextual_baselines(
+    baselines_by_circuit: dict[str, dict[str, Any]],
+    cap_per_feature: int,
+) -> dict[str, dict[str, Any]]:
+    if cap_per_feature <= 0:
+        return {}
+
+    changed = False
+    pruned: dict[str, dict[str, Any]] = {}
+    for circuit_id, stats_by_key in baselines_by_circuit.items():
+        grouped: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for key, stats in stats_by_key.items():
+            if not isinstance(stats, Mapping):
+                changed = True
+                continue
+            feature = str(stats.get("feature") or str(key).split("|", 1)[0])
+            grouped.setdefault(feature, []).append((str(key), dict(stats)))
+
+        retained: dict[str, dict[str, Any]] = {}
+        for feature_stats in grouped.values():
+            ranked = sorted(
+                feature_stats,
+                key=lambda item: (
+                    _contextual_stats_sample_count(item[1]),
+                    _contextual_stats_last_seen(item[1]),
+                ),
+                reverse=True,
+            )
+            if len(ranked) > cap_per_feature:
+                changed = True
+            for key, stats in ranked[:cap_per_feature]:
+                retained[key] = stats
+
+        if retained:
+            pruned[str(circuit_id)] = retained
+        if len(retained) != len(stats_by_key):
+            changed = True
+
+    return pruned if changed else baselines_by_circuit
+
+
+def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> int:
+    try:
+        return max(int(stats.get("sample_count", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _contextual_stats_last_seen(stats: Mapping[str, Any]) -> datetime:
+    value = stats.get("last_seen") or stats.get("first_seen")
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return datetime.min
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.min

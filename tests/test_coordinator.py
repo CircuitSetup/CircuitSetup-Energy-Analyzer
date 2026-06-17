@@ -1727,6 +1727,55 @@ async def test_runtime_entry_retention_applies_when_circuit_omits_retention() ->
     assert old_event not in fake_store.saved_events[-1]
 
 
+def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    old_sample = {
+        "timestamp": (now - timedelta(days=30)).isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 7.5,
+        "context": {"season": "spring"},
+        "source": "test",
+    }
+    recent_sample = {
+        "timestamp": (now - timedelta(days=2)).isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 8.5,
+        "context": {"season": "summer"},
+        "source": "test",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            contextual_baseline_samples_by_circuit={
+                "hvac": [old_sample, recent_sample]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.contextual_baseline_samples_by_circuit == {
+        "hvac": [recent_sample]
+    }
+
+
 def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         ALERT_FEEDBACK_MAX_ITEMS,

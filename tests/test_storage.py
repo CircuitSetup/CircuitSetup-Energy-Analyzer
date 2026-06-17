@@ -377,6 +377,81 @@ def test_prune_events_prunes_contextual_samples_and_enforces_cap() -> None:
     )
 
 
+def test_prune_events_caps_contextual_stats_per_feature_by_strength() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+
+    def stats_payload(
+        key: str,
+        *,
+        feature: str = "daily_energy_kwh",
+        sample_count: int,
+        last_seen: datetime,
+    ) -> tuple[str, dict[str, object]]:
+        context = dict(part.split("=", 1) for part in key.split("|"))
+        return (
+            f"{feature}|{key}",
+            {
+                "feature": feature,
+                "context_fingerprint": key,
+                "context": context,
+                "sample_count": sample_count,
+                "median": 8.0,
+                "mad": 0.5,
+                "p10": 7.0,
+                "p90": 9.0,
+                "confidence": 0.8,
+                "fallback_level": "exact_context",
+                "first_seen": (last_seen - timedelta(days=7)).isoformat(),
+                "last_seen": last_seen.isoformat(),
+            },
+        )
+
+    weak_key, weak_stats = stats_payload(
+        "season=summer|temperature_bin=warm",
+        sample_count=3,
+        last_seen=now,
+    )
+    strong_key, strong_stats = stats_payload(
+        "season=summer|temperature_bin=hot",
+        sample_count=12,
+        last_seen=now - timedelta(days=2),
+    )
+    recent_tie_key, recent_tie_stats = stats_payload(
+        "season=summer|temperature_bin=mild",
+        sample_count=12,
+        last_seen=now,
+    )
+    demand_key, demand_stats = stats_payload(
+        "season=summer|time_of_day=afternoon",
+        feature="demand_peak_w",
+        sample_count=2,
+        last_seen=now,
+    )
+    data = FeatureStoreData(
+        contextual_baselines_by_circuit={
+            "hvac": {
+                weak_key: weak_stats,
+                strong_key: strong_stats,
+                recent_tie_key: recent_tie_stats,
+                demand_key: demand_stats,
+            }
+        }
+    )
+
+    pruned = prune_events(
+        data,
+        RetentionMode.LIGHTWEIGHT,
+        now,
+        contextual_bucket_cap_per_feature=2,
+    )
+
+    assert set(pruned.contextual_baselines_by_circuit["hvac"]) == {
+        recent_tie_key,
+        strong_key,
+        demand_key,
+    }
+
+
 def test_feature_store_drops_malformed_contextual_baseline_entries() -> None:
     restored = feature_store_data_from_dict(
         {
