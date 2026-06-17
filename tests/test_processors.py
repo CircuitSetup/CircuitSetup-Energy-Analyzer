@@ -1755,7 +1755,7 @@ def test_solar_flow_processor_updates_flow_and_load_shift_state() -> None:
 
     assert result.alerts == []
     assert result.notifications == []
-    assert result.store_dirty is False
+    assert result.store_dirty is True
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("solar_generation_w_by_circuit", "mains")] == 2000.0
     assert updates[("solar_grid_import_w_by_circuit", "mains")] == 0.0
@@ -1860,6 +1860,107 @@ def test_solar_flow_processor_ignores_batches_without_mains() -> None:
     assert result.state_updates == []
     assert result.alerts == []
     assert result.notifications == []
+
+
+def test_solar_flow_processor_adds_contextual_surplus_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "mains_nilm",
+        "circuit_mode": "mains_nilm",
+        "power_flow_mode": "mains_net",
+        "season": "summer",
+        "solar_flow_state": "exporting",
+        "time_of_day": "afternoon",
+    }
+    store_data = FeatureStoreData(
+        contextual_baseline_samples_by_circuit={
+            "mains": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "solar_surplus_power_w",
+                    "value": value,
+                    "context": context_key,
+                    "source": "solar_flow",
+                }
+                for offset, value in enumerate(
+                    [420.0, 450.0, 500.0, 520.0, 540.0, 560.0, 580.0],
+                    start=1,
+                )
+            ]
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda _circuit_id: {},
+    )
+
+    result = processor.process(
+        [(mains, sample("mains", -500.0)), (solar, sample("solar", 2000.0))],
+        context,
+    )
+
+    assert result.store_dirty is True
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("solar_flow_evidence_by_circuit", "mains")]
+    assert evidence["comparison_basis"] == "contextual"
+    assert evidence["baseline_context"] == (
+        "mains_nilm, mains_nilm, mains_net, summer, exporting, afternoon"
+    )
+    assert evidence["baseline_fallback_level"] == "exact_context"
+    assert evidence["baseline_sample_count"] == 7
+    assert evidence["contextual_baseline_median_w"] == 520.0
+    assert evidence["contextual_baseline_p90_w"] == 560.0
+    assert evidence["contextual_baseline_confidence"] == 1.0
+    assert (
+        store_data.contextual_baseline_samples_by_circuit["mains"][-1]["feature"]
+        == "solar_surplus_power_w"
+    )
 
 
 def test_solar_flow_processor_respects_selection_and_settings_overrides() -> None:
