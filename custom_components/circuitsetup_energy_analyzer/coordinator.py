@@ -6011,7 +6011,26 @@ def _alert_feature(alert: AlertEvidence) -> str:
 
 
 def _alert_feedback_key(alert: AlertEvidence) -> str:
-    return f"{alert.circuit_id}:{_alert_feature(alert)}"
+    base_key = f"{alert.circuit_id}:{_alert_feature(alert)}"
+    context_key = _alert_feedback_context_key(alert)
+    if not context_key:
+        return base_key
+    return f"{base_key}|{context_key}"
+
+
+def _alert_feedback_context_key(alert: AlertEvidence) -> str:
+    features = alert.features
+    if str(features.get("comparison_basis", "")).strip().lower() != "contextual":
+        return ""
+    baseline_context = str(features.get("baseline_context", "")).strip()
+    if not baseline_context:
+        return ""
+    fallback_level = str(features.get("baseline_fallback_level", "")).strip()
+    parts = ["contextual"]
+    if fallback_level:
+        parts.append(fallback_level)
+    parts.append(baseline_context)
+    return "|".join(parts)
 
 
 def _normalized_temperature_unit(unit: str) -> str:

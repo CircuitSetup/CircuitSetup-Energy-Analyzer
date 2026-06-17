@@ -6007,6 +6007,88 @@ async def test_expected_alert_feedback_suppresses_repeated_notification(
 
 
 @pytest.mark.asyncio
+async def test_contextual_alert_feedback_only_suppresses_matching_context(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    hot_context = {
+        "comparison_basis": "contextual",
+        "baseline_context": "season=summer|temperature_bin=very_hot",
+        "baseline_fallback_level": "exact",
+    }
+    mild_context = {
+        "comparison_basis": "contextual",
+        "baseline_context": "season=summer|temperature_bin=mild",
+        "baseline_fallback_level": "exact",
+    }
+    expected_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Expected hot day use",
+        feature="daily_energy_spike",
+        features=hot_context,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(alerts=[expected_alert]),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
+    )
+
+    assert (
+        await coordinator.async_mark_alert_expected(
+            notification_id_for_alert(expected_alert)
+        )
+        is True
+    )
+    assert (
+        coordinator.store_data.alert_feedback[
+            "hvac:daily_energy_spike|contextual|exact|"
+            "season=summer|temperature_bin=very_hot"
+        ]["action"]
+        == "expected"
+    )
+
+    repeated_hot_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 3, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Expected hot day use again",
+        feature="daily_energy_spike",
+        features=hot_context,
+    )
+    mild_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Mild day use needs attention",
+        feature="daily_energy_spike",
+        features=mild_context,
+    )
+
+    await coordinator._notify_alert(repeated_hot_alert)
+    await coordinator._notify_alert(mild_alert)
+
+    assert notifications == [mild_alert]
+
+
+@pytest.mark.asyncio
 async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
