@@ -782,6 +782,211 @@ def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> N
     assert baseline.median == 1200.0
 
 
+def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    events: list[CircuitEvent] = []
+    for offset in range(1, 10):
+        started_at = now - timedelta(days=offset, hours=1)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=started_at,
+                    circuit_id="hvac",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=started_at + timedelta(minutes=20),
+                    circuit_id="hvac",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="hvac",
+            event_type=EventType.START,
+        )
+    )
+    context_key = {
+        "appliance_profile": "hvac",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "time_of_day": "afternoon",
+        "weather_mode": "cooling",
+    }
+    store_data = FeatureStoreData(
+        events=events,
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": RUN_CYCLE_DURATION_FEATURE,
+                    "value": value,
+                    "context": context_key,
+                    "source": "run_cycle",
+                }
+                for offset, value in enumerate(
+                    [3300.0, 3400.0, 3500.0, 3600.0, 3650.0, 3700.0, 3800.0],
+                    start=1,
+                )
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(
+            weather_context_by_circuit={
+                "hvac": {
+                    "temperature_f": 94.0,
+                    "mode": "cooling",
+                }
+            }
+        ),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.alerts == []
+    assert policy.observations == []
+
+
+def test_run_cycle_alert_features_include_contextual_baseline_details() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    events: list[CircuitEvent] = []
+    for offset in range(1, 10):
+        started_at = now - timedelta(days=offset, hours=1)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=started_at,
+                    circuit_id="hvac",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=started_at + timedelta(minutes=20),
+                    circuit_id="hvac",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="hvac",
+            event_type=EventType.START,
+        )
+    )
+    context_key = {
+        "appliance_profile": "hvac",
+        "circuit_mode": "dual_phase",
+        "season": "summer",
+        "temperature_bin": "very_hot",
+        "time_of_day": "afternoon",
+        "weather_mode": "cooling",
+    }
+    store_data = FeatureStoreData(
+        events=events,
+        contextual_baseline_samples_by_circuit={
+            "hvac": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": RUN_CYCLE_DURATION_FEATURE,
+                    "value": value,
+                    "context": context_key,
+                    "source": "run_cycle",
+                }
+                for offset, value in enumerate(
+                    [1200.0, 1250.0, 1300.0, 1350.0, 1400.0, 1450.0, 1500.0],
+                    start=1,
+                )
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(
+            weather_context_by_circuit={
+                "hvac": {
+                    "temperature_f": 94.0,
+                    "mode": "cooling",
+                }
+            }
+        ),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert len(result.alerts) == 1
+    assert policy.observations[0].baseline_value == 1450.0
+    assert policy.observations[0].features["comparison_basis"] == "contextual"
+    assert policy.observations[0].features["baseline_fallback_level"] == (
+        "exact_context"
+    )
+    assert policy.observations[0].features["baseline_context"] == (
+        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+    )
+    assert policy.observations[0].features["contextual_baseline_p90"] == 1450.0
+    assert result.alerts[0].features["comparison_basis"] == "contextual"
+
+
 def test_activity_alert_processor_returns_left_on_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.activity import (
