@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from custom_components.circuitsetup_energy_analyzer.weather_context import (
     WeatherContextSample,
     evaluate_weather_context,
@@ -98,3 +100,93 @@ def test_weather_context_reports_missing_temperature_source() -> None:
     )
 
     assert result["status"] == "no_temperature_source"
+
+
+def test_weather_context_uses_exact_temperature_season_baseline() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=94.0,
+        current_runtime_minutes=101.0,
+        current_duty_cycle_percent=50.0,
+        history=[
+            WeatherContextSample(
+                timestamp=datetime(2026, 6, day, tzinfo=UTC),
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for day, temperature, runtime, duty in (
+                (1, 93.0, 95.0, 46.0),
+                (2, 95.0, 100.0, 50.0),
+                (3, 92.0, 110.0, 54.0),
+                (4, 80.0, 60.0, 30.0),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 17, 15, tzinfo=UTC),
+    )
+
+    assert result["status"] == "weather_correlated"
+    assert result["baseline_context"] == "cooling, very_hot, summer"
+    assert result["baseline_fallback_level"] == "exact_context"
+    assert result["baseline_sample_count"] == 3
+    assert result["baseline_confidence"] == 1.0
+    assert result["expected_runtime_median_minutes"] == 100.0
+    assert result["expected_runtime_p90_minutes"] == 110.0
+    assert result["contextual_status"] == "weather_correlated"
+
+
+def test_weather_context_falls_back_to_temperature_context_without_season() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=94.0,
+        current_runtime_minutes=101.0,
+        current_duty_cycle_percent=50.0,
+        history=[
+            WeatherContextSample(
+                timestamp=datetime(2026, month, day, tzinfo=UTC),
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for month, day, temperature, runtime, duty in (
+                (5, 28, 93.0, 95.0, 46.0),
+                (5, 29, 95.0, 100.0, 50.0),
+                (9, 3, 92.0, 110.0, 54.0),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 17, 15, tzinfo=UTC),
+    )
+
+    assert result["status"] == "weather_correlated"
+    assert result["baseline_context"] == "cooling, very_hot"
+    assert result["baseline_fallback_level"] == "temperature_context"
+    assert result["baseline_sample_count"] == 3
+
+
+def test_weather_context_mild_day_can_be_above_contextual_range() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=62.0,
+        current_runtime_minutes=220.0,
+        current_duty_cycle_percent=75.0,
+        history=[
+            WeatherContextSample(
+                timestamp=datetime(2026, 6, day, tzinfo=UTC),
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for day, temperature, runtime, duty in (
+                (1, 61.0, 40.0, 12.0),
+                (2, 63.0, 45.0, 14.0),
+                (3, 62.0, 50.0, 16.0),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 17, 15, tzinfo=UTC),
+    )
+
+    assert result["status"] == "above_weather_adjusted_range"
+    assert result["baseline_context"] == "cooling, mild, summer"
+    assert result["baseline_fallback_level"] == "exact_context"
+    assert result["observed_runtime_minutes"] == 220.0
+    assert result["expected_runtime_p90_minutes"] == 50.0

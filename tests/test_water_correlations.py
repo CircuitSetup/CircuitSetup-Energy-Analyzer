@@ -25,6 +25,14 @@ def test_rain_explains_elevated_sump_runtime() -> None:
     assert evidence["expected_runtime_minutes"] > 6.0
     assert evidence["actual_minus_expected_minutes"] <= 0.0
     assert "rain" in evidence["contributing_factors"]
+    assert evidence["baseline_context"] == "raining"
+    assert evidence["baseline_fallback_level"] == "rain_adjusted_context"
+    assert evidence["baseline_sample_count"] == 18
+    assert evidence["contextual_status"] == "rain_explained"
+    assert evidence["rain_adjusted_baseline_minutes"] == (
+        evidence["expected_runtime_minutes"]
+    )
+    assert evidence["contextual_baseline_confidence"] == evidence["confidence"]
 
 
 def test_rain_and_compressor_together_explain_higher_sump_runtime() -> None:
@@ -65,6 +73,8 @@ def test_high_pump_runtime_after_adjustment_is_possible_issue() -> None:
     assert evidence["status"] == "possible_excess_pump_activity"
     assert evidence["actual_minus_expected_minutes"] > 0.0
     assert evidence["confidence"] >= 0.75
+    assert evidence["baseline_context"] == "raining, moderate"
+    assert evidence["baseline_fallback_level"] == "rain_adjusted_context"
 
 
 def test_flow_without_any_water_load_is_possible_leak_candidate() -> None:
@@ -87,6 +97,11 @@ def test_flow_without_any_water_load_is_possible_leak_candidate() -> None:
         "Water flow has been active for 14 minutes with no mapped water "
         "appliance activity."
     )
+    assert evidence["baseline_context"] == "active_flow"
+    assert evidence["baseline_fallback_level"] == "water_flow_context"
+    assert evidence["baseline_sample_count"] == 12
+    assert evidence["contextual_status"] == "possible_flow_without_load"
+    assert evidence["contextual_baseline_confidence"] == evidence["confidence"]
 
 
 def test_flow_correlation_is_unconfigured_when_appliance_does_not_expect_flow() -> None:
@@ -143,3 +158,5 @@ def test_water_heater_uses_recent_flow_instead_of_exact_overlap() -> None:
     )
     assert evidence["status"] == "normal"
     assert evidence["recent_flow_explains_activity"] is True
+    assert evidence["baseline_context"] == "recent_flow"
+    assert evidence["baseline_fallback_level"] == "water_flow_context"

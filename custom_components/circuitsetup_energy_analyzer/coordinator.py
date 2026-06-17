@@ -3142,6 +3142,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 if outdoor_temperature_reading is not None
                 else "°F"
             ),
+            observed_at=now,
         )
         if outdoor_temperature_reading is not None:
             evidence["temperature_source_entity"] = outdoor_entity
@@ -3708,6 +3709,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     temperature=temperature,
                     runtime_minutes=runtime,
                     duty_cycle_percent=duty,
+                    timestamp=sample_time,
                     energy_kwh=_float_or_none(raw_sample.get("energy_kwh")),
                     start_count=(
                         int(start_count)
