@@ -222,6 +222,10 @@ class AlertEvidence:
     repeated_count: int = 1
     first_seen: datetime | None = None
     last_seen: datetime | None = None
+    feedback_status: str | None = None
+    feedback_effect: str | None = None
+    feedback_expires_at: datetime | None = None
+    matching_feedback_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))

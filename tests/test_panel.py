@@ -28,6 +28,7 @@ def _alert(
     feature: str = "leg_imbalance",
     *,
     timestamp: datetime | None = None,
+    **overrides,
 ) -> AlertEvidence:
     timestamp = timestamp or datetime(2026, 6, 6, 9, 0, tzinfo=UTC)
     return AlertEvidence(
@@ -43,6 +44,7 @@ def _alert(
         first_seen=timestamp - timedelta(hours=1),
         last_seen=timestamp,
         features={feature: 2.1},
+        **overrides,
     )
 
 
@@ -116,6 +118,36 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
+
+
+def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    fingerprint = (
+        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
+    )
+    alert = _alert(
+        feedback_status="expected",
+        feedback_effect="Notifications suppressed for this expected pattern",
+        feedback_expires_at=datetime(2026, 9, 15, 12, 0, tzinfo=UTC),
+        matching_feedback_fingerprint=fingerprint,
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(alert)],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["alert"]["feedback_status"] == "expected"
+    assert payload["alert"]["feedback_effect"] == (
+        "Notifications suppressed for this expected pattern"
+    )
+    assert payload["alert"]["feedback_expires_at"] == (
+        "2026-09-15T12:00:00+00:00"
+    )
+    assert payload["alert"]["matching_feedback_fingerprint"] == fingerprint
 
 
 def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit() -> (

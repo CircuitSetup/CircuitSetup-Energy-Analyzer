@@ -7,7 +7,7 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Self
 
-from .models import AlertEvidence, Severity
+from .models import AlertEvidence, CircuitConfig, Severity
 from .ux import friendly_feature_name
 
 
@@ -99,3 +99,85 @@ class ConservativeAlertPolicy:
             return 0.0
 
         return (observed_value - baseline_value) / baseline_value
+
+
+def alert_feedback_fingerprint(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    """Return a stable key for matching repeated versions of alert evidence."""
+    parts = [alert.circuit_id, _alert_feature(alert)]
+    if alert.event_type is not None:
+        parts.append(f"event={alert.event_type.value}")
+    if config is not None:
+        source_roles = sorted({sensor.role.value for sensor in config.sensors})
+        if source_roles:
+            parts.append(f"sources={'+'.join(source_roles)}")
+        parts.extend(
+            (
+                f"profile={config.appliance_profile.value}",
+                f"mode={config.mode.value}",
+                f"power_flow={config.power_flow.value}",
+            )
+        )
+    parts.extend(
+        (
+            f"observed={_value_bucket(alert.observed_value)}",
+            f"baseline={_value_bucket(alert.baseline_value)}",
+            f"ratio={_ratio_bucket(alert.change_ratio)}",
+        )
+    )
+    if (temperature := _temperature_context_bucket(alert.features)) is not None:
+        parts.append(f"temp={temperature}")
+    return "|".join(parts)
+
+
+def _alert_feature(alert: AlertEvidence) -> str:
+    if alert.feature:
+        return alert.feature
+    if alert.event_type is not None:
+        return alert.event_type.value
+    return "alert"
+
+
+def _value_bucket(value: float) -> str:
+    step = 0.5
+    bucket_start = _floor_to_step(float(value), step)
+    bucket_end = bucket_start + step
+    return f"{bucket_start:.1f}-{bucket_end:.1f}"
+
+
+def _ratio_bucket(change_ratio: float) -> str:
+    percent = abs(float(change_ratio) * 100.0)
+    for bucket_start, bucket_end in (
+        (0, 10),
+        (10, 25),
+        (25, 50),
+        (50, 75),
+        (75, 100),
+        (100, 150),
+        (150, 200),
+    ):
+        if percent < bucket_end:
+            return f"{bucket_start}-{bucket_end}pct"
+    return "200pct-plus"
+
+
+def _temperature_context_bucket(features: Mapping[str, object]) -> str | None:
+    for key in (
+        "outdoor_temperature_f",
+        "current_outdoor_temperature_f",
+        "temperature_f",
+        "outdoor_temperature",
+        "current_outdoor_temperature",
+    ):
+        value = features.get(key)
+        if isinstance(value, int | float):
+            bucket_start = int(_floor_to_step(float(value), 5.0))
+            return f"{bucket_start}-{bucket_start + 5}f"
+    return None
+
+
+def _floor_to_step(value: float, step: float) -> float:
+    return (value // step) * step

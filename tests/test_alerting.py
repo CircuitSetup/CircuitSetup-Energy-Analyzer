@@ -5,9 +5,16 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.alerting import (
     ConservativeAlertPolicy,
     Observation,
+    alert_feedback_fingerprint,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    PowerFlowMode,
+    SensorRef,
+    SensorRole,
     Severity,
 )
 
@@ -142,3 +149,76 @@ def test_policy_preserves_custom_power_quality_evidence() -> None:
     assert alert.feature == "reactive_shift_under_stable_real_power"
     assert alert.features["reactive_power"] == 4.2
     assert alert.features["relationship_rms"] == 3.4
+
+
+def test_alert_feedback_fingerprint_is_stable_across_alert_timestamps() -> None:
+    first = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    repeated = AlertEvidence(
+        timestamp=datetime(2026, 6, 3, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue again",
+        feature="daily_energy_spike",
+        observed_value=2.64,
+        baseline_value=2.0,
+        change_ratio=0.32,
+    )
+
+    assert alert_feedback_fingerprint(first) == alert_feedback_fingerprint(repeated)
+
+
+def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+        features={"outdoor_temperature_f": 94.2},
+    )
+    cooler_context = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+        features={"outdoor_temperature_f": 61.0},
+    )
+
+    fingerprint = alert_feedback_fingerprint(alert, config=config)
+
+    assert fingerprint.startswith("fridge|daily_energy_spike|")
+    assert "sources=energy+real_power" in fingerprint
+    assert "profile=refrigerator" in fingerprint
+    assert "mode=single_phase" in fingerprint
+    assert "power_flow=load" in fingerprint
+    assert "observed=2.5-3.0" in fingerprint
+    assert "ratio=25-50pct" in fingerprint
+    assert "temp=90-95f" in fingerprint
+    assert fingerprint != alert_feedback_fingerprint(cooler_context, config=config)

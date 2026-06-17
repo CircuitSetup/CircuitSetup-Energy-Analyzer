@@ -1770,6 +1770,164 @@ def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_expected_alert_feedback_suppresses_matching_future_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    previous_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    repeated_alert = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue again",
+        feature="daily_energy_spike",
+        observed_value=2.64,
+        baseline_value=2.0,
+        change_ratio=0.32,
+    )
+    fingerprint = alert_feedback_fingerprint(previous_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+
+    _, active_alerts = await coordinator._apply_feature_result(
+        FeatureResult(alerts=[repeated_alert], notifications=[repeated_alert])
+    )
+
+    assert notifications == []
+    assert active_alerts == []
+    assert len(coordinator.store_data.alerts) == 1
+    stored_alert = coordinator.store_data.alerts[0]
+    assert stored_alert.feedback_status == "expected"
+    assert stored_alert.matching_feedback_fingerprint == fingerprint
+    assert stored_alert.feedback_effect == (
+        "Notifications suppressed for this expected pattern"
+    )
+
+
+@pytest.mark.asyncio
+async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    expected_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    unrelated_alert = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="standby_power",
+        observed_value=40.0,
+        baseline_value=10.0,
+        change_ratio=3.0,
+    )
+    fingerprint = alert_feedback_fingerprint(expected_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+
+    _, active_alerts = await coordinator._apply_feature_result(
+        FeatureResult(alerts=[unrelated_alert], notifications=[unrelated_alert])
+    )
+
+    assert active_alerts == [unrelated_alert]
+    assert notifications == [unrelated_alert]
+    assert coordinator.store_data.alerts == [unrelated_alert]
+
+
 def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         settings_advisor as advisor,
@@ -6007,7 +6165,10 @@ async def test_expected_alert_feedback_suppresses_repeated_notification(
 
 
 @pytest.mark.asyncio
-async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
+async def test_alert_feedback_methods_store_fingerprint_key() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -6036,12 +6197,17 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         is True
     )
 
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "action"
-    ] == "expected"
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "alert_id"
-    ] == notification_id_for_alert(alert)
+    fingerprint = alert_feedback_fingerprint(alert)
+    feedback = coordinator.store_data.alert_feedback[fingerprint]
+    assert feedback["fingerprint"] == fingerprint
+    assert feedback["status"] == "expected"
+    assert feedback["action"] == "expected"
+    assert feedback["alert_id"] == notification_id_for_alert(alert)
+    assert feedback["source_alert_id"] == notification_id_for_alert(alert)
+    assert feedback["circuit_id"] == "fridge"
+    assert feedback["feature"] == "reactive_power"
+    assert feedback["evidence_count"] == 1
+    assert feedback["expires_at"] == "2026-08-31T12:05:00+00:00"
 
     unhelpful_alert = AlertEvidence(
         timestamp=datetime(2026, 6, 2, 12, 1, tzinfo=UTC),
@@ -6062,9 +6228,13 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         is True
     )
 
-    assert coordinator.store_data.alert_feedback["fridge:power_factor"]["action"] == (
-        "unhelpful"
-    )
+    unhelpful_fingerprint = alert_feedback_fingerprint(unhelpful_alert)
+    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
+        "action"
+    ] == "unhelpful"
+    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
+        "expires_at"
+    ] == "2026-07-17T12:05:00+00:00"
 
 
 @pytest.mark.parametrize(
@@ -6079,6 +6249,9 @@ async def test_alert_feedback_methods_store_feedback_and_retire_visible_alert(
     method_name: str,
     feedback_action: str,
 ) -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -6108,12 +6281,11 @@ async def test_alert_feedback_methods_store_feedback_and_retire_visible_alert(
     result = await getattr(coordinator, method_name)(alert_id)
 
     assert result is True
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "action"
-    ] == feedback_action
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "alert_id"
-    ] == alert_id
+    fingerprint = alert_feedback_fingerprint(alert)
+    assert coordinator.store_data.alert_feedback[fingerprint]["action"] == (
+        feedback_action
+    )
+    assert coordinator.store_data.alert_feedback[fingerprint]["alert_id"] == alert_id
     assert [
         notification_id_for_alert(stored_alert)
         for stored_alert in coordinator.store_data.alerts

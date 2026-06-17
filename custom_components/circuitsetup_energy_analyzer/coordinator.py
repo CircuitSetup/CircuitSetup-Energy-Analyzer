@@ -19,7 +19,7 @@ from .activity_timeline import (
     timeline_payload,
 )
 from .aggregation import aggregate_dual_phase
-from .alerting import ConservativeAlertPolicy
+from .alerting import ConservativeAlertPolicy, alert_feedback_fingerprint
 from .balance import (
     DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
 )
@@ -241,6 +241,8 @@ ALERT_HISTORY_MAX_ITEMS = 500
 ALERT_HISTORY_MAX_AGE = timedelta(days=180)
 ALERT_FEEDBACK_MAX_ITEMS = 500
 ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
+ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
+ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
@@ -1280,7 +1282,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         for config, sample in samples:
             for nilm_alert in self._process_nilm_sample(config, sample, events):
-                alerts.append(nilm_alert)
+                nilm_alert = self._alert_with_feedback(nilm_alert)
+                if nilm_alert.feedback_status != "expected":
+                    alerts.append(nilm_alert)
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
@@ -1294,7 +1298,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             await self._sync_setup_health_repairs(config.circuit_id)
             water_context_alert = self._observe_water_context(config, now)
             if water_context_alert is not None:
-                alerts.append(water_context_alert)
+                water_context_alert = self._alert_with_feedback(water_context_alert)
+                if water_context_alert.feedback_status != "expected":
+                    alerts.append(water_context_alert)
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
@@ -5230,15 +5236,31 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if alert is None:
             return False
         now = self._now_fn()
-        self.store_data.alert_feedback[_alert_feedback_key(alert)] = {
+        fingerprint = _alert_feedback_key(
+            alert,
+            config=self._config_for_circuit(alert.circuit_id),
+        )
+        existing = self.store_data.alert_feedback.get(fingerprint, {})
+        evidence_count = (
+            _positive_int_value(existing.get("evidence_count"), default=0) + 1
+        )
+        expires_at = _alert_feedback_expires_at(action, now)
+        self.store_data.alert_feedback[fingerprint] = {
+            "fingerprint": fingerprint,
+            "status": action,
             "action": action,
+            "source_alert_id": alert_id,
             "alert_id": alert_id,
+            "decided_at": now.isoformat(),
             "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "last_seen": now.isoformat(),
             "circuit_id": alert.circuit_id,
             "feature": _alert_feature(alert),
             "change_ratio": alert.change_ratio,
             "observed_value": alert.observed_value,
             "baseline_value": alert.baseline_value,
+            "evidence_count": evidence_count,
         }
         self._retire_alert_id(alert_id)
         self._mark_store_dirty()
@@ -5283,8 +5305,42 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return None
 
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
-        feedback = self.store_data.alert_feedback.get(_alert_feedback_key(alert), {})
-        return feedback.get("action") in {"expected", "unhelpful"}
+        _fingerprint, feedback = self._alert_feedback_for(alert)
+        return _alert_feedback_status(feedback) in {"expected", "unhelpful"}
+
+    def _alert_feedback_for(
+        self: Self,
+        alert: AlertEvidence,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        candidates = (
+            _alert_feedback_key(
+                alert,
+                config=self._config_for_circuit(alert.circuit_id),
+            ),
+            _alert_feedback_key(alert),
+            _legacy_alert_feedback_key(alert),
+        )
+        for fingerprint in candidates:
+            feedback = self.store_data.alert_feedback.get(fingerprint)
+            if not isinstance(feedback, Mapping):
+                continue
+            if _alert_feedback_is_expired(feedback, self._now_fn()):
+                continue
+            return fingerprint, feedback
+        return None, {}
+
+    def _alert_with_feedback(self: Self, alert: AlertEvidence) -> AlertEvidence:
+        fingerprint, feedback = self._alert_feedback_for(alert)
+        status = _alert_feedback_status(feedback)
+        if fingerprint is None or status is None:
+            return alert
+        return replace(
+            alert,
+            feedback_status=status,
+            feedback_effect=_alert_feedback_effect(status),
+            feedback_expires_at=_mapping_datetime(feedback.get("expires_at")),
+            matching_feedback_fingerprint=fingerprint,
+        )
 
     def _nilm_signature_for_review(
         self: Self,
@@ -5307,17 +5363,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
+        stored_alerts = [self._alert_with_feedback(alert) for alert in result.alerts]
+        active_alerts = [
+            alert
+            for alert in stored_alerts
+            if alert.feedback_status != "expected"
+        ]
         if result.events:
             self.store_data.events.extend(result.events)
-        if result.alerts:
-            self.store_data.alerts.extend(result.alerts)
+        if stored_alerts:
+            self.store_data.alerts.extend(stored_alerts)
         for update in result.state_updates:
             _apply_state_update(self.state, update.path, update.value)
         for alert in result.notifications:
-            await self._notify_alert(alert)
-        if result.store_dirty or result.events or result.alerts:
+            await self._notify_alert(self._alert_with_feedback(alert))
+        if result.store_dirty or result.events or stored_alerts:
             self._mark_store_dirty()
-        return list(result.events), list(result.alerts)
+        return list(result.events), active_alerts
 
     async def _async_save_store(self: Self, now: datetime) -> None:
         if self._store is None or not self._store_dirty:
@@ -5444,7 +5506,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         retained = {
             key: value
             for key, value in self.store_data.alert_feedback.items()
-            if _mapping_time(value, "created_at", "timestamp") >= cutoff
+            if not _alert_feedback_is_expired(value, now)
+            and _mapping_time(value, "created_at", "timestamp") >= cutoff
         }
         self.store_data.alert_feedback = dict(
             sorted(
@@ -6008,8 +6071,62 @@ def _alert_feature(alert: AlertEvidence) -> str:
     return "alert"
 
 
-def _alert_feedback_key(alert: AlertEvidence) -> str:
+def _alert_feedback_key(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    return alert_feedback_fingerprint(alert, config=config)
+
+
+def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
     return f"{alert.circuit_id}:{_alert_feature(alert)}"
+
+
+def _alert_feedback_status(feedback: Mapping[str, Any]) -> str | None:
+    status = feedback.get("status") or feedback.get("action")
+    if not isinstance(status, str):
+        return None
+    normalized = status.strip().lower()
+    return normalized or None
+
+
+def _alert_feedback_effect(status: str) -> str:
+    if status == "expected":
+        return "Notifications suppressed for this expected pattern"
+    if status == "unhelpful":
+        return "Notifications suppressed for this not-helpful pattern"
+    return "Feedback recorded for this alert pattern"
+
+
+def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:
+    if action == "expected":
+        return now + ALERT_EXPECTED_FEEDBACK_TTL
+    if action == "unhelpful":
+        return now + ALERT_UNHELPFUL_FEEDBACK_TTL
+    return None
+
+
+def _alert_feedback_is_expired(
+    feedback: Mapping[str, Any],
+    now: datetime,
+) -> bool:
+    expires_at = _mapping_datetime(feedback.get("expires_at"))
+    if expires_at is None:
+        return False
+    return expires_at <= _datetime_with_matching_timezone(now, expires_at)
+
+
+def _mapping_datetime(value: Any) -> datetime | None:
+    return _datetime_or_none(value)
+
+
+def _datetime_with_matching_timezone(now: datetime, target: datetime) -> datetime:
+    if target.tzinfo is None and now.tzinfo is not None:
+        return now.replace(tzinfo=None)
+    if target.tzinfo is not None and now.tzinfo is None:
+        return now.replace(tzinfo=target.tzinfo)
+    return now
 
 
 def _normalized_temperature_unit(unit: str) -> str:
