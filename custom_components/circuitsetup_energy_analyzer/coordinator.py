@@ -3730,6 +3730,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         rain_active = self._binary_entity_active(rain_entity)
         rain_intensity = self._numeric_entity_value(rain_intensity_entity)
+        rain_intensity_unit = self._entity_unit_of_measurement(rain_intensity_entity)
         compressor_context = self._hvac_compressor_context()
         runtime_minutes = self._runtime_minutes_for_circuit(config.circuit_id)
         baseline = self._dry_weather_pump_baseline(config.circuit_id, now)
@@ -3740,8 +3741,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 pump_runtime_minutes=runtime_minutes,
                 dry_baseline_minutes=baseline["dry_baseline_minutes"],
                 comparable_window_count=baseline["comparable_window_count"],
-                rain_active=bool(rain_active),
+                rain_active=rain_active,
                 rain_intensity_per_hour=rain_intensity,
+                rain_intensity_unit=rain_intensity_unit,
                 compressor_runtime_minutes=compressor_context["runtime_minutes"],
                 compressor_duty_cycle_percent=compressor_context[
                     "duty_cycle_percent"
@@ -3758,6 +3760,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         evidence["rain_sensor_active"] = rain_active
         evidence["rain_intensity_entity"] = rain_intensity_entity
         evidence["rain_intensity_per_hour"] = rain_intensity
+        evidence["rain_intensity_unit"] = rain_intensity_unit
         evidence["rain_response_window_minutes"] = int(
             advanced_settings.get(
                 CONF_RAIN_RESPONSE_WINDOW_MINUTES,
@@ -3913,6 +3916,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         state = str(getattr(raw_state, "state", "")).strip()
         return _float_or_none(state)
 
+    def _entity_unit_of_measurement(self: Self, entity_id: str | None) -> str | None:
+        if not entity_id:
+            return None
+        raw_state = self._raw_state_for_entity(entity_id)
+        if raw_state is None:
+            return None
+        attributes = getattr(raw_state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            return None
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        return unit or None
+
     def _max_flow_active_minutes(
         self: Self,
         entity_ids: Iterable[str],
@@ -4013,7 +4028,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._ha_time_zone(),
             ) >= _ha_local_date(now, self._ha_time_zone()):
                 continue
-            if sample.get("rain_active") is True:
+            if not _water_context_history_sample_is_dry(sample):
                 continue
             if _float_or_none(sample.get("compressor_runtime_minutes")) not in (
                 None,
@@ -4060,6 +4075,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 "hvac_compressor_runtime_minutes"
             ),
         }
+        for key in (
+            "rain_state",
+            "rain_intensity_mm_per_hour",
+            "rain_intensity_bin",
+            "rain_context_issues",
+        ):
+            if key in rain_evidence:
+                sample[key] = rain_evidence[key]
         history = self.store_data.water_context_history_by_circuit.setdefault(
             circuit_id,
             [],
@@ -6664,6 +6687,21 @@ def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
     if time_zone is None or value.tzinfo is None:
         return value.date()
     return local_date(value, time_zone)
+
+
+def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
+    raw_issues = sample.get("rain_context_issues")
+    if isinstance(raw_issues, str) and raw_issues.strip():
+        return False
+    if isinstance(raw_issues, (list, tuple, set)) and raw_issues:
+        return False
+    intensity = _float_or_none(sample.get("rain_intensity_mm_per_hour"))
+    if intensity is not None and intensity > 0.0:
+        return False
+    rain_state = str(sample.get("rain_state") or "").strip().lower()
+    if rain_state:
+        return rain_state == "dry"
+    return sample.get("rain_active") is False
 
 
 def _observation_within_cutoff(

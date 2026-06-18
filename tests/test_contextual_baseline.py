@@ -84,6 +84,10 @@ def test_context_bucket_helpers() -> None:
     assert rain_intensity_bin(0.9) == "heavy"
     assert rain_state(False, None) == "dry"
     assert rain_state(True, 0.9) == "heavy_rain"
+    assert rain_state(None, 0.4) == "raining"
+    assert rain_state(None, 0.9) == "heavy_rain"
+    assert rain_state(False, 0.4) == "ambiguous"
+    assert rain_state(False, 0.0) == "dry"
     assert water_flow_state(True, 12.0) == "active_flow"
     assert water_flow_state(False, 3.0) == "recent_flow"
     assert water_flow_state(False, 0.0) == "no_flow"
@@ -278,6 +282,82 @@ def test_build_context_for_sample_accepts_rollup_calendar_timestamp() -> None:
     assert values["season"] == "spring"
     assert values["day_type"] == "weekend"
     assert values["time_of_day"] == "evening"
+
+
+def test_build_context_for_sample_carries_rain_context_issue() -> None:
+    now = datetime(2026, 6, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "rain_intensity_mm_per_hour": 0.35,
+                "rain_context_issues": ["rain_activity_conflict"],
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict() == {
+        "appliance_profile": "sump_pump",
+        "circuit_mode": "single_phase",
+        "rain_context_issue": "rain_activity_conflict",
+        "rain_intensity_bin": "moderate",
+        "rain_state": "ambiguous",
+        "season": "summer",
+    }
+
+
+def test_build_context_preserves_raw_rain_conflict_when_unit_unknown() -> None:
+    now = datetime(2026, 6, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "rain_intensity_per_hour": 0.35,
+                "rain_intensity_unit": None,
+                "rain_intensity_mm_per_hour": None,
+                "rain_context_issues": ["rain_intensity_unit_missing"],
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict() == {
+        "appliance_profile": "sump_pump",
+        "circuit_mode": "single_phase",
+        "rain_context_issue": "rain_activity_conflict",
+        "rain_intensity_bin": "unknown",
+        "rain_state": "unknown",
+        "season": "summer",
+    }
 
 
 def test_upsert_contextual_sample_replaces_same_ha_local_date() -> None:

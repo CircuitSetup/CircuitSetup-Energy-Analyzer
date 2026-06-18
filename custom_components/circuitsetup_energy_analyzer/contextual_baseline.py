@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from math import isfinite
 from typing import Any
 
 from .baseline import build_baseline
@@ -21,6 +22,11 @@ FALLBACK_SPECIFICITY_WEIGHT = {
 }
 
 DAILY_ENERGY_FEATURE = "daily_energy_kwh"
+DEFAULT_RAIN_INTENSITY_UNIT = "mm/h"
+RAIN_ACTIVITY_CONFLICT = "rain_activity_conflict"
+RAIN_INTENSITY_UNIT_MISSING = "rain_intensity_unit_missing"
+RAIN_INTENSITY_UNIT_UNSUPPORTED = "rain_intensity_unit_unsupported"
+RAIN_INTENSITY_INVALID = "rain_intensity_invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +121,14 @@ class ContextualBaselineStats:
     fallback_level: str = "exact_context"
 
 
+@dataclass(frozen=True, slots=True)
+class RainContext:
+    state: str
+    intensity_bin: str
+    intensity_mm_per_hour: float | None
+    issues: tuple[str, ...] = ()
+
+
 def season_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
     """Return Northern Hemisphere meteorological season."""
     month = _calendar_datetime(dt, time_zone).month
@@ -177,7 +191,102 @@ def weather_mode_for_temperature(temperature_f: float | None) -> str:
     return "neutral"
 
 
-def rain_intensity_bin(intensity_per_hour: float | None) -> str:
+def normalize_rain_intensity_per_hour(
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> tuple[float | None, tuple[str, ...]]:
+    if intensity_per_hour is None:
+        return None, ()
+    intensity = _float_or_none(intensity_per_hour)
+    if intensity is None or not isfinite(intensity):
+        return None, (RAIN_INTENSITY_INVALID,)
+    intensity = max(float(intensity), 0.0)
+    if intensity == 0.0:
+        return 0.0, ()
+    normalized_unit = _normalize_rain_intensity_unit(unit)
+    if normalized_unit is None:
+        return None, (RAIN_INTENSITY_UNIT_MISSING,)
+    if normalized_unit == DEFAULT_RAIN_INTENSITY_UNIT:
+        return intensity, ()
+    if normalized_unit == "in/h":
+        return intensity * 25.4, ()
+    return None, (RAIN_INTENSITY_UNIT_UNSUPPORTED,)
+
+
+def rain_intensity_bin(
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> str:
+    intensity, _issues = normalize_rain_intensity_per_hour(
+        intensity_per_hour,
+        unit=unit,
+    )
+    return _rain_intensity_bin_from_mm(intensity)
+
+
+def rain_state(
+    active: bool | None,
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> str:
+    return rain_context(active, intensity_per_hour, unit=unit).state
+
+
+def rain_context(
+    active: bool | None,
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> RainContext:
+    intensity, issues = normalize_rain_intensity_per_hour(
+        intensity_per_hour,
+        unit=unit,
+    )
+    raw_intensity = _float_or_none(intensity_per_hour)
+    raw_positive = (
+        raw_intensity is not None
+        and isfinite(raw_intensity)
+        and float(raw_intensity) > 0.0
+    )
+    active_state = _bool_or_none(active)
+    intensity_bin = _rain_intensity_bin_from_mm(intensity)
+    context_issues = list(issues)
+
+    if active_state is None:
+        if intensity is None:
+            state = "unknown" if raw_positive or raw_intensity is None else "dry"
+        elif intensity > 0.0:
+            state = _rain_state_from_intensity_bin(intensity_bin)
+        else:
+            state = "dry"
+    elif active_state is False:
+        if raw_positive:
+            context_issues.append(RAIN_ACTIVITY_CONFLICT)
+            state = (
+                "ambiguous"
+                if intensity is not None and intensity > 0.0
+                else "unknown"
+            )
+        else:
+            state = "dry"
+    elif intensity is not None and intensity == 0.0:
+        context_issues.append(RAIN_ACTIVITY_CONFLICT)
+        state = "raining"
+    else:
+        state = _rain_state_from_intensity_bin(intensity_bin)
+
+    return RainContext(
+        state=state,
+        intensity_bin=intensity_bin,
+        intensity_mm_per_hour=intensity,
+        issues=_unique_issue_tuple(context_issues),
+    )
+
+
+def _rain_intensity_bin_from_mm(intensity_per_hour: float | None) -> str:
     if intensity_per_hour is None:
         return "unknown"
     intensity = max(float(intensity_per_hour), 0.0)
@@ -190,14 +299,8 @@ def rain_intensity_bin(intensity_per_hour: float | None) -> str:
     return "heavy"
 
 
-def rain_state(active: bool | None, intensity_per_hour: float | None) -> str:
-    if active is None and intensity_per_hour is None:
-        return "unknown"
-    if not active:
-        return "dry"
-    if rain_intensity_bin(intensity_per_hour) == "heavy":
-        return "heavy_rain"
-    return "raining"
+def _rain_state_from_intensity_bin(intensity_bin: str) -> str:
+    return "heavy_rain" if intensity_bin == "heavy" else "raining"
 
 
 def water_flow_state(active: bool | None, active_minutes: float | None) -> str:
@@ -380,10 +483,15 @@ def build_context_for_sample(
         circuit_id,
     )
     rain_active = _bool_or_none(rain.get("rain_sensor_active"))
-    rain_intensity = _float_or_none(rain.get("rain_intensity_per_hour"))
-    if rain_active is not None or rain_intensity is not None:
-        values["rain_state"] = rain_state(rain_active, rain_intensity)
-        values["rain_intensity_bin"] = rain_intensity_bin(rain_intensity)
+    rain_intensity, rain_unit = _rain_intensity_for_context(rain)
+    rain_issues = _rain_issues_for_context(rain)
+    if rain_active is not None or rain_intensity is not None or rain_issues:
+        rain_info = rain_context(rain_active, rain_intensity, unit=rain_unit)
+        issues = _unique_issue_tuple((*rain_issues, *rain_info.issues))
+        values["rain_state"] = rain_info.state
+        values["rain_intensity_bin"] = rain_info.intensity_bin
+        if issues:
+            values["rain_context_issue"] = _primary_rain_issue(issues)
 
     water = _mapping_for(
         getattr(state, "water_flow_context_by_circuit", {}),
@@ -556,7 +664,14 @@ def _filter_context_for_profile(
         ApplianceProfile.WATER_PUMP,
         ApplianceProfile.WELL_PUMP,
     }:
-        allowed.update({"rain_intensity_bin", "rain_state", "water_flow_state"})
+        allowed.update(
+            {
+                "rain_context_issue",
+                "rain_intensity_bin",
+                "rain_state",
+                "water_flow_state",
+            }
+        )
     elif profile is ApplianceProfile.WATER_HEATER:
         allowed.update({"day_type", "time_of_day", "water_flow_state"})
     elif profile in {ApplianceProfile.EV_CHARGER, ApplianceProfile.POOL_PUMP}:
@@ -618,6 +733,72 @@ def _normalize_weather_mode(value: Any, temperature: float | None) -> str:
     if normalized in {"heating", "cooling", "neutral"}:
         return normalized
     return weather_mode_for_temperature(temperature)
+
+
+def _rain_intensity_for_context(
+    rain: Mapping[str, Any],
+) -> tuple[float | None, str | None]:
+    normalized_intensity = _float_or_none(rain.get("rain_intensity_mm_per_hour"))
+    if normalized_intensity is not None:
+        return normalized_intensity, DEFAULT_RAIN_INTENSITY_UNIT
+    return _float_or_none(rain.get("rain_intensity_per_hour")), rain.get(
+        "rain_intensity_unit",
+        DEFAULT_RAIN_INTENSITY_UNIT,
+    )
+
+
+def _rain_issues_for_context(rain: Mapping[str, Any]) -> tuple[str, ...]:
+    raw_issues = rain.get("rain_context_issues")
+    if isinstance(raw_issues, str):
+        return _unique_issue_tuple([raw_issues])
+    if not isinstance(raw_issues, Sequence):
+        return ()
+    return _unique_issue_tuple(str(issue) for issue in raw_issues if issue)
+
+
+def _normalize_rain_intensity_unit(unit: str | None) -> str | None:
+    if unit is None:
+        return None
+    normalized = str(unit).strip().lower()
+    if not normalized:
+        return None
+    compact = normalized.replace(" ", "")
+    if compact in {
+        "mm/h",
+        "mm/hr",
+        "mmperhour",
+        "millimeter/hour",
+        "millimeters/hour",
+        "millimeterperhour",
+        "millimetersperhour",
+    }:
+        return DEFAULT_RAIN_INTENSITY_UNIT
+    if compact in {
+        "in/h",
+        "in/hr",
+        "inperhour",
+        "inch/hour",
+        "inches/hour",
+        "inchperhour",
+        "inchesperhour",
+    }:
+        return "in/h"
+    return compact
+
+
+def _unique_issue_tuple(issues: Iterable[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    for issue in issues:
+        normalized = _normalize_token(issue)
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return tuple(values)
+
+
+def _primary_rain_issue(issues: Sequence[str]) -> str:
+    if RAIN_ACTIVITY_CONFLICT in issues:
+        return RAIN_ACTIVITY_CONFLICT
+    return str(issues[0])
 
 
 def _normalize_token(value: Any) -> str:

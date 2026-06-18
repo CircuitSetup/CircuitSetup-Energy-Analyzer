@@ -289,8 +289,148 @@ def test_coordinator_refreshes_rain_pump_context_from_rain_and_hvac() -> None:
 
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["status"] == "weather_explained"
-    assert evidence["expected_runtime_minutes"] >= 27.0
+    assert evidence["expected_runtime_minutes"] == pytest.approx(26.8)
     assert evidence["hvac_compressor_runtime_minutes"] == 32.0
+
+
+def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str) -> Any:
+            values = {
+                "binary_sensor.rain": ("on", {}),
+                "sensor.precipitation_rate": (
+                    "0.02",
+                    {"unit_of_measurement": "in/h"},
+                ),
+            }
+            value = values.get(entity_id)
+            if value is None:
+                return None
+            state, attributes = value
+            return SimpleNamespace(
+                state=state,
+                attributes=attributes,
+                last_changed=now,
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), config=SimpleNamespace()),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain",
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.precipitation_rate",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (
+                            now - timedelta(days=index + 1)
+                        ).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 18 * 60
+
+    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_intensity_per_hour"] == 0.02
+    assert evidence["rain_intensity_unit"] == "in/h"
+    assert evidence["rain_intensity_mm_per_hour"] == pytest.approx(0.508)
+    assert evidence["rain_intensity_bin"] == "heavy"
+    assert evidence["baseline_context"] == "heavy_rain, heavy"
+    assert evidence["rain_context_issues"] == []
+
+
+def test_coordinator_marks_positive_rain_intensity_with_missing_unit_unknown() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str) -> Any:
+            if entity_id != "sensor.precipitation_rate":
+                return None
+            return SimpleNamespace(
+                state="0.35",
+                attributes={},
+                last_changed=now,
+                last_updated=now,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), config=SimpleNamespace()),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.precipitation_rate",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (
+                            now - timedelta(days=index + 1)
+                        ).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 7 * 60
+
+    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_sensor_active"] is None
+    assert evidence["rain_intensity_per_hour"] == 0.35
+    assert evidence["rain_intensity_unit"] is None
+    assert evidence["rain_intensity_mm_per_hour"] is None
+    assert evidence["rain_intensity_bin"] == "unknown"
+    assert evidence["baseline_context"] == "unknown"
+    assert evidence["baseline_fallback_level"] == "unknown_rain_context"
+    assert evidence["rain_context_issues"] == ["rain_intensity_unit_missing"]
 
 
 def test_coordinator_refreshes_water_flow_context_for_flow_without_load() -> None:
@@ -3137,6 +3277,111 @@ def test_dry_weather_pump_baseline_excludes_same_ha_local_day_samples() -> None:
 
     assert baseline["dry_baseline_minutes"] is None
     assert baseline["comparable_window_count"] == 0
+
+
+def test_dry_weather_pump_baseline_excludes_intensity_derived_rain_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": "2026-06-07T12:00:00+00:00",
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    },
+                    {
+                        "timestamp": "2026-06-08T12:00:00+00:00",
+                        "pump_runtime_minutes": 8.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    },
+                    {
+                        "timestamp": "2026-06-09T12:00:00+00:00",
+                        "pump_runtime_minutes": 60.0,
+                        "rain_active": None,
+                        "rain_state": "raining",
+                        "rain_intensity_mm_per_hour": 0.35,
+                        "rain_context_issues": [],
+                        "compressor_runtime_minutes": 0.0,
+                    },
+                    {
+                        "timestamp": "2026-06-06T12:00:00+00:00",
+                        "pump_runtime_minutes": 50.0,
+                        "rain_active": False,
+                        "rain_state": "dry",
+                        "rain_intensity_mm_per_hour": 0.35,
+                        "rain_context_issues": [],
+                        "compressor_runtime_minutes": 0.0,
+                    },
+                    {
+                        "timestamp": "2026-06-05T12:00:00+00:00",
+                        "pump_runtime_minutes": 40.0,
+                        "rain_active": False,
+                        "rain_state": "dry",
+                        "rain_intensity_mm_per_hour": None,
+                        "rain_context_issues": ["rain_activity_conflict"],
+                        "compressor_runtime_minutes": 0.0,
+                    },
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    baseline = coordinator._dry_weather_pump_baseline("sump_pump", now)
+
+    assert baseline["dry_baseline_minutes"] == 7.0
+    assert baseline["comparable_window_count"] == 2
+
+
+def test_append_water_context_history_preserves_derived_rain_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    coordinator.state.rain_pump_context_by_circuit["sump_pump"] = {
+        "status": "rain_explained",
+        "pump_runtime_minutes": 18.0,
+        "rain_sensor_active": None,
+        "rain_state": "raining",
+        "rain_intensity_mm_per_hour": 0.35,
+        "rain_intensity_bin": "moderate",
+        "rain_context_issues": [],
+        "hvac_compressor_runtime_minutes": 0.0,
+    }
+
+    changed = coordinator._append_water_context_history("sump_pump", now)
+
+    assert changed is True
+    assert coordinator.store_data.water_context_history_by_circuit["sump_pump"] == [
+        {
+            "timestamp": "2026-06-10T12:00:00+00:00",
+            "rain_status": "rain_explained",
+            "flow_status": None,
+            "pump_runtime_minutes": 18.0,
+            "flow_active_minutes": None,
+            "mismatch_minutes": None,
+            "rain_active": None,
+            "compressor_runtime_minutes": 0.0,
+            "rain_state": "raining",
+            "rain_intensity_mm_per_hour": 0.35,
+            "rain_intensity_bin": "moderate",
+            "rain_context_issues": [],
+        }
+    ]
 
 
 def test_append_water_context_history_replaces_same_ha_local_day() -> None:

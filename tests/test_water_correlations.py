@@ -55,6 +55,54 @@ def test_rain_and_compressor_together_explain_higher_sump_runtime() -> None:
     assert evidence["compressor_adjustment_minutes"] > 0.0
 
 
+def test_positive_rain_intensity_explains_pump_runtime_without_binary_sensor() -> None:
+    evidence = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=18.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=None,
+            rain_intensity_per_hour=0.35,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+
+    assert evidence["status"] == "rain_explained"
+    assert "rain" in evidence["contributing_factors"]
+    assert "rain_intensity" in evidence["contributing_factors"]
+    assert evidence["baseline_context"] == "raining, moderate"
+    assert evidence["baseline_fallback_level"] == "rain_adjusted_context"
+    assert evidence["rain_context_issues"] == []
+
+
+def test_conflicting_rain_sensor_and_intensity_records_context_issue() -> None:
+    evidence = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=7.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=False,
+            rain_intensity_per_hour=0.35,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+
+    assert evidence["status"] == "normal"
+    assert evidence["rain_adjustment_minutes"] == 0.0
+    assert "rain" not in evidence["contributing_factors"]
+    assert evidence["baseline_context"] == "ambiguous, moderate"
+    assert evidence["baseline_fallback_level"] == "ambiguous_rain_context"
+    assert evidence["rain_context_issues"] == ["rain_activity_conflict"]
+
+
 def test_high_pump_runtime_after_adjustment_is_possible_issue() -> None:
     evidence = evaluate_rain_pump_correlation(
         RainPumpCorrelationInput(
