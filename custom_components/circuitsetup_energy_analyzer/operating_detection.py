@@ -486,7 +486,6 @@ class OperatingStateMachine:
                 return self._result("initial_running_without_event")
             self._state = OperatingState.PENDING_ON
             self._stable_state = OperatingState.UNKNOWN
-            self._state_since = sample.timestamp
             self._candidate_since = sample.timestamp
             self._transition_reason = "initial_above_on_threshold"
             return self._result(self._transition_reason)
@@ -508,7 +507,6 @@ class OperatingStateMachine:
         if watts >= self._profile.on_threshold_w:
             if self._state is not OperatingState.PENDING_ON:
                 self._state = OperatingState.PENDING_ON
-                self._state_since = sample.timestamp
                 self._candidate_since = sample.timestamp
                 self._transition_reason = "pending_on"
                 return self._result(self._transition_reason)
@@ -551,7 +549,6 @@ class OperatingStateMachine:
         if watts <= self._profile.off_threshold_w:
             if self._state is not OperatingState.PENDING_OFF:
                 self._state = OperatingState.PENDING_OFF
-                self._state_since = sample.timestamp
                 self._candidate_since = sample.timestamp
                 self._transition_reason = "pending_off"
                 return self._result(self._transition_reason)
@@ -559,16 +556,19 @@ class OperatingStateMachine:
                 sample.timestamp - self._candidate_since
             ).total_seconds() >= self._profile.off_dwell_seconds:
                 event_timestamp = self._candidate_since
+                run_started_at = self._run_started_at
                 features = _power_features(
                     sample,
                     "stop_power_w",
                     self._last_on_power_w or watts,
                 )
-                if self._run_started_at is not None and event_timestamp is not None:
+                if run_started_at is not None and event_timestamp is not None:
                     features["run_duration_s"] = (
-                        event_timestamp - self._run_started_at
+                        event_timestamp - run_started_at
                     ).total_seconds()
                 self._set_off(sample.timestamp)
+                if run_started_at is None:
+                    return self._result("unknown_start_ended")
                 return OperatingDetectionResult(
                     snapshot=self._snapshot("confirmed_stop"),
                     events=(
@@ -584,7 +584,6 @@ class OperatingStateMachine:
 
         self._state = OperatingState.RUNNING
         self._stable_state = OperatingState.RUNNING
-        self._state_since = sample.timestamp
         self._candidate_since = None
         self._transition_reason = (
             "pending_off_cancelled"
@@ -611,7 +610,6 @@ class OperatingStateMachine:
             self._state = OperatingState.PENDING_ON
             self._stable_state = OperatingState.UNKNOWN
             self._candidate_since = self._candidate_since or sample.timestamp
-            self._state_since = self._candidate_since
             self._transition_reason = "initial_above_on_threshold"
             return self._result(self._transition_reason)
 
@@ -660,15 +658,16 @@ class OperatingStateMachine:
 
     def _reset_pending_state(self, timestamp: datetime) -> None:
         if self._state is OperatingState.PENDING_ON:
-            self._state = OperatingState.OFF
-            self._stable_state = OperatingState.OFF
-            self._state_since = timestamp
+            self._state = (
+                OperatingState.OFF
+                if self._stable_state is OperatingState.OFF
+                else self._stable_state
+            )
             self._candidate_since = None
             self._transition_reason = "pending_on_reset_after_gap"
         elif self._state is OperatingState.PENDING_OFF:
             self._state = OperatingState.RUNNING
             self._stable_state = OperatingState.RUNNING
-            self._state_since = timestamp
             self._candidate_since = None
             self._transition_reason = "pending_off_reset_after_gap"
 
@@ -711,8 +710,10 @@ class OperatingStateMachine:
         reason: str,
     ) -> OperatingDetectionResult:
         self._state = OperatingState.OFF
+        previous_stable_state = self._stable_state
         self._stable_state = OperatingState.OFF
-        self._state_since = sample.timestamp
+        if previous_stable_state is not OperatingState.OFF or self._state_since is None:
+            self._state_since = sample.timestamp
         self._candidate_since = None
         self._transition_reason = reason
         if sample.voltage is not None:

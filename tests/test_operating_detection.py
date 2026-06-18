@@ -34,6 +34,38 @@ def _sample(
     )
 
 
+def _machine(
+    *,
+    on_dwell_seconds: float = 10.0,
+    off_dwell_seconds: float = 20.0,
+    max_sample_gap_seconds: float = 600.0,
+    appliance_profile: ApplianceProfile = ApplianceProfile.REFRIGERATOR,
+    circuit_mode: CircuitMode = CircuitMode.SINGLE_PHASE,
+):
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingDetectionProfile,
+        OperatingStateMachine,
+        OperatingThresholdSource,
+        ResolvedOperatingDetection,
+    )
+
+    return OperatingStateMachine(
+        ResolvedOperatingDetection(
+            profile=OperatingDetectionProfile(
+                on_threshold_w=25.0,
+                off_threshold_w=10.0,
+                on_dwell_seconds=on_dwell_seconds,
+                off_dwell_seconds=off_dwell_seconds,
+                merge_gap_seconds=60.0,
+                max_sample_gap_seconds=max_sample_gap_seconds,
+            ),
+            source=OperatingThresholdSource.PROFILE_DEFAULT,
+            appliance_profile=appliance_profile,
+            circuit_mode=circuit_mode,
+        )
+    )
+
+
 def test_resolve_operating_detection_profiles_are_valid() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         resolve_operating_detection,
@@ -254,6 +286,117 @@ def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
     assert [event.event_type for event in confirmed.events] == [EventType.STOP]
     assert confirmed.snapshot.state is OperatingState.OFF
     assert confirmed.snapshot.stable_state is OperatingState.OFF
+
+
+def test_operating_state_machine_continued_running_preserves_state_since() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine()
+
+    machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    confirmed = machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    continued = machine.process(_sample(60, 44.0, circuit_id="fridge"))
+
+    assert confirmed.snapshot.state is OperatingState.RUNNING
+    assert continued.snapshot.state is OperatingState.RUNNING
+    assert continued.snapshot.state_since == confirmed.snapshot.state_since
+    assert continued.snapshot.last_sample_at == _sample(60, 44.0).timestamp
+
+
+def test_operating_state_machine_continued_off_preserves_state_since() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine()
+
+    first = machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    continued = machine.process(_sample(60, 6.0, circuit_id="fridge"))
+
+    assert first.snapshot.state is OperatingState.OFF
+    assert continued.snapshot.state is OperatingState.OFF
+    assert continued.snapshot.state_since == first.snapshot.state_since
+    assert continued.snapshot.last_sample_at == _sample(60, 6.0).timestamp
+
+
+def test_operating_state_machine_cancelled_pending_on_preserves_off_start() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine()
+
+    off = machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    pending = machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    cancelled = machine.process(_sample(9, 6.0, circuit_id="fridge"))
+
+    assert pending.snapshot.state is OperatingState.PENDING_ON
+    assert pending.snapshot.candidate_since == _sample(5, 40.0).timestamp
+    assert cancelled.snapshot.state is OperatingState.OFF
+    assert cancelled.snapshot.candidate_since is None
+    assert cancelled.snapshot.state_since == off.snapshot.state_since
+
+
+def test_operating_state_machine_cancelled_pending_off_preserves_running_start(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine()
+
+    machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    running = machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    pending = machine.process(_sample(20, 8.0, circuit_id="fridge"))
+    cancelled = machine.process(_sample(25, 35.0, circuit_id="fridge"))
+
+    assert pending.snapshot.state is OperatingState.PENDING_OFF
+    assert pending.snapshot.candidate_since == _sample(20, 8.0).timestamp
+    assert cancelled.snapshot.state is OperatingState.RUNNING
+    assert cancelled.snapshot.candidate_since is None
+    assert cancelled.snapshot.state_since == running.snapshot.state_since
+
+
+def test_operating_state_machine_long_gap_pending_reset_preserves_stable_since(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine(max_sample_gap_seconds=30.0)
+
+    off = machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    pending = machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    reset = machine.process(_sample(40, 6.0, circuit_id="fridge"))
+
+    assert pending.snapshot.state is OperatingState.PENDING_ON
+    assert reset.snapshot.state is OperatingState.OFF
+    assert reset.snapshot.candidate_since is None
+    assert reset.snapshot.state_since == off.snapshot.state_since
+
+
+def test_operating_state_machine_unknown_start_stop_does_not_emit_orphan_stop(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingState,
+    )
+
+    machine = _machine()
+
+    machine.process(_sample(0, 40.0, circuit_id="fridge"))
+    initial_running = machine.process(_sample(12, 42.0, circuit_id="fridge"))
+    pending_stop = machine.process(_sample(20, 8.0, circuit_id="fridge"))
+    stopped = machine.process(_sample(41, 6.0, circuit_id="fridge"))
+
+    assert initial_running.events == ()
+    assert initial_running.snapshot.state is OperatingState.RUNNING
+    assert pending_stop.snapshot.state is OperatingState.PENDING_OFF
+    assert stopped.events == ()
+    assert stopped.snapshot.state is OperatingState.OFF
 
 
 def test_operating_state_machine_does_not_emit_false_start_on_initial_high_power(
