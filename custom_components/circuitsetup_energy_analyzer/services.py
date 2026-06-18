@@ -495,29 +495,43 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_UNDO_SETTING_RECOMMENDATION:
         recommendation_id = _service_recommendation_id(hass, data)
+        handled = False
         for coordinator in _target_recommendation_coordinators(
             hass,
             recommendation_id,
             data.get(ATTR_ENTRY_ID),
         ):
-            await _call_if_present(
+            result = await _call_if_present(
                 coordinator,
                 "async_undo_setting_recommendation",
                 recommendation_id,
+            )
+            handled = handled or result is True
+        if not handled:
+            raise HomeAssistantError(
+                f"Recommendation '{recommendation_id}' could not be changed. "
+                "Refresh the evidence panel and try again."
             )
         return
 
     if service == SERVICE_RESET_SETTING_RECOMMENDATION:
         recommendation_id = _service_recommendation_id(hass, data)
+        handled = False
         for coordinator in _target_recommendation_coordinators(
             hass,
             recommendation_id,
             data.get(ATTR_ENTRY_ID),
         ):
-            await _call_if_present(
+            result = await _call_if_present(
                 coordinator,
                 "async_reset_setting_recommendation",
                 recommendation_id,
+            )
+            handled = handled or result is True
+        if not handled:
+            raise HomeAssistantError(
+                f"Recommendation '{recommendation_id}' could not be changed. "
+                "Refresh the evidence panel and try again."
             )
         return
 

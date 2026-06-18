@@ -1645,7 +1645,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_undo_setting_recommendation(
         self: Self,
         recommendation_id: str,
-    ) -> None:
+    ) -> bool:
         """Restore the value recorded before an applied recommendation."""
         recommendation = self.store_data.settings_recommendations.get(
             recommendation_id,
@@ -1654,7 +1654,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             recommendation is None
             or recommendation.status is not RecommendationStatus.APPLIED
         ):
-            return
+            return False
 
         self._set_recommendation_setting_value(
             recommendation.circuit_id,
@@ -1672,17 +1672,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
+        return True
 
     async def async_reset_setting_recommendation(
         self: Self,
         recommendation_id: str,
-    ) -> None:
+    ) -> bool:
         """Reset a recommendation-backed setting to its built-in default."""
         recommendation = self.store_data.settings_recommendations.get(
             recommendation_id,
         )
         if recommendation is None:
-            return
+            return False
 
         default_value = recommendation_setting_default_value(
             recommendation.setting_key,
@@ -1703,6 +1704,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
+        return True
 
     def _set_recommendation_setting_value(
         self: Self,
