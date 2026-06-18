@@ -432,6 +432,12 @@ Configure this from:
 
 Use the energy-usage settings to adjust the comparison window and spike threshold without editing YAML.
 
+### Seasonal and contextual baselines
+
+Some appliances behave differently depending on weather, season, time of day, rain, water use, and solar production. The analyzer keeps compact contextual samples and compares a circuit with the most relevant learned baseline when enough similar history exists. If there is not enough matching context yet, it falls back to the existing broader rolling baseline.
+
+This helps avoid noisy alerts when context explains the usage, such as HVAC energy on very hot summer afternoons, while still preserving conservative possible-issue evidence when behavior is unusual for the current context.
+
 ### Daily energy goals
 
 Daily goals add a notification layer around a kWh target. Use Home Assistant's Energy Dashboard for normal energy charts; use this feature when you want per-circuit goal evidence.

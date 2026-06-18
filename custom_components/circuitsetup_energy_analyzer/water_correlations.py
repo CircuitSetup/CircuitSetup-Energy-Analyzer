@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .contextual_baseline import (
+    rain_intensity_bin,
+    rain_state,
+    water_flow_state,
+)
+
 SUPPORTED_RAIN_PUMP_PROFILES = {"sump_pump", "water_pump", "well_pump"}
 SUPPORTED_FLOW_PROFILES = {
     "water_pump",
@@ -273,6 +279,7 @@ def _rain_result(
         "contributing_factors": contributing_factors or ["baseline"],
         "confidence": round(float(confidence), 2),
     }
+    result.update(_rain_context_attributes(inputs, result))
     result["friendly_summary"] = _rain_summary(result)
     return result
 
@@ -290,7 +297,7 @@ def _flow_result(
     friendly_summary: str,
     confidence: float,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "status": status,
         "circuit_id": inputs.circuit_id,
         "appliance_profile": _normalize_profile(inputs.appliance_profile),
@@ -300,10 +307,61 @@ def _flow_result(
             recent_related_runtime_minutes
         ),
         "mismatch_minutes": _round_minutes(mismatch_minutes),
+        "comparable_window_count": inputs.comparable_window_count,
         "mapped_appliance_count": mapped_appliance_count,
         "recent_flow_explains_activity": bool(recent_flow_explains_activity),
         "friendly_summary": friendly_summary,
         "confidence": round(float(confidence), 2),
+    }
+    result.update(_flow_context_attributes(inputs, result))
+    return result
+
+
+def _rain_context_attributes(
+    inputs: RainPumpCorrelationInput,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    state = rain_state(inputs.rain_active, inputs.rain_intensity_per_hour)
+    intensity = rain_intensity_bin(inputs.rain_intensity_per_hour)
+    context_parts = [state]
+    if state in {"raining", "heavy_rain"} and intensity not in {"unknown", "none"}:
+        context_parts.append(intensity)
+    fallback_level = (
+        "rain_adjusted_context"
+        if state in {"raining", "heavy_rain"}
+        else "dry_context"
+    )
+    expected_runtime = _round_minutes(result.get("expected_runtime_minutes", 0.0))
+    return {
+        "baseline_context": ", ".join(context_parts),
+        "baseline_fallback_level": fallback_level,
+        "baseline_sample_count": int(result.get("comparable_window_count", 0)),
+        "contextual_status": str(result.get("status", "")),
+        "contextual_baseline_confidence": result.get("confidence", 0.0),
+        "dry_baseline_minutes": result.get("dry_baseline_minutes"),
+        "rain_adjusted_baseline_minutes": expected_runtime,
+    }
+
+
+def _flow_context_attributes(
+    inputs: FlowCorrelationInput,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    flow_active = _round_minutes(result.get("flow_active_minutes", 0.0))
+    recent_related = _round_minutes(inputs.recent_related_runtime_minutes)
+    flow_context = (
+        water_flow_state(True, flow_active)
+        if flow_active > 0.0
+        else "recent_flow"
+        if recent_related > 0.0
+        else water_flow_state(False, 0.0)
+    )
+    return {
+        "baseline_context": flow_context,
+        "baseline_fallback_level": "water_flow_context",
+        "baseline_sample_count": int(result.get("comparable_window_count", 0)),
+        "contextual_status": str(result.get("status", "")),
+        "contextual_baseline_confidence": result.get("confidence", 0.0),
     }
 
 

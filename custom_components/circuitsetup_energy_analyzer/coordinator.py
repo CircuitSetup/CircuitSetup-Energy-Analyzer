@@ -178,7 +178,11 @@ from .solar_flow import (
     SOLAR_SURPLUS_THRESHOLD_W,
 )
 from .standby import StandbySettings
-from .storage import RETENTION_WINDOWS, FeatureStoreData
+from .storage import (
+    RETENTION_WINDOWS,
+    FeatureStoreData,
+    prune_contextual_baseline_state,
+)
 from .usage import EnergyUsageSettings
 from .utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
@@ -3142,6 +3146,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 if outdoor_temperature_reading is not None
                 else "°F"
             ),
+            observed_at=now,
         )
         if outdoor_temperature_reading is not None:
             evidence["temperature_source_entity"] = outdoor_entity
@@ -3708,6 +3713,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     temperature=temperature,
                     runtime_minutes=runtime,
                     duty_cycle_percent=duty,
+                    timestamp=sample_time,
                     energy_kwh=_float_or_none(raw_sample.get("energy_kwh")),
                     start_count=(
                         int(start_count)
@@ -5338,6 +5344,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_standby(now)
         self._prune_weather_context(now)
         self._prune_water_context(now)
+        self._prune_contextual_baseline_state(now)
         self._prune_alert_history(now)
         self._prune_nilm_history()
         self._prune_alert_feedback(now)
@@ -5416,6 +5423,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for sample in history
                 if _sample_timestamp_is_at_or_after(sample, cutoff)
             ][-WATER_CONTEXT_HISTORY_MAX_SAMPLES:]
+
+    def _prune_contextual_baseline_state(self: Self, now: datetime) -> None:
+        pruned_samples: dict[str, list[dict[str, Any]]] = {}
+        pruned_stats: dict[str, dict[str, Any]] = {}
+        circuit_ids = set(self.store_data.contextual_baseline_samples_by_circuit) | set(
+            self.store_data.contextual_baselines_by_circuit
+        )
+        for circuit_id in circuit_ids:
+            retention_mode = self._retention_mode_for_circuit(circuit_id)
+            samples = self.store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_id,
+                [],
+            )
+            stats = self.store_data.contextual_baselines_by_circuit.get(
+                circuit_id,
+                {},
+            )
+            samples_by_circuit, stats_by_circuit = prune_contextual_baseline_state(
+                {circuit_id: samples},
+                {circuit_id: stats},
+                retention_mode,
+                now,
+            )
+            if samples_by_circuit.get(circuit_id):
+                pruned_samples[circuit_id] = samples_by_circuit[circuit_id]
+            if stats_by_circuit.get(circuit_id):
+                pruned_stats[circuit_id] = stats_by_circuit[circuit_id]
+        self.store_data.contextual_baseline_samples_by_circuit = pruned_samples
+        self.store_data.contextual_baselines_by_circuit = pruned_stats
 
     def _prune_alert_history(self: Self, now: datetime) -> None:
         cutoff = now - ALERT_HISTORY_MAX_AGE
@@ -6009,7 +6045,26 @@ def _alert_feature(alert: AlertEvidence) -> str:
 
 
 def _alert_feedback_key(alert: AlertEvidence) -> str:
-    return f"{alert.circuit_id}:{_alert_feature(alert)}"
+    base_key = f"{alert.circuit_id}:{_alert_feature(alert)}"
+    context_key = _alert_feedback_context_key(alert)
+    if not context_key:
+        return base_key
+    return f"{base_key}|{context_key}"
+
+
+def _alert_feedback_context_key(alert: AlertEvidence) -> str:
+    features = alert.features
+    if str(features.get("comparison_basis", "")).strip().lower() != "contextual":
+        return ""
+    baseline_context = str(features.get("baseline_context", "")).strip()
+    if not baseline_context:
+        return ""
+    fallback_level = str(features.get("baseline_fallback_level", "")).strip()
+    parts = ["contextual"]
+    if fallback_level:
+        parts.append(fallback_level)
+    parts.append(baseline_context)
+    return "|".join(parts)
 
 
 def _normalized_temperature_unit(unit: str) -> str:

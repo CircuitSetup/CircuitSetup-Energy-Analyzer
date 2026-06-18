@@ -112,18 +112,28 @@ def water_context_baseline_value(evidence: Mapping[str, Any]) -> float:
     return threshold if threshold is not None else 0.0
 
 
-def water_context_alert_features(evidence: Mapping[str, Any]) -> dict[str, float]:
+def water_context_alert_features(evidence: Mapping[str, Any]) -> dict[str, Any]:
     """Build numeric alert features from water-context evidence."""
-    features: dict[str, float] = {}
+    features: dict[str, Any] = {}
     for key in (
         "mismatch_minutes",
         "pump_runtime_minutes",
         "expected_runtime_minutes",
         "flow_active_minutes",
         "confidence",
+        "baseline_sample_count",
+        "contextual_baseline_confidence",
     ):
         value = _float_or_none(evidence.get(key))
         if value is not None:
+            features[key] = value
+    for key in (
+        "baseline_context",
+        "baseline_fallback_level",
+        "contextual_status",
+    ):
+        value = evidence.get(key)
+        if isinstance(value, str) and value:
             features[key] = value
     return features
 

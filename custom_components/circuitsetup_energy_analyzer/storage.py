@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self
 
 from .const import STORAGE_KEY, STORAGE_VERSION
+from .contextual_baseline import contextual_sample_from_dict
 from .models import (
     AlertEvidence,
     BaselineStats,
@@ -36,6 +38,16 @@ RETENTION_WINDOWS: dict[RetentionMode, timedelta] = {
     RetentionMode.STANDARD: timedelta(days=45),
     RetentionMode.DIAGNOSTIC: timedelta(days=180),
 }
+CONTEXTUAL_SAMPLE_CAPS: dict[RetentionMode, int] = {
+    RetentionMode.LIGHTWEIGHT: 500,
+    RetentionMode.STANDARD: 2000,
+    RetentionMode.DIAGNOSTIC: 10000,
+}
+CONTEXTUAL_BUCKET_CAPS: dict[RetentionMode, int] = {
+    RetentionMode.LIGHTWEIGHT: 64,
+    RetentionMode.STANDARD: 128,
+    RetentionMode.DIAGNOSTIC: 512,
+}
 
 
 @dataclass(slots=True)
@@ -62,6 +74,12 @@ class FeatureStoreData:
         default_factory=dict
     )
     water_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    contextual_baseline_samples_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    contextual_baselines_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
@@ -241,6 +259,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "water_context_history_by_circuit": _dict_of_list_dicts(
             data.water_context_history_by_circuit
         ),
+        "contextual_baseline_samples_by_circuit": _dict_of_list_dicts(
+            data.contextual_baseline_samples_by_circuit
+        ),
+        "contextual_baselines_by_circuit": _dict_of_dicts(
+            data.contextual_baselines_by_circuit
+        ),
         "sensitivity_by_circuit": {
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
@@ -340,6 +364,14 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         water_context_history_by_circuit=_dict_of_list_dicts(
             raw.get("water_context_history_by_circuit", {})
         ),
+        contextual_baseline_samples_by_circuit=(
+            _contextual_samples_by_circuit(
+                raw.get("contextual_baseline_samples_by_circuit", {})
+            )
+        ),
+        contextual_baselines_by_circuit=_contextual_baselines_by_circuit(
+            raw.get("contextual_baselines_by_circuit", {})
+        ),
         sensitivity_by_circuit={
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in raw.get(
@@ -425,9 +457,20 @@ def prune_events(
     data: FeatureStoreData,
     retention_mode: RetentionMode,
     now: datetime,
+    *,
+    contextual_sample_cap_per_circuit: int | None = None,
+    contextual_bucket_cap_per_feature: int | None = None,
 ) -> FeatureStoreData:
     """Return a new payload with events pruned according to retention mode."""
     cutoff = now - RETENTION_WINDOWS[retention_mode]
+    contextual_samples, contextual_stats = prune_contextual_baseline_state(
+        data.contextual_baseline_samples_by_circuit,
+        data.contextual_baselines_by_circuit,
+        retention_mode,
+        now,
+        contextual_sample_cap_per_circuit=contextual_sample_cap_per_circuit,
+        contextual_bucket_cap_per_feature=contextual_bucket_cap_per_feature,
+    )
     return FeatureStoreData(
         events=[event for event in data.events if event.timestamp >= cutoff],
         baselines=data.baselines,
@@ -439,6 +482,8 @@ def prune_events(
         rain_pump_context_by_circuit=data.rain_pump_context_by_circuit,
         water_flow_context_by_circuit=data.water_flow_context_by_circuit,
         water_context_history_by_circuit=data.water_context_history_by_circuit,
+        contextual_baseline_samples_by_circuit=contextual_samples,
+        contextual_baselines_by_circuit=contextual_stats,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
@@ -471,6 +516,33 @@ def prune_events(
         settings_recommendation_notification_episode_key=(
             data.settings_recommendation_notification_episode_key
         ),
+    )
+
+
+def prune_contextual_baseline_state(
+    samples_by_circuit: dict[str, list[dict[str, Any]]],
+    baselines_by_circuit: dict[str, dict[str, Any]],
+    retention_mode: RetentionMode,
+    now: datetime,
+    *,
+    contextual_sample_cap_per_circuit: int | None = None,
+    contextual_bucket_cap_per_feature: int | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    """Prune contextual samples and cap retained stats buckets."""
+    cutoff = now - RETENTION_WINDOWS[retention_mode]
+    sample_cap = (
+        CONTEXTUAL_SAMPLE_CAPS[retention_mode]
+        if contextual_sample_cap_per_circuit is None
+        else max(int(contextual_sample_cap_per_circuit), 0)
+    )
+    bucket_cap = (
+        CONTEXTUAL_BUCKET_CAPS[retention_mode]
+        if contextual_bucket_cap_per_feature is None
+        else max(int(contextual_bucket_cap_per_feature), 0)
+    )
+    return (
+        _prune_contextual_samples(samples_by_circuit, cutoff, sample_cap),
+        _prune_contextual_baselines(baselines_by_circuit, bucket_cap),
     )
 
 
@@ -529,3 +601,147 @@ def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
         str(key): [dict(item) for item in list(value)]
         for key, value in dict(values).items()
     }
+
+
+def _contextual_samples_by_circuit(values: Any) -> dict[str, list[dict[str, Any]]]:
+    sanitized: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(values, Mapping):
+        return sanitized
+    for circuit_id, raw_samples in values.items():
+        samples: list[dict[str, Any]] = []
+        if not isinstance(raw_samples, list):
+            continue
+        for raw_sample in raw_samples:
+            if not isinstance(raw_sample, Mapping):
+                continue
+            sample = contextual_sample_from_dict(str(circuit_id), raw_sample)
+            if sample is None:
+                continue
+            payload = dict(raw_sample)
+            payload["feature"] = sample.feature
+            payload["value"] = sample.value
+            payload["context"] = sample.context.as_dict()
+            payload["timestamp"] = sample.timestamp.isoformat()
+            samples.append(payload)
+        if samples:
+            sanitized[str(circuit_id)] = samples
+    return sanitized
+
+
+def _contextual_baselines_by_circuit(values: Any) -> dict[str, dict[str, Any]]:
+    sanitized: dict[str, dict[str, Any]] = {}
+    if not isinstance(values, Mapping):
+        return sanitized
+    for circuit_id, raw_stats_by_key in values.items():
+        if not isinstance(raw_stats_by_key, Mapping):
+            continue
+        stats_by_key: dict[str, Any] = {}
+        for key, raw_stats in raw_stats_by_key.items():
+            if not isinstance(raw_stats, Mapping):
+                continue
+            context = raw_stats.get("context", {})
+            if not isinstance(context, Mapping):
+                continue
+            try:
+                stats_by_key[str(key)] = {
+                    "feature": str(raw_stats["feature"]),
+                    "context_fingerprint": str(raw_stats["context_fingerprint"]),
+                    "context": {str(k): str(v) for k, v in context.items()},
+                    "sample_count": int(raw_stats["sample_count"]),
+                    "median": float(raw_stats["median"]),
+                    "mad": float(raw_stats["mad"]),
+                    "p10": float(raw_stats["p10"]),
+                    "p90": float(raw_stats["p90"]),
+                    "confidence": float(raw_stats["confidence"]),
+                    "fallback_level": str(
+                        raw_stats.get("fallback_level", "exact_context")
+                    ),
+                    "first_seen": raw_stats.get("first_seen"),
+                    "last_seen": raw_stats.get("last_seen"),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+        if stats_by_key:
+            sanitized[str(circuit_id)] = stats_by_key
+    return sanitized
+
+
+def _prune_contextual_samples(
+    samples_by_circuit: dict[str, list[dict[str, Any]]],
+    cutoff: datetime,
+    cap_per_circuit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    pruned: dict[str, list[dict[str, Any]]] = {}
+    for circuit_id, raw_samples in samples_by_circuit.items():
+        retained: list[dict[str, Any]] = []
+        for raw_sample in raw_samples:
+            sample = contextual_sample_from_dict(circuit_id, raw_sample)
+            if sample is None or sample.timestamp < cutoff:
+                continue
+            retained.append(dict(raw_sample))
+        retained.sort(key=lambda item: str(item.get("timestamp", "")))
+        if cap_per_circuit:
+            retained = retained[-cap_per_circuit:]
+        if retained:
+            pruned[circuit_id] = retained
+    return pruned
+
+
+def _prune_contextual_baselines(
+    baselines_by_circuit: dict[str, dict[str, Any]],
+    cap_per_feature: int,
+) -> dict[str, dict[str, Any]]:
+    if cap_per_feature <= 0:
+        return {}
+
+    changed = False
+    pruned: dict[str, dict[str, Any]] = {}
+    for circuit_id, stats_by_key in baselines_by_circuit.items():
+        grouped: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for key, stats in stats_by_key.items():
+            if not isinstance(stats, Mapping):
+                changed = True
+                continue
+            feature = str(stats.get("feature") or str(key).split("|", 1)[0])
+            grouped.setdefault(feature, []).append((str(key), dict(stats)))
+
+        retained: dict[str, dict[str, Any]] = {}
+        for feature_stats in grouped.values():
+            ranked = sorted(
+                feature_stats,
+                key=lambda item: (
+                    _contextual_stats_sample_count(item[1]),
+                    _contextual_stats_last_seen(item[1]),
+                ),
+                reverse=True,
+            )
+            if len(ranked) > cap_per_feature:
+                changed = True
+            for key, stats in ranked[:cap_per_feature]:
+                retained[key] = stats
+
+        if retained:
+            pruned[str(circuit_id)] = retained
+        if len(retained) != len(stats_by_key):
+            changed = True
+
+    return pruned if changed else baselines_by_circuit
+
+
+def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> int:
+    try:
+        return max(int(stats.get("sample_count", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _contextual_stats_last_seen(stats: Mapping[str, Any]) -> datetime:
+    value = stats.get("last_seen") or stats.get("first_seen")
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return datetime.min
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.min
