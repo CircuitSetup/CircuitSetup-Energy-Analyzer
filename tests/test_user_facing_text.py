@@ -967,6 +967,21 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Metric Consistency Status" in readme
 
 
+def test_readme_explains_running_observation_and_alert_distinction() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        "Running is the current operating state used for automations." in readme
+    )
+    assert (
+        "Observation recorded means the analyzer noticed something unusual" in readme
+    )
+    assert (
+        "Possible issue means repeated evidence crossed the alert threshold."
+        in readme
+    )
+
+
 def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     blueprint_path = (
         ROOT
