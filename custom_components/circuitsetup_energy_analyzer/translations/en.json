@@ -92,6 +92,7 @@
       "invalid_source_devices": "Source meter devices must be text values.",
       "invalid_source_entities": "Source sensor entity IDs must be text values.",
       "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
+      "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
       "invalid_known_load_circuits": "Known load circuits must be selected from configured appliance circuits.",
@@ -236,7 +237,7 @@
       },
       "advanced_settings": {
         "title": "Advanced Circuit Settings",
-        "description": "**{circuit_name}**\n\nAppliance type: {appliance_profile}. This form shows only the sections that apply to the selected appliance or circuit, including billing, standby, power-quality, mains, and solar sections when relevant.",
+        "description": "**{circuit_name}**\n\nAppliance type: {appliance_profile}. This form shows only the sections that apply to the selected appliance or circuit, including operating detection, billing, standby, power-quality, mains, and solar sections when relevant.",
         "data": {
           "reset_advanced_settings_to_defaults": "Reset All Advanced Circuit Settings to Default"
         },
@@ -252,6 +253,26 @@
             },
             "data_description": {
               "preset": "Controls alert sensitivity for this circuit only."
+            }
+          },
+          "operating_detection_settings": {
+            "name": "Operating Detection",
+            "description": "The analyzer normally chooses these values from the appliance type. Change them only when the Running state does not match the appliance.",
+            "data": {
+              "reset_operating_detection_settings_to_defaults": "Reset Operating Detection To Defaults",
+              "operating_on_threshold_w": "Turn-On Power",
+              "operating_on_dwell_seconds": "Turn-On Confirmation Time",
+              "operating_off_threshold_w": "Turn-Off Power",
+              "operating_off_dwell_seconds": "Turn-Off Confirmation Time",
+              "operating_merge_gap_seconds": "Merge Short Interruptions"
+            },
+            "data_description": {
+              "reset_operating_detection_settings_to_defaults": "Turn this on when saving to remove custom operating-detection thresholds, confirmation times, and short-gap merging for this circuit.",
+              "operating_on_threshold_w": "The power level this appliance must stay above before it is considered running.",
+              "operating_on_dwell_seconds": "How long power must stay above the turn-on level before Running turns on.",
+              "operating_off_threshold_w": "The power level this appliance must stay below before it is considered off.",
+              "operating_off_dwell_seconds": "How long power must stay below the turn-off level before Running turns off.",
+              "operating_merge_gap_seconds": "Treat stop-start interruptions shorter than this as the same run cycle."
             }
           },
           "energy_settings": {
@@ -474,6 +495,7 @@
     "error": {
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
+      "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."

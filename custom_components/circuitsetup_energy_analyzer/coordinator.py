@@ -134,7 +134,10 @@ from .nilm import (
     NilmEdgeDetector,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
-from .operating_detection import resolve_operating_detection
+from .operating_detection import (
+    OPERATING_DETECTION_OVERRIDE_FIELDS,
+    resolve_operating_detection,
+)
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
@@ -994,6 +997,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.metric_consistency_settings_by_circuit.pop(circuit_id, None)
         self.store_data.balance_settings_by_circuit.pop(circuit_id, None)
         self.store_data.solar_flow_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.operating_detection_settings_by_circuit.pop(circuit_id, None)
 
     def _apply_advanced_settings(
         self: Self,
@@ -1114,6 +1118,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     "flexible_load_running_threshold_w"
                 ),
             },
+        )
+        _replace_if_present(
+            self.store_data.operating_detection_settings_by_circuit,
+            circuit_id,
+            settings,
+            OPERATING_DETECTION_OVERRIDE_FIELDS,
         )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
@@ -1726,6 +1736,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if key in solar_flow:
                 settings[key] = solar_flow[key]
 
+        settings.update(
+            self.store_data.operating_detection_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+
         return settings
 
     def _advisor_feature_history_for_circuit(
@@ -1737,6 +1754,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         feature_history: dict[str, Any] = {
             "energy_usage_days": [],
             "cycles": [],
+            "operating_idle_samples": [],
+            "operating_start_samples": [],
             "standby_samples_w": [],
             "current_samples": [],
             "leg_imbalance_ratios": [],
@@ -1775,10 +1794,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ]
 
         standby_history = self.store_data.standby_by_circuit.get(circuit_id, {})
+        standby_samples = standby_history.get("samples")
+        if isinstance(standby_samples, list):
+            feature_history["operating_idle_samples"] = [
+                dict(sample)
+                for sample in standby_samples
+                if isinstance(sample, Mapping)
+            ]
         feature_history["standby_samples_w"] = _numeric_items(
-            standby_history.get("samples"),
+            standby_samples,
             keys=("real_power_w",),
         )
+
+        feature_history["operating_start_samples"] = [
+            {
+                "timestamp": event.timestamp.isoformat(),
+                "power_w": float(event.features["startup_power_w"]),
+            }
+            for event in self.store_data.events
+            if (
+                event.circuit_id == circuit_id
+                and event.event_type is EventType.START
+                and "startup_power_w" in event.features
+            )
+        ]
 
         demand_history = self.store_data.demand_by_circuit.get(circuit_id, {})
         feature_history["current_samples"] = _numeric_items(

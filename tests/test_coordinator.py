@@ -820,6 +820,11 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
             CONF_ADVANCED_SETTINGS: {
                 "refrigerator": {
                     "preset": "high",
+                    "operating_on_threshold_w": 30.0,
+                    "operating_off_threshold_w": 12.0,
+                    "operating_on_dwell_seconds": 14.0,
+                    "operating_off_dwell_seconds": 50.0,
+                    "operating_merge_gap_seconds": 95.0,
                     "window_days": 14,
                     "daily_spike_ratio": 0.35,
                     "daily_goal_kwh": 2.5,
@@ -868,6 +873,15 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "tolerance_percent": 8.5,
     }
     assert coordinator.store_data.sensitivity_by_circuit["refrigerator"] == "sensitive"
+    assert coordinator.store_data.operating_detection_settings_by_circuit[
+        "refrigerator"
+    ] == {
+        "operating_on_threshold_w": 30.0,
+        "operating_off_threshold_w": 12.0,
+        "operating_on_dwell_seconds": 14.0,
+        "operating_off_dwell_seconds": 50.0,
+        "operating_merge_gap_seconds": 95.0,
+    }
     assert coordinator.store_data.energy_usage_settings_by_circuit[
         "refrigerator"
     ] == {
@@ -968,6 +982,10 @@ def test_coordinator_replaces_store_advanced_settings_after_section_reset() -> N
                 "refrigerator": "sensitive",
                 "freezer": "quiet",
             },
+            operating_detection_settings_by_circuit={
+                "refrigerator": {"operating_off_threshold_w": 10.0},
+                "freezer": {"operating_off_threshold_w": 8.0},
+            },
             energy_usage_settings_by_circuit={
                 "refrigerator": {"daily_spike_ratio": 0.35},
                 "freezer": {"daily_spike_ratio": 0.4},
@@ -982,6 +1000,9 @@ def test_coordinator_replaces_store_advanced_settings_after_section_reset() -> N
     assert coordinator.store_data.sensitivity_by_circuit == {
         "refrigerator": "balanced",
         "freezer": "quiet",
+    }
+    assert coordinator.store_data.operating_detection_settings_by_circuit == {
+        "freezer": {"operating_off_threshold_w": 8.0},
     }
     assert coordinator.store_data.energy_usage_settings_by_circuit == {
         "freezer": {"daily_spike_ratio": 0.4},
@@ -1015,6 +1036,9 @@ def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
             sensitivity_by_circuit={
                 "refrigerator": "sensitive",
                 "freezer": "quiet",
+            },
+            operating_detection_settings_by_circuit={
+                "refrigerator": {"operating_off_threshold_w": 10.0},
             },
             energy_usage_settings_by_circuit={
                 "refrigerator": {"daily_spike_ratio": 0.35},
@@ -1060,6 +1084,10 @@ def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
     assert coordinator.store_data.energy_usage_settings_by_circuit == {
         "freezer": {"daily_spike_ratio": 0.4},
     }
+    assert (
+        "refrigerator"
+        not in coordinator.store_data.operating_detection_settings_by_circuit
+    )
     assert "refrigerator" not in coordinator.store_data.energy_goal_settings_by_circuit
     assert (
         "refrigerator"
@@ -6851,6 +6879,88 @@ async def test_coordinator_builds_settings_recommendation_after_maturity() -> No
     assert recommendation["setting_label"] == "Daily Spike Ratio"
     assert recommendation["suggested_value"] == 0.3
     assert coordinator.state.settings_recommendation_count_by_circuit["hvac"] == 1
+
+
+@pytest.mark.asyncio
+async def test_coordinator_builds_operating_detection_recommendations_after_maturity(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    base = datetime(2026, 5, 25, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=base + timedelta(days=index + 1),
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                    features={"startup_power_w": value},
+                )
+                for index, value in enumerate((84.5, 88.0, 90.0, 92.0, 96.0, 101.0))
+            ],
+            standby_by_circuit={
+                "fridge": {
+                    "samples": [
+                        {
+                            "timestamp": (
+                                base + timedelta(hours=index * 16)
+                            ).isoformat(),
+                            "real_power_w": value,
+                        }
+                        for index, value in enumerate(
+                            (
+                                4.2,
+                                4.8,
+                                5.1,
+                                5.4,
+                                5.8,
+                                6.0,
+                                6.2,
+                                6.4,
+                                6.5,
+                                6.7,
+                                6.8,
+                                6.9,
+                                7.0,
+                                7.2,
+                            )
+                        )
+                    ]
+                }
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_recalculate_setting_recommendations()
+
+    recommendations = coordinator.state.settings_recommendations_by_circuit["fridge"]
+    setting_keys = {recommendation["setting_key"] for recommendation in recommendations}
+    assert {
+        "operating_on_threshold_w",
+        "operating_off_threshold_w",
+    }.issubset(setting_keys)
+    by_key = {
+        recommendation["setting_key"]: recommendation
+        for recommendation in recommendations
+    }
+    assert by_key["operating_on_threshold_w"]["suggested_value"] == 45.0
+    assert by_key["operating_off_threshold_w"]["suggested_value"] == 15.0
 
 
 @pytest.mark.asyncio

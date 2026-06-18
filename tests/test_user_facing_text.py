@@ -66,6 +66,14 @@ EXPECTED_ADVANCED_TOP_LEVEL_LABELS = {
 
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "preset": "Sensitivity",
+    "reset_operating_detection_settings_to_defaults": (
+        "Reset Operating Detection To Defaults"
+    ),
+    "operating_on_threshold_w": "Turn-On Power",
+    "operating_on_dwell_seconds": "Turn-On Confirmation Time",
+    "operating_off_threshold_w": "Turn-Off Power",
+    "operating_off_dwell_seconds": "Turn-Off Confirmation Time",
+    "operating_merge_gap_seconds": "Merge Short Interruptions",
     "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
     "window_days": "Energy Window Days",
     "daily_spike_ratio": "Daily Spike Ratio",
@@ -123,6 +131,7 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
 
 EXPECTED_ADVANCED_SECTION_LABELS = {
     "analysis_settings": "Sensitivity",
+    "operating_detection_settings": "Operating Detection",
     "energy_settings": "Energy Usage And Goals",
     "activity_settings": "Run And Activity Alerts",
     "billing_cost_settings": "Billing And Cost",

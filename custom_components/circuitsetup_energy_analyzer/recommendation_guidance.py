@@ -53,6 +53,14 @@ _SETTING_EXPECTED_EFFECTS = {
         "Tune this setting toward the observed history without requiring manual "
         "threshold math."
     ),
+    "operating_on_threshold_w": (
+        "Turn Running on only after the appliance clears a stable start "
+        "threshold."
+    ),
+    "operating_off_threshold_w": (
+        "Keep brief power dips from ending a run while still turning Running "
+        "off near true idle draw."
+    ),
     "max_active_minutes": (
         "Reduce false long-run alerts while still flagging unusually long cycles."
     ),

@@ -109,6 +109,9 @@ class FeatureStoreData:
         default_factory=dict
     )
     standby_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    operating_detection_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     settings_recommendations: dict[str, SettingRecommendation] = field(
         default_factory=dict
     )
@@ -287,6 +290,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             data.standby_settings_by_circuit
         ),
         "standby_by_circuit": _dict_of_dicts(data.standby_by_circuit),
+        "operating_detection_settings_by_circuit": _dict_of_dicts(
+            data.operating_detection_settings_by_circuit
+        ),
         "settings_recommendations": {
             str(recommendation_id): recommendation_to_dict(recommendation)
             for recommendation_id, recommendation in (
@@ -397,6 +403,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("standby_settings_by_circuit", {}),
         ),
         standby_by_circuit=_dict_of_dicts(raw.get("standby_by_circuit", {})),
+        operating_detection_settings_by_circuit=_dict_of_dicts(
+            raw.get("operating_detection_settings_by_circuit", {}),
+        ),
         settings_recommendations={
             str(recommendation_id): recommendation_from_dict(recommendation)
             for recommendation_id, recommendation in raw.get(

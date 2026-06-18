@@ -434,6 +434,15 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 6.0}],
             }
         },
+        operating_detection_settings_by_circuit={
+            "fridge": {
+                "operating_on_threshold_w": 25.0,
+                "operating_off_threshold_w": 10.0,
+                "operating_on_dwell_seconds": 10.0,
+                "operating_off_dwell_seconds": 45.0,
+                "operating_merge_gap_seconds": 90.0,
+            }
+        },
         demand_by_circuit={
             "hvac": {
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
@@ -516,6 +525,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.standby_by_circuit["office"]["samples"] == [
         {"timestamp": now.isoformat(), "real_power_w": 6.0}
     ]
+    assert restored.operating_detection_settings_by_circuit["fridge"] == {
+        "operating_on_threshold_w": 25.0,
+        "operating_off_threshold_w": 10.0,
+        "operating_on_dwell_seconds": 10.0,
+        "operating_off_dwell_seconds": 45.0,
+        "operating_merge_gap_seconds": 90.0,
+    }
     assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [
         {"date": "2026-06-02", "usage_kwh": 8.5}
