@@ -335,11 +335,14 @@ def data_quality_checklist(
     return {
         "required_sensors_present": required_present,
         "optional_sensors_present": optional_present,
-        "numeric_states_valid": not _has_issue_containing(
+        "numeric_states_valid": not _has_any_issue_containing(
             quality_issues,
-            "non_numeric",
+            ("non_numeric", "non_finite"),
         ),
-        "source_data_fresh": not _has_issue_containing(quality_issues, "stale"),
+        "source_data_fresh": not _has_any_issue_containing(
+            quality_issues,
+            ("stale", "future_timestamp", "naive_timestamp"),
+        ),
         "quality_issues": quality_issue_preview,
         "quality_issue_count": len(quality_issues),
         "quality_issues_has_more": len(quality_issues) > len(quality_issue_preview),
@@ -447,6 +450,13 @@ def _roles_with_sample_values(sample: CircuitSample | None) -> set[SensorRole]:
 
 def _has_issue_containing(quality_issues: Sequence[str], text: str) -> bool:
     return any(text in issue for issue in quality_issues)
+
+
+def _has_any_issue_containing(
+    quality_issues: Sequence[str],
+    texts: Sequence[str],
+) -> bool:
+    return any(_has_issue_containing(quality_issues, text) for text in texts)
 
 
 def _coverage(expected_roles: set[SensorRole], present_roles: set[SensorRole]) -> float:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from .models import CircuitConfig, CircuitSample, PowerFlowMode, SensorRole
 
 STALE_AFTER = timedelta(minutes=10)
+FUTURE_TIMESTAMP_TOLERANCE = timedelta(seconds=30)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
@@ -80,7 +82,15 @@ def build_circuit_sample(
             quality_issues.append(f"{sensor.entity_id} missing")
             continue
 
-        is_stale = now - source.last_updated > STALE_AFTER
+        timestamp_issue = _timestamp_issue(now, source.last_updated)
+        if timestamp_issue is not None:
+            values[sensor.role] = None
+            quality_issues.append(f"{sensor.entity_id} {timestamp_issue}")
+            continue
+
+        source_last_updated = source.last_updated.astimezone(UTC)
+        now_utc = now.astimezone(UTC)
+        is_stale = now_utc - source_last_updated > STALE_AFTER
         if is_stale:
             quality_issues.append(f"{sensor.entity_id} stale")
 
@@ -99,11 +109,19 @@ def build_circuit_sample(
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} non_numeric")
             continue
+        if not math.isfinite(value):
+            values[sensor.role] = None
+            quality_issues.append(f"{sensor.entity_id} non_finite")
+            continue
 
         if sensor.role in _POWER_ROLES and _is_kw(source.unit):
             value *= 1000
         elif sensor.role is SensorRole.ENERGY:
             value = _normalize_energy_kwh(value, source.unit)
+        if not math.isfinite(value):
+            values[sensor.role] = None
+            quality_issues.append(f"{sensor.entity_id} non_finite")
+            continue
 
         values[sensor.role] = value
         source_by_role[sensor.role] = sensor.entity_id
@@ -138,6 +156,19 @@ def build_circuit_sample(
 
 def _is_kw(unit: str | None) -> bool:
     return unit is not None and unit.strip().lower() == "kw"
+
+
+def _timestamp_issue(now: datetime, source_last_updated: datetime) -> str | None:
+    if _is_naive(now) or _is_naive(source_last_updated):
+        return "naive_timestamp"
+    future_skew = source_last_updated.astimezone(UTC) - now.astimezone(UTC)
+    if future_skew > FUTURE_TIMESTAMP_TOLERANCE:
+        return "future_timestamp"
+    return None
+
+
+def _is_naive(value: datetime) -> bool:
+    return value.tzinfo is None or value.tzinfo.utcoffset(value) is None
 
 
 def _normalize_energy_kwh(value: float, unit: str | None) -> float:
