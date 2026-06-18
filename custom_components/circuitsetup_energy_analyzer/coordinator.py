@@ -4287,7 +4287,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             now,
         )
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
-        raw_real_power = _sum_sample_values(
+        raw_real_power = _sum_complete_sample_values(
             (left_sample, right_sample),
             "raw_real_power",
         )
@@ -4340,19 +4340,43 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not samples:
             return build_circuit_sample(config, {}, now)
 
-        raw_real_power = _sum_sample_values(samples, "raw_real_power")
+        raw_real_power = _sum_parallel_sensor_values(
+            sensor_samples,
+            "raw_real_power",
+            SensorRole.REAL_POWER,
+        )
         leg_a_sample, leg_b_sample = _parallel_leg_samples(sensor_samples)
         return NormalizedCircuitSample(
             timestamp=max(sample.timestamp for sample in samples),
             circuit_id=config.circuit_id,
-            real_power=_sum_sample_values(samples, "real_power"),
-            current=_sum_sample_values(samples, "current"),
+            real_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "real_power",
+                SensorRole.REAL_POWER,
+            ),
+            current=_sum_parallel_sensor_values(
+                sensor_samples,
+                "current",
+                SensorRole.CURRENT,
+            ),
             voltage=_average_sample_values(samples, "voltage"),
-            reactive_power=_sum_sample_values(samples, "reactive_power"),
-            apparent_power=_sum_sample_values(samples, "apparent_power"),
+            reactive_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "reactive_power",
+                SensorRole.REACTIVE_POWER,
+            ),
+            apparent_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "apparent_power",
+                SensorRole.APPARENT_POWER,
+            ),
             power_factor=_average_sample_values(samples, "power_factor"),
             frequency=_average_sample_values(samples, "frequency"),
-            energy=_sum_sample_values(samples, "energy"),
+            energy=_sum_parallel_sensor_values(
+                sensor_samples,
+                "energy",
+                SensorRole.ENERGY,
+            ),
             source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
             quality_issues=tuple(
                 issue
@@ -6885,6 +6909,38 @@ def _sum_sample_values(
     if not values:
         return None
     return float(sum(values))
+
+
+def _sum_complete_sample_values(
+    samples: Iterable[NormalizedCircuitSample],
+    attribute: str,
+) -> float | None:
+    total = 0.0
+    has_values = False
+    for sample in samples:
+        value = getattr(sample, attribute, None)
+        if value is None:
+            return None
+        total += float(value)
+        has_values = True
+    if not has_values:
+        return None
+    return total
+
+
+def _sum_parallel_sensor_values(
+    sensor_samples: Iterable[tuple[SensorRef, NormalizedCircuitSample]],
+    attribute: str,
+    role: SensorRole,
+) -> float | None:
+    return _sum_complete_sample_values(
+        [
+            sample
+            for sensor, sample in sensor_samples
+            if sensor.role is role
+        ],
+        attribute,
+    )
 
 
 def _average_sample_values(

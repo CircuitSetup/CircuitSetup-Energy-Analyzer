@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Protocol
 
 from ..activity_alerts import ActivityAlertSettings, evaluate_activity_alert
@@ -92,8 +93,9 @@ class ActivityAlertProcessor:
             observation_key=_observation_key(evidence.feature, summary),
             features=evidence.features,
         )
+        policy_observation = replace(observation, observation_key=None)
         alert = self._alert_policy_for_circuit(circuit_config.circuit_id).observe(
-            observation
+            policy_observation
         )
         if alert is None:
             return FeatureResult(observations=[observation])

@@ -2656,6 +2656,66 @@ async def test_runtime_dual_phase_generation_preserves_export_direction() -> Non
     assert event.features["power_flow_direction"] == "export"
 
 
+def test_mains_parallel_sample_treats_partial_power_as_unavailable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    stale = now - timedelta(hours=1)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            if entity_id == "sensor.mains_l1_power":
+                return SimpleNamespace(
+                    state="1200",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now,
+                )
+            if entity_id == "sensor.mains_l2_power":
+                return SimpleNamespace(
+                    state="1300",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=stale,
+                )
+            return None
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Main Service",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.mains_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.mains_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    sample = coordinator._sample_for_config(coordinator.circuit_configs[0], now)
+
+    assert sample.real_power is None
+    assert sample.raw_real_power is None
+    assert sample.power_flow_direction is None
+    assert "sensor.mains_l2_power stale" in sample.quality_issues
+
+
 @pytest.mark.asyncio
 async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

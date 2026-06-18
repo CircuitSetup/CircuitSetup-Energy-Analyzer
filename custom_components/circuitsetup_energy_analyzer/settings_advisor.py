@@ -544,6 +544,10 @@ def _operating_detection_recommendations(
         "distributions are clearly separated."
     )
     recommendations: list[SettingRecommendation] = []
+    threshold_payload = {
+        OPERATING_ON_THRESHOLD_W: suggested_on,
+        OPERATING_OFF_THRESHOLD_W: suggested_off,
+    }
 
     if abs(current_on - suggested_on) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
         recommendations.append(
@@ -558,6 +562,7 @@ def _operating_detection_recommendations(
                 confidence=confidence,
                 reason=reason,
                 evidence=evidence,
+                apply_payload=threshold_payload,
             )
         )
 
@@ -574,6 +579,7 @@ def _operating_detection_recommendations(
                 confidence=confidence,
                 reason=reason,
                 evidence=evidence,
+                apply_payload=threshold_payload,
             )
         )
 
@@ -887,6 +893,7 @@ def _make_recommendation(
     confidence: float,
     reason: str,
     evidence: Mapping[str, Any],
+    apply_payload: Mapping[str, Any] | None = None,
 ) -> SettingRecommendation:
     context = inputs.context
     return SettingRecommendation(
@@ -907,7 +914,11 @@ def _make_recommendation(
         confidence=_clamp(confidence, 0.0, 1.0),
         reason=reason,
         evidence=evidence,
-        apply_payload={setting_key: suggested_value},
+        apply_payload=(
+            dict(apply_payload)
+            if apply_payload is not None
+            else {setting_key: suggested_value}
+        ),
         status=RecommendationStatus.PENDING,
         created_at=inputs.now,
         expires_at=inputs.now + DEFAULT_RECOMMENDATION_TTL,

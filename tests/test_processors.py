@@ -1579,10 +1579,22 @@ def test_activity_alert_processor_returns_observation_without_alert() -> None:
     assert result.alerts == []
     assert result.notifications == []
     assert result.observations[0].feature == "activity_left_on"
-    assert policy.observations[0] == result.observations[0]
+    assert result.observations[0].observation_key is not None
+    assert policy.observations[0].feature == result.observations[0].feature
+    assert (
+        policy.observations[0].observed_value
+        == result.observations[0].observed_value
+    )
+    assert (
+        policy.observations[0].baseline_value
+        == result.observations[0].baseline_value
+    )
+    assert policy.observations[0].message == result.observations[0].message
+    assert policy.observations[0].features == result.observations[0].features
+    assert policy.observations[0].observation_key is None
 
 
-def test_activity_alert_processor_does_not_promote_one_session_across_polls() -> None:
+def test_activity_alert_processor_promotes_one_session_across_repeated_polls() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         ConservativeAlertPolicy,
     )
@@ -1638,6 +1650,15 @@ def test_activity_alert_processor_does_not_promote_one_session_across_polls() ->
         "activity_left_on",
         "activity_left_on",
     ]
+    assert [result.observations[0].observation_key for result in results] == [
+        results[0].observations[0].observation_key,
+        results[0].observations[0].observation_key,
+        results[0].observations[0].observation_key,
+    ]
+    assert [len(result.alerts) for result in results] == [0, 0, 1]
+    assert results[2].notifications == results[2].alerts
+    assert results[2].alerts[0].feature == "activity_left_on"
+    assert results[2].alerts[0].repeated_count == 3
 
 
 def test_activity_alert_processor_skips_unavailable_operating_state(

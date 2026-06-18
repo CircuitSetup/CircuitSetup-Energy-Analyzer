@@ -380,10 +380,18 @@ def test_operating_detection_recommendations_use_idle_and_start_separation() -> 
     assert advisor.recommendation_evidence_fingerprint(on_recommendation) == (
         "operating_detection_thresholds:days=9;idle_p95=7.2;running_p10=84.5"
     )
+    assert on_recommendation.apply_payload == {
+        "operating_on_threshold_w": 45.0,
+        "operating_off_threshold_w": 15.0,
+    }
 
     assert off_recommendation.setting_label == "Turn-Off Power"
     assert off_recommendation.current_value == 10.0
     assert off_recommendation.suggested_value == 15.0
+    assert off_recommendation.apply_payload == {
+        "operating_on_threshold_w": 45.0,
+        "operating_off_threshold_w": 15.0,
+    }
 
 
 def test_operating_detection_recommendations_require_clear_separation() -> None:
