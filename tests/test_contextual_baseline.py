@@ -154,6 +154,34 @@ def test_contextual_baseline_fallback_prefers_reliable_context() -> None:
     assert selected.context == {"temperature_bin": "very_hot"}
 
 
+def test_exact_context_requires_matching_dimension_set() -> None:
+    less_specific = ContextKey.from_mapping({"season": "summer"})
+    more_specific = ContextKey.from_mapping(
+        {"season": "summer", "temperature_bin": "very_hot"}
+    )
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC) + timedelta(days=offset),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=12.0 + offset,
+            context=more_specific,
+        )
+        for offset in range(7)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=less_specific,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=7,
+    )
+
+    assert stats is None
+
+
 def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
     now = datetime(2026, 6, 17, 15, tzinfo=UTC)
     config = CircuitConfig(
@@ -236,9 +264,38 @@ def test_build_context_for_water_and_solar_state() -> None:
     )
 
     assert water_context.as_dict()["water_flow_state"] == "active_flow"
+    assert water_context.as_dict()["day_type"] == "weekday"
     assert water_context.as_dict()["time_of_day"] == "evening"
     assert solar_context.as_dict()["solar_flow_state"] == "high_surplus"
     assert solar_context.as_dict()["power_flow_mode"] == "mains_net"
+
+
+def test_load_context_uses_site_solar_flow_state() -> None:
+    now = datetime(2026, 6, 20, 14, tzinfo=UTC)
+    ev_config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    state = AnalyzerState(
+        solar_flow_status_by_circuit={"mains": "exporting"},
+        solar_flow_evidence_by_circuit={
+            "mains": {"solar_surplus_status": "high_surplus"}
+        },
+    )
+
+    context = build_context_for_sample(
+        circuit_config=ev_config,
+        sample=_sample("ev", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="peak_demand_w",
+    )
+
+    assert context.as_dict()["day_type"] == "weekend"
+    assert context.as_dict()["solar_flow_state"] == "high_surplus"
 
 
 def _sample(circuit_id: str, timestamp: datetime) -> NormalizedCircuitSample:

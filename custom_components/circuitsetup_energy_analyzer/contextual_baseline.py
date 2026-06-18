@@ -239,7 +239,7 @@ def build_contextual_baseline(
         for sample in samples
         if sample.circuit_id == circuit_id
         and sample.feature == feature
-        and sample.context.contains(context)
+        and _context_matches_fallback(sample.context, context, fallback_level)
     ]
     if len(matching) < required_samples:
         return None
@@ -351,6 +351,7 @@ def build_context_for_sample(
     values: dict[str, str] = {
         "appliance_profile": circuit_config.appliance_profile.value,
         "circuit_mode": circuit_config.mode.value,
+        "day_type": day_type_for_datetime(now),
         "season": season_for_datetime(now),
         "time_of_day": time_of_day_bucket(now),
     }
@@ -388,10 +389,27 @@ def build_context_for_sample(
     if flow_active is not None or flow_minutes is not None:
         values["water_flow_state"] = water_flow_state(flow_active, flow_minutes)
 
-    solar_status = getattr(state, "solar_flow_status_by_circuit", {}).get(circuit_id)
-    solar_evidence = _mapping_for(
-        getattr(state, "solar_flow_evidence_by_circuit", {}),
+    raw_solar_status_by_circuit = getattr(state, "solar_flow_status_by_circuit", {})
+    raw_solar_evidence_by_circuit = getattr(state, "solar_flow_evidence_by_circuit", {})
+    solar_status_by_circuit = (
+        raw_solar_status_by_circuit
+        if isinstance(raw_solar_status_by_circuit, Mapping)
+        else {}
+    )
+    solar_evidence_by_circuit = (
+        raw_solar_evidence_by_circuit
+        if isinstance(raw_solar_evidence_by_circuit, Mapping)
+        else {}
+    )
+    solar_context_circuit_id = _solar_context_circuit_id(
+        solar_status_by_circuit,
+        solar_evidence_by_circuit,
         circuit_id,
+    )
+    solar_status = solar_status_by_circuit.get(solar_context_circuit_id)
+    solar_evidence = _mapping_for(
+        solar_evidence_by_circuit,
+        solar_context_circuit_id,
     )
     solar_surplus = solar_evidence.get("solar_surplus_status")
     if solar_status is not None or solar_surplus is not None:
@@ -496,6 +514,16 @@ def upsert_contextual_sample(
     samples.append(payload)
 
 
+def _context_matches_fallback(
+    sample_context: ContextKey,
+    requested_context: ContextKey,
+    fallback_level: str,
+) -> bool:
+    if fallback_level == "exact_context":
+        return sample_context.fingerprint() == requested_context.fingerprint()
+    return sample_context.contains(requested_context)
+
+
 def _filter_context_for_profile(
     circuit_config: CircuitConfig,
     values: Mapping[str, str],
@@ -536,6 +564,26 @@ def _filter_context_for_profile(
     if "day_type" in allowed:
         filtered["day_type"] = values.get("day_type", "")
     return {key: value for key, value in filtered.items() if value}
+
+
+def _solar_context_circuit_id(
+    solar_status_by_circuit: Mapping[Any, Any],
+    solar_evidence_by_circuit: Mapping[Any, Any],
+    circuit_id: str,
+) -> str:
+    if circuit_id in solar_status_by_circuit:
+        return circuit_id
+    if circuit_id in solar_evidence_by_circuit:
+        return circuit_id
+
+    candidate_ids: list[str] = []
+    candidate_ids.extend(str(key) for key in solar_status_by_circuit)
+    candidate_ids.extend(
+        str(key)
+        for key in solar_evidence_by_circuit
+        if str(key) not in candidate_ids
+    )
+    return candidate_ids[0] if candidate_ids else circuit_id
 
 
 def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:
