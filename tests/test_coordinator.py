@@ -4929,6 +4929,155 @@ def test_nilm_signature_payloads_do_not_reuse_label_for_changed_topology() -> No
     assert payloads[0]["classification"] == "possible 240 V resistive load"
 
 
+def test_nilm_signature_payloads_reuse_review_by_stable_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint,
+    )
+
+    saved_signature = NilmSignature(
+        signature_id="on-1",
+        median_delta_w=612.0,
+        median_delta_var=142.0,
+        median_delta_va=628.0,
+        median_delta_pf=-0.03,
+        occurrence_count=3,
+        confidence=0.7,
+        median_leg_a_delta_w=610.0,
+        median_leg_b_delta_w=15.0,
+        leg_balance_ratio=0.95,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-1",
+                        "feedback_fingerprint": nilm_signature_fingerprint(
+                            saved_signature
+                        ),
+                        "median_delta_w": saved_signature.median_delta_w,
+                        "median_delta_var": saved_signature.median_delta_var,
+                        "median_delta_va": saved_signature.median_delta_va,
+                        "median_delta_pf": saved_signature.median_delta_pf,
+                        "split_phase_type": saved_signature.split_phase_type,
+                        "dominant_leg": saved_signature.dominant_leg,
+                        "user_label": "Guest room heater",
+                        "expected": True,
+                        "review_state": "expected",
+                    }
+                ]
+            }
+        ),
+    )
+
+    payloads = coordinator._nilm_signature_payloads(
+        "mains",
+        [
+            NilmSignature(
+                signature_id="on-2",
+                median_delta_w=625.0,
+                median_delta_var=151.0,
+                median_delta_va=638.0,
+                median_delta_pf=-0.02,
+                occurrence_count=6,
+                confidence=0.9,
+                median_leg_a_delta_w=625.0,
+                median_leg_b_delta_w=18.0,
+                leg_balance_ratio=0.94,
+                dominant_leg="a",
+                split_phase_type="single_leg_a",
+            )
+        ],
+    )
+
+    assert payloads[0]["signature_id"] == "on-2"
+    assert payloads[0]["user_label"] == "Guest room heater"
+    assert payloads[0]["expected"] is True
+    assert payloads[0]["review_state"] == "expected"
+
+
+def test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint,
+    )
+
+    source = NilmSignature("on-1", 600.0, 140.0, 620.0, -0.02, 3, 0.7)
+    target = NilmSignature(
+        "on-2",
+        1800.0,
+        80.0,
+        1810.0,
+        0.0,
+        4,
+        0.8,
+        dominant_leg="balanced",
+        split_phase_type="balanced_240v",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": source.signature_id,
+                        "feedback_fingerprint": nilm_signature_fingerprint(source),
+                        "median_delta_w": source.median_delta_w,
+                        "median_delta_var": source.median_delta_var,
+                        "median_delta_va": source.median_delta_va,
+                        "split_phase_type": source.split_phase_type,
+                        "review_state": "merged",
+                        "merged_into": target.signature_id,
+                        "merged_into_fingerprint": nilm_signature_fingerprint(target),
+                    },
+                    {
+                        "signature_id": target.signature_id,
+                        "feedback_fingerprint": nilm_signature_fingerprint(target),
+                        "median_delta_w": target.median_delta_w,
+                        "median_delta_var": target.median_delta_var,
+                        "median_delta_va": target.median_delta_va,
+                        "split_phase_type": target.split_phase_type,
+                        "review_state": "expected",
+                    },
+                ]
+            }
+        ),
+    )
+
+    payloads = coordinator._nilm_signature_payloads(
+        "mains",
+        [
+            NilmSignature("on-4", 610.0, 145.0, 630.0, -0.02, 6, 0.9),
+            NilmSignature(
+                "on-5",
+                1815.0,
+                85.0,
+                1822.0,
+                0.0,
+                5,
+                0.9,
+                dominant_leg="balanced",
+                split_phase_type="balanced_240v",
+            ),
+        ],
+    )
+
+    by_id = {payload["signature_id"]: payload for payload in payloads}
+    assert by_id["on-4"]["review_state"] == "merged"
+    assert by_id["on-4"]["merged_into"] == "on-5"
+    assert by_id["on-5"]["review_state"] == "expected"
+
+
 @pytest.mark.asyncio
 async def test_runtime_known_load_option_controls_nilm_masking() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

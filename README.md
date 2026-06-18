@@ -402,7 +402,7 @@ When you mark an alert as expected, the analyzer remembers that evidence pattern
 
 When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Future matching evidence must repeat more times before it can become a new alert, and the evidence panel shows the adjusted repeated-evidence requirement when it applies. If the same daily energy spike pattern is repeatedly marked not helpful, the analyzer can suggest a safer daily spike ratio change for you to approve. Not-helpful feedback expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
 
-When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Stable NILM fingerprint matching across reclustering is still experimental and will continue to improve.
+When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Review decisions follow a stable electrical fingerprint across future reclustering when the direction, value buckets, and split-phase topology still match; substantially different signatures are treated as new review items.
 
 Suggested settings remember apply, deny, and dismiss decisions. Denying a suggestion suppresses the same value for the same evidence during its cooldown. Dismissing hides it until the evidence changes or the recommendation expires.
 

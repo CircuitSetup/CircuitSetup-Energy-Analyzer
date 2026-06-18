@@ -3065,10 +3065,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         target_signature_id: str,
     ) -> None:
         """Persist that one NILM signature should be treated as another."""
-        self._nilm_signature_for_review(circuit_id, target_signature_id)
+        target = self._nilm_signature_for_review(circuit_id, target_signature_id)
         source = self._nilm_signature_for_review(circuit_id, source_signature_id)
         source["review_state"] = "merged"
         source["merged_into"] = target_signature_id
+        if target.get("feedback_fingerprint"):
+            source["merged_into_fingerprint"] = target["feedback_fingerprint"]
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())

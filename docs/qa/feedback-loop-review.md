@@ -17,7 +17,6 @@
 - Future expected alerts were blocked from notifications but could still be promoted as active possible-issue evidence.
 - Alert evidence did not expose feedback status, effect, expiration, or the matching feedback fingerprint.
 - Expected and unhelpful alert feedback did not have status-specific expiration defaults.
-- NILM feedback still needs stable fingerprint persistence across reclustering order changes.
 - Recommendation undo/reset behavior remains a follow-up.
 
 ## Files inspected
@@ -45,8 +44,9 @@ This work follows the suggested early PR scope:
 5. Keep matching expected evidence in retained history while preventing it from becoming a new active possible-issue alert or notification.
 6. Require stronger repeated evidence for future alerts that match not-helpful feedback.
 7. Suggest a safe daily spike ratio change when the same daily energy spike alert pattern is repeatedly marked not helpful.
-8. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
-9. Document the remaining feedback-loop gaps for follow-up PRs.
+8. Preserve NILM label, expected, ignored, and merge review metadata by stable electrical fingerprint when cluster IDs change.
+9. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
+10. Document the remaining feedback-loop gaps for follow-up PRs.
 
 ## Tests added
 
@@ -61,3 +61,6 @@ This work follows the suggested early PR scope:
 - `test_alert_evidence_payload_explains_unhelpful_adjusted_requirement`
 - `test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting`
 - `test_unhelpful_alert_recommendation_fingerprint_uses_feedback_evidence`
+- `test_nilm_signature_fingerprint_ignores_cluster_order_id`
+- `test_nilm_signature_payloads_reuse_review_by_stable_fingerprint`
+- `test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint`
