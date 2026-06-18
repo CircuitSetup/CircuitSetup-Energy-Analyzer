@@ -7143,6 +7143,73 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_operating_detection_recommendation_preserves_learned_source(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(
+        settings_advisor,
+        recommendation_id="fridge:operating_on_threshold_w:v1",
+        unique_key="fridge:operating_on_threshold_w",
+        circuit_id="fridge",
+        circuit_name="Kitchen Fridge",
+        setting_key="operating_on_threshold_w",
+        setting_label="Turn-On Power",
+        current_value=25.0,
+        suggested_value=45.0,
+        unit="W",
+        feature="operating_detection_thresholds",
+        group="Operating Detection",
+        apply_payload={"operating_on_threshold_w": 45.0},
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_apply_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][
+            "operating_on_threshold_w"
+        ]
+        == 45.0
+    )
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][
+            "operating_detection_source"
+        ]
+        == "learned_recommendation"
+    )
+    assert (
+        coordinator.store_data.operating_detection_settings_by_circuit["fridge"][
+            "operating_detection_source"
+        ]
+        == "learned_recommendation"
+    )
+
+
+@pytest.mark.asyncio
 async def test_deny_setting_recommendation_records_decision() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

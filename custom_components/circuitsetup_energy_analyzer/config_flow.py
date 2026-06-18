@@ -202,6 +202,7 @@ from .operating_detection import (
     OPERATING_ON_DWELL_SECONDS,
     OPERATING_ON_THRESHOLD_W,
     resolve_operating_detection,
+    resolve_operating_detection_from_settings,
 )
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -2280,10 +2281,7 @@ def _resolved_operating_detection_for_context(
 ) -> Any:
     config = _operating_detection_config_for_context(context)
     try:
-        return resolve_operating_detection(
-            config,
-            overrides=_operating_detection_override_settings(settings or {}),
-        )
+        return resolve_operating_detection_from_settings(config, settings or {})
     except ValueError:
         return resolve_operating_detection(config)
 
@@ -2295,16 +2293,6 @@ def _operating_detection_source_label(source: Any) -> str:
     if source_value == "learned_recommendation":
         return "Suggested from learned behavior"
     return "Appliance profile default"
-
-
-def _operating_detection_override_settings(
-    settings: Mapping[str, Any],
-) -> dict[str, Any]:
-    return {
-        key: settings[key]
-        for key in OPERATING_DETECTION_OVERRIDE_FIELDS
-        if key in settings
-    }
 
 
 def _safe_appliance_profile(value: Any, default: str) -> str:

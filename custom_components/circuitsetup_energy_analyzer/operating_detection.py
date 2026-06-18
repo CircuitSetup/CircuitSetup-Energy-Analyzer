@@ -22,6 +22,7 @@ OPERATING_ON_DWELL_SECONDS = "operating_on_dwell_seconds"
 OPERATING_OFF_DWELL_SECONDS = "operating_off_dwell_seconds"
 OPERATING_MERGE_GAP_SECONDS = "operating_merge_gap_seconds"
 OPERATING_MAX_SAMPLE_GAP_SECONDS = "operating_max_sample_gap_seconds"
+OPERATING_DETECTION_SOURCE = "operating_detection_source"
 OPERATING_DETECTION_OVERRIDE_FIELDS = (
     OPERATING_ON_THRESHOLD_W,
     OPERATING_OFF_THRESHOLD_W,
@@ -281,6 +282,7 @@ def resolve_operating_detection(
     config: CircuitConfig,
     overrides: dict[str, Any] | None = None,
     recommendation: dict[str, Any] | None = None,
+    source_hint: OperatingThresholdSource | str | None = None,
 ) -> ResolvedOperatingDetection:
     defaults = dict(_PROFILE_DEFAULTS.get(config.appliance_profile, _GENERIC_PROFILE))
     source = OperatingThresholdSource.PROFILE_DEFAULT
@@ -289,7 +291,10 @@ def resolve_operating_detection(
         source = OperatingThresholdSource.LEARNED_RECOMMENDATION
     if overrides:
         raw = overrides
-        source = OperatingThresholdSource.USER_OVERRIDE
+        source = (
+            _coerce_operating_threshold_source(source_hint)
+            or OperatingThresholdSource.USER_OVERRIDE
+        )
     values = {
         "on_threshold_w": _float_value(
             raw.get(OPERATING_ON_THRESHOLD_W),
@@ -322,6 +327,39 @@ def resolve_operating_detection(
         source=source,
         appliance_profile=config.appliance_profile,
         circuit_mode=config.mode,
+    )
+
+
+def operating_detection_override_settings(
+    settings: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(settings, Mapping):
+        return {}
+    return {
+        key: settings[key]
+        for key in OPERATING_DETECTION_OVERRIDE_FIELDS
+        if key in settings
+    }
+
+
+def operating_detection_source_hint(
+    settings: Mapping[str, Any] | None,
+) -> OperatingThresholdSource | None:
+    if not isinstance(settings, Mapping):
+        return None
+    return _coerce_operating_threshold_source(
+        settings.get(OPERATING_DETECTION_SOURCE),
+    )
+
+
+def resolve_operating_detection_from_settings(
+    config: CircuitConfig,
+    settings: Mapping[str, Any] | None,
+) -> ResolvedOperatingDetection:
+    return resolve_operating_detection(
+        config,
+        overrides=operating_detection_override_settings(settings),
+        source_hint=operating_detection_source_hint(settings),
     )
 
 
@@ -748,6 +786,20 @@ def _finite_or_none(value: float | None) -> float | None:
         return None
     result = float(value)
     return result if math.isfinite(result) else None
+
+
+def _coerce_operating_threshold_source(
+    value: OperatingThresholdSource | str | None,
+) -> OperatingThresholdSource | None:
+    if isinstance(value, OperatingThresholdSource):
+        return value
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    try:
+        return OperatingThresholdSource(normalized)
+    except ValueError:
+        return None
 
 
 def _isoformat_or_none(value: datetime | None) -> str | None:

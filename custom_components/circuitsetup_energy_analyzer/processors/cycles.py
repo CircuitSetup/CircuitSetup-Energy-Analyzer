@@ -16,7 +16,10 @@ from ..cycles import (
 )
 from ..models import AlertEvidence, BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
-from ..operating_detection import resolve_operating_detection
+from ..operating_detection import (
+    operating_state_is_running,
+    resolve_operating_detection_from_settings,
+)
 from ..storage import FeatureStoreData
 from .base import FeatureResult, ProcessingContext
 
@@ -55,9 +58,9 @@ class RunCycleProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return run-cycle alerts for the current retained event history."""
-        merge_gap_seconds = resolve_operating_detection(
+        merge_gap_seconds = resolve_operating_detection_from_settings(
             circuit_config,
-            overrides=getattr(
+            getattr(
                 context.store_data,
                 "operating_detection_settings_by_circuit",
                 {},
@@ -76,6 +79,8 @@ class RunCycleProcessor:
             merge_gap_seconds=merge_gap_seconds,
         )
         if not self._learning_mature(circuit_config, context.now):
+            return FeatureResult(store_dirty=baseline_dirty)
+        if _operating_state_is_unavailable(context, circuit_config.circuit_id):
             return FeatureResult(store_dirty=baseline_dirty)
 
         policy = self._alert_policy_for_circuit(circuit_config.circuit_id)
@@ -149,3 +154,14 @@ def _observation_key(feature: str, summary: Any) -> str:
         if last_start is not None:
             return f"{feature}:{last_start.isoformat()}"
     return f"{feature}:{getattr(summary, 'date', '')}"
+
+
+def _operating_state_is_unavailable(
+    context: ProcessingContext,
+    circuit_id: str,
+) -> bool:
+    snapshots = getattr(context.state, "operating_state_snapshot_by_circuit", {}) or {}
+    if not isinstance(snapshots, dict):
+        return False
+    snapshot = snapshots.get(circuit_id)
+    return snapshot is not None and operating_state_is_running(snapshot) is None

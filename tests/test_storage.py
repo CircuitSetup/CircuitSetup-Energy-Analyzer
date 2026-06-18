@@ -72,6 +72,13 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
             "always_on_alert_w": 25.0,
         }
     }
+    operating_detection_settings_by_circuit = {
+        "fridge": {
+            "operating_on_threshold_w": 25.0,
+            "operating_off_threshold_w": 10.0,
+            "operating_detection_source": "learned_recommendation",
+        }
+    }
     standby_by_circuit = {
         "office": {
             "samples": [
@@ -112,6 +119,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
             utility_comparison_settings_by_circuit
         ),
         standby_settings_by_circuit=standby_settings_by_circuit,
+        operating_detection_settings_by_circuit=(
+            operating_detection_settings_by_circuit
+        ),
         standby_by_circuit=standby_by_circuit,
     )
 
@@ -141,6 +151,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         is data.utility_comparison_settings_by_circuit
     )
     assert pruned.standby_settings_by_circuit is data.standby_settings_by_circuit
+    assert (
+        pruned.operating_detection_settings_by_circuit
+        is data.operating_detection_settings_by_circuit
+    )
     assert pruned.standby_by_circuit is data.standby_by_circuit
     assert data.events == [old, recent]
 

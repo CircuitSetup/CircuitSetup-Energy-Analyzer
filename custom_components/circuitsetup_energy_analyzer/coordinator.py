@@ -137,7 +137,9 @@ from .nilm import (
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
-    resolve_operating_detection,
+    OPERATING_DETECTION_SOURCE,
+    OperatingThresholdSource,
+    resolve_operating_detection_from_settings,
 )
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -1128,7 +1130,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.operating_detection_settings_by_circuit,
             circuit_id,
             settings,
-            OPERATING_DETECTION_OVERRIDE_FIELDS,
+            OPERATING_DETECTION_OVERRIDE_FIELDS + (OPERATING_DETECTION_SOURCE,),
         )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
@@ -1576,6 +1578,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             dict(current_settings) if isinstance(current_settings, Mapping) else {}
         )
         updated_settings.update(dict(recommendation.apply_payload))
+        if any(
+            key in OPERATING_DETECTION_OVERRIDE_FIELDS
+            for key in recommendation.apply_payload
+        ):
+            updated_settings[OPERATING_DETECTION_SOURCE] = (
+                OperatingThresholdSource.LEARNED_RECOMMENDATION.value
+            )
         advanced_by_circuit[recommendation.circuit_id] = updated_settings
         self._apply_advanced_settings(recommendation.circuit_id, updated_settings)
         await self._async_persist_config_entry_options()
@@ -1778,9 +1787,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if isinstance(usage_days, list):
             feature_history["energy_usage_days"] = list(usage_days)
 
-        merge_gap_seconds = resolve_operating_detection(
+        merge_gap_seconds = resolve_operating_detection_from_settings(
             config,
-            overrides=getattr(
+            getattr(
                 self.store_data,
                 "operating_detection_settings_by_circuit",
                 {},
@@ -3053,9 +3062,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             suppression_reason=suppression_reason,
         )
         self.state.learning_progress_by_circuit[circuit_id] = progress
-        merge_gap_seconds = resolve_operating_detection(
+        merge_gap_seconds = resolve_operating_detection_from_settings(
             config,
-            overrides=getattr(
+            getattr(
                 self.store_data,
                 "operating_detection_settings_by_circuit",
                 {},

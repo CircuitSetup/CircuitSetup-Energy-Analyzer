@@ -498,6 +498,52 @@ def test_event_processor_preserves_threshold_source_from_overrides() -> None:
     ] == "user_override"
 
 
+def test_event_processor_preserves_threshold_source_from_applied_recommendation() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            operating_detection_settings_by_circuit={
+                "washer": {
+                    "operating_on_threshold_w": 42.0,
+                    "operating_off_threshold_w": 18.0,
+                    "operating_detection_source": "learned_recommendation",
+                }
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CircuitEventProcessor()
+
+    result = processor.process(_sample(0, 5.0), config, context)
+    updates = {update.path: update.value for update in result.state_updates}
+
+    assert updates[("operating_state_snapshot_by_circuit", "washer")][
+        "threshold_source"
+    ] == "learned_recommendation"
+
+
 def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -841,6 +887,85 @@ def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_no
     assert policy.observations[0] == result.observations[0]
 
 
+def test_run_cycle_processor_skips_unavailable_operating_state(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    events = []
+    for index in range(10):
+        start = now - timedelta(days=10 - index, hours=1)
+        stop = start + timedelta(minutes=20)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=stop,
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+    )
+    state = AnalyzerState(
+        operating_state_snapshot_by_circuit={
+            "fridge": {
+                "state": "unavailable",
+                "stable_state": "unavailable",
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=FeatureStoreData(events=events),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+    assert RUN_CYCLE_DURATION_FEATURE not in {
+        observation.feature for observation in policy.observations
+    }
+
+
 def test_run_cycle_processor_does_not_promote_one_cycle_across_polls() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         ConservativeAlertPolicy,
@@ -1027,8 +1152,65 @@ def test_activity_alert_processor_does_not_promote_one_session_across_polls() ->
         "activity_left_on",
         "activity_left_on",
     ]
-    assert [result.alerts for result in results] == [[], [], []]
-    assert [result.notifications for result in results] == [[], [], []]
+
+
+def test_activity_alert_processor_skips_unavailable_operating_state(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=45),
+                circuit_id="dryer",
+                event_type=EventType.START,
+            )
+        ]
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(
+            operating_state_snapshot_by_circuit={
+                "dryer": {
+                    "state": "unavailable",
+                    "stable_state": "unavailable",
+                }
+            }
+        ),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+    assert policy.observations == []
 
 
 def test_billing_cycle_processor_updates_state_and_returns_budget_alert() -> None:

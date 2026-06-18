@@ -10,7 +10,10 @@ from ..alerting import Observation
 from ..cycles import summarize_circuit_cycles
 from ..models import AlertEvidence, CircuitConfig
 from ..normalize import NormalizedCircuitSample
-from ..operating_detection import resolve_operating_detection
+from ..operating_detection import (
+    operating_state_is_running,
+    resolve_operating_detection_from_settings,
+)
 from .base import FeatureResult, ProcessingContext
 
 
@@ -49,14 +52,16 @@ class ActivityAlertProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return configured activity alerts for the current cycle summary."""
-        merge_gap_seconds = resolve_operating_detection(
+        merge_gap_seconds = resolve_operating_detection_from_settings(
             circuit_config,
-            overrides=getattr(
+            getattr(
                 context.store_data,
                 "operating_detection_settings_by_circuit",
                 {},
             ).get(circuit_config.circuit_id, {}),
         ).profile.merge_gap_seconds
+        if _operating_state_is_unavailable(context, circuit_config.circuit_id):
+            return FeatureResult()
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
@@ -105,3 +110,14 @@ def _observation_key(feature: str, summary: Any) -> str:
     if summary.last_stop is not None:
         return f"{feature}:{summary.last_stop.isoformat()}"
     return f"{feature}:{summary.date}"
+
+
+def _operating_state_is_unavailable(
+    context: ProcessingContext,
+    circuit_id: str,
+) -> bool:
+    snapshots = getattr(context.state, "operating_state_snapshot_by_circuit", {}) or {}
+    if not isinstance(snapshots, dict):
+        return False
+    snapshot = snapshots.get(circuit_id)
+    return snapshot is not None and operating_state_is_running(snapshot) is None

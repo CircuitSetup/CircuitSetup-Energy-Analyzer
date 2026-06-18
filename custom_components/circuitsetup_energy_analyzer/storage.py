@@ -475,6 +475,9 @@ def prune_events(
         ),
         standby_settings_by_circuit=data.standby_settings_by_circuit,
         standby_by_circuit=data.standby_by_circuit,
+        operating_detection_settings_by_circuit=(
+            data.operating_detection_settings_by_circuit
+        ),
         settings_recommendations=data.settings_recommendations,
         settings_recommendation_decisions=data.settings_recommendation_decisions,
         settings_recommendation_notification_episode_key=(

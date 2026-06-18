@@ -10,7 +10,7 @@ from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_snapshot_to_dict,
-    resolve_operating_detection,
+    resolve_operating_detection_from_settings,
 )
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
@@ -39,9 +39,9 @@ class CircuitEventProcessor:
             "operating_detection_settings_by_circuit",
             {},
         )
-        resolved = resolve_operating_detection(
+        resolved = resolve_operating_detection_from_settings(
             circuit_config,
-            overrides=(
+            (
                 overrides.get(circuit_config.circuit_id, {})
                 if isinstance(overrides, dict)
                 else {}
