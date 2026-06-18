@@ -3110,6 +3110,85 @@ def test_weather_context_history_excludes_same_ha_local_day_samples() -> None:
     assert coordinator._weather_context_history_samples("hvac", now) == []
 
 
+def test_dry_weather_pump_baseline_excludes_same_ha_local_day_samples() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": "2026-05-31T23:30:00+00:00",
+                        "pump_runtime_minutes": 14.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    baseline = coordinator._dry_weather_pump_baseline("sump_pump", now)
+
+    assert baseline["dry_baseline_minutes"] is None
+    assert baseline["comparable_window_count"] == 0
+
+
+def test_append_water_context_history_replaces_same_ha_local_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": "2026-05-31T23:30:00+00:00",
+                        "rain_status": "normal",
+                        "flow_status": None,
+                        "pump_runtime_minutes": 8.0,
+                        "flow_active_minutes": None,
+                        "mismatch_minutes": None,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.rain_pump_context_by_circuit["sump_pump"] = {
+        "status": "weather_explained",
+        "pump_runtime_minutes": 14.0,
+        "rain_sensor_active": False,
+        "hvac_compressor_runtime_minutes": 0.0,
+    }
+
+    changed = coordinator._append_water_context_history("sump_pump", now)
+
+    assert changed is True
+    assert coordinator.store_data.water_context_history_by_circuit["sump_pump"] == [
+        {
+            "timestamp": "2026-06-01T03:30:00+00:00",
+            "rain_status": "weather_explained",
+            "flow_status": None,
+            "pump_runtime_minutes": 14.0,
+            "flow_active_minutes": None,
+            "mismatch_minutes": None,
+            "rain_active": False,
+            "compressor_runtime_minutes": 0.0,
+        }
+    ]
+
+
 def test_append_weather_context_history_replaces_same_ha_local_day() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -3152,6 +3231,95 @@ def test_append_weather_context_history_replaces_same_ha_local_day() -> None:
             "duty_cycle_percent": 30.0,
             "start_count": 2,
         }
+    ]
+
+
+def test_demo_energy_usage_history_uses_ha_local_seed_dates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.usage import (
+        EnergyUsageSettings,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    config = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_refrigerator",
+        name="Demo Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef(
+                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy",
+                role=SensorRole.ENERGY,
+            ),
+        ),
+    )
+
+    coordinator._seed_demo_energy_usage_history(
+        config,
+        SimpleNamespace(energy=52.6),
+        now,
+        EnergyUsageSettings(window_days=7),
+    )
+
+    history = coordinator.store_data.energy_usage_by_circuit[config.circuit_id]
+    assert history["_demo_seed_date"] == "2026-05-31"
+    assert [day["date"] for day in history["days"]] == [
+        "2026-05-24",
+        "2026-05-25",
+        "2026-05-26",
+        "2026-05-27",
+        "2026-05-28",
+        "2026-05-29",
+        "2026-05-30",
+    ]
+
+
+def test_demo_weather_context_history_uses_ha_local_prior_days() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    config = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_hvac",
+        name="Demo HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef(
+                entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+                role=SensorRole.REAL_POWER,
+            ),
+        ),
+    )
+
+    coordinator._seed_demo_weather_context_history(
+        config,
+        now,
+        outdoor_temperature=86.0,
+    )
+
+    history = coordinator.store_data.weather_context_history_by_circuit[
+        config.circuit_id
+    ]
+    assert [item["timestamp"] for item in history] == [
+        "2026-05-24T16:00:00+00:00",
+        "2026-05-25T16:00:00+00:00",
+        "2026-05-26T16:00:00+00:00",
+        "2026-05-27T16:00:00+00:00",
+        "2026-05-28T16:00:00+00:00",
     ]
 
 

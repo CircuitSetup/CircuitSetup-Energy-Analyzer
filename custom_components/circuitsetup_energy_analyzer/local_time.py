@@ -62,6 +62,15 @@ def local_day_end(day: date, time_zone: TimeZone) -> datetime:
     ).astimezone(UTC)
 
 
+def local_day_time(day: date, clock_time: time, time_zone: TimeZone) -> datetime:
+    """Return the UTC instant for a Home Assistant local wall-clock time."""
+    return datetime.combine(
+        day,
+        clock_time,
+        tzinfo=_time_zone_info(time_zone),
+    ).astimezone(UTC)
+
+
 def local_month_key(dt: datetime, time_zone: TimeZone) -> str:
     """Return YYYY-MM for the Home Assistant local calendar month."""
     return as_ha_local(dt, time_zone).strftime("%Y-%m")

@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from inspect import isawaitable
 from statistics import median
 from typing import Any, Self
@@ -117,7 +117,7 @@ from .goals import EnergyGoalSettings
 from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 )
-from .local_time import local_date
+from .local_time import local_date, local_day_time
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -4008,7 +4008,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if not isinstance(sample, Mapping):
                 continue
             sample_time = _datetime_or_none(sample.get("timestamp"))
-            if sample_time is not None and sample_time.date() >= now.date():
+            if sample_time is not None and _ha_local_date(
+                sample_time,
+                self._ha_time_zone(),
+            ) >= _ha_local_date(now, self._ha_time_zone()):
                 continue
             if sample.get("rain_active") is True:
                 continue
@@ -4063,7 +4066,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         for index in range(len(history) - 1, -1, -1):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
-            if existing_time is not None and existing_time.date() == now.date():
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                self._ha_time_zone(),
+            ) == _ha_local_date(now, self._ha_time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -4997,7 +5003,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             return
 
         window_days = max(int(settings.window_days), 1)
-        today = now.date().isoformat()
+        today_date = _ha_local_date(now, self._ha_time_zone())
+        today = today_date.isoformat()
         history = self.store_data.energy_usage_by_circuit.setdefault(
             config.circuit_id,
             {},
@@ -5020,7 +5027,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_key = _demo_circuit_key(config)
         prior_usage = _demo_prior_usage(circuit_key, window_days)
         today_usage = _demo_today_usage(circuit_key, energy_kwh)
-        start_date = now.date() - timedelta(days=window_days)
+        start_date = today_date - timedelta(days=window_days)
         history["days"] = [
             {
                 "date": (start_date + timedelta(days=index)).isoformat(),
@@ -5060,7 +5067,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_temp = _float_or_none(sample.get("temperature"))
             if (
                 sample_time is not None
-                and sample_time.date() < now.date()
+                and _ha_local_date(sample_time, self._ha_time_zone())
+                < _ha_local_date(now, self._ha_time_zone())
                 and sample_temp is not None
                 and abs(sample_temp - outdoor_temperature) <= 3.0
             ):
@@ -5068,10 +5076,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if comparable_count >= 3:
             return
 
+        current_date = _ha_local_date(now, self._ha_time_zone())
         self.store_data.weather_context_history_by_circuit[config.circuit_id] = [
             {
-                "timestamp": (
-                    now - timedelta(days=7 - index, hours=2)
+                "timestamp": local_day_time(
+                    current_date - timedelta(days=7 - index),
+                    time(12, 0),
+                    self._ha_time_zone(),
                 ).isoformat(),
                 "temperature": round(float(outdoor_temperature) + offset, 3),
                 "runtime_minutes": runtime,
