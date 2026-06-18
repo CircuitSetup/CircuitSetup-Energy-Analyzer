@@ -8,6 +8,8 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
     build_contextual_baseline,
+    contextual_sample_from_dict,
+    contextual_sample_to_dict,
     day_type_for_datetime,
     rain_intensity_bin,
     rain_state,
@@ -196,6 +198,162 @@ def test_contextual_baseline_excludes_maintenance_samples_from_fallback() -> Non
     )
 
     assert stats is None
+
+
+def test_contextual_baseline_uses_sample_weight_for_reliability_and_stats() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=100.0,
+            context=context,
+            weight=0.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=10.0,
+            context=context,
+            weight=3.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 3, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=20.0,
+            context=context,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 4, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=30.0,
+            context=context,
+        ),
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=5,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 5
+    assert stats.median == 10.0
+    assert stats.p90 == 30.0
+    assert stats.first_seen == datetime(2026, 6, 2, tzinfo=UTC)
+
+
+def test_contextual_baseline_weighted_stats_match_expanded_samples() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=10.0,
+            context=context,
+            weight=2.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=20.0,
+            context=context,
+            weight=2.0,
+        ),
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=4,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 4
+    assert stats.median == 15.0
+    assert stats.mad == 5.0
+
+
+def test_contextual_baseline_supports_subunit_fractional_weights() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, day, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=float(day * 10),
+            context=context,
+            weight=0.25,
+        )
+        for day in range(1, 5)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=1,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 1
+    assert stats.median == 25.0
+    assert stats.mad == 10.0
+    assert stats.p10 == 10.0
+    assert stats.p90 == 40.0
+
+
+def test_contextual_sample_serialization_preserves_non_default_weight() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    sample = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=12.0,
+        context=context,
+        weight=2.5,
+    )
+
+    payload = contextual_sample_to_dict(sample)
+    restored = contextual_sample_from_dict("hvac", payload)
+
+    assert payload["weight"] == 2.5
+    assert restored is not None
+    assert restored.weight == 2.5
+
+
+def test_contextual_sample_serialization_normalizes_invalid_weight() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    sample = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=12.0,
+        context=context,
+        weight=float("nan"),
+    )
+
+    payload = contextual_sample_to_dict(sample)
+    restored = contextual_sample_from_dict("hvac", payload)
+
+    assert payload["weight"] == 0.0
+    assert restored is not None
+    assert restored.weight == 0.0
 
 
 def test_exact_context_requires_matching_dimension_set() -> None:

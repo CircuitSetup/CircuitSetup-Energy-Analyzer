@@ -359,6 +359,60 @@ def test_feature_store_round_trips_contextual_baselines() -> None:
     )
 
 
+def test_feature_store_preserves_fractional_contextual_sample_count() -> None:
+    raw = {
+        "events": [],
+        "contextual_baselines_by_circuit": {
+            "hvac": {
+                "daily_energy_kwh|season=summer": {
+                    "feature": "daily_energy_kwh",
+                    "context_fingerprint": "season=summer",
+                    "context": {"season": "summer"},
+                    "sample_count": 1.3,
+                    "median": 7.8,
+                    "mad": 0.9,
+                    "p10": 6.4,
+                    "p90": 9.2,
+                    "confidence": 0.8,
+                    "fallback_level": "exact_context",
+                }
+            }
+        },
+    }
+
+    restored = feature_store_data_from_dict(raw)
+
+    assert restored.contextual_baselines_by_circuit["hvac"][
+        "daily_energy_kwh|season=summer"
+    ]["sample_count"] == 1.3
+
+
+def test_feature_store_drops_nonfinite_contextual_sample_count() -> None:
+    raw = {
+        "events": [],
+        "contextual_baselines_by_circuit": {
+            "hvac": {
+                "daily_energy_kwh|season=summer": {
+                    "feature": "daily_energy_kwh",
+                    "context_fingerprint": "season=summer",
+                    "context": {"season": "summer"},
+                    "sample_count": "nan",
+                    "median": 7.8,
+                    "mad": 0.9,
+                    "p10": 6.4,
+                    "p90": 9.2,
+                    "confidence": 0.8,
+                    "fallback_level": "exact_context",
+                }
+            }
+        },
+    }
+
+    restored = feature_store_data_from_dict(raw)
+
+    assert restored.contextual_baselines_by_circuit == {}
+
+
 def test_prune_events_prunes_contextual_samples_and_enforces_cap() -> None:
     now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
     samples = [

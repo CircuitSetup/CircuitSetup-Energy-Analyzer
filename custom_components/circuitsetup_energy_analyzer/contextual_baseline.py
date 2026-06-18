@@ -110,7 +110,7 @@ class ContextualBaselineStats:
     feature: str
     context_fingerprint: str
     context: dict[str, str]
-    sample_count: int
+    sample_count: int | float
     median: float
     mad: float
     p10: float
@@ -127,6 +127,15 @@ class RainContext:
     intensity_bin: str
     intensity_mm_per_hour: float | None
     issues: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _WeightedContextualStats:
+    sample_count: int | float
+    median: float
+    mad: float
+    p10: float
+    p90: float
 
 
 def season_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
@@ -345,14 +354,16 @@ def build_contextual_baseline(
         if sample.circuit_id == circuit_id
         and sample.feature == feature
         and context_allows_baseline_learning(sample.context)
+        and _sample_weight(sample) > 0.0
         and _context_matches_fallback(sample.context, context, fallback_level)
     ]
-    if len(matching) < required_samples:
+    effective_sample_count = sum(_sample_weight(sample) for sample in matching)
+    if effective_sample_count < required_samples:
         return None
 
-    baseline = build_baseline(feature, [sample.value for sample in matching])
+    baseline = _build_weighted_contextual_stats(feature, matching)
     timestamps = sorted(sample.timestamp for sample in matching)
-    sample_confidence = min(1.0, len(matching) / max(required_samples, 1))
+    sample_confidence = min(1.0, effective_sample_count / max(required_samples, 1))
     specificity = FALLBACK_SPECIFICITY_WEIGHT.get(fallback_level, 0.65)
     confidence = round(sample_confidence * specificity, 3)
     return ContextualBaselineStats(
@@ -360,7 +371,7 @@ def build_contextual_baseline(
         feature=feature,
         context_fingerprint=context.fingerprint(),
         context=context.as_dict(),
-        sample_count=len(matching),
+        sample_count=baseline.sample_count,
         median=baseline.median,
         mad=baseline.mad,
         p10=baseline.p10,
@@ -540,13 +551,17 @@ def build_context_for_sample(
 
 
 def contextual_sample_to_dict(sample: ContextualBaselineSample) -> dict[str, Any]:
-    return {
+    payload = {
         "timestamp": sample.timestamp.isoformat(),
         "feature": sample.feature,
         "value": float(sample.value),
         "context": sample.context.as_dict(),
         "source": sample.source,
     }
+    weight = _sample_weight(sample)
+    if weight != 1.0:
+        payload["weight"] = weight
+    return payload
 
 
 def contextual_sample_from_dict(
@@ -633,6 +648,102 @@ def upsert_contextual_sample(
 
 def context_allows_baseline_learning(context: ContextKey) -> bool:
     return context.as_dict().get("maintenance_state") != "active"
+
+
+def _build_weighted_contextual_stats(
+    feature: str,
+    samples: Sequence[ContextualBaselineSample],
+) -> _WeightedContextualStats:
+    weighted_values = [
+        (float(sample.value), _sample_weight(sample))
+        for sample in samples
+        if _sample_weight(sample) > 0.0
+    ]
+    if not weighted_values:
+        raise ValueError(f"{feature} baseline requires positive sample weight")
+    if all(weight.is_integer() for _value, weight in weighted_values):
+        expanded_values = [
+            value
+            for value, weight in weighted_values
+            for _index in range(int(weight))
+        ]
+        baseline = build_baseline(
+            feature,
+            expanded_values,
+        )
+        return _WeightedContextualStats(
+            sample_count=baseline.sample_count,
+            median=baseline.median,
+            mad=baseline.mad,
+            p10=baseline.p10,
+            p90=baseline.p90,
+        )
+    weighted_values.sort(key=lambda item: item[0])
+    median_value = _weighted_median(weighted_values)
+    weighted_deviations = sorted(
+        (
+            (abs(value - median_value), weight)
+            for value, weight in weighted_values
+        ),
+        key=lambda item: item[0],
+    )
+    return _WeightedContextualStats(
+        sample_count=_effective_weighted_sample_count(weighted_values),
+        median=median_value,
+        mad=_continuous_weighted_percentile(weighted_deviations, 0.50),
+        p10=_continuous_weighted_percentile(weighted_values, 0.10),
+        p90=_continuous_weighted_percentile(weighted_values, 0.90),
+    )
+
+
+def _effective_weighted_sample_count(
+    weighted_values: Sequence[tuple[float, float]],
+) -> int | float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight.is_integer():
+        return int(total_weight)
+    return round(total_weight, 3)
+
+
+def _weighted_median(weighted_values: Sequence[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight <= 0.0:
+        raise ValueError("weighted median requires positive total weight")
+    return _continuous_weighted_percentile(weighted_values, 0.50)
+
+
+def _continuous_weighted_percentile(
+    weighted_values: Sequence[tuple[float, float]],
+    percentile: float,
+) -> float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight <= 0.0:
+        raise ValueError("weighted percentile requires positive total weight")
+    target = total_weight * min(max(percentile, 0.0), 1.0)
+    centers: list[tuple[float, float]] = []
+    cumulative = 0.0
+    for value, weight in weighted_values:
+        centers.append((cumulative + weight / 2.0, value))
+        cumulative += weight
+    if target <= centers[0][0]:
+        return float(centers[0][1])
+    for index in range(1, len(centers)):
+        left_position, left_value = centers[index - 1]
+        right_position, right_value = centers[index]
+        if target <= right_position:
+            if right_position == left_position:
+                return float(right_value)
+            ratio = (target - left_position) / (right_position - left_position)
+            return float(left_value + (right_value - left_value) * ratio)
+    return float(centers[-1][1])
+
+
+def _sample_weight(sample: ContextualBaselineSample) -> float:
+    try:
+        weight = float(sample.weight)
+    except (TypeError, ValueError):
+        return 0.0
+    return weight if isfinite(weight) and weight > 0.0 else 0.0
 
 
 def _context_matches_fallback(

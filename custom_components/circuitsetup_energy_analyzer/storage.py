@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Self
 
 from .const import STORAGE_KEY, STORAGE_VERSION
@@ -694,7 +695,9 @@ def _contextual_baselines_by_circuit(values: Any) -> dict[str, dict[str, Any]]:
                     "feature": str(raw_stats["feature"]),
                     "context_fingerprint": str(raw_stats["context_fingerprint"]),
                     "context": {str(k): str(v) for k, v in context.items()},
-                    "sample_count": int(raw_stats["sample_count"]),
+                    "sample_count": _contextual_stats_sample_count_value(
+                        raw_stats["sample_count"]
+                    ),
                     "median": float(raw_stats["median"]),
                     "mad": float(raw_stats["mad"]),
                     "p10": float(raw_stats["p10"]),
@@ -775,11 +778,25 @@ def _prune_contextual_baselines(
     return pruned if changed else baselines_by_circuit
 
 
-def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> int:
+def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> float:
     try:
-        return max(int(stats.get("sample_count", 0)), 0)
+        return float(
+            max(
+                _contextual_stats_sample_count_value(stats.get("sample_count", 0)),
+                0,
+            )
+        )
     except (TypeError, ValueError):
-        return 0
+        return 0.0
+
+
+def _contextual_stats_sample_count_value(value: Any) -> int | float:
+    parsed = float(value)
+    if not isfinite(parsed):
+        raise ValueError("contextual sample count must be finite")
+    if parsed < 0.0:
+        parsed = 0.0
+    return int(parsed) if parsed.is_integer() else parsed
 
 
 def _contextual_stats_last_seen(stats: Mapping[str, Any]) -> datetime:
