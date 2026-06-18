@@ -26,6 +26,10 @@ from .entity import (
     sync_entity_registry_visibility,
 )
 from .models import ApplianceProfile, SensorRole
+from .operating_detection import (
+    PROFILE_RUNNING_ON_THRESHOLDS_W,
+    operating_state_is_running,
+)
 
 try:
     from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -35,25 +39,32 @@ except ModuleNotFoundError:
         """Fallback binary sensor base for tests without Home Assistant."""
 
 
+_RUNNING_BINARY_SENSOR_PROFILES = frozenset(
+    {
+        ApplianceProfile.REFRIGERATOR,
+        ApplianceProfile.FREEZER,
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.ELECTRIC_HEAT,
+        ApplianceProfile.WATER_HEATER,
+        ApplianceProfile.OVEN,
+        ApplianceProfile.MICROWAVE,
+        ApplianceProfile.WASHER,
+        ApplianceProfile.DRYER,
+        ApplianceProfile.POOL_PUMP,
+        ApplianceProfile.WATER_PUMP,
+        ApplianceProfile.WELL_PUMP,
+        ApplianceProfile.SUMP_PUMP,
+        ApplianceProfile.EV_CHARGER,
+        ApplianceProfile.MOTOR_LOAD,
+        ApplianceProfile.RESISTIVE_LOAD,
+    }
+)
+
 APPLIANCE_RUNNING_POWER_THRESHOLDS_W = {
-    ApplianceProfile.REFRIGERATOR: 25.0,
-    ApplianceProfile.FREEZER: 25.0,
-    ApplianceProfile.HVAC: 250.0,
-    ApplianceProfile.HVAC_COMPRESSOR: 500.0,
-    ApplianceProfile.HVAC_BLOWER: 80.0,
-    ApplianceProfile.ELECTRIC_HEAT: 500.0,
-    ApplianceProfile.WATER_HEATER: 500.0,
-    ApplianceProfile.OVEN: 500.0,
-    ApplianceProfile.MICROWAVE: 500.0,
-    ApplianceProfile.WASHER: 20.0,
-    ApplianceProfile.DRYER: 100.0,
-    ApplianceProfile.POOL_PUMP: 100.0,
-    ApplianceProfile.WATER_PUMP: 100.0,
-    ApplianceProfile.WELL_PUMP: 100.0,
-    ApplianceProfile.SUMP_PUMP: 80.0,
-    ApplianceProfile.EV_CHARGER: 500.0,
-    ApplianceProfile.MOTOR_LOAD: 80.0,
-    ApplianceProfile.RESISTIVE_LOAD: 100.0,
+    profile: PROFILE_RUNNING_ON_THRESHOLDS_W[profile]
+    for profile in _RUNNING_BINARY_SENSOR_PROFILES
 }
 
 LAUNDRY_RUNNING_POWER_THRESHOLDS_W = {
@@ -107,6 +118,12 @@ def is_appliance_running(
     threshold = APPLIANCE_RUNNING_POWER_THRESHOLDS_W.get(profile)
     if threshold is None:
         return False
+
+    operating_snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
+    if isinstance(operating_snapshots, dict):
+        running = operating_state_is_running(operating_snapshots.get(circuit_id))
+        if running is not None:
+            return running
 
     cycle_status_by_circuit = getattr(state, "run_cycle_status_by_circuit", {})
     if isinstance(cycle_status_by_circuit, dict):

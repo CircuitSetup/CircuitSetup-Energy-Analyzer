@@ -1174,10 +1174,8 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     now_holder["value"] = now + timedelta(minutes=2)
     await coordinator.async_process_update()
 
-    assert (
-        coordinator.state.last_event_by_circuit["fridge"].event_type
-        is EventType.START
-    )
+    assert "fridge" not in coordinator.state.last_event_by_circuit
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
     assert coordinator.state.learning_by_circuit["fridge"] is False
     assert coordinator.state.anomaly_score_by_circuit["fridge"] > 0.5
     assert coordinator.state.active_alerts_by_circuit["fridge"]
@@ -1943,17 +1941,18 @@ async def test_runtime_dual_phase_aggregates_leg_power() -> None:
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 0.0, "l2": 0.0, "time": now}
 
     class FakeStates:
         def get(self, entity_id: str):
             values = {
-                "sensor.hvac_l1_power": "400",
-                "sensor.hvac_l2_power": "450",
+                "sensor.hvac_l1_power": str(holder["l1"]),
+                "sensor.hvac_l2_power": str(holder["l2"]),
             }
             return SimpleNamespace(
                 state=values[entity_id],
                 attributes={"unit_of_measurement": "W"},
-                last_updated=now,
+                last_updated=holder["time"],
             )
 
     coordinator = EnergyAnalyzerCoordinator(
@@ -1980,9 +1979,13 @@ async def test_runtime_dual_phase_aggregates_leg_power() -> None:
                 }
             ]
         },
-        now_fn=lambda: now,
+        now_fn=lambda: holder["time"],
     )
 
+    await coordinator.async_process_update()
+    holder.update({"l1": 400.0, "l2": 450.0, "time": now + timedelta(seconds=30)})
+    await coordinator.async_process_update()
+    holder["time"] = now + timedelta(seconds=60)
     await coordinator.async_process_update()
 
     event = coordinator.state.last_event_by_circuit["hvac"]
@@ -2196,17 +2199,18 @@ async def test_runtime_dual_phase_generation_preserves_export_direction() -> Non
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 0.0, "l2": 0.0, "time": now}
 
     class FakeStates:
         def get(self, entity_id: str):
             values = {
-                "sensor.solar_l1_power": "-1600",
-                "sensor.solar_l2_power": "-1500",
+                "sensor.solar_l1_power": str(holder["l1"]),
+                "sensor.solar_l2_power": str(holder["l2"]),
             }
             return SimpleNamespace(
                 state=values[entity_id],
                 attributes={"unit_of_measurement": "W"},
-                last_updated=now,
+                last_updated=holder["time"],
             )
 
     coordinator = EnergyAnalyzerCoordinator(
@@ -2233,9 +2237,13 @@ async def test_runtime_dual_phase_generation_preserves_export_direction() -> Non
                 }
             ]
         },
-        now_fn=lambda: now,
+        now_fn=lambda: holder["time"],
     )
 
+    await coordinator.async_process_update()
+    holder.update({"l1": -1600.0, "l2": -1500.0, "time": now + timedelta(seconds=30)})
+    await coordinator.async_process_update()
+    holder["time"] = now + timedelta(seconds=60)
     await coordinator.async_process_update()
 
     event = coordinator.state.last_event_by_circuit["solar"]
@@ -4506,17 +4514,18 @@ async def test_runtime_synthetic_mains_sums_multiple_source_entities() -> None:
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    holder = {"l1": 0.0, "l2": 0.0, "time": now}
 
     class FakeStates:
         def get(self, entity_id: str):
             values = {
-                "sensor.mains_l1_power": "125",
-                "sensor.mains_l2_power": "175",
+                "sensor.mains_l1_power": str(holder["l1"]),
+                "sensor.mains_l2_power": str(holder["l2"]),
             }
             return SimpleNamespace(
                 state=values[entity_id],
                 attributes={"unit_of_measurement": "W"},
-                last_updated=now,
+                last_updated=holder["time"],
             )
 
     coordinator = EnergyAnalyzerCoordinator(
@@ -4529,9 +4538,13 @@ async def test_runtime_synthetic_mains_sums_multiple_source_entities() -> None:
                 "sensor.mains_l2_power",
             ],
         },
-        now_fn=lambda: now,
+        now_fn=lambda: holder["time"],
     )
 
+    await coordinator.async_process_update()
+    holder.update({"l1": 125.0, "l2": 175.0, "time": now + timedelta(seconds=30)})
+    await coordinator.async_process_update()
+    holder["time"] = now + timedelta(seconds=60)
     await coordinator.async_process_update()
 
     event = coordinator.state.last_event_by_circuit["mains"]
@@ -4706,19 +4719,20 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
     class FakeStates:
-        def __init__(self, watts: float) -> None:
+        def __init__(self, watts: float, timestamp: datetime) -> None:
             self.watts = watts
+            self.time = timestamp
 
         def get(self, entity_id: str):
             value = self.watts if "mains" in entity_id else max(self.watts - 100, 0)
             return SimpleNamespace(
                 state=str(value),
                 attributes={"unit_of_measurement": "W"},
-                last_updated=now,
+                last_updated=self.time,
             )
 
     async def unmatched_percentage_for(known_load_circuits: list[str]) -> float:
-        states = FakeStates(100)
+        states = FakeStates(100, now)
         coordinator = EnergyAnalyzerCoordinator(
             SimpleNamespace(states=states, data={}),
             entry_data={
@@ -4752,10 +4766,13 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
                 ],
             },
             options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
-            now_fn=lambda: now,
+            now_fn=lambda: states.time,
         )
         await coordinator.async_process_update()
+        states.time = now + timedelta(seconds=30)
         states.watts = 420
+        await coordinator.async_process_update()
+        states.time = now + timedelta(seconds=60)
         await coordinator.async_process_update()
         return coordinator.state.nilm_unmatched_load_percentage_by_circuit["mains"]
 
@@ -4817,6 +4834,8 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
 
     await coordinator.async_process_update()
     holder.update({"l1": 400.0, "fridge": 300.0, "time": now + timedelta(seconds=30)})
+    await coordinator.async_process_update()
+    holder["time"] = now + timedelta(seconds=60)
     await coordinator.async_process_update()
 
     assert coordinator.state.nilm_topology_status_by_circuit["fridge"] == "consistent"
@@ -4910,20 +4929,25 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
     )
 
     readings = [
-        (100.0, 100.0, 0.0),
-        (400.0, 100.0, 300.0),
-        (100.0, 100.0, 0.0),
-        (410.0, 100.0, 310.0),
-        (100.0, 100.0, 0.0),
-        (420.0, 100.0, 320.0),
+        (0, 100.0, 100.0, 0.0),
+        (30, 400.0, 100.0, 300.0),
+        (60, 400.0, 100.0, 300.0),
+        (120, 100.0, 100.0, 0.0),
+        (180, 100.0, 100.0, 0.0),
+        (240, 410.0, 100.0, 310.0),
+        (270, 410.0, 100.0, 310.0),
+        (330, 100.0, 100.0, 0.0),
+        (390, 100.0, 100.0, 0.0),
+        (450, 420.0, 100.0, 320.0),
+        (480, 420.0, 100.0, 320.0),
     ]
-    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+    for seconds, l1_w, l2_w, fridge_w in readings:
         holder.update(
             {
                 "l1": l1_w,
                 "l2": l2_w,
                 "fridge": fridge_w,
-                "time": now + timedelta(seconds=index * 30),
+                "time": now + timedelta(seconds=seconds),
             }
         )
         await coordinator.async_process_update()
@@ -5006,6 +5030,8 @@ async def test_runtime_does_not_suggest_leg_from_mixed_topology_evidence() -> No
         }
     )
     await coordinator.async_process_update()
+    holder["time"] = now + timedelta(seconds=60)
+    await coordinator.async_process_update()
 
     evidence = coordinator.state.nilm_topology_evidence_by_circuit["fridge"]
     assert evidence["status"] == "topology_mismatch"
@@ -5078,20 +5104,25 @@ async def test_runtime_infers_configured_leg_from_single_phase_entity_hint(
     )
 
     readings = [
-        (100.0, 100.0, 0.0),
-        (400.0, 100.0, 300.0),
-        (100.0, 100.0, 0.0),
-        (410.0, 100.0, 310.0),
-        (100.0, 100.0, 0.0),
-        (420.0, 100.0, 320.0),
+        (0, 100.0, 100.0, 0.0),
+        (30, 400.0, 100.0, 300.0),
+        (60, 400.0, 100.0, 300.0),
+        (120, 100.0, 100.0, 0.0),
+        (180, 100.0, 100.0, 0.0),
+        (240, 410.0, 100.0, 310.0),
+        (270, 410.0, 100.0, 310.0),
+        (330, 100.0, 100.0, 0.0),
+        (390, 100.0, 100.0, 0.0),
+        (450, 420.0, 100.0, 320.0),
+        (480, 420.0, 100.0, 320.0),
     ]
-    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+    for seconds, l1_w, l2_w, fridge_w in readings:
         holder.update(
             {
                 "l1": l1_w,
                 "l2": l2_w,
                 "fridge": fridge_w,
-                "time": now + timedelta(seconds=index * 30),
+                "time": now + timedelta(seconds=seconds),
             }
         )
         await coordinator.async_process_update()
@@ -5169,20 +5200,25 @@ async def test_runtime_alerts_on_repeated_known_load_topology_mismatch(
     )
 
     readings = [
-        (100.0, 100.0, 0.0),
-        (400.0, 400.0, 600.0),
-        (100.0, 100.0, 0.0),
-        (410.0, 410.0, 620.0),
-        (100.0, 100.0, 0.0),
-        (420.0, 420.0, 640.0),
+        (0, 100.0, 100.0, 0.0),
+        (30, 400.0, 400.0, 600.0),
+        (60, 400.0, 400.0, 600.0),
+        (120, 100.0, 100.0, 0.0),
+        (180, 100.0, 100.0, 0.0),
+        (240, 410.0, 410.0, 620.0),
+        (270, 410.0, 410.0, 620.0),
+        (330, 100.0, 100.0, 0.0),
+        (390, 100.0, 100.0, 0.0),
+        (450, 420.0, 420.0, 640.0),
+        (480, 420.0, 420.0, 640.0),
     ]
-    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+    for seconds, l1_w, l2_w, fridge_w in readings:
         holder.update(
             {
                 "l1": l1_w,
                 "l2": l2_w,
                 "fridge": fridge_w,
-                "time": now + timedelta(seconds=index * 30),
+                "time": now + timedelta(seconds=seconds),
             }
         )
         await coordinator.async_process_update()
@@ -5267,20 +5303,25 @@ async def test_runtime_ignores_low_confidence_known_load_topology_mismatch(
     )
 
     readings = [
-        (100.0, 100.0, 0.0),
-        (400.0, 400.0, 480.0),
-        (100.0, 100.0, 0.0),
-        (410.0, 410.0, 496.0),
-        (100.0, 100.0, 0.0),
-        (420.0, 420.0, 512.0),
+        (0, 100.0, 100.0, 0.0),
+        (30, 400.0, 400.0, 480.0),
+        (60, 400.0, 400.0, 480.0),
+        (120, 100.0, 100.0, 0.0),
+        (180, 100.0, 100.0, 0.0),
+        (240, 410.0, 410.0, 496.0),
+        (270, 410.0, 410.0, 496.0),
+        (330, 100.0, 100.0, 0.0),
+        (390, 100.0, 100.0, 0.0),
+        (450, 420.0, 420.0, 512.0),
+        (480, 420.0, 420.0, 512.0),
     ]
-    for index, (l1_w, l2_w, fridge_w) in enumerate(readings):
+    for seconds, l1_w, l2_w, fridge_w in readings:
         holder.update(
             {
                 "l1": l1_w,
                 "l2": l2_w,
                 "fridge": fridge_w,
-                "time": now + timedelta(seconds=index * 30),
+                "time": now + timedelta(seconds=seconds),
             }
         )
         await coordinator.async_process_update()
@@ -5846,7 +5887,7 @@ async def test_runtime_populates_readiness_health_and_checklist_state() -> None:
     assert coordinator.state.health_summary_by_circuit["fridge"] == "Learning"
     readiness = coordinator.state.readiness_by_circuit["fridge"]
     assert readiness["baseline_age_days"] == 1.0
-    assert readiness["cycle_count"] == 2
+    assert readiness["cycle_count"] == 1
     assert readiness["baseline_confidence"] == 0.8
     assert readiness["required_metric_coverage"] == 1.0
     assert readiness["optional_metric_coverage"] == 1.0
@@ -7908,6 +7949,72 @@ async def test_runtime_reports_run_cycle_diagnostics_from_retained_events() -> N
         "scope": "today",
         "evidence_source": "retained_start_stop_events",
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_merges_short_gap_cycles_for_activity_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.washer_power"
+            return SimpleNamespace(
+                state="0",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "mode": "single_phase",
+                    "appliance_profile": "washer",
+                    "sensors": [
+                        {"entity_id": "sensor.washer_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=0),
+                    circuit_id="washer",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=10),
+                    circuit_id="washer",
+                    event_type=EventType.STOP,
+                ),
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=11),
+                    circuit_id="washer",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=now.replace(hour=1, minute=20),
+                    circuit_id="washer",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert coordinator.state.run_cycle_count_by_circuit["washer"] == 1
+    assert coordinator.state.run_cycle_runtime_seconds_by_circuit["washer"] == 1140.0
+    assert coordinator.state.run_cycle_status_by_circuit["washer"] == "idle"
 
 
 @pytest.mark.asyncio

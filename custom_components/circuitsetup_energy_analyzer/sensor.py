@@ -70,6 +70,7 @@ from .entity import (
     sync_entity_registry_visibility,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
@@ -868,6 +869,14 @@ def always_on_limit_usage_value(state: Any, circuit_id: str) -> float:
 
 def activity_summary_value(state: Any, circuit_id: str) -> str:
     """Return a user-facing summary of what the circuit is doing."""
+    operating_snapshot = _operating_state_snapshot(state, circuit_id)
+    if operating_snapshot is not None:
+        running = operating_state_is_running(operating_snapshot)
+        if running is True:
+            return "Running"
+        if running is False:
+            return "Idle"
+        return "Unavailable"
     run_status = run_cycle_status_value(state, circuit_id)
     standby_status = standby_status_value(state, circuit_id)
     if run_status == "running":
@@ -883,7 +892,7 @@ def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     """Return activity detail that would otherwise require several entities."""
     run_status = run_cycle_status_value(state, circuit_id)
     standby_status = standby_status_value(state, circuit_id)
-    return {
+    attributes = {
         "run_cycle_status": run_status,
         "standby_status": standby_status,
         "run_cycle_count": run_cycle_count_value(state, circuit_id),
@@ -894,6 +903,22 @@ def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
             standby_status,
         ),
     }
+    operating_snapshot = _operating_state_snapshot(state, circuit_id)
+    if isinstance(operating_snapshot, dict):
+        attributes["operating_state"] = operating_snapshot.get("state", "unknown")
+        attributes["operating_stable_state"] = operating_snapshot.get(
+            "stable_state",
+            "unknown",
+        )
+    return attributes
+
+
+def _operating_state_snapshot(state: Any, circuit_id: str) -> dict[str, Any] | None:
+    snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
+    if not isinstance(snapshots, dict):
+        return None
+    snapshot = snapshots.get(circuit_id)
+    return snapshot if isinstance(snapshot, dict) else None
 
 
 def electrical_health_value(state: Any, circuit_id: str) -> str:

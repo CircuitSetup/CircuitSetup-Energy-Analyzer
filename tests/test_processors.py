@@ -247,7 +247,7 @@ async def test_coordinator_state_update_without_store_data_change_stays_clean() 
     assert coordinator._store_dirty is False
 
 
-def test_event_processor_returns_events() -> None:
+def test_event_processor_returns_events_after_dwell() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -277,10 +277,109 @@ def test_event_processor_returns_events() -> None:
 
     first = processor.process(_sample(0, 5.0), config, context)
     second = processor.process(_sample(10, 210.0), config, context)
+    third = processor.process(_sample(21, 210.0), config, context)
 
     assert first.events == []
-    assert [event.event_type for event in second.events] == [EventType.START]
-    assert second.store_dirty is True
+    assert second.events == []
+    assert [event.event_type for event in third.events] == [EventType.START]
+    assert third.store_dirty is True
+
+
+def test_event_processor_uses_profile_thresholds_and_dwell() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = CircuitEventProcessor()
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    microwave = CircuitConfig(
+        circuit_id="microwave",
+        name="Microwave",
+        appliance_profile=ApplianceProfile.MICROWAVE,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    washer_first = processor.process(_sample(0, 5.0), washer, context)
+    washer_pending = processor.process(_sample(5, 35.0), washer, context)
+    washer_confirmed = processor.process(_sample(21, 35.0), washer, context)
+    microwave_first = processor.process(_sample(0, 5.0), microwave, context)
+    microwave_second = processor.process(_sample(5, 35.0), microwave, context)
+    microwave_third = processor.process(_sample(21, 35.0), microwave, context)
+
+    assert washer_first.events == []
+    assert washer_pending.events == []
+    assert [event.event_type for event in washer_confirmed.events] == [EventType.START]
+    assert microwave_first.events == []
+    assert microwave_second.events == []
+    assert microwave_third.events == []
+
+
+def test_event_processor_returns_operating_state_updates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CircuitEventProcessor()
+
+    first = processor.process(_sample(0, 5.0), config, context)
+    second = processor.process(_sample(5, 35.0), config, context)
+    third = processor.process(_sample(21, 35.0), config, context)
+
+    first_updates = {update.path: update.value for update in first.state_updates}
+    second_updates = {update.path: update.value for update in second.state_updates}
+    third_updates = {update.path: update.value for update in third.state_updates}
+
+    assert first_updates[("operating_state_by_circuit", "washer")] == "off"
+    assert (
+        first_updates[("operating_state_snapshot_by_circuit", "washer")]["state"]
+        == "off"
+    )
+    assert second_updates[("operating_state_by_circuit", "washer")] == "pending_on"
+    assert third_updates[("operating_state_by_circuit", "washer")] == "running"
+    assert third_updates[("operating_state_snapshot_by_circuit", "washer")][
+        "stable_state"
+    ] == "running"
 
 
 def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
@@ -1753,6 +1852,94 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert inventory["unknown_load_count"] == 1
     assert inventory["unknown_loads"][0]["signature_id"] == signature["signature_id"]
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
+
+
+def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
+) -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        CircuitEvent,
+        EventType,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    state = AnalyzerState()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    observed_matches = []
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, events: events,
+        observe_topology=lambda _config, match, _context: observed_matches.append(match)
+        or [],
+    )
+
+    def sample(index: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=index * 30),
+            circuit_id="mains",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor.process(sample(0, 100.0), config, context, events=())
+    processor.process(sample(1, 420.0), config, context, events=())
+    result = processor.process(
+        sample(2, 420.0),
+        config,
+        context,
+        events=(
+            CircuitEvent(
+                timestamp=now + timedelta(seconds=30),
+                circuit_id="fridge",
+                event_type=EventType.START,
+                features={"startup_power_w": 320.0},
+            ),
+        ),
+    )
+
+    assert len(observed_matches) == 1
+    assert observed_matches[0].known_circuit_id == "fridge"
+    assert observed_matches[0].edge.timestamp == now + timedelta(seconds=30)
+    assert processor.total_events_by_circuit["mains"] == 1
+    assert processor.unmatched_edges_by_circuit["mains"] == []
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == 0.0
 
 
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:

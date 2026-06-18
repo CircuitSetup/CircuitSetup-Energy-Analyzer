@@ -15,6 +15,7 @@ from ..cycles import (
 )
 from ..models import AlertEvidence, BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
+from ..operating_detection import resolve_operating_detection
 from ..storage import FeatureStoreData
 from .base import FeatureResult, ProcessingContext
 
@@ -53,15 +54,25 @@ class RunCycleProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return run-cycle alerts for the current retained event history."""
+        merge_gap_seconds = resolve_operating_detection(
+            circuit_config,
+            overrides=getattr(
+                context.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_config.circuit_id, {}),
+        ).profile.merge_gap_seconds
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
             now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         baselines, baseline_dirty = self._cycle_baselines_for_config(
             context.store_data,
             circuit_config,
             context.now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         if not self._learning_mature(circuit_config, context.now):
             return FeatureResult(store_dirty=baseline_dirty)
@@ -100,6 +111,8 @@ class RunCycleProcessor:
         store_data: FeatureStoreData,
         config: CircuitConfig,
         now: datetime,
+        *,
+        merge_gap_seconds: float,
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
@@ -107,6 +120,7 @@ class RunCycleProcessor:
             store_data.events,
             circuit_id=config.circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         for feature, values in values_by_feature.items():
             key = _baseline_key(config.circuit_id, feature)

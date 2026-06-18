@@ -1798,6 +1798,30 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     ] == "No cumulative kWh evidence is available for this circuit."
 
 
+def test_activity_summary_prefers_operating_state_lane() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        activity_summary_attributes,
+        activity_summary_value,
+    )
+
+    state = AnalyzerState(
+        operating_state_snapshot_by_circuit={
+            "dryer": {"state": "pending_off", "stable_state": "running"},
+            "washer": {"state": "pending_on", "stable_state": "off"},
+        },
+        run_cycle_status_by_circuit={"dryer": "idle", "washer": "running"},
+        standby_status_by_circuit={"dryer": "off", "washer": "on"},
+        run_cycle_count_by_circuit={"dryer": 1, "washer": 2},
+        run_cycle_runtime_seconds_by_circuit={"dryer": 1800.0, "washer": 0.0},
+    )
+
+    assert activity_summary_value(state, "dryer") == "Running"
+    assert activity_summary_value(state, "washer") == "Idle"
+    assert activity_summary_attributes(state, "dryer")["operating_state"] == (
+        "pending_off"
+    )
+
+
 def test_setup_health_prioritizes_actionable_next_steps() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -2436,6 +2460,34 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     state.latest_real_power_w_by_circuit["oven"] = 2000.0
     assert is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
     assert is_appliance_running(state, "oven", ApplianceProfile.OVEN) is False
+
+
+def test_operating_state_helpers_take_precedence_over_cycle_and_watts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        is_appliance_running,
+    )
+
+    state = AnalyzerState(
+        latest_real_power_w_by_circuit={
+            "washer": 120.0,
+            "dryer": 0.0,
+            "fridge": 0.0,
+        },
+        run_cycle_status_by_circuit={
+            "washer": "running",
+            "dryer": "idle",
+            "fridge": "idle",
+        },
+        operating_state_snapshot_by_circuit={
+            "washer": {"state": "pending_on", "stable_state": "off"},
+            "dryer": {"state": "pending_off", "stable_state": "running"},
+            "fridge": {"state": "running", "stable_state": "running"},
+        },
+    )
+
+    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
+    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
+    assert is_appliance_running(state, "fridge", ApplianceProfile.REFRIGERATOR) is True
 
 
 def test_demo_source_values_are_intentionally_triggerable() -> None:

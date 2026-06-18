@@ -10,6 +10,7 @@ from ..alerting import Observation
 from ..cycles import summarize_circuit_cycles
 from ..models import AlertEvidence, CircuitConfig
 from ..normalize import NormalizedCircuitSample
+from ..operating_detection import resolve_operating_detection
 from .base import FeatureResult, ProcessingContext
 
 
@@ -48,10 +49,19 @@ class ActivityAlertProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return configured activity alerts for the current cycle summary."""
+        merge_gap_seconds = resolve_operating_detection(
+            circuit_config,
+            overrides=getattr(
+                context.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_config.circuit_id, {}),
+        ).profile.merge_gap_seconds
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
             now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         evidence = evaluate_activity_alert(
             circuit_id=circuit_config.circuit_id,

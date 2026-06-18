@@ -134,6 +134,7 @@ from .nilm import (
     NilmEdgeDetector,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
+from .operating_detection import resolve_operating_detection
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
@@ -354,6 +355,10 @@ class AnalyzerState:
     power_flow_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    operating_state_by_circuit: dict[str, str] = field(default_factory=dict)
+    operating_state_snapshot_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -1748,10 +1753,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if isinstance(usage_days, list):
             feature_history["energy_usage_days"] = list(usage_days)
 
+        merge_gap_seconds = resolve_operating_detection(
+            config,
+            overrides=getattr(
+                self.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_id, {}),
+        ).profile.merge_gap_seconds
         cycle_values = cycle_baseline_feature_values(
             self.store_data.events,
             circuit_id=circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -2994,10 +3008,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             suppression_reason=suppression_reason,
         )
         self.state.learning_progress_by_circuit[circuit_id] = progress
+        merge_gap_seconds = resolve_operating_detection(
+            config,
+            overrides=getattr(
+                self.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_id, {}),
+        ).profile.merge_gap_seconds
         cycle_summary = summarize_circuit_cycles(
             self.store_data.events,
             circuit_id=circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         self.state.run_cycle_count_by_circuit[circuit_id] = (
             cycle_summary.start_count
