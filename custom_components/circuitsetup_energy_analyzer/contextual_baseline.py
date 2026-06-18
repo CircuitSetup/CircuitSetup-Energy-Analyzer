@@ -704,6 +704,28 @@ def _solar_context_circuit_id(
     if circuit_id in solar_evidence_by_circuit:
         return circuit_id
 
+    site_candidates = [
+        candidate
+        for candidate in _solar_context_candidate_ids(
+            solar_status_by_circuit,
+            solar_evidence_by_circuit,
+        )
+        if _is_site_solar_context_candidate(candidate)
+    ]
+    if site_candidates:
+        return site_candidates[0]
+
+    candidate_ids = _solar_context_candidate_ids(
+        solar_status_by_circuit,
+        solar_evidence_by_circuit,
+    )
+    return candidate_ids[0] if candidate_ids else circuit_id
+
+
+def _solar_context_candidate_ids(
+    solar_status_by_circuit: Mapping[Any, Any],
+    solar_evidence_by_circuit: Mapping[Any, Any],
+) -> list[str]:
     candidate_ids: list[str] = []
     candidate_ids.extend(str(key) for key in solar_status_by_circuit)
     candidate_ids.extend(
@@ -711,7 +733,12 @@ def _solar_context_circuit_id(
         for key in solar_evidence_by_circuit
         if str(key) not in candidate_ids
     )
-    return candidate_ids[0] if candidate_ids else circuit_id
+    return candidate_ids
+
+
+def _is_site_solar_context_candidate(candidate_id: str) -> bool:
+    normalized = _normalize_token(candidate_id)
+    return normalized in {"mains", "main", "site", "grid", "whole_home"}
 
 
 def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:

@@ -497,6 +497,37 @@ def test_load_context_uses_site_solar_flow_state() -> None:
     assert context.as_dict()["solar_flow_state"] == "high_surplus"
 
 
+def test_load_context_prefers_explicit_mains_site_solar_context() -> None:
+    now = datetime(2026, 6, 20, 14, tzinfo=UTC)
+    ev_config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    state = AnalyzerState(
+        solar_flow_status_by_circuit={
+            "solar_array": "no_generation",
+            "mains": "exporting",
+        },
+        solar_flow_evidence_by_circuit={
+            "solar_array": {"solar_surplus_status": "no_surplus"},
+            "mains": {"solar_surplus_status": "high_surplus"},
+        },
+    )
+
+    context = build_context_for_sample(
+        circuit_config=ev_config,
+        sample=_sample("ev", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="peak_demand_w",
+    )
+
+    assert context.as_dict()["solar_flow_state"] == "high_surplus"
+
+
 def _sample(circuit_id: str, timestamp: datetime) -> NormalizedCircuitSample:
     return NormalizedCircuitSample(
         timestamp=timestamp,
