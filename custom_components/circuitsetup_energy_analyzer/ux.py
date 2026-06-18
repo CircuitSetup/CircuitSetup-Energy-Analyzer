@@ -388,6 +388,7 @@ def health_summary(
     data_quality_problem: bool = False,
     paused: bool = False,
     active_alerts: bool = False,
+    observations: bool = False,
     nilm_review_count: int = 0,
     mixed: bool = False,
     learning: bool = False,
@@ -399,6 +400,8 @@ def health_summary(
         return "paused", "Paused"
     if active_alerts:
         return "possible_issue", "Possible issue"
+    if observations:
+        return "observation", "Observation recorded"
     if nilm_review_count > 0:
         return "nilm_review", "NILM review"
     if mixed:

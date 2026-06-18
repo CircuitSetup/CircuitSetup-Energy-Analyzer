@@ -144,6 +144,7 @@ def health_summary_value(state: Any, circuit_id: str) -> str:
         "learning": "Learning",
         "ready": "Ready",
         "needs_data": "Needs data",
+        "observation": "Observation recorded",
         "paused": "Paused",
         "possible_issue": "Possible issue",
         "mixed_observation": "Mixed observation",
@@ -999,6 +1000,11 @@ def _health_summary_explanation(summary: str, readiness: str) -> str:
         return "One or more analyzer alerts are active for this circuit."
     if summary == "Needs data":
         return "The analyzer needs valid source sensor data before checks are reliable."
+    if summary == "Observation recorded":
+        return (
+            "A noteworthy observation was recorded, but repeated evidence is "
+            "still required before an alert is raised."
+        )
     if summary == "Learning":
         return "The analyzer is still building a baseline for this circuit."
     if summary == "Paused":
@@ -1468,6 +1474,10 @@ _STATUS_EXPLANATIONS: Mapping[str, str] = {
     "not_applicable": "This check does not apply to the current circuit configuration.",
     "not_dual_phase": "This check only applies to dual-phase circuits.",
     "off": "The latest power sample is below the configured standby threshold.",
+    "observation": (
+        "A noteworthy observation was recorded, but repeated evidence is still "
+        "required before an alert is raised."
+    ),
     "on": "The latest power sample is above the standby range.",
     "over_budget": "Billing-cycle usage is over the configured budget.",
     "over_goal": "Daily energy usage is over the configured goal.",

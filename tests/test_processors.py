@@ -98,6 +98,17 @@ class _CaptureAlertPolicy:
         )
 
 
+class _CaptureObservationOnlyPolicy:
+    min_average_score = 1.5
+
+    def __init__(self) -> None:
+        self.observations: list[Observation] = []
+
+    def observe(self, observation: Observation) -> None:
+        self.observations.append(observation)
+        return None
+
+
 def test_feature_result_defaults_are_independent() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         FeatureResult,
@@ -120,10 +131,21 @@ def test_feature_result_defaults_are_independent() -> None:
             value="Running",
         )
     )
+    first.observations.append(
+        Observation(
+            circuit_id="fridge",
+            feature="cycle_duration",
+            score=1.7,
+            baseline_confidence=0.8,
+            observed_at=datetime(2026, 6, 11, 12, 1, tzinfo=UTC),
+        )
+    )
 
     assert len(first.events) == 1
+    assert len(first.observations) == 1
     assert len(first.state_updates) == 1
     assert second.events == []
+    assert second.observations == []
     assert second.state_updates == []
 
 
@@ -245,6 +267,57 @@ async def test_coordinator_state_update_without_store_data_change_stays_clean() 
 
     assert coordinator.state.health_summary_by_circuit["fridge"] == "Running"
     assert coordinator._store_dirty is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_applies_observation_lane_without_creating_alert_history(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    observation = Observation(
+        circuit_id="fridge",
+        feature="cycle_duration",
+        score=1.8,
+        baseline_confidence=0.9,
+        observed_at=now,
+        observed_value=45.0,
+        baseline_value=30.0,
+        message="Fridge ran longer than usual.",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={DOMAIN: {}}),
+        entry_data={},
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+
+    applied_events, applied_alerts = await coordinator._apply_feature_result(
+        FeatureResult(observations=[observation]),
+    )
+
+    assert applied_events == []
+    assert applied_alerts == []
+    assert coordinator.store_data.alerts == []
+    assert coordinator._store_dirty is False
+    assert coordinator.state.recent_observations_by_circuit["fridge"] == [
+        {
+            "timestamp": now.isoformat(),
+            "circuit_id": "fridge",
+            "feature": "cycle_duration",
+            "feature_name": "Cycle Duration",
+            "message": "Fridge ran longer than usual.",
+            "score": 1.8,
+            "baseline_confidence": 0.9,
+            "observed_value": 45.0,
+            "baseline_value": 30.0,
+        }
+    ]
 
 
 def test_event_processor_returns_events_after_dwell() -> None:
@@ -652,6 +725,267 @@ def test_activity_alert_processor_returns_left_on_alert() -> None:
     assert policy.observations[0].observed_value == 45.0
     assert policy.observations[0].baseline_value == 30.0
     assert "Dryer has been active for 45 minutes" in result.alerts[0].message
+
+
+def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    events = []
+    for index in range(10):
+        start = now - timedelta(days=10 - index, hours=1)
+        stop = start + timedelta(minutes=20)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=stop,
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+    )
+    store_data = FeatureStoreData(events=events)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureObservationOnlyPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert len(result.observations) == 1
+    assert result.alerts == []
+    assert result.notifications == []
+    assert result.observations[0].feature == RUN_CYCLE_DURATION_FEATURE
+    assert policy.observations[0] == result.observations[0]
+
+
+def test_run_cycle_processor_does_not_promote_one_cycle_across_polls() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_DURATION_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    events = []
+    for index in range(10):
+        start = now - timedelta(days=10 - index, hours=1)
+        stop = start + timedelta(minutes=20)
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                ),
+                CircuitEvent(
+                    timestamp=stop,
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                ),
+            ]
+        )
+    events.append(
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+    )
+    store_data = FeatureStoreData(events=events)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = ConservativeAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+    )
+
+    results = []
+    for offset in range(3):
+        context = ProcessingContext(
+            now=now + timedelta(minutes=offset),
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=AnalyzerState(),
+            store_data=store_data,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        results.append(processor.process(_energy_sample(120.5), config, context))
+
+    assert [len(result.observations) for result in results] == [1, 1, 1]
+    assert [result.observations[0].feature for result in results] == [
+        RUN_CYCLE_DURATION_FEATURE,
+        RUN_CYCLE_DURATION_FEATURE,
+        RUN_CYCLE_DURATION_FEATURE,
+    ]
+    assert [result.alerts for result in results] == [[], [], []]
+    assert [result.notifications for result in results] == [[], [], []]
+
+
+def test_activity_alert_processor_returns_observation_without_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=45),
+                circuit_id="dryer",
+                event_type=EventType.START,
+            )
+        ]
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureObservationOnlyPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert len(result.observations) == 1
+    assert result.alerts == []
+    assert result.notifications == []
+    assert result.observations[0].feature == "activity_left_on"
+    assert policy.observations[0] == result.observations[0]
+
+
+def test_activity_alert_processor_does_not_promote_one_session_across_polls() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=45),
+                circuit_id="dryer",
+                event_type=EventType.START,
+            )
+        ]
+    )
+    config = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = ConservativeAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    results = []
+    for offset in range(3):
+        context = ProcessingContext(
+            now=now + timedelta(minutes=offset),
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=AnalyzerState(),
+            store_data=store_data,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        results.append(processor.process(_energy_sample(1.0), config, context))
+
+    assert [len(result.observations) for result in results] == [1, 1, 1]
+    assert [result.observations[0].feature for result in results] == [
+        "activity_left_on",
+        "activity_left_on",
+        "activity_left_on",
+    ]
+    assert [result.alerts for result in results] == [[], [], []]
+    assert [result.notifications for result in results] == [[], [], []]
 
 
 def test_billing_cycle_processor_updates_state_and_returns_budget_alert() -> None:

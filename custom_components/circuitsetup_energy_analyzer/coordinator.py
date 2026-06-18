@@ -15,6 +15,7 @@ from typing import Any, Self
 from . import notifications, repairs
 from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
+    DEFAULT_TIMELINE_WINDOW_HOURS,
     build_recent_activity_timeline,
     timeline_payload,
 )
@@ -196,6 +197,7 @@ from .ux import (
     alert_policy_name_for_sensitivity,
     canonicalize_sensitivity_config,
     data_quality_checklist,
+    friendly_feature_name,
     health_summary,
     learning_progress,
     normalize_sensitivity,
@@ -351,6 +353,9 @@ class AnalyzerState:
     recent_activity_by_circuit: dict[str, str] = field(default_factory=dict)
     recent_activity_count_by_circuit: dict[str, int] = field(default_factory=dict)
     recent_activity_timeline_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    recent_observations_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
@@ -1195,6 +1200,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
+        self._prune_recent_observations(now)
 
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
@@ -3094,6 +3100,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             paused=bool(maintenance.get("active"))
             or circuit_id in self.paused_circuits,
             active_alerts=bool(self.state.active_alerts_by_circuit.get(circuit_id)),
+            observations=bool(
+                self.state.recent_observations_by_circuit.get(circuit_id)
+            ),
             nilm_review_count=len(
                 self.state.nilm_review_by_circuit.get(circuit_id, [])
             ),
@@ -3141,6 +3150,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             events=self.store_data.events,
             alerts=self.store_data.alerts,
+            observations=self.state.recent_observations_by_circuit.get(
+                circuit_id,
+                [],
+            ),
             now=now,
         )
         self.state.recent_activity_by_circuit[circuit_id] = timeline.latest_title
@@ -5373,6 +5386,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.events.extend(result.events)
         if result.alerts:
             self.store_data.alerts.extend(result.alerts)
+        for observation in result.observations:
+            self._record_recent_observation(observation)
         for update in result.state_updates:
             _apply_state_update(self.state, update.path, update.value)
         for alert in result.notifications:
@@ -5404,6 +5419,52 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_nilm_history()
         self._prune_alert_feedback(now)
         self._prune_recommendation_history(now)
+
+    def _observation_payload(self: Self, observation: Any) -> dict[str, Any]:
+        payload = {
+            "timestamp": observation.observed_at.isoformat(),
+            "circuit_id": observation.circuit_id,
+            "feature": observation.feature,
+            "feature_name": friendly_feature_name(observation.feature),
+            "message": observation.message,
+            "score": observation.score,
+            "baseline_confidence": observation.baseline_confidence,
+            "observed_value": observation.observed_value,
+            "baseline_value": observation.baseline_value,
+        }
+        if getattr(observation, "observation_key", None) is not None:
+            payload["observation_key"] = observation.observation_key
+        return payload
+
+    def _record_recent_observation(self: Self, observation: Any) -> None:
+        payload = self._observation_payload(observation)
+        observations = self.state.recent_observations_by_circuit.setdefault(
+            observation.circuit_id,
+            [],
+        )
+        observation_key = payload.get("observation_key")
+        if observation_key is not None:
+            for index, existing in enumerate(observations):
+                if existing.get("observation_key") == observation_key:
+                    observations[index] = payload
+                    return
+        observations.append(payload)
+
+    def _prune_recent_observations(self: Self, now: datetime) -> None:
+        cutoff = now - timedelta(hours=DEFAULT_TIMELINE_WINDOW_HOURS)
+        retained: dict[str, list[dict[str, Any]]] = {}
+        for (
+            circuit_id,
+            observations,
+        ) in self.state.recent_observations_by_circuit.items():
+            kept = [
+                observation
+                for observation in observations
+                if _observation_within_cutoff(observation, cutoff)
+            ]
+            if kept:
+                retained[circuit_id] = kept
+        self.state.recent_observations_by_circuit = retained
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -6023,6 +6084,14 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _observation_within_cutoff(
+    observation: Mapping[str, Any],
+    cutoff: datetime,
+) -> bool:
+    observed_at = _datetime_or_none(observation.get("timestamp"))
+    return observed_at is not None and observed_at >= cutoff
 
 
 def _datetime_floor() -> datetime:

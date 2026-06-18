@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..activity_alerts import ActivityAlertSettings, evaluate_activity_alert
 from ..alerting import Observation
@@ -75,19 +75,33 @@ class ActivityAlertProcessor:
         if evidence is None:
             return FeatureResult()
 
+        observation = Observation(
+            circuit_id=circuit_config.circuit_id,
+            feature=evidence.feature,
+            score=evidence.score,
+            baseline_confidence=1.0,
+            observed_at=context.now,
+            observed_value=evidence.observed_value,
+            baseline_value=evidence.baseline_value,
+            message=evidence.message,
+            observation_key=_observation_key(evidence.feature, summary),
+            features=evidence.features,
+        )
         alert = self._alert_policy_for_circuit(circuit_config.circuit_id).observe(
-            Observation(
-                circuit_id=circuit_config.circuit_id,
-                feature=evidence.feature,
-                score=evidence.score,
-                baseline_confidence=1.0,
-                observed_at=context.now,
-                observed_value=evidence.observed_value,
-                baseline_value=evidence.baseline_value,
-                message=evidence.message,
-                features=evidence.features,
-            )
+            observation
         )
         if alert is None:
-            return FeatureResult()
-        return FeatureResult(alerts=[alert], notifications=[alert])
+            return FeatureResult(observations=[observation])
+        return FeatureResult(
+            observations=[observation],
+            alerts=[alert],
+            notifications=[alert],
+        )
+
+
+def _observation_key(feature: str, summary: Any) -> str:
+    if feature == "activity_left_on" and summary.last_start is not None:
+        return f"{feature}:{summary.last_start.isoformat()}"
+    if summary.last_stop is not None:
+        return f"{feature}:{summary.last_stop.isoformat()}"
+    return f"{feature}:{summary.date}"

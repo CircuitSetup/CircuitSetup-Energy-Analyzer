@@ -1369,6 +1369,7 @@ async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
         "total_count": 2,
         "event_count": 1,
         "alert_count": 1,
+        "observation_count": 0,
         "latest_title": "Possible issue: Cycle Duration",
         "latest_timestamp": alert.timestamp.isoformat(),
         "items": [
@@ -1399,6 +1400,100 @@ async def test_runtime_refreshes_recent_activity_timeline_from_store() -> None:
                 "change_ratio": None,
                 "repeated_count": None,
             },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_retains_recent_observations_across_refreshes() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+    from custom_components.circuitsetup_energy_analyzer.const import CONF_CIRCUITS
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+    now_holder = {"value": datetime(2026, 6, 18, 12, 0, tzinfo=UTC)}
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            assert entity_id == "sensor.fridge_power"
+            return SimpleNamespace(
+                state="5",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now_holder["value"],
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                            "unit": "W",
+                        }
+                    ],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now_holder["value"],
+    )
+    observation = Observation(
+        circuit_id="fridge",
+        feature="cycle_duration",
+        score=1.8,
+        baseline_confidence=0.9,
+        observed_at=now_holder["value"],
+        observed_value=45.0,
+        baseline_value=30.0,
+        message="Fridge ran longer than usual.",
+    )
+
+    await coordinator._apply_feature_result(
+        FeatureResult(observations=[observation]),
+    )
+    now_holder["value"] = now_holder["value"] + timedelta(minutes=1)
+    await coordinator.async_process_update()
+
+    assert (
+        coordinator.state.health_summary_by_circuit["fridge"]
+        == "Observation recorded"
+    )
+    assert coordinator.state.recent_activity_timeline_by_circuit["fridge"] == {
+        "status": "activity",
+        "window_hours": 24,
+        "total_count": 1,
+        "event_count": 0,
+        "alert_count": 0,
+        "observation_count": 1,
+        "latest_title": "Observation: Cycle Duration",
+        "latest_timestamp": observation.observed_at.isoformat(),
+        "items": [
+            {
+                "timestamp": observation.observed_at.isoformat(),
+                "kind": "observation",
+                "title": "Observation: Cycle Duration",
+                "detail": "Fridge ran longer than usual.",
+                "severity": "info",
+                "feature": "cycle_duration",
+                "feature_name": "Cycle Duration",
+                "event_type": None,
+                "observed_value": 45.0,
+                "baseline_value": 30.0,
+                "change_ratio": None,
+                "repeated_count": None,
+            }
         ],
     }
 
@@ -5552,7 +5647,32 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
     )
 
     for offset in range(3):
-        holder["time"] = now + timedelta(minutes=offset)
+        holder["time"] = now + timedelta(days=offset)
+        daily_events = []
+        for day_offset in range(1, 11):
+            start = holder["time"] - timedelta(days=day_offset, hours=2)
+            daily_events.extend(
+                [
+                    CircuitEvent(
+                        timestamp=start,
+                        circuit_id="fridge",
+                        event_type=EventType.START,
+                    ),
+                    CircuitEvent(
+                        timestamp=start + timedelta(minutes=20),
+                        circuit_id="fridge",
+                        event_type=EventType.STOP,
+                    ),
+                ]
+            )
+        daily_events.append(
+            CircuitEvent(
+                timestamp=holder["time"] - timedelta(minutes=45),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            )
+        )
+        coordinator.store_data.events = daily_events
         await coordinator.async_process_update()
 
     assert notifications
@@ -7796,11 +7916,18 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
     )
 
     for offset in range(3):
-        holder["time"] = now + timedelta(minutes=offset)
+        holder["time"] = now + timedelta(days=offset)
+        coordinator.store_data.events = [
+            CircuitEvent(
+                timestamp=holder["time"] - timedelta(minutes=45),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            )
+        ]
         await coordinator.async_process_update()
 
     assert notifications
-    alert = notifications[0]
+    alert = next(item for item in notifications if item.feature == "activity_left_on")
     assert alert.feature == "activity_left_on"
     assert alert.repeated_count == 3
     assert alert.observed_value >= 45.0
@@ -7874,11 +8001,25 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
     )
 
     for offset in range(3):
-        holder["time"] = now + timedelta(minutes=offset)
+        holder["time"] = now + timedelta(days=offset)
+        coordinator.store_data.events = [
+            CircuitEvent(
+                timestamp=holder["time"] - timedelta(hours=5),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            ),
+            CircuitEvent(
+                timestamp=holder["time"] - timedelta(hours=4),
+                circuit_id="fridge",
+                event_type=EventType.STOP,
+            ),
+        ]
         await coordinator.async_process_update()
 
     assert notifications
-    alert = notifications[0]
+    alert = next(
+        item for item in notifications if item.feature == "activity_inactive_too_long"
+    )
     assert alert.feature == "activity_inactive_too_long"
     assert alert.repeated_count == 3
     assert alert.observed_value >= 240.0
@@ -8202,7 +8343,32 @@ async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
     )
 
     for offset in range(3):
-        holder["time"] = now + timedelta(minutes=offset)
+        holder["time"] = now + timedelta(days=offset)
+        daily_events: list[CircuitEvent] = []
+        for day_offset in range(1, 21):
+            start = holder["time"] - timedelta(days=day_offset, hours=2)
+            daily_events.extend(
+                [
+                    CircuitEvent(
+                        timestamp=start,
+                        circuit_id="fridge",
+                        event_type=EventType.START,
+                    ),
+                    CircuitEvent(
+                        timestamp=start + timedelta(minutes=20),
+                        circuit_id="fridge",
+                        event_type=EventType.STOP,
+                    ),
+                ]
+            )
+        daily_events.append(
+            CircuitEvent(
+                timestamp=holder["time"] - timedelta(minutes=45),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            )
+        )
+        coordinator.store_data.events = daily_events
         await coordinator.async_process_update()
 
     assert notifications

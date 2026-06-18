@@ -1769,6 +1769,28 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
         "Energy use is above a configured threshold or budget."
     )
 
+
+def test_health_summary_attributes_explain_observation_without_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        electrical_health_attributes,
+        electrical_health_value,
+        energy_summary_attributes,
+        energy_summary_value,
+        health_summary_attributes,
+        health_summary_value,
+    )
+
+    state = AnalyzerState(
+        health_summary_by_circuit={"fridge": "Observation recorded"},
+        readiness_by_circuit={"fridge": {"health_status": "observation"}},
+    )
+
+    assert health_summary_value(state, "fridge") == "Observation recorded"
+    assert health_summary_attributes(state, "fridge")["status_explanation"] == (
+        "A noteworthy observation was recorded, but repeated evidence is still "
+        "required before an alert is raised."
+    )
+
     power_quality_only_state = AnalyzerState(
         metric_consistency_status_by_circuit={"pump": "missing_metrics"},
         power_quality_evidence_by_circuit={

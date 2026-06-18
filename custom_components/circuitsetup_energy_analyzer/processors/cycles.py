@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..alerting import Observation
 from ..baseline import build_baseline
 from ..cycles import (
+    RUN_CYCLE_DURATION_FEATURE,
     cycle_baseline_feature_values,
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
@@ -88,19 +89,23 @@ class RunCycleProcessor:
         if evidence is None:
             return feature_result
 
-        alert = policy.observe(
-            Observation(
-                circuit_id=circuit_config.circuit_id,
-                feature=evidence.feature,
-                score=evidence.score,
-                baseline_confidence=evidence.baseline_confidence,
-                observed_at=context.now,
-                observed_value=evidence.observed_value,
-                baseline_value=evidence.baseline_value,
-                message=evidence.message,
-                features=evidence.features,
-            )
+        observation = Observation(
+            circuit_id=circuit_config.circuit_id,
+            feature=evidence.feature,
+            score=evidence.score,
+            baseline_confidence=evidence.baseline_confidence,
+            observed_at=context.now,
+            observed_value=evidence.observed_value,
+            baseline_value=evidence.baseline_value,
+            message=evidence.message,
+            observation_key=_observation_key(evidence.feature, summary),
+            features=evidence.features,
         )
+        feature_result = FeatureResult(
+            observations=[observation],
+            store_dirty=baseline_dirty,
+        )
+        alert = policy.observe(observation)
         if alert is not None:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)
@@ -136,3 +141,11 @@ class RunCycleProcessor:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _observation_key(feature: str, summary: Any) -> str:
+    if feature == RUN_CYCLE_DURATION_FEATURE:
+        last_start = getattr(summary, "last_start", None)
+        if last_start is not None:
+            return f"{feature}:{last_start.isoformat()}"
+    return f"{feature}:{getattr(summary, 'date', '')}"
