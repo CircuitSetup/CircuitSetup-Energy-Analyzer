@@ -22,6 +22,7 @@ FALLBACK_SPECIFICITY_WEIGHT = {
 }
 
 DAILY_ENERGY_FEATURE = "daily_energy_kwh"
+CONTEXT_FINGERPRINT_SCHEMA_VERSION = "context:v2"
 DEFAULT_RAIN_INTENSITY_UNIT = "mm/h"
 RAIN_ACTIVITY_CONFLICT = "rain_activity_conflict"
 RAIN_INTENSITY_UNIT_MISSING = "rain_intensity_unit_missing"
@@ -73,10 +74,13 @@ class ContextKey:
         )
 
     def fingerprint(self) -> str:
-        return "|".join(
+        dimensions = "|".join(
             f"{dimension.name}={dimension.value}"
             for dimension in self.dimensions
         )
+        if not dimensions:
+            return CONTEXT_FINGERPRINT_SCHEMA_VERSION
+        return f"{CONTEXT_FINGERPRINT_SCHEMA_VERSION}|{dimensions}"
 
     def as_dict(self) -> dict[str, str]:
         return {

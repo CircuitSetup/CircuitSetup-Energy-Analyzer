@@ -52,7 +52,7 @@ def test_context_fingerprint_stable_and_order_independent() -> None:
     )
 
     assert first.fingerprint() == (
-        "season=summer|temperature_bin=very_hot|weather_mode=cooling"
+        "context:v2|season=summer|temperature_bin=very_hot|weather_mode=cooling"
     )
     assert second.fingerprint() == first.fingerprint()
     assert second.as_dict() == {
@@ -128,7 +128,7 @@ def test_contextual_baseline_builds_robust_stats() -> None:
     )
 
     assert stats is not None
-    assert stats.context_fingerprint == "season=summer"
+    assert stats.context_fingerprint == "context:v2|season=summer"
     assert stats.sample_count == 5
     assert stats.median == 8.0
     assert stats.p90 == 40.0
