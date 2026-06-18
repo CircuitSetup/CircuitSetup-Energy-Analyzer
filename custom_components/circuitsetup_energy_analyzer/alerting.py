@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Any, Self
 
@@ -39,11 +39,15 @@ class ConservativeAlertPolicy:
         min_total_score: float = 3.0,
         min_average_score: float = 1.5,
         min_baseline_confidence: float = 0.6,
+        max_observation_age: timedelta = timedelta(days=7),
+        max_episode_gap: timedelta = timedelta(days=2),
     ) -> None:
         self.min_repeated = min_repeated
         self.min_total_score = min_total_score
         self.min_average_score = min_average_score
         self.min_baseline_confidence = min_baseline_confidence
+        self.max_observation_age = max_observation_age
+        self.max_episode_gap = max_episode_gap
         self._observations: defaultdict[tuple[str, str], deque[Observation]] = (
             defaultdict(deque)
         )
@@ -63,6 +67,7 @@ class ConservativeAlertPolicy:
         )
         key = (observation.circuit_id, observation.feature)
         observations = self._observations[key]
+        self._prune_observation_episode(observations, observation.observed_at)
         if observation.observation_key is not None:
             for index, existing in enumerate(observations):
                 if existing.observation_key == observation.observation_key:
@@ -116,6 +121,21 @@ class ConservativeAlertPolicy:
             return 0.0
 
         return (observed_value - baseline_value) / baseline_value
+
+    def _prune_observation_episode(
+        self: Self,
+        observations: deque[Observation],
+        observed_at: datetime,
+    ) -> None:
+        if observations and observed_at - observations[-1].observed_at > (
+            self.max_episode_gap
+        ):
+            observations.clear()
+            return
+
+        oldest_allowed = observed_at - self.max_observation_age
+        while observations and observations[0].observed_at < oldest_allowed:
+            observations.popleft()
 
 
 def alert_feedback_fingerprint_for_observation(

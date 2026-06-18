@@ -120,6 +120,107 @@ def test_policy_supports_adjusted_min_repeated_requirement() -> None:
     assert alert.last_seen == now + timedelta(hours=4)
 
 
+def test_policy_does_not_combine_expired_observations() -> None:
+    policy = ConservativeAlertPolicy(
+        min_repeated=3,
+        min_baseline_confidence=0.6,
+        max_observation_age=timedelta(hours=1),
+    )
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+
+    assert (
+        policy.observe(Observation("fridge", "cycle_duration", 2.0, 0.8, now))
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(minutes=30),
+            )
+        )
+        is None
+    )
+
+    alert = policy.observe(
+        Observation(
+            "fridge",
+            "cycle_duration",
+            2.0,
+            0.8,
+            now + timedelta(hours=2),
+        )
+    )
+
+    assert alert is None
+
+
+def test_policy_starts_new_episode_after_large_observation_gap() -> None:
+    policy = ConservativeAlertPolicy(
+        min_repeated=3,
+        min_baseline_confidence=0.6,
+        max_episode_gap=timedelta(hours=1),
+    )
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+
+    assert (
+        policy.observe(Observation("fridge", "cycle_duration", 2.0, 0.8, now))
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(minutes=30),
+            )
+        )
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(hours=2),
+            )
+        )
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(hours=2, minutes=30),
+            )
+        )
+        is None
+    )
+    alert = policy.observe(
+        Observation(
+            "fridge",
+            "cycle_duration",
+            2.0,
+            0.8,
+            now + timedelta(hours=3),
+        )
+    )
+
+    assert alert is not None
+    assert alert.repeated_count == 3
+    assert alert.first_seen == now + timedelta(hours=2)
+
+
 def test_alert_evidence_features_are_readable_but_immutable() -> None:
     features = {"cycle_duration": 1.8}
     alert = AlertEvidence(
