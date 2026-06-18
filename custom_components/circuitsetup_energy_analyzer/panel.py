@@ -35,7 +35,9 @@ from .services import (
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
     SERVICE_RELEARN_BASELINE,
+    SERVICE_RESET_SETTING_RECOMMENDATION,
     SERVICE_START_MAINTENANCE,
+    SERVICE_UNDO_SETTING_RECOMMENDATION,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
@@ -63,7 +65,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260615-action-time-polish"
+PANEL_MODULE_VERSION = "20260618-feedback-actions"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -514,7 +516,11 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
     payload["display_label"] = _recommendation_display_label(payload)
     _add_recommendation_guidance(payload)
     if isinstance(recommendation_id, str) and recommendation_id:
-        payload["actions"] = _recommendation_actions(coordinator, recommendation_id)
+        payload["actions"] = _recommendation_actions(
+            coordinator,
+            recommendation_id,
+            status=str(payload.get("status") or "pending"),
+        )
         evidence_path = _recommendation_evidence_path(payload, recommendation_id)
         if evidence_path:
             payload["evidence_path"] = evidence_path
@@ -536,26 +542,53 @@ def _recommendation_display_label(payload: Mapping[str, Any]) -> str:
 def _recommendation_actions(
     coordinator: Any,
     recommendation_id: str,
+    *,
+    status: str,
 ) -> dict[str, dict[str, Any]]:
     data: dict[str, Any] = {ATTR_RECOMMENDATION_ID: recommendation_id}
     entry_id = getattr(coordinator, "entry_id", None)
     if isinstance(entry_id, str) and entry_id:
         data[ATTR_ENTRY_ID] = entry_id
+    is_pending = status == "pending"
+    is_applied = status == "applied"
     return {
         "apply": {
             "domain": DOMAIN,
             "service": SERVICE_APPLY_SETTING_RECOMMENDATION,
             "data": dict(data),
+            "enabled": is_pending,
+            "unavailable_reason": "not_pending",
+            "unavailable_label": "This recommendation is no longer pending.",
         },
         "deny": {
             "domain": DOMAIN,
             "service": SERVICE_DENY_SETTING_RECOMMENDATION,
             "data": dict(data),
+            "enabled": is_pending,
+            "unavailable_reason": "not_pending",
+            "unavailable_label": "This recommendation is no longer pending.",
         },
         "dismiss": {
             "domain": DOMAIN,
             "service": SERVICE_DISMISS_SETTING_RECOMMENDATION,
             "data": dict(data),
+            "enabled": is_pending,
+            "unavailable_reason": "not_pending",
+            "unavailable_label": "This recommendation is no longer pending.",
+        },
+        "undo": {
+            "domain": DOMAIN,
+            "service": SERVICE_UNDO_SETTING_RECOMMENDATION,
+            "data": dict(data),
+            "enabled": is_applied,
+            "unavailable_reason": "not_applied",
+            "unavailable_label": "Only applied recommendations can be undone.",
+        },
+        "reset": {
+            "domain": DOMAIN,
+            "service": SERVICE_RESET_SETTING_RECOMMENDATION,
+            "data": dict(data),
+            "enabled": True,
         },
     }
 

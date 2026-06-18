@@ -324,7 +324,7 @@ bound:
 | Stored structure | Cap |
 |---|---:|
 | Alert history | 500 items or 180 days |
-| Alert feedback | 500 items or 365 days |
+| Alert feedback | 500 items or 365 days; expected alert feedback expires after about 90 days, not-helpful feedback after about 45 days |
 | Weather context history | 1,008 samples per circuit plus the retention window |
 | Rain/water-flow context history | 1,008 samples per circuit plus the retention window |
 | NILM signatures | 64 signatures per mains circuit |
@@ -395,6 +395,16 @@ For day-to-day use, prefer these paths instead:
 | Setup/data-quality fix | Setup/data-quality fix -> Repairs flow |
 
 This keeps IDs inside the integration wherever possible. You should not need to copy `circuit_id`, `alert_id`, `signature_id`, or `recommendation_id` from attributes into Developer Tools for ordinary setup, tuning, alert review, or appliance maintenance.
+
+### Feedback teaches the analyzer
+
+When you mark an alert as expected, the analyzer remembers that evidence pattern by a stable local fingerprint. Future matching evidence under similar conditions is retained for review, but it is shown as an expected pattern instead of repeatedly creating a new active possible-issue alert or notification. Expected alert feedback expires after about 90 days unless refreshed.
+
+When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Future matching evidence must repeat more times before it can become a new alert, and the evidence panel shows the adjusted repeated-evidence requirement when it applies. If the same daily energy spike pattern is repeatedly marked not helpful, the analyzer can suggest a safer daily spike ratio change for you to approve, undo, or reset to the built-in default. Not-helpful feedback expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
+
+When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Review decisions follow a stable electrical fingerprint across future reclustering when the direction, value buckets, and split-phase topology still match; substantially different signatures are treated as new review items.
+
+Suggested settings remember apply, deny, and dismiss decisions. Denying a suggestion suppresses the same value for the same evidence during its cooldown. Dismissing hides it until the evidence changes or the recommendation expires.
 
 | Feature | What it does | Needs |
 |---|---|---|

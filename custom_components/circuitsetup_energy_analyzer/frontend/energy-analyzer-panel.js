@@ -15,6 +15,8 @@ const ACTION_SERVICE_NAMES = {
   apply_setting_recommendation: "apply_setting_recommendation",
   deny_setting_recommendation: "deny_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
+  undo_setting_recommendation: "undo_setting_recommendation",
+  reset_setting_recommendation: "reset_setting_recommendation",
 };
 const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
 
@@ -291,6 +293,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
+      this._lastActionMessage = this._recommendationActionMessage(actionKey);
       await this._loadEvidence({ routeKey: this._routeKey() });
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
@@ -385,6 +388,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "Merged signature.";
     }
     return "Action complete.";
+  }
+
+  _recommendationActionMessage(actionKey) {
+    const messages = {
+      apply: "Recommendation applied.",
+      deny: "Recommendation denied.",
+      dismiss: "Recommendation dismissed.",
+      undo: "Recommendation change undone.",
+      reset: "Recommendation setting reset to default.",
+    };
+    return messages[actionKey] || "Recommendation action complete.";
   }
 
   _isCurrentRequest(requestId, routeKey) {
@@ -784,12 +798,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               </div>
               ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
-              <div class="actions">
-                ${this._recommendationActionButton(index, "apply", "Apply")}
-                ${this._recommendationActionButton(index, "deny", "Deny", true)}
-                ${this._recommendationActionButton(index, "dismiss", "Dismiss", true)}
-                ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(index, "preview", "Preview evidence", true) : ""}
-              </div>
+                <div class="actions">
+                 ${this._recommendationActionButton(recommendation, index, "apply", "Apply")}
+                 ${this._recommendationActionButton(recommendation, index, "deny", "Deny", true)}
+                 ${this._recommendationActionButton(recommendation, index, "dismiss", "Dismiss", true)}
+                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, index, "undo", "Undo", true) : ""}
+                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, index, "reset", "Reset default", true) : ""}
+                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, index, "preview", "Preview evidence", true) : ""}
+                </div>
             </div>
           `).join("")}
         </div>
@@ -1054,9 +1070,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : this._disabled(busyKey)}>${this._escape(label)}</button>`;
   }
 
-  _recommendationActionButton(index, actionKey, label, secondary = false) {
+  _recommendationActionButton(recommendation, index, actionKey, label, secondary = false) {
     const busyKey = `recommendation_${index}_${actionKey}`;
-    return `<button data-recommendation-index="${index}" data-recommendation-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${this._disabled(busyKey)}>${this._escape(label)}</button>`;
+    const action = recommendation && recommendation.actions && recommendation.actions[actionKey];
+    const disabled = this._busyAction === busyKey || (action && action.enabled === false) ? "disabled" : "";
+    const reason = action && (action.unavailable_label || action.unavailable_reason);
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    return `<button data-recommendation-index="${index}" data-recommendation-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${disabled}>${this._escape(label)}</button>`;
   }
 
   _changeSummary(alert) {

@@ -739,6 +739,38 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     ]
 
 
+def test_feature_store_round_trips_fingerprint_alert_feedback() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    expires_at = now + timedelta(days=90)
+    fingerprint = (
+        "fridge|daily_energy_spike|sources=energy|observed=2.5-3.0|"
+        "baseline=2.0-2.5|ratio=25-50pct"
+    )
+    data = FeatureStoreData(
+        alert_feedback={
+            fingerprint: {
+                "fingerprint": fingerprint,
+                "status": "expected",
+                "action": "expected",
+                "source_alert_id": "alert-1",
+                "alert_id": "alert-1",
+                "decided_at": now.isoformat(),
+                "created_at": now.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "last_seen": now.isoformat(),
+                "circuit_id": "fridge",
+                "feature": "daily_energy_spike",
+                "evidence_count": 2,
+                "note": "Vacation schedule",
+            }
+        }
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.alert_feedback[fingerprint] == data.alert_feedback[fingerprint]
+
+
 def test_feature_store_preserves_settings_recommendations() -> None:
     raw = {
         "settings_recommendations": {

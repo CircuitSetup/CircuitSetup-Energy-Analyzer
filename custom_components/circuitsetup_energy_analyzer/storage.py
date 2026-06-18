@@ -189,7 +189,7 @@ def baseline_from_dict(raw: dict[str, Any]) -> BaselineStats:
 
 def alert_to_dict(alert: AlertEvidence) -> dict[str, Any]:
     """Serialize alert evidence for JSON storage."""
-    return {
+    payload = {
         "timestamp": alert.timestamp.isoformat(),
         "circuit_id": alert.circuit_id,
         "severity": alert.severity.value,
@@ -204,6 +204,19 @@ def alert_to_dict(alert: AlertEvidence) -> dict[str, Any]:
         "first_seen": alert.first_seen.isoformat() if alert.first_seen else None,
         "last_seen": alert.last_seen.isoformat() if alert.last_seen else None,
     }
+    if alert.feedback_status is not None:
+        payload["feedback_status"] = alert.feedback_status
+    if alert.feedback_effect is not None:
+        payload["feedback_effect"] = alert.feedback_effect
+    if alert.feedback_expires_at is not None:
+        payload["feedback_expires_at"] = alert.feedback_expires_at.isoformat()
+    if alert.matching_feedback_fingerprint is not None:
+        payload["matching_feedback_fingerprint"] = (
+            alert.matching_feedback_fingerprint
+        )
+    if alert.adjusted_min_repeated is not None:
+        payload["adjusted_min_repeated"] = alert.adjusted_min_repeated
+    return payload
 
 
 def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
@@ -211,6 +224,7 @@ def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
     event_type = raw.get("event_type")
     first_seen = raw.get("first_seen")
     last_seen = raw.get("last_seen")
+    feedback_expires_at = raw.get("feedback_expires_at")
     return AlertEvidence(
         timestamp=datetime.fromisoformat(raw["timestamp"]),
         circuit_id=str(raw["circuit_id"]),
@@ -225,6 +239,27 @@ def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
         repeated_count=int(raw.get("repeated_count", 1)),
         first_seen=datetime.fromisoformat(first_seen) if first_seen else None,
         last_seen=datetime.fromisoformat(last_seen) if last_seen else None,
+        feedback_status=(
+            str(raw["feedback_status"]) if raw.get("feedback_status") else None
+        ),
+        feedback_effect=(
+            str(raw["feedback_effect"]) if raw.get("feedback_effect") else None
+        ),
+        feedback_expires_at=(
+            datetime.fromisoformat(feedback_expires_at)
+            if feedback_expires_at
+            else None
+        ),
+        matching_feedback_fingerprint=(
+            str(raw["matching_feedback_fingerprint"])
+            if raw.get("matching_feedback_fingerprint")
+            else None
+        ),
+        adjusted_min_repeated=(
+            int(raw["adjusted_min_repeated"])
+            if raw.get("adjusted_min_repeated") is not None
+            else None
+        ),
     )
 
 
