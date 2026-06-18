@@ -7059,6 +7059,80 @@ async def test_coordinator_builds_settings_recommendation_after_maturity() -> No
 
 
 @pytest.mark.asyncio
+async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    prior_alert = AlertEvidence(
+        timestamp=now - timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Daily usage spike",
+        feature="daily_energy_usage_spike",
+        observed_value=3.0,
+        baseline_value=2.0,
+        change_ratio=0.5,
+    )
+    fingerprint = alert_feedback_fingerprint(prior_alert)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "decided_at": (now - timedelta(days=1)).isoformat(),
+                    "created_at": (now - timedelta(days=2)).isoformat(),
+                    "expires_at": (now + timedelta(days=30)).isoformat(),
+                    "last_seen": (now - timedelta(days=1)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_usage_spike",
+                    "change_ratio": 0.5,
+                    "observed_value": 3.0,
+                    "baseline_value": 2.0,
+                    "evidence_count": 2,
+                },
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_recalculate_setting_recommendations("fridge")
+
+    recommendation = coordinator.state.settings_recommendations_by_circuit["fridge"][0]
+    assert recommendation["setting_key"] == "daily_spike_ratio"
+    assert recommendation["suggested_value"] == 0.6
+    assert recommendation["current_value"] == 0.25
+    assert recommendation["evidence"]["source"] == "unhelpful_alert_feedback"
+    assert recommendation["evidence"]["unhelpful_feedback_count"] == 2
+    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][
+        "daily_spike_ratio"
+    ] == 0.25
+
+
+@pytest.mark.asyncio
 async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

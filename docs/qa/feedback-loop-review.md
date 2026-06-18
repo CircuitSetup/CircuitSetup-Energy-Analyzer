@@ -17,7 +17,6 @@
 - Future expected alerts were blocked from notifications but could still be promoted as active possible-issue evidence.
 - Alert evidence did not expose feedback status, effect, expiration, or the matching feedback fingerprint.
 - Expected and unhelpful alert feedback did not have status-specific expiration defaults.
-- Unhelpful alert feedback still needs the planned settings-recommendation hook.
 - NILM feedback still needs stable fingerprint persistence across reclustering order changes.
 - Recommendation undo/reset behavior remains a follow-up.
 
@@ -45,8 +44,9 @@ This work follows the suggested early PR scope:
 4. Annotate future matching alert evidence with feedback metadata.
 5. Keep matching expected evidence in retained history while preventing it from becoming a new active possible-issue alert or notification.
 6. Require stronger repeated evidence for future alerts that match not-helpful feedback.
-7. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
-8. Document the remaining feedback-loop gaps for follow-up PRs.
+7. Suggest a safe daily spike ratio change when the same daily energy spike alert pattern is repeatedly marked not helpful.
+8. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
+9. Document the remaining feedback-loop gaps for follow-up PRs.
 
 ## Tests added
 
@@ -59,3 +59,5 @@ This work follows the suggested early PR scope:
 - `test_policy_supports_adjusted_min_repeated_requirement`
 - `test_unhelpful_feedback_raises_future_alert_requirement`
 - `test_alert_evidence_payload_explains_unhelpful_adjusted_requirement`
+- `test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting`
+- `test_unhelpful_alert_recommendation_fingerprint_uses_feedback_evidence`

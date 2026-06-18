@@ -248,6 +248,23 @@ def test_energy_usage_recommendation_uses_7_day_pattern() -> None:
     assert "7 complete days" in recommendation.reason
 
 
+def test_unhelpful_alert_recommendation_fingerprint_uses_feedback_evidence() -> None:
+    advisor = _advisor()
+    recommendation = _recommendation(
+        advisor,
+        evidence={
+            "source": "unhelpful_alert_feedback",
+            "feedback_fingerprint": "fridge|daily_energy_usage_spike|ratio=25-50pct",
+            "suggested_daily_spike_ratio": 0.6,
+        },
+    )
+
+    assert advisor.recommendation_evidence_fingerprint(recommendation) == (
+        "unhelpful_alert_feedback:"
+        "fridge|daily_energy_usage_spike|ratio=25-50pct;suggested=0.6"
+    )
+
+
 def test_energy_usage_recommendation_uses_default_for_flat_usage() -> None:
     advisor = _advisor()
     inputs = advisor.AdvisorInputs(
