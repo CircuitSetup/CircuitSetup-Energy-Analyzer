@@ -15,6 +15,8 @@ const ACTION_SERVICE_NAMES = {
   apply_setting_recommendation: "apply_setting_recommendation",
   deny_setting_recommendation: "deny_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
+  undo_setting_recommendation: "undo_setting_recommendation",
+  reset_setting_recommendation: "reset_setting_recommendation",
 };
 const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
 
@@ -784,12 +786,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               </div>
               ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
-              <div class="actions">
-                ${this._recommendationActionButton(index, "apply", "Apply")}
-                ${this._recommendationActionButton(index, "deny", "Deny", true)}
-                ${this._recommendationActionButton(index, "dismiss", "Dismiss", true)}
-                ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(index, "preview", "Preview evidence", true) : ""}
-              </div>
+                <div class="actions">
+                 ${this._recommendationActionButton(index, "apply", "Apply")}
+                 ${this._recommendationActionButton(index, "deny", "Deny", true)}
+                 ${this._recommendationActionButton(index, "dismiss", "Dismiss", true)}
+                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(index, "undo", "Undo", true) : ""}
+                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(index, "reset", "Reset default", true) : ""}
+                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(index, "preview", "Preview evidence", true) : ""}
+                </div>
             </div>
           `).join("")}
         </div>

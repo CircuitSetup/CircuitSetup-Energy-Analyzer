@@ -17,7 +17,7 @@
 - Future expected alerts were blocked from notifications but could still be promoted as active possible-issue evidence.
 - Alert evidence did not expose feedback status, effect, expiration, or the matching feedback fingerprint.
 - Expected and unhelpful alert feedback did not have status-specific expiration defaults.
-- Recommendation undo/reset behavior remains a follow-up.
+- No feedback-loop gaps remain in the audited alert, NILM, recommendation, storage, service-validation, and evidence-panel paths.
 
 ## Files inspected
 
@@ -45,8 +45,8 @@ This work follows the suggested early PR scope:
 6. Require stronger repeated evidence for future alerts that match not-helpful feedback.
 7. Suggest a safe daily spike ratio change when the same daily energy spike alert pattern is repeatedly marked not helpful.
 8. Preserve NILM label, expected, ignored, and merge review metadata by stable electrical fingerprint when cluster IDs change.
-9. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
-10. Document the remaining feedback-loop gaps for follow-up PRs.
+9. Add click-through undo and reset-to-default actions for recommendation-backed settings.
+10. Surface feedback metadata and adjusted repeated-evidence requirements in alert evidence payloads.
 
 ## Tests added
 
@@ -64,3 +64,5 @@ This work follows the suggested early PR scope:
 - `test_nilm_signature_fingerprint_ignores_cluster_order_id`
 - `test_nilm_signature_payloads_reuse_review_by_stable_fingerprint`
 - `test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint`
+- `test_undo_setting_recommendation_restores_previous_value`
+- `test_reset_setting_recommendation_restores_builtin_default`

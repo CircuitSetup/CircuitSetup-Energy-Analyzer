@@ -53,6 +53,8 @@ SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendatio
 SERVICE_APPLY_SETTING_RECOMMENDATION = "apply_setting_recommendation"
 SERVICE_DENY_SETTING_RECOMMENDATION = "deny_setting_recommendation"
 SERVICE_DISMISS_SETTING_RECOMMENDATION = "dismiss_setting_recommendation"
+SERVICE_UNDO_SETTING_RECOMMENDATION = "undo_setting_recommendation"
+SERVICE_RESET_SETTING_RECOMMENDATION = "reset_setting_recommendation"
 
 ATTR_CIRCUIT_ID = "circuit_id"
 ATTR_ENTITY_ID = "entity_id"
@@ -354,6 +356,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_APPLY_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
     SERVICE_DENY_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
     SERVICE_DISMISS_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
+    SERVICE_UNDO_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
+    SERVICE_RESET_SETTING_RECOMMENDATION: RECOMMENDATION_ACTION_SERVICE_SCHEMA,
 }
 
 
@@ -485,6 +489,34 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             await _call_if_present(
                 coordinator,
                 "async_dismiss_setting_recommendation",
+                recommendation_id,
+            )
+        return
+
+    if service == SERVICE_UNDO_SETTING_RECOMMENDATION:
+        recommendation_id = _service_recommendation_id(hass, data)
+        for coordinator in _target_recommendation_coordinators(
+            hass,
+            recommendation_id,
+            data.get(ATTR_ENTRY_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_undo_setting_recommendation",
+                recommendation_id,
+            )
+        return
+
+    if service == SERVICE_RESET_SETTING_RECOMMENDATION:
+        recommendation_id = _service_recommendation_id(hass, data)
+        for coordinator in _target_recommendation_coordinators(
+            hass,
+            recommendation_id,
+            data.get(ATTR_ENTRY_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_reset_setting_recommendation",
                 recommendation_id,
             )
         return

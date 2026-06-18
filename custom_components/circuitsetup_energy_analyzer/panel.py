@@ -35,7 +35,9 @@ from .services import (
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
     SERVICE_RELEARN_BASELINE,
+    SERVICE_RESET_SETTING_RECOMMENDATION,
     SERVICE_START_MAINTENANCE,
+    SERVICE_UNDO_SETTING_RECOMMENDATION,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
@@ -555,6 +557,16 @@ def _recommendation_actions(
         "dismiss": {
             "domain": DOMAIN,
             "service": SERVICE_DISMISS_SETTING_RECOMMENDATION,
+            "data": dict(data),
+        },
+        "undo": {
+            "domain": DOMAIN,
+            "service": SERVICE_UNDO_SETTING_RECOMMENDATION,
+            "data": dict(data),
+        },
+        "reset": {
+            "domain": DOMAIN,
+            "service": SERVICE_RESET_SETTING_RECOMMENDATION,
             "data": dict(data),
         },
     }

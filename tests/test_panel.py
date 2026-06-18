@@ -394,6 +394,12 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     assert payload["setting_recommendations"][0]["actions"]["dismiss"]["service"] == (
         "dismiss_setting_recommendation"
     )
+    assert payload["setting_recommendations"][0]["actions"]["undo"]["service"] == (
+        "undo_setting_recommendation"
+    )
+    assert payload["setting_recommendations"][0]["actions"]["reset"]["service"] == (
+        "reset_setting_recommendation"
+    )
     assert payload["setting_recommendations"][0]["display_label"] == (
         "Raise daily spike threshold"
     )

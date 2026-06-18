@@ -535,6 +535,8 @@ async def test_setting_recommendation_services_dispatch() -> None:
         SERVICE_DENY_SETTING_RECOMMENDATION,
         SERVICE_DISMISS_SETTING_RECOMMENDATION,
         SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS,
+        SERVICE_RESET_SETTING_RECOMMENDATION,
+        SERVICE_UNDO_SETTING_RECOMMENDATION,
         async_setup_services,
     )
 
@@ -598,9 +600,25 @@ async def test_setting_recommendation_services_dispatch() -> None:
                 ("async_dismiss_setting_recommendation", (recommendation_id,))
             )
 
+        async def async_undo_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_undo_setting_recommendation", (recommendation_id,))
+            )
+
+        async def async_reset_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_reset_setting_recommendation", (recommendation_id,))
+            )
+
     fridge_coordinator = FakeCoordinator(
         {"fridge"},
-        {"rec-apply", "rec-deny", "rec-dismiss"},
+        {"rec-apply", "rec-deny", "rec-dismiss", "rec-undo", "rec-reset"},
     )
     mains_coordinator = FakeCoordinator({"mains"})
     hass = SimpleNamespace(
@@ -630,6 +648,12 @@ async def test_setting_recommendation_services_dispatch() -> None:
     await hass.services.registered[(DOMAIN, SERVICE_DISMISS_SETTING_RECOMMENDATION)](
         SimpleNamespace(data={"recommendation_id": "rec-dismiss"})
     )
+    await hass.services.registered[(DOMAIN, SERVICE_UNDO_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"recommendation_id": "rec-undo"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_RESET_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"recommendation_id": "rec-reset"})
+    )
 
     assert fridge_coordinator.calls == [
         ("async_recalculate_setting_recommendations", (None,)),
@@ -637,6 +661,8 @@ async def test_setting_recommendation_services_dispatch() -> None:
         ("async_apply_setting_recommendation", ("rec-apply",)),
         ("async_deny_setting_recommendation", ("rec-deny",)),
         ("async_dismiss_setting_recommendation", ("rec-dismiss",)),
+        ("async_undo_setting_recommendation", ("rec-undo",)),
+        ("async_reset_setting_recommendation", ("rec-reset",)),
     ]
     assert mains_coordinator.calls == [
         ("async_recalculate_setting_recommendations", (None,)),

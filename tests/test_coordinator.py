@@ -7341,6 +7341,126 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_undo_setting_recommendation_restores_previous_value() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(
+        settings_advisor,
+        status=settings_advisor.RecommendationStatus.APPLIED,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.3},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_settings_by_circuit={"hvac": {"daily_spike_ratio": 0.3}},
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_undo_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.PENDING
+    )
+
+
+@pytest.mark.asyncio
+async def test_reset_setting_recommendation_restores_builtin_default() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(
+        settings_advisor,
+        current_value=0.35,
+        suggested_value=0.5,
+        apply_payload={"daily_spike_ratio": 0.5},
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.35},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_settings_by_circuit={"hvac": {"daily_spike_ratio": 0.35}},
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_reset_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.STALE
+    )
+
+
+@pytest.mark.asyncio
 async def test_deny_setting_recommendation_records_decision() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
