@@ -15,6 +15,7 @@ from ..nilm import (
     classify_signature,
     cluster_recurring_signatures,
     mask_known_loads,
+    nilm_signature_fingerprint,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -165,10 +166,24 @@ class NilmSampleProcessor:
             str(signature.get("signature_id")): dict(signature)
             for signature in context.store_data.nilm_signatures.get(circuit_id, [])
         }
+        existing_by_fingerprint = {
+            str(signature.get("feedback_fingerprint")): dict(signature)
+            for signature in context.store_data.nilm_signatures.get(circuit_id, [])
+            if signature.get("feedback_fingerprint")
+        }
+        signature_list = list(signatures)
+        current_id_by_fingerprint = {
+            nilm_signature_fingerprint(signature): signature.signature_id
+            for signature in signature_list
+        }
         payloads: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for signature in signatures:
-            current = existing.get(signature.signature_id, {})
+        for signature in signature_list:
+            feedback_fingerprint = nilm_signature_fingerprint(signature)
+            current = existing.get(
+                signature.signature_id,
+                existing_by_fingerprint.get(feedback_fingerprint, {}),
+            )
             metadata_current = (
                 current if _nilm_signature_metadata_compatible(signature, current)
                 else {}
@@ -193,6 +208,7 @@ class NilmSampleProcessor:
                 "occurrence_count": signature.occurrence_count,
                 "confidence": signature.confidence,
                 "classification": classify_signature(classified_signature),
+                "feedback_fingerprint": feedback_fingerprint,
             }
             if user_label:
                 payload["user_label"] = user_label
@@ -201,8 +217,17 @@ class NilmSampleProcessor:
             for key in ("review_state", "expected", "merged_into"):
                 if key in metadata_current:
                     payload[key] = metadata_current[key]
+            target_fingerprint = metadata_current.get("merged_into_fingerprint")
+            if target_fingerprint:
+                payload["merged_into_fingerprint"] = target_fingerprint
+                payload["merged_into"] = current_id_by_fingerprint.get(
+                    str(target_fingerprint),
+                    payload.get("merged_into"),
+                )
             payloads.append(payload)
             seen.add(signature.signature_id)
+            if metadata_current.get("signature_id"):
+                seen.add(str(metadata_current["signature_id"]))
 
         for signature_id, signature in existing.items():
             if signature_id not in seen and (

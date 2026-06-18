@@ -62,6 +62,22 @@ class NilmSignature:
     split_phase_type: str = "unknown"
 
 
+def nilm_signature_fingerprint(signature: NilmSignature) -> str:
+    """Return a stable review key for a recurring NILM signature shape."""
+    return "|".join(
+        (
+            f"direction={_signature_direction(signature.signature_id)}",
+            f"watts={_abs_value_bucket(signature.median_delta_w, 100.0)}",
+            f"var={_abs_value_bucket(signature.median_delta_var, 100.0)}",
+            f"va={_abs_value_bucket(signature.median_delta_va, 100.0)}",
+            f"pf={_abs_value_bucket(signature.median_delta_pf, 0.05)}",
+            f"split={signature.split_phase_type or 'unknown'}",
+            f"leg={signature.dominant_leg or 'unknown'}",
+            f"balance={_optional_ratio_bucket(signature.leg_balance_ratio)}",
+        )
+    )
+
+
 class NilmEdgeDetector:
     """Detect significant mains real-power transitions."""
 
@@ -291,6 +307,25 @@ def _delta(current: float | None, previous: float | None) -> float:
     if current is None or previous is None:
         return 0.0
     return current - previous
+
+
+def _signature_direction(signature_id: str) -> str:
+    direction = str(signature_id).split("-", 1)[0].strip().lower()
+    return direction if direction in {"on", "off"} else "unknown"
+
+
+def _abs_value_bucket(value: float, step: float) -> str:
+    bucket_start = (abs(float(value)) // step) * step
+    bucket_end = bucket_start + step
+    if step >= 1.0:
+        return f"{bucket_start:.0f}-{bucket_end:.0f}"
+    return f"{bucket_start:.2f}-{bucket_end:.2f}"
+
+
+def _optional_ratio_bucket(value: float | None) -> str:
+    if value is None:
+        return "unknown"
+    return _abs_value_bucket(value, 0.25)
 
 
 def _optional_delta(current: float | None, previous: float | None) -> float | None:

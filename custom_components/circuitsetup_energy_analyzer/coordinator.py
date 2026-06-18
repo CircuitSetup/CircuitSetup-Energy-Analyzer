@@ -19,7 +19,12 @@ from .activity_timeline import (
     timeline_payload,
 )
 from .aggregation import aggregate_dual_phase
-from .alerting import ConservativeAlertPolicy
+from .alerting import (
+    ConservativeAlertPolicy,
+    Observation,
+    alert_feedback_fingerprint,
+    alert_feedback_fingerprint_for_observation,
+)
 from .balance import (
     DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
 )
@@ -162,7 +167,9 @@ from .processors import (
     WaterContextAlertProcessor,
 )
 from .profiles import get_profile_definition
+from .recommendation_guidance import recommendation_setting_default_value
 from .settings_advisor import (
+    DEFAULT_RECOMMENDATION_TTL,
     AdvisorCircuitContext,
     AdvisorInputs,
     RecommendationDecision,
@@ -170,7 +177,10 @@ from .settings_advisor import (
     SettingRecommendation,
     build_settings_recommendations,
     recommendation_evidence_fingerprint,
+    recommendation_id_for,
     recommendation_to_dict,
+    recommendation_unique_key,
+    should_suppress_recommendation,
 )
 from .solar_flow import (
     EXPORT_TOLERANCE_W,
@@ -245,6 +255,10 @@ ALERT_HISTORY_MAX_ITEMS = 500
 ALERT_HISTORY_MAX_AGE = timedelta(days=180)
 ALERT_FEEDBACK_MAX_ITEMS = 500
 ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
+ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
+ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
+ALERT_UNHELPFUL_EXTRA_REPEATED = 2
+ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
@@ -308,6 +322,40 @@ except ModuleNotFoundError:
 
         def async_set_updated_data(self, data: Any) -> None:
             self.data = data
+
+
+class _FeedbackAwareAlertPolicy:
+    """Apply persisted alert feedback before delegating to the scoring policy."""
+
+    def __init__(self: Self, coordinator: Any, policy: ConservativeAlertPolicy) -> None:
+        self._coordinator = coordinator
+        self._policy = policy
+
+    @property
+    def min_repeated(self: Self) -> int:
+        return self._policy.min_repeated
+
+    @property
+    def min_total_score(self: Self) -> float:
+        return self._policy.min_total_score
+
+    @property
+    def min_average_score(self: Self) -> float:
+        return self._policy.min_average_score
+
+    @property
+    def min_baseline_confidence(self: Self) -> float:
+        return self._policy.min_baseline_confidence
+
+    def observe(self: Self, observation: Observation) -> AlertEvidence | None:
+        min_repeated = self._coordinator._adjusted_min_repeated_for_observation(
+            observation,
+            self._policy.min_repeated,
+        )
+        alert = self._policy.observe(observation, min_repeated=min_repeated)
+        if alert is None or min_repeated == self._policy.min_repeated:
+            return alert
+        return replace(alert, adjusted_min_repeated=min_repeated)
 
 
 @dataclass(slots=True)
@@ -643,6 +691,22 @@ def _replace_if_present_as(
     }
     if values:
         target[circuit_id] = values
+
+
+def _remove_setting_key(
+    target: dict[str, dict[str, Any]],
+    circuit_id: str,
+    setting_key: str,
+) -> None:
+    current = target.get(circuit_id)
+    if not isinstance(current, dict) or setting_key not in current:
+        return
+    updated = dict(current)
+    updated.pop(setting_key, None)
+    if updated:
+        target[circuit_id] = updated
+    else:
+        target.pop(circuit_id, None)
 
 
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
@@ -1284,7 +1348,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
         for config, sample in samples:
             for nilm_alert in self._process_nilm_sample(config, sample, events):
-                alerts.append(nilm_alert)
+                nilm_alert = self._alert_with_feedback(nilm_alert)
+                if nilm_alert.feedback_status != "expected":
+                    alerts.append(nilm_alert)
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
@@ -1298,7 +1364,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             await self._sync_setup_health_repairs(config.circuit_id)
             water_context_alert = self._observe_water_context(config, now)
             if water_context_alert is not None:
-                alerts.append(water_context_alert)
+                water_context_alert = self._alert_with_feedback(water_context_alert)
+                if water_context_alert.feedback_status != "expected":
+                    alerts.append(water_context_alert)
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
@@ -1495,8 +1563,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         changed = False
 
         for config in target_configs:
-            recommendations = build_settings_recommendations(
-                self._advisor_inputs_for_config(config, now),
+            advisor_inputs = self._advisor_inputs_for_config(config, now)
+            recommendations = build_settings_recommendations(advisor_inputs)
+            recommendations.extend(
+                self._unhelpful_alert_setting_recommendations(
+                    config,
+                    now,
+                    existing_recommendation_ids={
+                        recommendation.recommendation_id
+                        for recommendation in recommendations
+                    },
+                ),
             )
             recommendation_ids = {
                 recommendation.recommendation_id
@@ -1550,17 +1627,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ):
             return
 
-        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
-        if not isinstance(advanced_by_circuit, dict):
-            advanced_by_circuit = dict(advanced_by_circuit)
-            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
-        current_settings = advanced_by_circuit.get(recommendation.circuit_id, {})
-        updated_settings = (
-            dict(current_settings) if isinstance(current_settings, Mapping) else {}
-        )
-        updated_settings.update(dict(recommendation.apply_payload))
-        advanced_by_circuit[recommendation.circuit_id] = updated_settings
-        self._apply_advanced_settings(recommendation.circuit_id, updated_settings)
+        for setting_key, value in recommendation.apply_payload.items():
+            self._set_recommendation_setting_value(
+                recommendation.circuit_id,
+                str(setting_key),
+                value,
+            )
         await self._async_persist_config_entry_options()
 
         self.store_data.settings_recommendations[recommendation_id] = replace(
@@ -1573,6 +1645,171 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
+
+    async def async_undo_setting_recommendation(
+        self: Self,
+        recommendation_id: str,
+    ) -> bool:
+        """Restore the value recorded before an applied recommendation."""
+        recommendation = self.store_data.settings_recommendations.get(
+            recommendation_id,
+        )
+        if (
+            recommendation is None
+            or recommendation.status is not RecommendationStatus.APPLIED
+        ):
+            return False
+
+        self._set_recommendation_setting_value(
+            recommendation.circuit_id,
+            recommendation.setting_key,
+            recommendation.current_value,
+        )
+        await self._async_persist_config_entry_options()
+        self.store_data.settings_recommendations[recommendation_id] = replace(
+            recommendation,
+            status=RecommendationStatus.PENDING,
+        )
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_settings_recommendation_state(now)
+        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+        return True
+
+    async def async_reset_setting_recommendation(
+        self: Self,
+        recommendation_id: str,
+    ) -> bool:
+        """Reset a recommendation-backed setting to its built-in default."""
+        recommendation = self.store_data.settings_recommendations.get(
+            recommendation_id,
+        )
+        if recommendation is None:
+            return False
+
+        default_value = recommendation_setting_default_value(
+            recommendation.setting_key,
+        )
+        self._set_recommendation_setting_value(
+            recommendation.circuit_id,
+            recommendation.setting_key,
+            default_value,
+        )
+        await self._async_persist_config_entry_options()
+        self.store_data.settings_recommendations[recommendation_id] = replace(
+            recommendation,
+            status=RecommendationStatus.STALE,
+        )
+        self._mark_store_dirty()
+        now = self._now_fn()
+        self._refresh_settings_recommendation_state(now)
+        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now)
+        return True
+
+    def _set_recommendation_setting_value(
+        self: Self,
+        circuit_id: str,
+        setting_key: str,
+        value: Any,
+    ) -> None:
+        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
+        if not isinstance(advanced_by_circuit, dict):
+            advanced_by_circuit = dict(advanced_by_circuit)
+            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
+        current_settings = advanced_by_circuit.get(circuit_id, {})
+        updated_settings = (
+            dict(current_settings) if isinstance(current_settings, Mapping) else {}
+        )
+        self._clear_advanced_setting_value(circuit_id, setting_key)
+        if value is None:
+            updated_settings.pop(setting_key, None)
+        else:
+            updated_settings[setting_key] = value
+            self._apply_advanced_settings(circuit_id, {setting_key: value})
+        if updated_settings:
+            advanced_by_circuit[circuit_id] = updated_settings
+        else:
+            advanced_by_circuit.pop(circuit_id, None)
+
+    def _clear_advanced_setting_value(
+        self: Self,
+        circuit_id: str,
+        setting_key: str,
+    ) -> None:
+        if setting_key == "preset":
+            self.store_data.sensitivity_by_circuit.pop(circuit_id, None)
+            return
+        _remove_setting_key(
+            self.store_data.energy_usage_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.energy_goal_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.activity_alert_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.billing_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.cost_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.demand_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.capacity_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.standby_settings_by_circuit,
+            circuit_id,
+            "min_samples" if setting_key == "standby_min_samples" else setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.leg_imbalance_settings_by_circuit,
+            circuit_id,
+            {
+                "leg_imbalance_warning_ratio": "warning_ratio",
+                "leg_imbalance_min_total_power_w": "minimum_total_power_w",
+            }.get(setting_key, setting_key),
+        )
+        _remove_setting_key(
+            self.store_data.metric_consistency_settings_by_circuit,
+            circuit_id,
+            setting_key,
+        )
+        _remove_setting_key(
+            self.store_data.balance_settings_by_circuit,
+            circuit_id,
+            {
+                "balance_negative_tolerance_w": "negative_tolerance_w",
+            }.get(setting_key, setting_key),
+        )
+        _remove_setting_key(
+            self.store_data.solar_flow_settings_by_circuit,
+            circuit_id,
+            {
+                "solar_export_tolerance_w": "export_tolerance_w",
+            }.get(setting_key, setting_key),
+        )
 
     async def async_deny_setting_recommendation(
         self: Self,
@@ -1662,6 +1899,121 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             feature_history=self._advisor_feature_history_for_circuit(config, now),
             decisions=self.store_data.settings_recommendation_decisions,
+        )
+
+    def _unhelpful_alert_setting_recommendations(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+        *,
+        existing_recommendation_ids: set[str],
+    ) -> list[SettingRecommendation]:
+        recommendation_id = recommendation_id_for(
+            config.circuit_id,
+            "daily_spike_ratio",
+        )
+        if recommendation_id in existing_recommendation_ids:
+            return []
+
+        feedback = self._repeated_unhelpful_daily_spike_feedback(config, now)
+        if feedback is None:
+            return []
+
+        current_value = _positive_float_value(
+            self._advanced_settings_for_circuit(config.circuit_id).get(
+                "daily_spike_ratio",
+            ),
+            default=config.daily_energy_spike_ratio,
+        )
+        change_ratio = _absolute_float_value(feedback.get("change_ratio"))
+        suggested_value = round(
+            min(1.0, max(current_value + 0.05, change_ratio + 0.10)),
+            1,
+        )
+        if suggested_value <= current_value:
+            return []
+
+        unique_key = recommendation_unique_key(config.circuit_id, "daily_spike_ratio")
+        evidence = {
+            "source": "unhelpful_alert_feedback",
+            "feedback_fingerprint": str(feedback.get("fingerprint") or ""),
+            "unhelpful_feedback_count": _positive_int_value(
+                feedback.get("evidence_count"),
+                default=1,
+            ),
+            "change_ratio": round(change_ratio, 3),
+            "observed_value": _optional_float_value(feedback.get("observed_value")),
+            "baseline_value": _optional_float_value(feedback.get("baseline_value")),
+            "suggested_daily_spike_ratio": suggested_value,
+        }
+        recommendation = SettingRecommendation(
+            recommendation_id=recommendation_id,
+            unique_key=unique_key,
+            circuit_id=config.circuit_id,
+            circuit_name=config.name,
+            setting_key="daily_spike_ratio",
+            setting_label="Daily Spike Ratio",
+            current_value=current_value,
+            suggested_value=suggested_value,
+            unit="ratio",
+            feature="energy_usage_spikes",
+            group="Energy Usage",
+            confidence=0.72,
+            reason=(
+                "This daily energy spike pattern was repeatedly marked not "
+                "helpful. Increase the daily spike ratio to make future "
+                "matching alerts more conservative."
+            ),
+            evidence=evidence,
+            apply_payload={"daily_spike_ratio": suggested_value},
+            status=RecommendationStatus.PENDING,
+            created_at=now,
+            expires_at=now + DEFAULT_RECOMMENDATION_TTL,
+        )
+        if should_suppress_recommendation(
+            self.store_data.settings_recommendation_decisions.get(unique_key),
+            now=now,
+            suggested_value=recommendation.suggested_value,
+            evidence_fingerprint=recommendation_evidence_fingerprint(recommendation),
+        ):
+            return []
+        return [recommendation]
+
+    def _repeated_unhelpful_daily_spike_feedback(
+        self: Self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> Mapping[str, Any] | None:
+        matches: list[Mapping[str, Any]] = []
+        for feedback in self.store_data.alert_feedback.values():
+            if not isinstance(feedback, Mapping):
+                continue
+            if _alert_feedback_status(feedback) != "unhelpful":
+                continue
+            if _alert_feedback_is_expired(feedback, now):
+                continue
+            if str(feedback.get("circuit_id") or "") != config.circuit_id:
+                continue
+            if str(feedback.get("feature") or "") != "daily_energy_usage_spike":
+                continue
+            if (
+                _positive_int_value(feedback.get("evidence_count"), default=1)
+                < ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT
+            ):
+                continue
+            matches.append(feedback)
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda feedback: (
+                _positive_int_value(feedback.get("evidence_count"), default=1),
+                (
+                    _mapping_datetime(feedback.get("last_seen")).timestamp()
+                    if _mapping_datetime(feedback.get("last_seen")) is not None
+                    else 0.0
+                ),
+            ),
         )
 
     def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
@@ -1836,10 +2188,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         by_circuit: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        pending_count_by_circuit: defaultdict[str, int] = defaultdict(int)
         for recommendation in sorted(
-            self._pending_settings_recommendations(now),
+            self._visible_settings_recommendations(now),
             key=lambda item: (
                 item.circuit_name,
+                item.status is not RecommendationStatus.PENDING,
                 item.group,
                 item.setting_label,
                 item.recommendation_id,
@@ -1848,13 +2202,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             by_circuit[recommendation.circuit_id].append(
                 recommendation_to_dict(recommendation),
             )
+            if recommendation.status is RecommendationStatus.PENDING:
+                pending_count_by_circuit[recommendation.circuit_id] += 1
         self.state.settings_recommendations_by_circuit = dict(by_circuit)
         self.state.settings_recommendation_count_by_circuit = {
-            circuit_id: len(recommendations)
-            for circuit_id, recommendations in by_circuit.items()
+            circuit_id: count
+            for circuit_id, count in pending_count_by_circuit.items()
+            if count > 0
         }
-        if not by_circuit:
+        if not pending_count_by_circuit:
             self._set_settings_recommendation_notification_episode_key(())
+
+    def _visible_settings_recommendations(
+        self: Self,
+        now: datetime,
+    ) -> list[SettingRecommendation]:
+        return [
+            recommendation
+            for recommendation in self.store_data.settings_recommendations.values()
+            if recommendation.status
+            in {RecommendationStatus.PENDING, RecommendationStatus.APPLIED}
+            and recommendation.expires_at > now
+        ]
 
     def _pending_settings_recommendations(
         self: Self,
@@ -2894,10 +3263,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         target_signature_id: str,
     ) -> None:
         """Persist that one NILM signature should be treated as another."""
-        self._nilm_signature_for_review(circuit_id, target_signature_id)
+        target = self._nilm_signature_for_review(circuit_id, target_signature_id)
         source = self._nilm_signature_for_review(circuit_id, source_signature_id)
         source["review_state"] = "merged"
         source["merged_into"] = target_signature_id
+        if target.get("feedback_fingerprint"):
+            source["merged_into_fingerprint"] = target["feedback_fingerprint"]
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
@@ -4989,10 +5360,47 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
         )
 
+    def _feedback_aware_alert_policy(
+        self: Self,
+        policy: ConservativeAlertPolicy,
+    ) -> _FeedbackAwareAlertPolicy:
+        return _FeedbackAwareAlertPolicy(self, policy)
+
+    def _adjusted_min_repeated_for_observation(
+        self: Self,
+        observation: Observation,
+        base_min_repeated: int,
+    ) -> int:
+        _fingerprint, feedback = self._alert_feedback_for_observation(observation)
+        if _alert_feedback_status(feedback) != "unhelpful":
+            return base_min_repeated
+        return base_min_repeated + ALERT_UNHELPFUL_EXTRA_REPEATED
+
+    def _alert_feedback_for_observation(
+        self: Self,
+        observation: Observation,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        candidates = (
+            alert_feedback_fingerprint_for_observation(
+                observation,
+                config=self._config_for_circuit(observation.circuit_id),
+            ),
+            alert_feedback_fingerprint_for_observation(observation),
+            _legacy_alert_feedback_key_for_observation(observation),
+        )
+        for fingerprint in candidates:
+            feedback = self.store_data.alert_feedback.get(fingerprint)
+            if not isinstance(feedback, Mapping):
+                continue
+            if _alert_feedback_is_expired(feedback, self._now_fn()):
+                continue
+            return fingerprint, feedback
+        return None, {}
+
     def _alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5000,12 +5408,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if policy is None:
             policy = _alert_policy_for_sensitivity(policy_name)
             self._alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _usage_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5019,12 +5427,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=0.8,
             )
             self._usage_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _goal_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5038,12 +5446,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._goal_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _billing_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5057,12 +5465,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._billing_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _demand_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5076,12 +5484,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._demand_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _capacity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5095,12 +5503,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._capacity_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _leg_imbalance_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5114,12 +5522,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._leg_imbalance_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _standby_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5133,12 +5541,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._standby_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _utility_comparison_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5152,12 +5560,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._utility_comparison_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _nilm_topology_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5171,12 +5579,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._nilm_topology_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _cycle_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5190,12 +5598,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
             )
             self._cycle_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _activity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, policy_name)
@@ -5209,13 +5617,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=1.0,
             )
             self._activity_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     def _water_context_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
         feature: str,
-    ) -> ConservativeAlertPolicy:
+    ) -> _FeedbackAwareAlertPolicy:
         sensitivity = self._sensitivity_for_circuit(circuit_id)
         policy_name = alert_policy_name_for_sensitivity(sensitivity)
         key = (circuit_id, feature, policy_name)
@@ -5229,22 +5637,38 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 min_baseline_confidence=0.7,
             )
             self._water_context_alert_policies[key] = policy
-        return policy
+        return self._feedback_aware_alert_policy(policy)
 
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> bool:
         alert = self._alert_for_id(alert_id)
         if alert is None:
             return False
         now = self._now_fn()
-        self.store_data.alert_feedback[_alert_feedback_key(alert)] = {
+        fingerprint = _alert_feedback_key(
+            alert,
+            config=self._config_for_circuit(alert.circuit_id),
+        )
+        existing = self.store_data.alert_feedback.get(fingerprint, {})
+        evidence_count = (
+            _positive_int_value(existing.get("evidence_count"), default=0) + 1
+        )
+        expires_at = _alert_feedback_expires_at(action, now)
+        self.store_data.alert_feedback[fingerprint] = {
+            "fingerprint": fingerprint,
+            "status": action,
             "action": action,
+            "source_alert_id": alert_id,
             "alert_id": alert_id,
+            "decided_at": now.isoformat(),
             "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "last_seen": now.isoformat(),
             "circuit_id": alert.circuit_id,
             "feature": _alert_feature(alert),
             "change_ratio": alert.change_ratio,
             "observed_value": alert.observed_value,
             "baseline_value": alert.baseline_value,
+            "evidence_count": evidence_count,
         }
         self._retire_alert_id(alert_id)
         self._mark_store_dirty()
@@ -5289,8 +5713,42 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return None
 
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
-        feedback = self.store_data.alert_feedback.get(_alert_feedback_key(alert), {})
-        return feedback.get("action") in {"expected", "unhelpful"}
+        _fingerprint, feedback = self._alert_feedback_for(alert)
+        return _alert_feedback_status(feedback) == "expected"
+
+    def _alert_feedback_for(
+        self: Self,
+        alert: AlertEvidence,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        candidates = (
+            _alert_feedback_key(
+                alert,
+                config=self._config_for_circuit(alert.circuit_id),
+            ),
+            _alert_feedback_key(alert),
+            _legacy_alert_feedback_key(alert),
+        )
+        for fingerprint in candidates:
+            feedback = self.store_data.alert_feedback.get(fingerprint)
+            if not isinstance(feedback, Mapping):
+                continue
+            if _alert_feedback_is_expired(feedback, self._now_fn()):
+                continue
+            return fingerprint, feedback
+        return None, {}
+
+    def _alert_with_feedback(self: Self, alert: AlertEvidence) -> AlertEvidence:
+        fingerprint, feedback = self._alert_feedback_for(alert)
+        status = _alert_feedback_status(feedback)
+        if fingerprint is None or status is None:
+            return alert
+        return replace(
+            alert,
+            feedback_status=status,
+            feedback_effect=_alert_feedback_effect(status),
+            feedback_expires_at=_mapping_datetime(feedback.get("expires_at")),
+            matching_feedback_fingerprint=fingerprint,
+        )
 
     def _nilm_signature_for_review(
         self: Self,
@@ -5313,17 +5771,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
+        stored_alerts = [self._alert_with_feedback(alert) for alert in result.alerts]
+        active_alerts = [
+            alert
+            for alert in stored_alerts
+            if alert.feedback_status != "expected"
+        ]
         if result.events:
             self.store_data.events.extend(result.events)
-        if result.alerts:
-            self.store_data.alerts.extend(result.alerts)
+        if stored_alerts:
+            self.store_data.alerts.extend(stored_alerts)
         for update in result.state_updates:
             _apply_state_update(self.state, update.path, update.value)
         for alert in result.notifications:
-            await self._notify_alert(alert)
-        if result.store_dirty or result.events or result.alerts:
+            await self._notify_alert(self._alert_with_feedback(alert))
+        if result.store_dirty or result.events or stored_alerts:
             self._mark_store_dirty()
-        return list(result.events), list(result.alerts)
+        return list(result.events), active_alerts
 
     async def _async_save_store(self: Self, now: datetime) -> None:
         if self._store is None or not self._store_dirty:
@@ -5480,7 +5944,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         retained = {
             key: value
             for key, value in self.store_data.alert_feedback.items()
-            if _mapping_time(value, "created_at", "timestamp") >= cutoff
+            if not _alert_feedback_is_expired(value, now)
+            and _mapping_time(value, "created_at", "timestamp") >= cutoff
         }
         self.store_data.alert_feedback = dict(
             sorted(
@@ -6044,27 +6509,66 @@ def _alert_feature(alert: AlertEvidence) -> str:
     return "alert"
 
 
-def _alert_feedback_key(alert: AlertEvidence) -> str:
-    base_key = f"{alert.circuit_id}:{_alert_feature(alert)}"
-    context_key = _alert_feedback_context_key(alert)
-    if not context_key:
-        return base_key
-    return f"{base_key}|{context_key}"
+def _alert_feedback_key(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    return alert_feedback_fingerprint(alert, config=config)
 
 
-def _alert_feedback_context_key(alert: AlertEvidence) -> str:
-    features = alert.features
-    if str(features.get("comparison_basis", "")).strip().lower() != "contextual":
-        return ""
-    baseline_context = str(features.get("baseline_context", "")).strip()
-    if not baseline_context:
-        return ""
-    fallback_level = str(features.get("baseline_fallback_level", "")).strip()
-    parts = ["contextual"]
-    if fallback_level:
-        parts.append(fallback_level)
-    parts.append(baseline_context)
-    return "|".join(parts)
+def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
+    return f"{alert.circuit_id}:{_alert_feature(alert)}"
+
+
+def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
+    return f"{observation.circuit_id}:{observation.feature or 'alert'}"
+
+
+def _alert_feedback_status(feedback: Mapping[str, Any]) -> str | None:
+    status = feedback.get("status") or feedback.get("action")
+    if not isinstance(status, str):
+        return None
+    normalized = status.strip().lower()
+    return normalized or None
+
+
+def _alert_feedback_effect(status: str) -> str:
+    if status == "expected":
+        return "Notifications suppressed for this expected pattern"
+    if status == "unhelpful":
+        return "Future matching alerts require stronger repeated evidence"
+    return "Feedback recorded for this alert pattern"
+
+
+def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:
+    if action == "expected":
+        return now + ALERT_EXPECTED_FEEDBACK_TTL
+    if action == "unhelpful":
+        return now + ALERT_UNHELPFUL_FEEDBACK_TTL
+    return None
+
+
+def _alert_feedback_is_expired(
+    feedback: Mapping[str, Any],
+    now: datetime,
+) -> bool:
+    expires_at = _mapping_datetime(feedback.get("expires_at"))
+    if expires_at is None:
+        return False
+    return expires_at <= _datetime_with_matching_timezone(now, expires_at)
+
+
+def _mapping_datetime(value: Any) -> datetime | None:
+    return _datetime_or_none(value)
+
+
+def _datetime_with_matching_timezone(now: datetime, target: datetime) -> datetime:
+    if target.tzinfo is None and now.tzinfo is not None:
+        return now.replace(tzinfo=None)
+    if target.tzinfo is not None and now.tzinfo is None:
+        return now.replace(tzinfo=target.tzinfo)
+    return now
 
 
 def _normalized_temperature_unit(unit: str) -> str:
@@ -6856,6 +7360,19 @@ def _positive_float_value(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
+
+
+def _optional_float_value(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _absolute_float_value(value: Any) -> float:
+    parsed = _optional_float_value(value)
+    return abs(parsed) if parsed is not None else 0.0
 
 
 def _nonnegative_float_value(value: Any, *, default: float) -> float:

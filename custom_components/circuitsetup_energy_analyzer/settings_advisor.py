@@ -872,6 +872,12 @@ def _evidence_fingerprint(
     feature: str,
     evidence: Mapping[str, Any],
 ) -> str:
+    if evidence.get("source") == "unhelpful_alert_feedback":
+        return (
+            "unhelpful_alert_feedback:"
+            f"{evidence.get('feedback_fingerprint')};"
+            f"suggested={evidence.get('suggested_daily_spike_ratio')}"
+        )
     if feature == "energy_usage_spikes":
         return (
             "energy_usage_spikes:"
