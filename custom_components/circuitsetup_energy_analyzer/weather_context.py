@@ -12,7 +12,7 @@ from .contextual_baseline import (
 from .contextual_baseline import (
     temperature_bin as contextual_temperature_bin,
 )
-from .local_time import TimeZone
+from .local_time import TimeZone, local_date
 
 MIN_WEATHER_CONTEXT_SAMPLES = 3
 
@@ -121,7 +121,7 @@ def evaluate_weather_context(
         "baseline_fallback_level": comparable["fallback_level"],
         "baseline_sample_count": len(comparable_samples),
         "baseline_confidence": _baseline_confidence(
-            len(comparable_samples),
+            int(comparable["distinct_date_count"]),
             str(comparable["fallback_level"]),
         ),
         "contextual_status": status,
@@ -188,11 +188,13 @@ def _select_weather_baseline(
     fallback_groups.append(("global_circuit", mode, list(history)))
 
     for fallback_level, baseline_context, samples in fallback_groups:
-        if len(samples) >= MIN_WEATHER_CONTEXT_SAMPLES:
+        distinct_date_count = _distinct_local_date_count(samples, time_zone)
+        if distinct_date_count >= MIN_WEATHER_CONTEXT_SAMPLES:
             return {
                 "fallback_level": fallback_level,
                 "baseline_context": baseline_context,
                 "samples": samples,
+                "distinct_date_count": distinct_date_count,
             }
     return None
 
@@ -210,14 +212,29 @@ def _sample_season(
     return season_for_datetime(sample.timestamp, time_zone=time_zone)
 
 
-def _baseline_confidence(sample_count: int, fallback_level: str) -> float:
+def _distinct_local_date_count(
+    samples: Iterable[WeatherContextSample],
+    time_zone: TimeZone,
+) -> int:
+    dates = set()
+    for sample in samples:
+        if sample.timestamp is None:
+            continue
+        dates.add(local_date(sample.timestamp, time_zone))
+    return len(dates)
+
+
+def _baseline_confidence(distinct_date_count: int, fallback_level: str) -> float:
     specificity_weight = {
         "exact_context": 1.0,
         "temperature_context": 0.85,
         "seasonal_context": 0.75,
         "global_circuit": 0.65,
     }.get(fallback_level, 0.65)
-    sample_confidence = min(1.0, sample_count / MIN_WEATHER_CONTEXT_SAMPLES)
+    sample_confidence = min(
+        1.0,
+        distinct_date_count / MIN_WEATHER_CONTEXT_SAMPLES,
+    )
     return round(sample_confidence * specificity_weight, 3)
 
 

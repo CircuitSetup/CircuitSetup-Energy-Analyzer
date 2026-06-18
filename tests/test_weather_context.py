@@ -15,16 +15,19 @@ def test_weather_context_marks_hot_weather_hvac_activity_correlated() -> None:
         current_duty_cycle_percent=45.0,
         history=[
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 1, tzinfo=UTC),
                 temperature=90.0,
                 runtime_minutes=170.0,
                 duty_cycle_percent=44.0,
             ),
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 2, tzinfo=UTC),
                 temperature=92.0,
                 runtime_minutes=190.0,
                 duty_cycle_percent=48.0,
             ),
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 3, tzinfo=UTC),
                 temperature=89.0,
                 runtime_minutes=160.0,
                 duty_cycle_percent=42.0,
@@ -46,16 +49,19 @@ def test_weather_context_flags_activity_above_adjusted_range() -> None:
         current_duty_cycle_percent=80.0,
         history=[
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 1, tzinfo=UTC),
                 temperature=71.0,
                 runtime_minutes=120.0,
                 duty_cycle_percent=20.0,
             ),
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 2, tzinfo=UTC),
                 temperature=73.0,
                 runtime_minutes=160.0,
                 duty_cycle_percent=25.0,
             ),
             WeatherContextSample(
+                timestamp=datetime(2026, 6, 3, tzinfo=UTC),
                 temperature=72.0,
                 runtime_minutes=140.0,
                 duty_cycle_percent=22.0,
@@ -88,6 +94,49 @@ def test_weather_context_learns_until_similar_temperature_history_exists() -> No
     assert result["status"] == "learning"
     assert result["temperature_bin"] == "warm"
     assert "learning" in result["explanation"].lower()
+
+
+def test_weather_context_requires_distinct_local_dates_for_baseline() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=94.0,
+        current_runtime_minutes=101.0,
+        current_duty_cycle_percent=50.0,
+        history=[
+            WeatherContextSample(
+                timestamp=timestamp,
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for timestamp, temperature, runtime, duty in (
+                (
+                    datetime(2026, 6, 1, 4, 30, tzinfo=UTC),
+                    93.0,
+                    95.0,
+                    46.0,
+                ),
+                (
+                    datetime(2026, 6, 2, 3, 30, tzinfo=UTC),
+                    95.0,
+                    100.0,
+                    50.0,
+                ),
+                (
+                    datetime(2026, 6, 3, 3, 30, tzinfo=UTC),
+                    92.0,
+                    110.0,
+                    54.0,
+                ),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 17, 15, tzinfo=UTC),
+        time_zone="America/New_York",
+    )
+
+    assert result["status"] == "learning"
+    assert result["baseline_fallback_level"] == "not_enough_data"
+    assert "baseline_confidence" not in result
 
 
 def test_weather_context_reports_missing_temperature_source() -> None:
@@ -149,13 +198,13 @@ def test_weather_context_season_uses_ha_local_timezone() -> None:
             )
             for timestamp, temperature, runtime, duty in (
                 (
-                    datetime(2026, 5, 30, 18, tzinfo=UTC),
+                    datetime(2026, 5, 29, 18, tzinfo=UTC),
                     93.0,
                     95.0,
                     46.0,
                 ),
                 (
-                    datetime(2026, 5, 31, 18, tzinfo=UTC),
+                    datetime(2026, 5, 30, 18, tzinfo=UTC),
                     95.0,
                     100.0,
                     50.0,
