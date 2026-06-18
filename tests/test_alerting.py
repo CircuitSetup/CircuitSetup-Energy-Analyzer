@@ -352,6 +352,9 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
 
     assert fingerprint.startswith("alert:v2|fridge|daily_energy_spike|")
     assert "sources=energy+real_power" in fingerprint
+    assert "source_map=energy:sensor.fridge_energy+real_power:sensor.fridge_power" in (
+        fingerprint
+    )
     assert "profile=refrigerator" in fingerprint
     assert "mode=single_phase" in fingerprint
     assert "power_flow=load" in fingerprint
@@ -360,6 +363,46 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     assert "direction=increase" in fingerprint
     assert "temp=90-95f" in fingerprint
     assert fingerprint != alert_feedback_fingerprint(cooler_context, config=config)
+
+
+def test_alert_feedback_fingerprint_changes_when_sources_are_remapped() -> None:
+    first_config = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+    remapped_config = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+        sensors=(
+            SensorRef("sensor.new_fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.new_fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+
+    assert alert_feedback_fingerprint(
+        alert,
+        config=first_config,
+    ) != alert_feedback_fingerprint(alert, config=remapped_config)
 
 
 def test_alert_feedback_fingerprint_preserves_change_direction() -> None:

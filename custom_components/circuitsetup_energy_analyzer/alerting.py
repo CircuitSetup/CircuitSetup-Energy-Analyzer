@@ -178,6 +178,9 @@ def alert_feedback_fingerprint(
         source_roles = sorted({sensor.role.value for sensor in config.sensors})
         if source_roles:
             parts.append(f"sources={'+'.join(source_roles)}")
+        source_mapping = _source_mapping_bucket(config)
+        if source_mapping:
+            parts.append(f"source_map={source_mapping}")
         parts.extend(
             (
                 f"profile={config.appliance_profile.value}",
@@ -207,6 +210,15 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
+
+
+def _source_mapping_bucket(config: CircuitConfig) -> str:
+    mapped_sources = sorted(
+        f"{sensor.role.value}:{sensor.entity_id}"
+        for sensor in config.sensors
+        if sensor.entity_id
+    )
+    return "+".join(mapped_sources)
 
 
 def _value_bucket(value: float) -> str:
