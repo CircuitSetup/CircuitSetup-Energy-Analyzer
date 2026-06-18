@@ -7467,6 +7467,9 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
         ].status
         is settings_advisor.RecommendationStatus.APPLIED
     )
+    recommendations = coordinator.state.settings_recommendations_by_circuit["hvac"]
+    assert recommendations[0]["recommendation_id"] == recommendation.recommendation_id
+    assert recommendations[0]["status"] == "applied"
     assert (
         coordinator.state.settings_recommendation_count_by_circuit.get("hvac", 0)
         == 0

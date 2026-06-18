@@ -418,6 +418,42 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     )
 
 
+def test_alert_evidence_payload_enables_undo_for_applied_recommendations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    coordinator = _coordinator(alert)
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:daily_spike_ratio:v1",
+                "title": "Raise daily spike threshold",
+                "feature": "daily_spike_ratio",
+                "status": "applied",
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    actions = payload["setting_recommendations"][0]["actions"]
+    assert actions["apply"]["enabled"] is False
+    assert actions["deny"]["enabled"] is False
+    assert actions["dismiss"]["enabled"] is False
+    assert actions["undo"]["enabled"] is True
+    assert actions["undo"]["data"] == {
+        "recommendation_id": "hvac:daily_spike_ratio:v1",
+        "entry_id": "entry-1",
+    }
+    assert actions["reset"]["enabled"] is True
+
+
 def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

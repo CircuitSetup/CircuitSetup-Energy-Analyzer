@@ -65,7 +65,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260615-action-time-polish"
+PANEL_MODULE_VERSION = "20260618-feedback-actions"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"

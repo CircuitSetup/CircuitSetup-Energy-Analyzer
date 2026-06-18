@@ -2188,10 +2188,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         by_circuit: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        pending_count_by_circuit: defaultdict[str, int] = defaultdict(int)
         for recommendation in sorted(
-            self._pending_settings_recommendations(now),
+            self._visible_settings_recommendations(now),
             key=lambda item: (
                 item.circuit_name,
+                item.status is not RecommendationStatus.PENDING,
                 item.group,
                 item.setting_label,
                 item.recommendation_id,
@@ -2200,13 +2202,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             by_circuit[recommendation.circuit_id].append(
                 recommendation_to_dict(recommendation),
             )
+            if recommendation.status is RecommendationStatus.PENDING:
+                pending_count_by_circuit[recommendation.circuit_id] += 1
         self.state.settings_recommendations_by_circuit = dict(by_circuit)
         self.state.settings_recommendation_count_by_circuit = {
-            circuit_id: len(recommendations)
-            for circuit_id, recommendations in by_circuit.items()
+            circuit_id: count
+            for circuit_id, count in pending_count_by_circuit.items()
+            if count > 0
         }
-        if not by_circuit:
+        if not pending_count_by_circuit:
             self._set_settings_recommendation_notification_episode_key(())
+
+    def _visible_settings_recommendations(
+        self: Self,
+        now: datetime,
+    ) -> list[SettingRecommendation]:
+        return [
+            recommendation
+            for recommendation in self.store_data.settings_recommendations.values()
+            if recommendation.status
+            in {RecommendationStatus.PENDING, RecommendationStatus.APPLIED}
+            and recommendation.expires_at > now
+        ]
 
     def _pending_settings_recommendations(
         self: Self,
