@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Self
+from typing import Any, Self
 
 from .models import AlertEvidence, CircuitConfig, Severity
 from .ux import friendly_feature_name
@@ -23,7 +23,7 @@ class Observation:
     observed_value: float = 0.0
     baseline_value: float = 0.0
     message: str = ""
-    features: Mapping[str, float] = field(default_factory=dict)
+    features: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
@@ -166,6 +166,8 @@ def alert_feedback_fingerprint(
     )
     if (temperature := _temperature_context_bucket(alert.features)) is not None:
         parts.append(f"temp={temperature}")
+    if (baseline_context := _baseline_context_bucket(alert.features)) is not None:
+        parts.append(f"context={baseline_context}")
     return "|".join(parts)
 
 
@@ -213,6 +215,20 @@ def _temperature_context_bucket(features: Mapping[str, object]) -> str | None:
             bucket_start = int(_floor_to_step(float(value), 5.0))
             return f"{bucket_start}-{bucket_start + 5}f"
     return None
+
+
+def _baseline_context_bucket(features: Mapping[str, object]) -> str | None:
+    if str(features.get("comparison_basis", "")).strip().lower() != "contextual":
+        return None
+    baseline_context = str(features.get("baseline_context", "")).strip()
+    if not baseline_context:
+        return None
+    fallback_level = str(features.get("baseline_fallback_level", "")).strip()
+    parts = ["contextual"]
+    if fallback_level:
+        parts.append(fallback_level)
+    parts.append(baseline_context)
+    return "+".join(parts)
 
 
 def _floor_to_step(value: float, step: float) -> float:

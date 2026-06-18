@@ -6,6 +6,16 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..alerting import Observation
+from ..contextual_baseline import (
+    ContextualBaselineSample,
+    build_context_for_sample,
+    contextual_stats_storage_key,
+    contextual_stats_to_dict,
+    daily_energy_fallback_contexts,
+    select_contextual_baseline,
+    stored_contextual_samples,
+    upsert_contextual_sample,
+)
 from ..demand import (
     DemandLimitEvidence,
     DemandPeakEvidence,
@@ -15,6 +25,8 @@ from ..demand import (
 from ..models import AlertEvidence, CircuitConfig, PowerFlowMode
 from ..normalize import NormalizedCircuitSample
 from .base import FeatureResult, ProcessingContext, StateUpdate
+
+DEMAND_PEAK_FEATURE = "peak_demand_w"
 
 
 class _AlertPolicy(Protocol):
@@ -64,6 +76,12 @@ class DemandProcessor:
         if result is None:
             return FeatureResult()
 
+        contextual_comparison = _contextual_demand_comparison(
+            result,
+            circuit_config,
+            sample,
+            context,
+        )
         feature_result = FeatureResult(
             state_updates=[
                 StateUpdate(
@@ -88,10 +106,11 @@ class DemandProcessor:
                 ),
                 StateUpdate(
                     ("demand_evidence_by_circuit", circuit_id),
-                    demand_evidence_payload(result),
+                    demand_evidence_payload(result, contextual_comparison),
                 ),
             ],
-            store_dirty=result.monthly_peak_recorded,
+            store_dirty=result.monthly_peak_recorded
+            or bool(contextual_comparison.get("sample_recorded")),
         )
 
         alert = None
@@ -100,13 +119,16 @@ class DemandProcessor:
                 circuit_config,
                 context,
                 result.limit_exceeded,
+                contextual_comparison,
             )
         elif result.monthly_peak_warning is not None:
-            alert = self._demand_monthly_peak_alert(
-                circuit_config,
-                context,
-                result.monthly_peak_warning,
-            )
+            if contextual_comparison.get("status_override") != "context_explained":
+                alert = self._demand_monthly_peak_alert(
+                    circuit_config,
+                    context,
+                    result.monthly_peak_warning,
+                    contextual_comparison,
+                )
         if alert is not None:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)
@@ -117,6 +139,7 @@ class DemandProcessor:
         circuit_config: CircuitConfig,
         context: ProcessingContext,
         evidence: DemandLimitEvidence,
+        contextual_comparison: dict[str, Any],
     ) -> AlertEvidence | None:
         score = (
             evidence.current_demand_w / evidence.demand_limit_w
@@ -133,7 +156,10 @@ class DemandProcessor:
                 observed_value=evidence.current_demand_w,
                 baseline_value=evidence.demand_limit_w,
                 message=demand_limit_message(circuit_config, evidence),
-                features=evidence.features,
+                features={
+                    **evidence.features,
+                    **_contextual_alert_features(contextual_comparison),
+                },
             )
         )
 
@@ -142,8 +168,22 @@ class DemandProcessor:
         circuit_config: CircuitConfig,
         context: ProcessingContext,
         evidence: DemandPeakEvidence,
+        contextual_comparison: dict[str, Any],
     ) -> AlertEvidence | None:
-        score = max(1.0, evidence.monthly_peak_usage_percent / 100.0)
+        baseline_value = float(
+            contextual_comparison.get(
+                "alert_baseline_value",
+                evidence.monthly_peak_cutoff_w,
+            )
+        )
+        score = max(
+            1.0,
+            (
+                float(evidence.current_demand_w) / baseline_value
+                if baseline_value > 0.0
+                else evidence.monthly_peak_usage_percent / 100.0
+            ),
+        )
         return self._alert_policy_for_circuit(circuit_config.circuit_id).observe(
             Observation(
                 circuit_id=circuit_config.circuit_id,
@@ -152,9 +192,12 @@ class DemandProcessor:
                 baseline_confidence=1.0,
                 observed_at=context.now,
                 observed_value=evidence.current_demand_w,
-                baseline_value=evidence.monthly_peak_cutoff_w,
+                baseline_value=baseline_value,
                 message=demand_monthly_peak_message(circuit_config, evidence),
-                features=evidence.features,
+                features={
+                    **evidence.features,
+                    **_contextual_alert_features(contextual_comparison),
+                },
             )
         )
 
@@ -187,26 +230,140 @@ def demand_monthly_peak_message(
     )
 
 
-def demand_evidence_payload(result: Any) -> dict[str, Any]:
+def demand_evidence_payload(
+    result: Any,
+    contextual_comparison: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the analyzer state payload for rolling demand tracking."""
+    status = (
+        "over_limit"
+        if result.limit_exceeded is not None
+        else ("tracking" if result.demand_limit_w is not None else "unconfigured")
+    )
+    if contextual_comparison and contextual_comparison.get("status_override"):
+        status = str(contextual_comparison["status_override"])
+    return _with_contextual_evidence(
+        {
+            "date": result.date,
+            "current_demand_w": result.current_demand_w,
+            "peak_demand_w": result.peak_demand_w,
+            "demand_window_minutes": result.window_minutes,
+            "demand_limit_w": result.demand_limit_w,
+            "demand_limit_usage_percent": result.demand_limit_usage,
+            "status": status,
+            "monthly_peak_rank": result.monthly_peak_rank,
+            "monthly_peak_status": result.monthly_peak_status,
+            "monthly_peak_cutoff_w": result.monthly_peak_cutoff_w,
+            "monthly_peak_usage_percent": result.monthly_peak_usage_percent,
+            "monthly_peak_rank_count": result.monthly_peak_rank_count,
+            "monthly_peak_warning_ratio": result.monthly_peak_warning_ratio,
+        },
+        contextual_comparison,
+    )
+
+
+def _contextual_demand_comparison(
+    result: Any,
+    circuit_config: CircuitConfig,
+    sample: NormalizedCircuitSample,
+    context: ProcessingContext,
+) -> dict[str, Any]:
+    context_key = build_context_for_sample(
+        circuit_config=circuit_config,
+        sample=sample,
+        state=context.state,
+        store_data=context.store_data,
+        now=context.now,
+        feature=DEMAND_PEAK_FEATURE,
+    )
+    raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
+        circuit_config.circuit_id,
+        [],
+    )
+    selected = select_contextual_baseline(
+        circuit_id=circuit_config.circuit_id,
+        feature=DEMAND_PEAK_FEATURE,
+        samples=stored_contextual_samples(circuit_config.circuit_id, raw_samples),
+        fallback_contexts=daily_energy_fallback_contexts(context_key),
+    )
+
+    sample_recorded = False
+    if result.current_demand_w > 0.0:
+        samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+            circuit_config.circuit_id,
+            [],
+        )
+        before = [dict(item) for item in samples]
+        upsert_contextual_sample(
+            samples,
+            ContextualBaselineSample(
+                timestamp=context.now,
+                circuit_id=circuit_config.circuit_id,
+                feature=DEMAND_PEAK_FEATURE,
+                value=result.current_demand_w,
+                context=context_key,
+                source="demand",
+            ),
+        )
+        sample_recorded = before != samples
+        updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)
+        exact = select_contextual_baseline(
+            circuit_id=circuit_config.circuit_id,
+            feature=DEMAND_PEAK_FEATURE,
+            samples=updated_samples,
+            fallback_contexts=[("exact_context", context_key, 7)],
+        )
+        if exact is not None:
+            context.store_data.contextual_baselines_by_circuit.setdefault(
+                circuit_config.circuit_id,
+                {},
+            )[contextual_stats_storage_key(exact)] = contextual_stats_to_dict(exact)
+
+    if selected is None:
+        return {"sample_recorded": sample_recorded}
+
+    attrs: dict[str, Any] = {
+        "comparison_basis": "contextual",
+        "baseline_context": ", ".join(selected.context.values()),
+        "baseline_fallback_level": selected.fallback_level,
+        "baseline_sample_count": selected.sample_count,
+        "contextual_baseline_median_w": round(selected.median, 1),
+        "contextual_baseline_p90_w": round(selected.p90, 1),
+        "contextual_baseline_confidence": selected.confidence,
+        "contextual_expected_range_w": [round(selected.p10, 1), round(selected.p90, 1)],
+        "alert_baseline_value": selected.p90,
+        "sample_recorded": sample_recorded,
+    }
+    if (
+        result.monthly_peak_warning is not None
+        and result.current_demand_w <= selected.p90
+    ):
+        attrs["status_override"] = "context_explained"
+    return attrs
+
+
+def _with_contextual_evidence(
+    payload: dict[str, Any],
+    contextual_comparison: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if contextual_comparison:
+        payload.update(
+            {
+                key: value
+                for key, value in contextual_comparison.items()
+                if not key.startswith("alert_")
+                and key not in {"sample_recorded", "status_override"}
+            }
+        )
+    return payload
+
+
+def _contextual_alert_features(contextual_comparison: dict[str, Any]) -> dict[str, Any]:
     return {
-        "date": result.date,
-        "current_demand_w": result.current_demand_w,
-        "peak_demand_w": result.peak_demand_w,
-        "demand_window_minutes": result.window_minutes,
-        "demand_limit_w": result.demand_limit_w,
-        "demand_limit_usage_percent": result.demand_limit_usage,
-        "status": (
-            "over_limit"
-            if result.limit_exceeded is not None
-            else ("tracking" if result.demand_limit_w is not None else "unconfigured")
-        ),
-        "monthly_peak_rank": result.monthly_peak_rank,
-        "monthly_peak_status": result.monthly_peak_status,
-        "monthly_peak_cutoff_w": result.monthly_peak_cutoff_w,
-        "monthly_peak_usage_percent": result.monthly_peak_usage_percent,
-        "monthly_peak_rank_count": result.monthly_peak_rank_count,
-        "monthly_peak_warning_ratio": result.monthly_peak_warning_ratio,
+        key: value
+        for key, value in contextual_comparison.items()
+        if not key.startswith("alert_")
+        and key not in {"sample_recorded", "status_override"}
     }
 
 

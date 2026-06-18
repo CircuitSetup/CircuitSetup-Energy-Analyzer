@@ -6,6 +6,16 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..alerting import Observation
+from ..contextual_baseline import (
+    ContextualBaselineSample,
+    build_context_for_sample,
+    contextual_stats_storage_key,
+    contextual_stats_to_dict,
+    daily_energy_fallback_contexts,
+    select_contextual_baseline,
+    stored_contextual_samples,
+    upsert_contextual_sample,
+)
 from ..models import (
     AlertEvidence,
     CircuitConfig,
@@ -19,6 +29,8 @@ from ..standby import (
     record_standby_sample,
 )
 from .base import FeatureResult, ProcessingContext, StateUpdate
+
+STANDBY_POWER_FEATURE = "standby_power_w"
 
 
 class _AlertPolicy(Protocol):
@@ -76,6 +88,12 @@ class StandbyProcessor:
         if result is None:
             return FeatureResult()
 
+        contextual_comparison = _contextual_standby_comparison(
+            result,
+            circuit_config,
+            sample,
+            context,
+        )
         feature_result = FeatureResult(
             state_updates=[
                 StateUpdate(
@@ -96,16 +114,18 @@ class StandbyProcessor:
                 ),
                 StateUpdate(
                     ("standby_evidence_by_circuit", circuit_config.circuit_id),
-                    standby_evidence_payload(result),
+                    standby_evidence_payload(result, contextual_comparison),
                 ),
             ],
-            store_dirty=result.limit_exceeded is not None,
+            store_dirty=result.limit_exceeded is not None
+            or bool(contextual_comparison.get("sample_recorded")),
         )
         if result.limit_exceeded is not None:
             alert = self._standby_limit_alert(
                 circuit_config,
                 context,
                 result.limit_exceeded,
+                contextual_comparison,
             )
             if alert is not None:
                 feature_result.alerts.append(alert)
@@ -117,6 +137,7 @@ class StandbyProcessor:
         config: CircuitConfig,
         context: ProcessingContext,
         evidence: StandbyLimitEvidence,
+        contextual_comparison: dict[str, Any],
     ) -> AlertEvidence | None:
         score = (
             evidence.always_on_power_w / evidence.always_on_alert_w
@@ -133,7 +154,10 @@ class StandbyProcessor:
                 observed_value=evidence.always_on_power_w,
                 baseline_value=evidence.always_on_alert_w,
                 message=standby_limit_message(config, evidence),
-                features=evidence.features,
+                features={
+                    **evidence.features,
+                    **_contextual_alert_features(contextual_comparison),
+                },
             )
         )
 
@@ -151,9 +175,12 @@ def standby_limit_message(
     )
 
 
-def standby_evidence_payload(result: StandbyResult) -> dict[str, Any]:
+def standby_evidence_payload(
+    result: StandbyResult,
+    contextual_comparison: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the analyzer state payload for standby tracking."""
-    return {
+    payload = {
         "always_on_power_w": result.always_on_power_w,
         "current_power_w": result.current_power_w,
         "standby_threshold_w": result.standby_threshold_w,
@@ -162,6 +189,96 @@ def standby_evidence_payload(result: StandbyResult) -> dict[str, Any]:
         "always_on_alert_w": result.always_on_alert_w,
         "always_on_limit_usage_percent": result.always_on_limit_usage,
         "status": result.status,
+    }
+    if contextual_comparison:
+        payload.update(
+            {
+                key: value
+                for key, value in contextual_comparison.items()
+                if not key.startswith("alert_") and key != "sample_recorded"
+            }
+        )
+    return payload
+
+
+def _contextual_standby_comparison(
+    result: StandbyResult,
+    circuit_config: CircuitConfig,
+    sample: NormalizedCircuitSample,
+    context: ProcessingContext,
+) -> dict[str, Any]:
+    context_key = build_context_for_sample(
+        circuit_config=circuit_config,
+        sample=sample,
+        state=context.state,
+        store_data=context.store_data,
+        now=context.now,
+        feature=STANDBY_POWER_FEATURE,
+    )
+    raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
+        circuit_config.circuit_id,
+        [],
+    )
+    selected = select_contextual_baseline(
+        circuit_id=circuit_config.circuit_id,
+        feature=STANDBY_POWER_FEATURE,
+        samples=stored_contextual_samples(circuit_config.circuit_id, raw_samples),
+        fallback_contexts=daily_energy_fallback_contexts(context_key),
+    )
+
+    sample_recorded = False
+    if result.always_on_power_w > 0.0 and result.status != "learning":
+        samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+            circuit_config.circuit_id,
+            [],
+        )
+        before = [dict(item) for item in samples]
+        upsert_contextual_sample(
+            samples,
+            ContextualBaselineSample(
+                timestamp=context.now,
+                circuit_id=circuit_config.circuit_id,
+                feature=STANDBY_POWER_FEATURE,
+                value=result.always_on_power_w,
+                context=context_key,
+                source="standby",
+            ),
+        )
+        sample_recorded = before != samples
+        updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)
+        exact = select_contextual_baseline(
+            circuit_id=circuit_config.circuit_id,
+            feature=STANDBY_POWER_FEATURE,
+            samples=updated_samples,
+            fallback_contexts=[("exact_context", context_key, 7)],
+        )
+        if exact is not None:
+            context.store_data.contextual_baselines_by_circuit.setdefault(
+                circuit_config.circuit_id,
+                {},
+            )[contextual_stats_storage_key(exact)] = contextual_stats_to_dict(exact)
+
+    if selected is None:
+        return {"sample_recorded": sample_recorded}
+
+    return {
+        "comparison_basis": "contextual",
+        "baseline_context": ", ".join(selected.context.values()),
+        "baseline_fallback_level": selected.fallback_level,
+        "baseline_sample_count": selected.sample_count,
+        "contextual_baseline_median_w": round(selected.median, 1),
+        "contextual_baseline_p90_w": round(selected.p90, 1),
+        "contextual_baseline_confidence": selected.confidence,
+        "contextual_expected_range_w": [round(selected.p10, 1), round(selected.p90, 1)],
+        "sample_recorded": sample_recorded,
+    }
+
+
+def _contextual_alert_features(contextual_comparison: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in contextual_comparison.items()
+        if not key.startswith("alert_") and key != "sample_recorded"
     }
 
 

@@ -5,6 +5,19 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from ..contextual_baseline import (
+    ContextKey,
+    ContextualBaselineSample,
+    contextual_stats_storage_key,
+    contextual_stats_to_dict,
+    daily_energy_fallback_contexts,
+    season_for_datetime,
+    select_contextual_baseline,
+    solar_flow_state,
+    stored_contextual_samples,
+    time_of_day_bucket,
+    upsert_contextual_sample,
+)
 from ..load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
     FlexibleLoadInput,
@@ -35,6 +48,8 @@ FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
 
 type SolarFlowSettingsProvider = Callable[[str], Mapping[str, Any]]
 
+SOLAR_SURPLUS_CONTEXT_FEATURE = "solar_surplus_power_w"
+
 
 class SolarFlowProcessor:
     """Calculate solar generation, grid flow, surplus, and load-shift state."""
@@ -54,7 +69,6 @@ class SolarFlowProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return state updates for every mains NILM sample in a batch."""
-        del context
         mains_items = [
             (config, sample)
             for config, sample in samples
@@ -83,6 +97,7 @@ class SolarFlowProcessor:
         ]
 
         state_updates: list[StateUpdate] = []
+        store_dirty = False
         for config, sample in mains_items:
             settings = self._settings_for_circuit(config.circuit_id)
             solar_flow = calculate_solar_flow(
@@ -114,21 +129,29 @@ class SolarFlowProcessor:
                     default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
                 ),
             )
+            contextual_evidence, contextual_dirty = _solar_contextual_evidence(
+                config=config,
+                result=solar_flow,
+                context=context,
+            )
+            store_dirty = store_dirty or contextual_dirty
             state_updates.extend(
                 solar_flow_state_updates(
                     config.circuit_id,
                     solar_flow,
                     load_shift,
+                    contextual_evidence,
                 ),
             )
 
-        return FeatureResult(state_updates=state_updates)
+        return FeatureResult(state_updates=state_updates, store_dirty=store_dirty)
 
 
 def solar_flow_state_updates(
     circuit_id: str,
     result: SolarFlowResult,
     load_shift: SolarLoadShiftResult,
+    contextual_evidence: Mapping[str, Any] | None = None,
 ) -> list[StateUpdate]:
     """Build state updates for a solar flow calculation."""
     return [
@@ -184,6 +207,7 @@ def solar_flow_state_updates(
                 **result.features,
                 "status": result.status,
                 "solar_surplus_status": result.solar_surplus_status,
+                **dict(contextual_evidence or {}),
             },
         ),
         StateUpdate(
@@ -191,6 +215,91 @@ def solar_flow_state_updates(
             load_shift.features,
         ),
     ]
+
+
+def _solar_contextual_evidence(
+    *,
+    config: CircuitConfig,
+    result: SolarFlowResult,
+    context: ProcessingContext,
+) -> tuple[dict[str, Any], bool]:
+    context_key = _solar_context_key(config, result, context)
+    raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
+        config.circuit_id,
+        [],
+    )
+    selected = select_contextual_baseline(
+        circuit_id=config.circuit_id,
+        feature=SOLAR_SURPLUS_CONTEXT_FEATURE,
+        samples=stored_contextual_samples(config.circuit_id, raw_samples),
+        fallback_contexts=daily_energy_fallback_contexts(context_key),
+    )
+    evidence: dict[str, Any] = {}
+    store_dirty = False
+    if selected is not None:
+        evidence = {
+            "comparison_basis": "contextual",
+            "baseline_context": ", ".join(selected.context.values()),
+            "baseline_fallback_level": selected.fallback_level,
+            "baseline_sample_count": selected.sample_count,
+            "contextual_baseline_median_w": round(selected.median, 3),
+            "contextual_baseline_p90_w": round(selected.p90, 3),
+            "contextual_baseline_confidence": selected.confidence,
+        }
+        context.store_data.contextual_baselines_by_circuit.setdefault(
+            config.circuit_id,
+            {},
+        )[contextual_stats_storage_key(selected)] = contextual_stats_to_dict(selected)
+        store_dirty = True
+
+    samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+        config.circuit_id,
+        [],
+    )
+    before = [dict(sample) for sample in samples]
+    for feature, value in _solar_context_values(result).items():
+        upsert_contextual_sample(
+            samples,
+            ContextualBaselineSample(
+                timestamp=context.now,
+                circuit_id=config.circuit_id,
+                feature=feature,
+                value=value,
+                context=context_key,
+                source="solar_flow",
+            ),
+        )
+    return evidence, store_dirty or before != samples
+
+
+def _solar_context_key(
+    config: CircuitConfig,
+    result: SolarFlowResult,
+    context: ProcessingContext,
+) -> ContextKey:
+    return ContextKey.from_mapping(
+        {
+            "appliance_profile": config.appliance_profile.value,
+            "circuit_mode": config.mode.value,
+            "power_flow_mode": config.power_flow.value,
+            "season": season_for_datetime(context.now),
+            "solar_flow_state": solar_flow_state(
+                result.status,
+                result.solar_surplus_status,
+            ),
+            "time_of_day": time_of_day_bucket(context.now),
+        }
+    )
+
+
+def _solar_context_values(result: SolarFlowResult) -> dict[str, float]:
+    return {
+        "solar_generation_power_w": result.solar_generation_w,
+        "grid_import_power_w": result.grid_import_w,
+        "grid_export_power_w": result.grid_export_w,
+        "site_consumption_power_w": result.site_consumption_w,
+        SOLAR_SURPLUS_CONTEXT_FEATURE: result.solar_surplus_w,
+    }
 
 
 def _is_mains_nilm(config: CircuitConfig) -> bool:
