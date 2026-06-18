@@ -406,3 +406,85 @@ def test_operating_state_machine_ignores_duplicate_and_out_of_order_samples() ->
     assert duplicate.events == ()
     assert out_of_order.events == ()
     assert [event.event_type for event in confirmed.events] == [EventType.START]
+
+
+def test_operating_state_machine_marks_state_unavailable_after_missing_power_grace(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingDetectionProfile,
+        OperatingState,
+        OperatingStateMachine,
+        OperatingThresholdSource,
+        ResolvedOperatingDetection,
+    )
+
+    machine = OperatingStateMachine(
+        ResolvedOperatingDetection(
+            profile=OperatingDetectionProfile(
+                on_threshold_w=25.0,
+                off_threshold_w=10.0,
+                on_dwell_seconds=10.0,
+                off_dwell_seconds=20.0,
+                merge_gap_seconds=60.0,
+                max_sample_gap_seconds=30.0,
+            ),
+            source=OperatingThresholdSource.PROFILE_DEFAULT,
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            circuit_mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
+
+    machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    machine.process(_sample(16, 42.0, circuit_id="fridge"))
+
+    brief_gap = machine.process(_sample(30, None, circuit_id="fridge"))
+    extended_gap = machine.process(_sample(50, None, circuit_id="fridge"))
+
+    assert brief_gap.snapshot.state is OperatingState.RUNNING
+    assert brief_gap.snapshot.stable_state is OperatingState.RUNNING
+    assert extended_gap.snapshot.state is OperatingState.UNAVAILABLE
+    assert extended_gap.snapshot.stable_state is OperatingState.UNAVAILABLE
+    assert extended_gap.events == ()
+
+
+def test_operating_state_machine_recovers_from_unavailable_without_false_start(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingDetectionProfile,
+        OperatingState,
+        OperatingStateMachine,
+        OperatingThresholdSource,
+        ResolvedOperatingDetection,
+    )
+
+    machine = OperatingStateMachine(
+        ResolvedOperatingDetection(
+            profile=OperatingDetectionProfile(
+                on_threshold_w=25.0,
+                off_threshold_w=10.0,
+                on_dwell_seconds=10.0,
+                off_dwell_seconds=20.0,
+                merge_gap_seconds=60.0,
+                max_sample_gap_seconds=30.0,
+            ),
+            source=OperatingThresholdSource.PROFILE_DEFAULT,
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            circuit_mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
+
+    machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    machine.process(_sample(50, None, circuit_id="fridge"))
+
+    pending = machine.process(_sample(60, 41.0, circuit_id="fridge"))
+    recovered = machine.process(_sample(72, 43.0, circuit_id="fridge"))
+
+    assert pending.snapshot.state is OperatingState.PENDING_ON
+    assert pending.snapshot.stable_state is OperatingState.UNKNOWN
+    assert pending.events == ()
+    assert recovered.snapshot.state is OperatingState.RUNNING
+    assert recovered.snapshot.stable_state is OperatingState.RUNNING
+    assert recovered.events == ()

@@ -455,6 +455,49 @@ def test_event_processor_returns_operating_state_updates() -> None:
     ] == "running"
 
 
+def test_event_processor_preserves_threshold_source_from_overrides() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            operating_detection_settings_by_circuit={
+                "washer": {
+                    "operating_on_threshold_w": 42.0,
+                    "operating_off_threshold_w": 18.0,
+                }
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CircuitEventProcessor()
+
+    result = processor.process(_sample(0, 5.0), config, context)
+    updates = {update.path: update.value for update in result.state_updates}
+
+    assert updates[("operating_state_snapshot_by_circuit", "washer")][
+        "threshold_source"
+    ] == "user_override"
+
+
 def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (

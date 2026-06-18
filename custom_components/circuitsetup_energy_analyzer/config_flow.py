@@ -2288,6 +2288,15 @@ def _resolved_operating_detection_for_context(
         return resolve_operating_detection(config)
 
 
+def _operating_detection_source_label(source: Any) -> str:
+    source_value = str(source or "").strip().lower()
+    if source_value == "user_override":
+        return "User override"
+    if source_value == "learned_recommendation":
+        return "Suggested from learned behavior"
+    return "Appliance profile default"
+
+
 def _operating_detection_override_settings(
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -4159,6 +4168,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         config = _entry_config(self._config_entry)
         context = _advanced_circuit_context_from_config(config, circuit_id)
         settings = _settings_map_for_entry(self._config_entry, CONF_ADVANCED_SETTINGS)
+        resolved_operating_detection = _resolved_operating_detection_for_context(
+            context,
+            settings=settings.get(circuit_id, {}),
+        )
         return self.async_show_form(
             step_id="advanced_settings",
             data_schema=_advanced_settings_schema(
@@ -4175,6 +4188,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "Single Phase",
                 ),
                 "power_flow": _power_flow_label(context.get("power_flow")),
+                "operating_detection_source": _operating_detection_source_label(
+                    resolved_operating_detection.source.value
+                ),
             },
         )
 

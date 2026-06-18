@@ -376,6 +376,7 @@ class OperatingStateMachine:
         self._state_since: datetime | None = None
         self._candidate_since: datetime | None = None
         self._last_sample_at: datetime | None = None
+        self._last_valid_power_at: datetime | None = None
         self._last_power_w: float | None = None
         self._last_on_power_w: float | None = None
         self._run_started_at: datetime | None = None
@@ -402,17 +403,17 @@ class OperatingStateMachine:
         self._last_power_w = watts
 
         if watts is None:
-            if (
-                sample.voltage is not None
-                and self._stable_state is not OperatingState.RUNNING
-            ):
-                self._nominal_voltage = sample.voltage
-            return self._result("invalid_or_missing_power")
+            return self._handle_invalid_or_missing_power(sample)
+
+        self._last_valid_power_at = sample.timestamp
 
         if self._state is OperatingState.UNKNOWN:
             return self._initialize_from_first_valid_sample(sample, watts)
 
-        if self._stable_state is OperatingState.UNKNOWN:
+        if self._stable_state in {
+            OperatingState.UNKNOWN,
+            OperatingState.UNAVAILABLE,
+        }:
             result = self._process_from_unknown(sample, watts)
         elif self._stable_state is OperatingState.OFF:
             result = self._process_from_off(sample, watts)
@@ -571,7 +572,8 @@ class OperatingStateMachine:
                 return self._result("initial_running_without_event")
             self._state = OperatingState.PENDING_ON
             self._stable_state = OperatingState.UNKNOWN
-            self._state_since = self._candidate_since or sample.timestamp
+            self._candidate_since = self._candidate_since or sample.timestamp
+            self._state_since = self._candidate_since
             self._transition_reason = "initial_above_on_threshold"
             return self._result(self._transition_reason)
 
@@ -608,6 +610,16 @@ class OperatingStateMachine:
         self._last_on_power_w = None
         self._sag_emitted_for_run = False
 
+    def _set_unavailable(self, timestamp: datetime, *, reason: str) -> None:
+        self._state = OperatingState.UNAVAILABLE
+        self._stable_state = OperatingState.UNAVAILABLE
+        self._state_since = timestamp
+        self._candidate_since = None
+        self._transition_reason = reason
+        self._run_started_at = None
+        self._last_on_power_w = None
+        self._sag_emitted_for_run = False
+
     def _reset_pending_state(self, timestamp: datetime) -> None:
         if self._state is OperatingState.PENDING_ON:
             self._state = OperatingState.OFF
@@ -621,6 +633,32 @@ class OperatingStateMachine:
             self._state_since = timestamp
             self._candidate_since = None
             self._transition_reason = "pending_off_reset_after_gap"
+
+    def _handle_invalid_or_missing_power(
+        self,
+        sample: NormalizedCircuitSample,
+    ) -> OperatingDetectionResult:
+        if (
+            sample.voltage is not None
+            and self._stable_state is not OperatingState.RUNNING
+        ):
+            self._nominal_voltage = sample.voltage
+
+        if self._state in {OperatingState.PENDING_ON, OperatingState.PENDING_OFF}:
+            self._reset_pending_state(sample.timestamp)
+
+        if self._should_mark_unavailable(sample):
+            self._set_unavailable(sample.timestamp, reason="source_data_unavailable")
+            return self._result("source_data_unavailable")
+
+        return self._result("invalid_or_missing_power")
+
+    def _should_mark_unavailable(self, sample: NormalizedCircuitSample) -> bool:
+        if self._last_valid_power_at is None:
+            return True
+        return (
+            sample.timestamp - self._last_valid_power_at
+        ).total_seconds() > self._profile.max_sample_gap_seconds
 
     def _set_off_without_event(
         self,

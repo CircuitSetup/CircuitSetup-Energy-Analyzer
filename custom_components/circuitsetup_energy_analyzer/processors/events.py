@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+from typing import Any
 
 from ..events import CircuitEventDetector
 from ..models import CircuitConfig
@@ -24,7 +25,7 @@ class CircuitEventProcessor:
         detectors: MutableMapping[str, CircuitEventDetector] | None = None,
     ) -> None:
         self.detectors = detectors if detectors is not None else {}
-        self._resolved_by_circuit: dict[str, tuple[float, ...]] = {}
+        self._resolved_by_circuit: dict[str, tuple[Any, ...]] = {}
 
     def process(
         self,
@@ -53,6 +54,10 @@ class CircuitEventProcessor:
             resolved.profile.off_dwell_seconds,
             resolved.profile.merge_gap_seconds,
             resolved.profile.max_sample_gap_seconds,
+            resolved.profile.emit_initial_transition,
+            resolved.source.value,
+            resolved.appliance_profile.value,
+            resolved.circuit_mode.value,
         )
         detector = self.detectors.get(circuit_config.circuit_id)
         if (
@@ -67,6 +72,7 @@ class CircuitEventProcessor:
                 merge_gap_seconds=resolved.profile.merge_gap_seconds,
                 max_sample_gap_seconds=resolved.profile.max_sample_gap_seconds,
                 emit_initial_transition=resolved.profile.emit_initial_transition,
+                threshold_source=resolved.source,
                 appliance_profile=resolved.appliance_profile,
                 circuit_mode=resolved.circuit_mode,
             )

@@ -3779,6 +3779,44 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert "solar_export_tolerance_w" not in _schema_keys(schema)
 
 
+@pytest.mark.asyncio
+async def test_advanced_settings_form_shows_operating_detection_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "appliance_profile": "refrigerator",
+                    "mode": "single_phase",
+                    "power_flow": "load",
+                    "sensors": [],
+                }
+            ]
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {
+                    "operating_on_threshold_w": 30.0,
+                    "operating_off_threshold_w": 12.0,
+                }
+            }
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow._advanced_circuit_id = "fridge"
+
+    result = await flow.async_step_advanced_settings()
+
+    assert result["description_placeholders"]["operating_detection_source"] == (
+        "User override"
+    )
+
+
 def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,

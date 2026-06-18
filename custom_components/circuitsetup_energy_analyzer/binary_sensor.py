@@ -121,9 +121,12 @@ def is_appliance_running(
 
     operating_snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
     if isinstance(operating_snapshots, dict):
-        running = operating_state_is_running(operating_snapshots.get(circuit_id))
-        if running is not None:
-            return running
+        snapshot = operating_snapshots.get(circuit_id)
+        if isinstance(snapshot, Mapping):
+            running = operating_state_is_running(snapshot)
+            if running is not None:
+                return running
+            return False
 
     cycle_status_by_circuit = getattr(state, "run_cycle_status_by_circuit", {})
     if isinstance(cycle_status_by_circuit, dict):
@@ -304,6 +307,22 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
     def icon(self) -> str | None:
         """Return the purpose-specific icon for fallback tests."""
         return self._attr_icon
+
+    @property
+    def available(self) -> bool:
+        """Report when the Running state is temporarily unavailable."""
+        if self.entity_description.key != "running":
+            return True
+        state = self.coordinator_state
+        if state is None:
+            return True
+        snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
+        if not isinstance(snapshots, Mapping):
+            return True
+        snapshot = snapshots.get(self.circuit_id)
+        if not isinstance(snapshot, Mapping):
+            return True
+        return operating_state_is_running(snapshot) is not None
 
     @property
     def is_on(self) -> bool:

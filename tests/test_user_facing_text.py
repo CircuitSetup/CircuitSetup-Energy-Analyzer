@@ -375,6 +375,7 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert settings_step["description"].startswith("**{circuit_name}**")
     assert "service" not in settings_step["description"].lower()
     assert "appliance type" in settings_step["description"].lower()
+    assert "operating detection source" in settings_step["description"].lower()
     assert "circuit mode" not in settings_step["description"].lower()
     assert "power flow" not in settings_step["description"].lower()
     assert " - " not in settings_step["description"]

@@ -24,6 +24,9 @@ class CircuitEventDetector:
         max_sample_gap_seconds: float = 600.0,
         emit_initial_transition: bool = False,
         voltage_sag_ratio: float = 0.08,
+        threshold_source: OperatingThresholdSource = (
+            OperatingThresholdSource.PROFILE_DEFAULT
+        ),
         *,
         appliance_profile: ApplianceProfile = ApplianceProfile.MIXED,
         circuit_mode: CircuitMode = CircuitMode.SINGLE_PHASE,
@@ -39,7 +42,7 @@ class CircuitEventDetector:
                     max_sample_gap_seconds=max_sample_gap_seconds,
                     emit_initial_transition=emit_initial_transition,
                 ),
-                source=OperatingThresholdSource.PROFILE_DEFAULT,
+                source=threshold_source,
                 appliance_profile=appliance_profile,
                 circuit_mode=circuit_mode,
             ),

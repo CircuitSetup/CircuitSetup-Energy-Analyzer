@@ -1844,6 +1844,44 @@ def test_activity_summary_prefers_operating_state_lane() -> None:
     )
 
 
+def test_activity_summary_reports_unavailable_operating_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        activity_summary_attributes,
+        activity_summary_value,
+    )
+
+    state = AnalyzerState(
+        operating_state_snapshot_by_circuit={
+            "fridge": {"state": "unavailable", "stable_state": "unavailable"}
+        },
+        run_cycle_status_by_circuit={"fridge": "running"},
+        standby_status_by_circuit={"fridge": "on"},
+    )
+
+    assert activity_summary_value(state, "fridge") == "Unavailable"
+    assert activity_summary_attributes(state, "fridge")["summary_explanation"] == (
+        "Current operating state is unavailable because source data is missing "
+        "or stale."
+    )
+
+
+def test_operating_state_helpers_do_not_fallback_when_snapshot_is_unavailable(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        is_appliance_running,
+    )
+
+    state = AnalyzerState(
+        latest_real_power_w_by_circuit={"fridge": 800.0},
+        run_cycle_status_by_circuit={"fridge": "running"},
+        operating_state_snapshot_by_circuit={
+            "fridge": {"state": "unavailable", "stable_state": "unavailable"}
+        },
+    )
+
+    assert is_appliance_running(state, "fridge", ApplianceProfile.REFRIGERATOR) is False
+
+
 def test_setup_health_prioritizes_actionable_next_steps() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
