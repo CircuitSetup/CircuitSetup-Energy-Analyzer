@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -682,12 +682,18 @@ class OperatingStateMachine:
         ):
             self._nominal_voltage = sample.voltage
 
+        if self._should_mark_unavailable(sample):
+            stop_event = self._unavailable_stop_event(sample)
+            self._set_unavailable(sample.timestamp, reason="source_data_unavailable")
+            if stop_event is not None:
+                return OperatingDetectionResult(
+                    snapshot=self._snapshot("source_data_unavailable"),
+                    events=(stop_event,),
+                )
+            return self._result("source_data_unavailable")
+
         if self._state in {OperatingState.PENDING_ON, OperatingState.PENDING_OFF}:
             self._reset_pending_state(sample.timestamp)
-
-        if self._should_mark_unavailable(sample):
-            self._set_unavailable(sample.timestamp, reason="source_data_unavailable")
-            return self._result("source_data_unavailable")
 
         return self._result("invalid_or_missing_power")
 
@@ -712,6 +718,38 @@ class OperatingStateMachine:
         if sample.voltage is not None:
             self._nominal_voltage = sample.voltage
         return self._result(reason)
+
+    def _unavailable_stop_event(
+        self,
+        sample: NormalizedCircuitSample,
+    ) -> CircuitEvent | None:
+        if (
+            self._stable_state is not OperatingState.RUNNING
+            or self._run_started_at is None
+            or self._last_valid_power_at is None
+        ):
+            return None
+
+        stop_timestamp = min(
+            sample.timestamp,
+            self._last_valid_power_at
+            + timedelta(seconds=self._profile.max_sample_gap_seconds),
+        )
+        features = {
+            "stop_power_w": float(
+                self._last_on_power_w
+                if self._last_on_power_w is not None
+                else 0.0
+            ),
+            "run_duration_s": (stop_timestamp - self._run_started_at).total_seconds(),
+            "transition_reason": "source_data_unavailable",
+        }
+        return CircuitEvent(
+            timestamp=stop_timestamp,
+            circuit_id=sample.circuit_id,
+            event_type=EventType.STOP,
+            features=features,
+        )
 
     def _detect_voltage_sag(
         self,

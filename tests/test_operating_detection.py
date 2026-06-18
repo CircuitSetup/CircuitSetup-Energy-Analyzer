@@ -445,7 +445,78 @@ def test_operating_state_machine_marks_state_unavailable_after_missing_power_gra
     assert brief_gap.snapshot.stable_state is OperatingState.RUNNING
     assert extended_gap.snapshot.state is OperatingState.UNAVAILABLE
     assert extended_gap.snapshot.stable_state is OperatingState.UNAVAILABLE
-    assert extended_gap.events == ()
+    assert [event.event_type for event in extended_gap.events] == [EventType.STOP]
+    assert extended_gap.events[0].timestamp == _sample(
+        46,
+        0.0,
+        circuit_id="fridge",
+    ).timestamp
+
+
+def test_operating_state_machine_closes_running_cycle_when_gap_turns_unavailable(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingDetectionProfile,
+        OperatingState,
+        OperatingStateMachine,
+        OperatingThresholdSource,
+        ResolvedOperatingDetection,
+    )
+
+    machine = OperatingStateMachine(
+        ResolvedOperatingDetection(
+            profile=OperatingDetectionProfile(
+                on_threshold_w=25.0,
+                off_threshold_w=10.0,
+                on_dwell_seconds=10.0,
+                off_dwell_seconds=20.0,
+                merge_gap_seconds=60.0,
+                max_sample_gap_seconds=30.0,
+            ),
+            source=OperatingThresholdSource.PROFILE_DEFAULT,
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            circuit_mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
+
+    events = []
+    machine.process(_sample(0, 5.0, circuit_id="fridge"))
+    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    start = machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    events.extend(start.events)
+    machine.process(_sample(30, None, circuit_id="fridge"))
+    unavailable = machine.process(_sample(50, None, circuit_id="fridge"))
+    events.extend(unavailable.events)
+    settled = machine.process(_sample(70, 5.0, circuit_id="fridge"))
+
+    assert unavailable.snapshot.state is OperatingState.UNAVAILABLE
+    assert unavailable.snapshot.stable_state is OperatingState.UNAVAILABLE
+    assert [event.event_type for event in unavailable.events] == [EventType.STOP]
+    assert unavailable.events[0].timestamp == _sample(
+        46,
+        0.0,
+        circuit_id="fridge",
+    ).timestamp
+    assert unavailable.events[0].features["stop_power_w"] == 42.0
+    assert unavailable.events[0].features["run_duration_s"] == 41.0
+    assert settled.events == ()
+    assert settled.snapshot.state is OperatingState.OFF
+    assert settled.snapshot.stable_state is OperatingState.OFF
+
+    summary = summarize_circuit_cycles(
+        events,
+        circuit_id="fridge",
+        now=_sample(70, 5.0, circuit_id="fridge").timestamp,
+        merge_gap_seconds=60.0,
+    )
+
+    assert summary.status == "idle"
+    assert summary.completed_cycle_count == 1
+    assert summary.runtime_seconds == 41.0
+    assert summary.active_cycle_seconds == 0.0
 
 
 def test_operating_state_machine_recovers_from_unavailable_without_false_start(
