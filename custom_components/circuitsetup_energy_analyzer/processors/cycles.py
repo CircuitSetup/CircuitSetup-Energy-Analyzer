@@ -11,6 +11,7 @@ from ..baseline import build_baseline
 from ..contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
+    context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -253,6 +254,8 @@ def _record_contextual_cycle_samples(
     now: datetime,
     time_zone: str | None = None,
 ) -> bool:
+    if not context_allows_baseline_learning(context_key):
+        return False
     samples = store_data.contextual_baseline_samples_by_circuit.setdefault(
         circuit_id,
         [],

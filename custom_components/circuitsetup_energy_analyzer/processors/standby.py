@@ -9,6 +9,7 @@ from ..alerting import Observation
 from ..contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
+    context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -229,7 +230,11 @@ def _contextual_standby_comparison(
     )
 
     sample_recorded = False
-    if result.always_on_power_w > 0.0 and result.status != "learning":
+    if (
+        result.always_on_power_w > 0.0
+        and result.status != "learning"
+        and context_allows_baseline_learning(context_key)
+    ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_config.circuit_id,
             [],

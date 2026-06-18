@@ -167,6 +167,37 @@ def test_contextual_baseline_fallback_prefers_reliable_context() -> None:
     assert selected.context == {"temperature_bin": "very_hot"}
 
 
+def test_contextual_baseline_excludes_maintenance_samples_from_fallback() -> None:
+    requested = ContextKey.from_mapping({"season": "summer"})
+    maintenance_context = ContextKey.from_mapping(
+        {
+            "maintenance_state": "active",
+            "season": "summer",
+        }
+    )
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC) + timedelta(days=offset),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=12.0 + offset,
+            context=maintenance_context,
+        )
+        for offset in range(7)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=requested,
+        samples=samples,
+        fallback_level="seasonal_context",
+        required_samples=7,
+    )
+
+    assert stats is None
+
+
 def test_exact_context_requires_matching_dimension_set() -> None:
     less_specific = ContextKey.from_mapping({"season": "summer"})
     more_specific = ContextKey.from_mapping(

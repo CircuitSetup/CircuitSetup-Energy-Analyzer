@@ -10,6 +10,7 @@ from ..contextual_baseline import (
     DAILY_ENERGY_FEATURE,
     ContextualBaselineSample,
     build_context_for_sample,
+    context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -235,7 +236,9 @@ def _contextual_daily_energy_comparison(
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
-    if result.daily_usage_kwh > 0.0:
+    if result.daily_usage_kwh > 0.0 and context_allows_baseline_learning(
+        context_key
+    ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_id,
             [],

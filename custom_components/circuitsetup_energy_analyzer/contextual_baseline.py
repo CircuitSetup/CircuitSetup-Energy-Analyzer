@@ -344,6 +344,7 @@ def build_contextual_baseline(
         for sample in samples
         if sample.circuit_id == circuit_id
         and sample.feature == feature
+        and context_allows_baseline_learning(sample.context)
         and _context_matches_fallback(sample.context, context, fallback_level)
     ]
     if len(matching) < required_samples:
@@ -628,6 +629,10 @@ def upsert_contextual_sample(
             samples[index] = payload
             return
     samples.append(payload)
+
+
+def context_allows_baseline_learning(context: ContextKey) -> bool:
+    return context.as_dict().get("maintenance_state") != "active"
 
 
 def _context_matches_fallback(

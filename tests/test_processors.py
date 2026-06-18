@@ -858,6 +858,61 @@ def test_energy_usage_processor_context_uses_rollup_timestamp() -> None:
     assert stored["context"]["time_of_day"] == "evening"
 
 
+def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "ev": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+            }
+        },
+        maintenance_by_circuit={"ev": {"active": True}},
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="ev",
+        real_power=180.0,
+        current=1.5,
+        voltage=120.0,
+        energy=104.0,
+    )
+
+    processor.process(sample, config, context)
+
+    assert store_data.contextual_baseline_samples_by_circuit == {}
+
+
 def test_energy_usage_alert_features_include_contextual_baseline_details() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -2948,6 +3003,71 @@ def test_solar_flow_processor_adds_contextual_surplus_evidence() -> None:
         store_data.contextual_baseline_samples_by_circuit["mains"][-1]["feature"]
         == "solar_surplus_power_w"
     )
+
+
+def test_solar_flow_processor_skips_contextual_learning_during_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        maintenance_by_circuit={"mains": {"active": True}},
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda _circuit_id: {},
+    )
+
+    result = processor.process(
+        [(mains, sample("mains", -500.0)), (solar, sample("solar", 2000.0))],
+        context,
+    )
+
+    assert result.store_dirty is False
+    assert store_data.contextual_baseline_samples_by_circuit == {}
 
 
 def test_solar_flow_processor_respects_selection_and_settings_overrides() -> None:
