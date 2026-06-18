@@ -866,6 +866,12 @@ Start with these on dashboards.
 
 Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` when the analyzer has not observed a cumulative kWh increase yet.
 
+### Running Vs Observations Vs Alerts
+
+- Running is the current operating state used for automations.
+- Observation recorded means the analyzer noticed something unusual, but one observation alone is not an alert.
+- Possible issue means repeated evidence crossed the alert threshold.
+
 ### Core diagnostic and evidence sensors
 
 These help explain why a summary changed. They are useful for troubleshooting, automations, and temporary diagnostic dashboards.

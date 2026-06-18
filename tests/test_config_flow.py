@@ -1462,6 +1462,54 @@ async def test_options_advanced_step_saves_existing_setting_families() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_advanced_step_saves_operating_detection_overrides() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Kitchen Refrigerator",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        options={},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_select_advanced_circuit(
+        {"circuit_id": "refrigerator"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "advanced_settings"
+
+    result = await flow.async_step_advanced_settings(
+        {
+            "operating_detection_settings": {
+                "operating_on_threshold_w": 25.0,
+                "operating_off_threshold_w": 12.0,
+                "operating_on_dwell_seconds": 10.0,
+                "operating_off_dwell_seconds": 45.0,
+                "operating_merge_gap_seconds": 90.0,
+            }
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS]["refrigerator"] == {
+        "preset": "balanced",
+        "operating_off_threshold_w": 12.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_options_advanced_step_resets_circuit_to_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -3700,6 +3748,11 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     )
 
     assert "selected_appliance" not in _schema_keys(schema)
+    assert _schema_default(schema, "operating_on_threshold_w") == 25.0
+    assert _schema_default(schema, "operating_off_threshold_w") == 10.0
+    assert _schema_default(schema, "operating_on_dwell_seconds") == 10.0
+    assert _schema_default(schema, "operating_off_dwell_seconds") == 45.0
+    assert _schema_default(schema, "operating_merge_gap_seconds") == 90.0
     assert _schema_default(schema, "daily_goal_kwh") == 0.0
     assert _schema_default(schema, "max_active_minutes") == 0
     assert _schema_default(schema, "max_idle_minutes") == 0
@@ -3713,6 +3766,7 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert _schema_default(schema, "standby_min_samples") == 24
     assert _schema_section_keys(schema) == {
         "analysis_settings",
+        "operating_detection_settings",
         "energy_settings",
         "activity_settings",
         "billing_cost_settings",
@@ -3723,6 +3777,84 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert "leg_imbalance_warning_ratio" not in _schema_keys(schema)
     assert "balance_negative_tolerance_w" not in _schema_keys(schema)
     assert "solar_export_tolerance_w" not in _schema_keys(schema)
+
+
+@pytest.mark.asyncio
+async def test_advanced_settings_form_shows_operating_detection_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "appliance_profile": "refrigerator",
+                    "mode": "single_phase",
+                    "power_flow": "load",
+                    "sensors": [],
+                }
+            ]
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {
+                    "operating_on_threshold_w": 30.0,
+                    "operating_off_threshold_w": 12.0,
+                }
+            }
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow._advanced_circuit_id = "fridge"
+
+    result = await flow.async_step_advanced_settings()
+
+    assert result["description_placeholders"]["operating_detection_source"] == (
+        "User override"
+    )
+
+
+@pytest.mark.asyncio
+async def test_advanced_settings_form_shows_learned_operating_detection_source(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "appliance_profile": "refrigerator",
+                    "mode": "single_phase",
+                    "power_flow": "load",
+                    "sensors": [],
+                }
+            ]
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {
+                    "operating_on_threshold_w": 30.0,
+                    "operating_off_threshold_w": 12.0,
+                    "operating_detection_source": "learned_recommendation",
+                }
+            }
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow._advanced_circuit_id = "fridge"
+
+    result = await flow.async_step_advanced_settings()
+
+    assert result["description_placeholders"]["operating_detection_source"] == (
+        "Suggested from learned behavior"
+    )
 
 
 def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
@@ -3766,6 +3898,7 @@ def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
     ]
 
     reset_fields = (
+        "reset_operating_detection_settings_to_defaults",
         "reset_energy_settings_to_defaults",
         "reset_activity_settings_to_defaults",
         "reset_billing_cost_settings_to_defaults",
@@ -3968,11 +4101,13 @@ def test_advanced_settings_schema_hides_appliance_controls_for_mixed_circuits(
 
     assert _schema_section_keys(schema) == {
         "analysis_settings",
+        "operating_detection_settings",
         "energy_settings",
         "billing_cost_settings",
         "demand_capacity_settings",
         "power_quality_settings",
     }
+    assert _schema_default(schema, "operating_on_threshold_w") == 80.0
     assert "max_active_minutes" not in _schema_keys(schema)
     assert "standby_threshold_w" not in _schema_keys(schema)
 
@@ -4061,6 +4196,11 @@ def test_advanced_settings_from_input_resets_selected_sections_to_defaults() -> 
             "analysis_settings": {
                 "preset": "high",
             },
+            "operating_detection_settings": {
+                "operating_on_threshold_w": 30.0,
+                "operating_off_threshold_w": 12.0,
+                "reset_operating_detection_settings_to_defaults": True,
+            },
             "energy_settings": {
                 "window_days": 14,
                 "daily_spike_ratio": 0.35,
@@ -4091,6 +4231,68 @@ def test_advanced_settings_from_input_resets_selected_sections_to_defaults() -> 
         "budget_alert_ratio": 0.85,
         "min_elapsed_days": 5,
     }
+
+
+def test_advanced_settings_from_input_only_persists_non_default_operating_overrides(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "analysis_settings": {"preset": "balanced"},
+            "operating_detection_settings": {
+                "operating_on_threshold_w": 25.0,
+                "operating_off_threshold_w": 12.0,
+                "operating_on_dwell_seconds": 10.0,
+                "operating_off_dwell_seconds": 45.0,
+                "operating_merge_gap_seconds": 90.0,
+            },
+        },
+        context={
+            "circuit_id": "refrigerator",
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert settings == {
+        "preset": "balanced",
+        "operating_off_threshold_w": 12.0,
+    }
+
+
+def test_advanced_settings_from_input_rejects_invalid_operating_overrides() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        SetupValidationError,
+        _advanced_settings_from_input,
+    )
+
+    with pytest.raises(SetupValidationError, match="invalid_advanced_settings") as err:
+        _advanced_settings_from_input(
+            {
+                "operating_detection_settings": {
+                    "operating_on_threshold_w": 10.0,
+                    "operating_off_threshold_w": 12.0,
+                }
+            },
+            context={
+                "circuit_id": "refrigerator",
+                "name": "Kitchen Refrigerator",
+                "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+                "mode": CircuitMode.SINGLE_PHASE.value,
+                "power_flow": "load",
+            },
+        )
+
+    assert err.value.error_key == "invalid_advanced_settings"
 
 
 def test_advanced_settings_from_input_resets_all_settings_to_defaults() -> None:

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from custom_components.circuitsetup_energy_analyzer.activity_timeline import (
     build_recent_activity_timeline,
 )
+from custom_components.circuitsetup_energy_analyzer.alerting import Observation
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     CircuitEvent,
@@ -117,3 +118,50 @@ def test_recent_activity_timeline_limits_items_and_reports_quiet() -> None:
     assert quiet.status == "quiet"
     assert quiet.latest_title == "No recent activity"
     assert quiet.items == []
+
+
+def test_recent_activity_timeline_includes_observation_items_without_alerts() -> (
+    None
+):
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    observation = Observation(
+        circuit_id="dryer",
+        feature="activity_left_on",
+        score=1.8,
+        baseline_confidence=1.0,
+        observed_at=now - timedelta(minutes=3),
+        observed_value=45.0,
+        baseline_value=30.0,
+        message="Dryer has been active for 45 minutes. No alert yet.",
+        features={"duration_minutes": 45.0},
+    )
+
+    summary = build_recent_activity_timeline(
+        circuit_id="dryer",
+        events=[],
+        alerts=[],
+        observations=[observation],
+        now=now,
+    )
+
+    assert summary.status == "activity"
+    assert summary.latest_title == "Observation: Activity Left On"
+    assert summary.latest_timestamp == observation.observed_at.isoformat()
+    assert summary.observation_count == 1
+    assert summary.alert_count == 0
+    assert summary.items == [
+        {
+            "timestamp": observation.observed_at.isoformat(),
+            "kind": "observation",
+            "title": "Observation: Activity Left On",
+            "detail": "Dryer has been active for 45 minutes. No alert yet.",
+            "severity": "info",
+            "feature": "activity_left_on",
+            "feature_name": "Activity Left On",
+            "event_type": None,
+            "observed_value": 45.0,
+            "baseline_value": 30.0,
+            "change_ratio": None,
+            "repeated_count": None,
+        }
+    ]

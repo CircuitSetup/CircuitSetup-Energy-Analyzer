@@ -40,14 +40,14 @@ def aggregate_dual_phase(
         leg_a=_leg_sample("left", left),
         leg_b=_leg_sample("right", right),
         frequency=_average_optional(left.frequency, right.frequency),
-        energy=_sum_optional(left.energy, right.energy),
-        combined_real_power=_sum_optional(left.real_power, right.real_power),
-        combined_current=_sum_optional(left.current, right.current),
-        combined_reactive_power=_sum_optional(
+        energy=_sum_complete_optional(left.energy, right.energy),
+        combined_real_power=_sum_complete_optional(left.real_power, right.real_power),
+        combined_current=_sum_complete_optional(left.current, right.current),
+        combined_reactive_power=_sum_complete_optional(
             left.reactive_power,
             right.reactive_power,
         ),
-        combined_apparent_power=_sum_optional(
+        combined_apparent_power=_sum_complete_optional(
             left.apparent_power,
             right.apparent_power,
         ),
@@ -76,6 +76,12 @@ def _sum_optional(left: float | None, right: float | None) -> float | None:
     if not values:
         return None
     return sum(values)
+
+
+def _sum_complete_optional(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left + right
 
 
 def _average_optional(left: float | None, right: float | None) -> float | None:

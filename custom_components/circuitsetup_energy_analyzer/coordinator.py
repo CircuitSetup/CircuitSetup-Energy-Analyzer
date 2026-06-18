@@ -15,6 +15,7 @@ from typing import Any, Self
 from . import notifications, repairs
 from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
+    DEFAULT_TIMELINE_WINDOW_HOURS,
     build_recent_activity_timeline,
     timeline_payload,
 )
@@ -139,6 +140,12 @@ from .nilm import (
     NilmEdgeDetector,
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
+from .operating_detection import (
+    OPERATING_DETECTION_OVERRIDE_FIELDS,
+    OPERATING_DETECTION_SOURCE,
+    OperatingThresholdSource,
+    resolve_operating_detection_from_settings,
+)
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
@@ -206,6 +213,7 @@ from .ux import (
     alert_policy_name_for_sensitivity,
     canonicalize_sensitivity_config,
     data_quality_checklist,
+    friendly_feature_name,
     health_summary,
     learning_progress,
     normalize_sensitivity,
@@ -401,11 +409,18 @@ class AnalyzerState:
     recent_activity_timeline_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    recent_observations_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
     circuit_mode_by_circuit: dict[str, str] = field(default_factory=dict)
     power_flow_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    operating_state_by_circuit: dict[str, str] = field(default_factory=dict)
+    operating_state_snapshot_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -1057,6 +1072,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.metric_consistency_settings_by_circuit.pop(circuit_id, None)
         self.store_data.balance_settings_by_circuit.pop(circuit_id, None)
         self.store_data.solar_flow_settings_by_circuit.pop(circuit_id, None)
+        self.store_data.operating_detection_settings_by_circuit.pop(circuit_id, None)
 
     def _apply_advanced_settings(
         self: Self,
@@ -1178,6 +1194,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 ),
             },
         )
+        _replace_if_present(
+            self.store_data.operating_detection_settings_by_circuit,
+            circuit_id,
+            settings,
+            OPERATING_DETECTION_OVERRIDE_FIELDS + (OPERATING_DETECTION_SOURCE,),
+        )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
@@ -1248,6 +1270,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
+        self._prune_recent_observations(now)
 
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
@@ -1633,6 +1656,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 str(setting_key),
                 value,
             )
+        if any(
+            key in OPERATING_DETECTION_OVERRIDE_FIELDS
+            for key in recommendation.apply_payload
+        ):
+            self._set_recommendation_setting_value(
+                recommendation.circuit_id,
+                OPERATING_DETECTION_SOURCE,
+                OperatingThresholdSource.LEARNED_RECOMMENDATION.value,
+            )
         await self._async_persist_config_entry_options()
 
         self.store_data.settings_recommendations[recommendation_id] = replace(
@@ -1809,6 +1841,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             {
                 "solar_export_tolerance_w": "export_tolerance_w",
             }.get(setting_key, setting_key),
+        )
+        _remove_setting_key(
+            self.store_data.operating_detection_settings_by_circuit,
+            circuit_id,
+            setting_key,
         )
 
     async def async_deny_setting_recommendation(
@@ -2077,6 +2114,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if key in solar_flow:
                 settings[key] = solar_flow[key]
 
+        settings.update(
+            self.store_data.operating_detection_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+
         return settings
 
     def _advisor_feature_history_for_circuit(
@@ -2088,6 +2132,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         feature_history: dict[str, Any] = {
             "energy_usage_days": [],
             "cycles": [],
+            "operating_idle_samples": [],
+            "operating_start_samples": [],
             "standby_samples_w": [],
             "current_samples": [],
             "leg_imbalance_ratios": [],
@@ -2104,10 +2150,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if isinstance(usage_days, list):
             feature_history["energy_usage_days"] = list(usage_days)
 
+        merge_gap_seconds = resolve_operating_detection_from_settings(
+            config,
+            getattr(
+                self.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_id, {}),
+        ).profile.merge_gap_seconds
         cycle_values = cycle_baseline_feature_values(
             self.store_data.events,
             circuit_id=circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -2117,10 +2172,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ]
 
         standby_history = self.store_data.standby_by_circuit.get(circuit_id, {})
+        standby_samples = standby_history.get("samples")
+        if isinstance(standby_samples, list):
+            feature_history["operating_idle_samples"] = [
+                dict(sample)
+                for sample in standby_samples
+                if isinstance(sample, Mapping)
+            ]
         feature_history["standby_samples_w"] = _numeric_items(
-            standby_history.get("samples"),
+            standby_samples,
             keys=("real_power_w",),
         )
+
+        feature_history["operating_start_samples"] = [
+            {
+                "timestamp": event.timestamp.isoformat(),
+                "power_w": float(event.features["startup_power_w"]),
+            }
+            for event in self.store_data.events
+            if (
+                event.circuit_id == circuit_id
+                and event.event_type is EventType.START
+                and "startup_power_w" in event.features
+            )
+        ]
 
         demand_history = self.store_data.demand_by_circuit.get(circuit_id, {})
         feature_history["current_samples"] = _numeric_items(
@@ -3369,10 +3444,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             suppression_reason=suppression_reason,
         )
         self.state.learning_progress_by_circuit[circuit_id] = progress
+        merge_gap_seconds = resolve_operating_detection_from_settings(
+            config,
+            getattr(
+                self.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_id, {}),
+        ).profile.merge_gap_seconds
         cycle_summary = summarize_circuit_cycles(
             self.store_data.events,
             circuit_id=circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         self.state.run_cycle_count_by_circuit[circuit_id] = (
             cycle_summary.start_count
@@ -3407,6 +3491,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             paused=bool(maintenance.get("active"))
             or circuit_id in self.paused_circuits,
             active_alerts=bool(self.state.active_alerts_by_circuit.get(circuit_id)),
+            observations=bool(
+                self.state.recent_observations_by_circuit.get(circuit_id)
+            ),
             nilm_review_count=len(
                 self.state.nilm_review_by_circuit.get(circuit_id, [])
             ),
@@ -3454,6 +3541,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             events=self.store_data.events,
             alerts=self.store_data.alerts,
+            observations=self.state.recent_observations_by_circuit.get(
+                circuit_id,
+                [],
+            ),
             now=now,
         )
         self.state.recent_activity_by_circuit[circuit_id] = timeline.latest_title
@@ -4196,7 +4287,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             now,
         )
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
-        raw_real_power = _sum_sample_values(
+        raw_real_power = _sum_complete_sample_values(
             (left_sample, right_sample),
             "raw_real_power",
         )
@@ -4249,19 +4340,43 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not samples:
             return build_circuit_sample(config, {}, now)
 
-        raw_real_power = _sum_sample_values(samples, "raw_real_power")
+        raw_real_power = _sum_parallel_sensor_values(
+            sensor_samples,
+            "raw_real_power",
+            SensorRole.REAL_POWER,
+        )
         leg_a_sample, leg_b_sample = _parallel_leg_samples(sensor_samples)
         return NormalizedCircuitSample(
             timestamp=max(sample.timestamp for sample in samples),
             circuit_id=config.circuit_id,
-            real_power=_sum_sample_values(samples, "real_power"),
-            current=_sum_sample_values(samples, "current"),
+            real_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "real_power",
+                SensorRole.REAL_POWER,
+            ),
+            current=_sum_parallel_sensor_values(
+                sensor_samples,
+                "current",
+                SensorRole.CURRENT,
+            ),
             voltage=_average_sample_values(samples, "voltage"),
-            reactive_power=_sum_sample_values(samples, "reactive_power"),
-            apparent_power=_sum_sample_values(samples, "apparent_power"),
+            reactive_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "reactive_power",
+                SensorRole.REACTIVE_POWER,
+            ),
+            apparent_power=_sum_parallel_sensor_values(
+                sensor_samples,
+                "apparent_power",
+                SensorRole.APPARENT_POWER,
+            ),
             power_factor=_average_sample_values(samples, "power_factor"),
             frequency=_average_sample_values(samples, "frequency"),
-            energy=_sum_sample_values(samples, "energy"),
+            energy=_sum_parallel_sensor_values(
+                sensor_samples,
+                "energy",
+                SensorRole.ENERGY,
+            ),
             source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
             quality_issues=tuple(
                 issue
@@ -5781,6 +5896,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.events.extend(result.events)
         if stored_alerts:
             self.store_data.alerts.extend(stored_alerts)
+        for observation in result.observations:
+            self._record_recent_observation(observation)
         for update in result.state_updates:
             _apply_state_update(self.state, update.path, update.value)
         for alert in result.notifications:
@@ -5813,6 +5930,52 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_nilm_history()
         self._prune_alert_feedback(now)
         self._prune_recommendation_history(now)
+
+    def _observation_payload(self: Self, observation: Any) -> dict[str, Any]:
+        payload = {
+            "timestamp": observation.observed_at.isoformat(),
+            "circuit_id": observation.circuit_id,
+            "feature": observation.feature,
+            "feature_name": friendly_feature_name(observation.feature),
+            "message": observation.message,
+            "score": observation.score,
+            "baseline_confidence": observation.baseline_confidence,
+            "observed_value": observation.observed_value,
+            "baseline_value": observation.baseline_value,
+        }
+        if getattr(observation, "observation_key", None) is not None:
+            payload["observation_key"] = observation.observation_key
+        return payload
+
+    def _record_recent_observation(self: Self, observation: Any) -> None:
+        payload = self._observation_payload(observation)
+        observations = self.state.recent_observations_by_circuit.setdefault(
+            observation.circuit_id,
+            [],
+        )
+        observation_key = payload.get("observation_key")
+        if observation_key is not None:
+            for index, existing in enumerate(observations):
+                if existing.get("observation_key") == observation_key:
+                    observations[index] = payload
+                    return
+        observations.append(payload)
+
+    def _prune_recent_observations(self: Self, now: datetime) -> None:
+        cutoff = now - timedelta(hours=DEFAULT_TIMELINE_WINDOW_HOURS)
+        retained: dict[str, list[dict[str, Any]]] = {}
+        for (
+            circuit_id,
+            observations,
+        ) in self.state.recent_observations_by_circuit.items():
+            kept = [
+                observation
+                for observation in observations
+                if _observation_within_cutoff(observation, cutoff)
+            ]
+            if kept:
+                retained[circuit_id] = kept
+        self.state.recent_observations_by_circuit = retained
 
     def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
         retention_mode = self._retention_mode_for_circuit(event.circuit_id)
@@ -6464,6 +6627,14 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return None
 
 
+def _observation_within_cutoff(
+    observation: Mapping[str, Any],
+    cutoff: datetime,
+) -> bool:
+    observed_at = _datetime_or_none(observation.get("timestamp"))
+    return observed_at is not None and observed_at >= cutoff
+
+
 def _datetime_floor() -> datetime:
     return datetime.min.replace(tzinfo=UTC)
 
@@ -6738,6 +6909,38 @@ def _sum_sample_values(
     if not values:
         return None
     return float(sum(values))
+
+
+def _sum_complete_sample_values(
+    samples: Iterable[NormalizedCircuitSample],
+    attribute: str,
+) -> float | None:
+    total = 0.0
+    has_values = False
+    for sample in samples:
+        value = getattr(sample, attribute, None)
+        if value is None:
+            return None
+        total += float(value)
+        has_values = True
+    if not has_values:
+        return None
+    return total
+
+
+def _sum_parallel_sensor_values(
+    sensor_samples: Iterable[tuple[SensorRef, NormalizedCircuitSample]],
+    attribute: str,
+    role: SensorRole,
+) -> float | None:
+    return _sum_complete_sample_values(
+        [
+            sample
+            for sensor, sample in sensor_samples
+            if sensor.role is role
+        ],
+        attribute,
+    )
 
 
 def _average_sample_values(

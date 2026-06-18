@@ -44,13 +44,16 @@ def test_event_detector_emits_start_and_stop() -> None:
     events = []
     events.extend(detector.process(sample(0, 5.0)))
     events.extend(detector.process(sample(10, 210.0)))
-    events.extend(detector.process(sample(70, 185.0)))
-    events.extend(detector.process(sample(130, 8.0)))
+    events.extend(detector.process(sample(20, 210.0)))
+    events.extend(detector.process(sample(40, 8.0)))
+    events.extend(detector.process(sample(70, 8.0)))
 
     assert [event.event_type for event in events] == [EventType.START, EventType.STOP]
     assert events[0].features["startup_power_w"] == 210.0
-    assert events[1].features["stop_power_w"] == 185.0
-    assert events[1].features["run_duration_s"] == 120.0
+    assert events[1].features["stop_power_w"] == 210.0
+    assert events[0].timestamp == sample(10, 210.0).timestamp
+    assert events[1].timestamp == sample(40, 8.0).timestamp
+    assert events[1].features["run_duration_s"] == 30.0
 
 
 def test_event_detector_emits_voltage_sag_under_load() -> None:
@@ -59,6 +62,7 @@ def test_event_detector_emits_voltage_sag_under_load() -> None:
     events = []
     events.extend(detector.process(sample(0, 5.0, 120.0)))
     events.extend(detector.process(sample(10, 500.0, 109.0)))
+    events.extend(detector.process(sample(20, 500.0, 109.0)))
 
     assert [event.event_type for event in events] == [
         EventType.START,
@@ -88,9 +92,36 @@ def test_event_detector_treats_generation_export_as_start() -> None:
         },
         now,
     )
+    idle = build_circuit_sample(
+        config,
+        {
+            "sensor.solar_power": SourceState(
+                "sensor.solar_power",
+                "0",
+                "W",
+                now - timedelta(seconds=20),
+            )
+        },
+        now - timedelta(seconds=20),
+    )
+    later = build_circuit_sample(
+        config,
+        {
+            "sensor.solar_power": SourceState(
+                "sensor.solar_power",
+                "-3200",
+                "W",
+                now + timedelta(seconds=20),
+            )
+        },
+        now + timedelta(seconds=20),
+    )
     detector = CircuitEventDetector(on_threshold_w=80.0)
 
-    events = detector.process(exported)
+    events = []
+    events.extend(detector.process(idle))
+    events.extend(detector.process(exported))
+    events.extend(detector.process(later))
 
     assert [event.event_type for event in events] == [EventType.START]
     assert events[0].features["startup_power_w"] == 3200.0

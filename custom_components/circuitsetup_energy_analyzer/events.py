@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from .models import CircuitEvent, CircuitSample, EventType
+from .models import ApplianceProfile, CircuitEvent, CircuitMode, CircuitSample
+from .operating_detection import (
+    OperatingDetectionProfile,
+    OperatingDetectionResult,
+    OperatingStateMachine,
+    OperatingStateSnapshot,
+    OperatingThresholdSource,
+    ResolvedOperatingDetection,
+)
 
 
 class CircuitEventDetector:
@@ -12,97 +18,48 @@ class CircuitEventDetector:
         self,
         on_threshold_w: float = 80.0,
         off_threshold_w: float = 30.0,
+        on_dwell_seconds: float = 10.0,
+        off_dwell_seconds: float = 30.0,
+        merge_gap_seconds: float = 60.0,
+        max_sample_gap_seconds: float = 600.0,
+        emit_initial_transition: bool = False,
         voltage_sag_ratio: float = 0.08,
+        threshold_source: OperatingThresholdSource = (
+            OperatingThresholdSource.PROFILE_DEFAULT
+        ),
+        *,
+        appliance_profile: ApplianceProfile = ApplianceProfile.MIXED,
+        circuit_mode: CircuitMode = CircuitMode.SINGLE_PHASE,
     ) -> None:
-        self._on_threshold_w = on_threshold_w
-        self._off_threshold_w = off_threshold_w
-        self._voltage_sag_ratio = voltage_sag_ratio
-        self._is_on = False
-        self._run_started_at: datetime | None = None
-        self._last_on_power_w: float | None = None
-        self._nominal_voltage: float | None = None
-        self._sag_emitted_for_run = False
+        self._machine = OperatingStateMachine(
+            ResolvedOperatingDetection(
+                profile=OperatingDetectionProfile(
+                    on_threshold_w=on_threshold_w,
+                    off_threshold_w=off_threshold_w,
+                    on_dwell_seconds=on_dwell_seconds,
+                    off_dwell_seconds=off_dwell_seconds,
+                    merge_gap_seconds=merge_gap_seconds,
+                    max_sample_gap_seconds=max_sample_gap_seconds,
+                    emit_initial_transition=emit_initial_transition,
+                ),
+                source=threshold_source,
+                appliance_profile=appliance_profile,
+                circuit_mode=circuit_mode,
+            ),
+            voltage_sag_ratio=voltage_sag_ratio,
+        )
+        self._last_result: OperatingDetectionResult | None = None
 
     def process(self, sample: CircuitSample) -> list[CircuitEvent]:
-        events: list[CircuitEvent] = []
-        watts = sample.real_power
+        self._last_result = self._machine.process(sample)
+        return list(self._last_result.events)
 
-        if not self._is_on:
-            if watts is not None and watts >= self._on_threshold_w:
-                self._is_on = True
-                self._run_started_at = sample.timestamp
-                self._last_on_power_w = float(watts)
-                self._sag_emitted_for_run = False
-                events.append(
-                    CircuitEvent(
-                        timestamp=sample.timestamp,
-                        circuit_id=sample.circuit_id,
-                        event_type=EventType.START,
-                        features=_power_features(sample, "startup_power_w", watts),
-                    )
-                )
-            elif sample.voltage is not None:
-                self._nominal_voltage = sample.voltage
-        elif watts is not None and watts <= self._off_threshold_w:
-            features = _power_features(
-                sample,
-                "stop_power_w",
-                self._last_on_power_w or watts,
-            )
-            if self._run_started_at is not None:
-                features["run_duration_s"] = (
-                    sample.timestamp - self._run_started_at
-                ).total_seconds()
-
-            events.append(
-                CircuitEvent(
-                    timestamp=sample.timestamp,
-                    circuit_id=sample.circuit_id,
-                    event_type=EventType.STOP,
-                    features=features,
-                )
-            )
-            self._is_on = False
-            self._run_started_at = None
-            self._last_on_power_w = None
-            self._sag_emitted_for_run = False
-            if sample.voltage is not None:
-                self._nominal_voltage = sample.voltage
-
-        if self._is_on and watts is not None:
-            self._last_on_power_w = float(watts)
-
-        if self._is_on and not self._sag_emitted_for_run:
-            sag_event = self._detect_voltage_sag(sample)
-            if sag_event is not None:
-                events.append(sag_event)
-                self._sag_emitted_for_run = True
-
-        return events
-
-    def _detect_voltage_sag(self, sample: CircuitSample) -> CircuitEvent | None:
-        if (
-            self._nominal_voltage is None
-            or sample.voltage is None
-            or sample.real_power is None
-            or self._nominal_voltage <= 0.0
-        ):
-            return None
-
-        sag_ratio = (self._nominal_voltage - sample.voltage) / self._nominal_voltage
-        if sag_ratio < self._voltage_sag_ratio:
-            return None
-
-        return CircuitEvent(
-            timestamp=sample.timestamp,
-            circuit_id=sample.circuit_id,
-            event_type=EventType.VOLTAGE_SAG,
-            features={
-                "voltage": sample.voltage,
-                "nominal_voltage": self._nominal_voltage,
-                "sag_ratio": sag_ratio,
-                "real_power_w": sample.real_power,
-            },
+    @property
+    def last_snapshot(self) -> OperatingStateSnapshot | None:
+        return (
+            self._last_result.snapshot
+            if self._last_result is not None
+            else None
         )
 
 

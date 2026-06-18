@@ -110,6 +110,92 @@ def test_cycle_summary_reports_no_activity_defaults() -> None:
     assert summary.duty_cycle_percent == 0.0
 
 
+def test_build_normalized_run_sessions_merges_short_gap() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        build_normalized_run_sessions,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=0),
+            circuit_id="washer",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=10),
+            circuit_id="washer",
+            event_type=EventType.STOP,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=11),
+            circuit_id="washer",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=20),
+            circuit_id="washer",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    sessions = build_normalized_run_sessions(
+        events,
+        circuit_id="washer",
+        merge_gap_seconds=90.0,
+        now=now,
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].started_at == now.replace(hour=1, minute=0)
+    assert sessions[0].stopped_at == now.replace(hour=1, minute=20)
+    assert sessions[0].duration_seconds == 1140.0
+    assert sessions[0].merged_transition_count == 4
+
+
+def test_cycle_summary_uses_normalized_sessions_for_count_and_runtime() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=0),
+            circuit_id="washer",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=10),
+            circuit_id="washer",
+            event_type=EventType.STOP,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=11),
+            circuit_id="washer",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=now.replace(hour=1, minute=20),
+            circuit_id="washer",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    summary = summarize_circuit_cycles(
+        events,
+        circuit_id="washer",
+        now=now,
+        merge_gap_seconds=90.0,
+    )
+
+    assert summary.status == "idle"
+    assert summary.start_count == 1
+    assert summary.completed_cycle_count == 1
+    assert summary.runtime_seconds == 1140.0
+    assert summary.average_cycle_seconds == 1140.0
+
+
 def test_cycle_baselines_use_prior_completed_cycles_and_daily_activity() -> None:
     from custom_components.circuitsetup_energy_analyzer.cycles import (
         cycle_baseline_feature_values,

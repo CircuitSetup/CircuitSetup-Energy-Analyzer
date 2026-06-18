@@ -42,6 +42,19 @@ class CircuitCycleSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class RunSession:
+    """Normalized run session built from confirmed transitions."""
+
+    started_at: datetime
+    stopped_at: datetime | None
+    duration_seconds: float
+    merged_transition_count: int
+    start_event_id: str | None = None
+    stop_event_id: str | None = None
+    start_known: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class CycleAnomalyEvidence:
     """Selected run-cycle behavior evidence for one circuit."""
 
@@ -62,28 +75,16 @@ def summarize_circuit_cycles(
     *,
     circuit_id: str,
     now: datetime,
+    merge_gap_seconds: float = 0.0,
 ) -> CircuitCycleSummary:
     """Summarize today's appliance run cycles from retained start/stop events."""
     day_start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
-    circuit_events = sorted(
-        (
-            event
-            for event in events
-            if event.circuit_id == circuit_id
-            and event.timestamp <= now
-            and event.event_type in {EventType.START, EventType.STOP}
-        ),
-        key=lambda event: event.timestamp,
+    sessions = build_normalized_run_sessions(
+        events,
+        circuit_id=circuit_id,
+        merge_gap_seconds=merge_gap_seconds,
+        now=now,
     )
-
-    active_start: datetime | None = None
-    for event in circuit_events:
-        if event.timestamp >= day_start:
-            break
-        if event.event_type is EventType.START:
-            active_start = event.timestamp
-        elif event.event_type is EventType.STOP:
-            active_start = None
 
     start_count = 0
     completed_cycle_count = 0
@@ -94,30 +95,28 @@ def summarize_circuit_cycles(
     last_start: datetime | None = None
     last_stop: datetime | None = None
 
-    for event in circuit_events:
-        if event.timestamp < day_start:
+    for session in sessions:
+        if session.started_at > now:
             continue
-        if event.event_type is EventType.START:
+        if session.started_at >= day_start:
             start_count += 1
-            first_start = first_start or event.timestamp
-            last_start = event.timestamp
-            active_start = event.timestamp
-            continue
+            first_start = first_start or session.started_at
+            last_start = session.started_at
 
-        last_stop = event.timestamp
-        if active_start is None:
-            continue
-        cycle_start = max(active_start, day_start)
-        duration = max((event.timestamp - cycle_start).total_seconds(), 0.0)
-        runtime_seconds += duration
-        completed_runtime_seconds += duration
-        completed_cycle_count += 1
-        active_start = None
+        session_runtime = _session_runtime_within_day(
+            session,
+            day_start=day_start,
+            now=now,
+        )
+        runtime_seconds += session_runtime
 
-    if active_start is not None:
-        cycle_start = max(active_start, day_start)
-        active_cycle_seconds = max((now - cycle_start).total_seconds(), 0.0)
-        runtime_seconds += active_cycle_seconds
+        if session.stopped_at is None:
+            active_cycle_seconds += session_runtime
+            continue
+        if session.stopped_at >= day_start:
+            last_stop = session.stopped_at
+            completed_cycle_count += 1
+            completed_runtime_seconds += session_runtime
 
     day_elapsed_seconds = max((now - day_start).total_seconds(), 0.0)
     average_cycle_seconds = (
@@ -159,6 +158,7 @@ def cycle_baseline_feature_values(
     *,
     circuit_id: str,
     now: datetime,
+    merge_gap_seconds: float = 0.0,
 ) -> dict[str, list[float]]:
     """Return prior cycle-feature samples suitable for robust baselines."""
     day_start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
@@ -175,6 +175,7 @@ def cycle_baseline_feature_values(
             circuit_events,
             circuit_id=circuit_id,
             now=_end_of_day(day, now),
+            merge_gap_seconds=merge_gap_seconds,
         )
         for day in prior_dates
     ]
@@ -186,7 +187,9 @@ def cycle_baseline_feature_values(
     return {
         RUN_CYCLE_DURATION_FEATURE: _completed_cycle_durations(
             circuit_events,
+            circuit_id=circuit_id,
             before=day_start,
+            merge_gap_seconds=merge_gap_seconds,
         ),
         RUN_CYCLE_DUTY_CYCLE_FEATURE: [
             summary.duty_cycle_percent for summary in active_daily_summaries
@@ -250,6 +253,77 @@ def cycle_summary_payload(summary: CircuitCycleSummary) -> dict[str, Any]:
         "scope": "today",
         "evidence_source": "retained_start_stop_events",
     }
+
+
+def build_normalized_run_sessions(
+    events: Iterable[CircuitEvent],
+    *,
+    circuit_id: str,
+    merge_gap_seconds: float,
+    now: datetime,
+) -> list[RunSession]:
+    """Build normalized run sessions from retained start/stop transitions."""
+    circuit_events = _circuit_cycle_events(events, circuit_id)
+    raw_sessions: list[RunSession] = []
+    active_start: datetime | None = None
+
+    for event in circuit_events:
+        if event.timestamp > now:
+            break
+        if event.event_type is EventType.START:
+            active_start = event.timestamp
+            continue
+        if event.event_type is not EventType.STOP or active_start is None:
+            continue
+        duration = max((event.timestamp - active_start).total_seconds(), 0.0)
+        raw_sessions.append(
+            RunSession(
+                started_at=active_start,
+                stopped_at=event.timestamp,
+                duration_seconds=_round_seconds(duration),
+                merged_transition_count=2,
+            )
+        )
+        active_start = None
+
+    if active_start is not None:
+        raw_sessions.append(
+            RunSession(
+                started_at=active_start,
+                stopped_at=None,
+                duration_seconds=_round_seconds(
+                    max((now - active_start).total_seconds(), 0.0)
+                ),
+                merged_transition_count=1,
+            )
+        )
+
+    if not raw_sessions:
+        return []
+
+    merged_sessions: list[RunSession] = [raw_sessions[0]]
+    for session in raw_sessions[1:]:
+        previous = merged_sessions[-1]
+        if (
+            previous.stopped_at is not None
+            and session.started_at >= previous.stopped_at
+            and (session.started_at - previous.stopped_at).total_seconds()
+            <= merge_gap_seconds
+        ):
+            merged_sessions[-1] = RunSession(
+                started_at=previous.started_at,
+                stopped_at=session.stopped_at,
+                duration_seconds=_round_seconds(
+                    previous.duration_seconds + session.duration_seconds
+                ),
+                merged_transition_count=(
+                    previous.merged_transition_count + session.merged_transition_count
+                ),
+                start_known=previous.start_known,
+            )
+            continue
+        merged_sessions.append(session)
+    return merged_sessions
 
 
 def _isoformat_or_none(value: datetime | None) -> str | None:
@@ -357,23 +431,20 @@ def _daily_start_count_evidence(
 def _completed_cycle_durations(
     events: Iterable[CircuitEvent],
     *,
+    circuit_id: str,
     before: datetime,
+    merge_gap_seconds: float = 0.0,
 ) -> list[float]:
-    active_start: datetime | None = None
-    durations: list[float] = []
-    for event in sorted(events, key=lambda item: item.timestamp):
-        if event.timestamp >= before:
-            break
-        if event.event_type is EventType.START:
-            active_start = event.timestamp
-            continue
-        if event.event_type is not EventType.STOP or active_start is None:
-            continue
-        duration = max((event.timestamp - active_start).total_seconds(), 0.0)
-        if duration > 0.0:
-            durations.append(_round_seconds(duration))
-        active_start = None
-    return durations
+    return [
+        session.duration_seconds
+        for session in build_normalized_run_sessions(
+            events,
+            circuit_id=circuit_id,
+            merge_gap_seconds=merge_gap_seconds,
+            now=before,
+        )
+        if session.stopped_at is not None and session.stopped_at < before
+    ]
 
 
 def _circuit_cycle_events(
@@ -393,6 +464,24 @@ def _circuit_cycle_events(
 
 def _end_of_day(day: date, now: datetime) -> datetime:
     return datetime.combine(day, time.max, tzinfo=now.tzinfo)
+
+
+def _session_runtime_within_day(
+    session: RunSession,
+    *,
+    day_start: datetime,
+    now: datetime,
+) -> float:
+    if session.stopped_at is None:
+        if session.started_at >= day_start:
+            return session.duration_seconds
+        return _round_seconds(max((now - day_start).total_seconds(), 0.0))
+
+    if session.stopped_at <= day_start:
+        return 0.0
+    if session.started_at >= day_start:
+        return session.duration_seconds
+    return _round_seconds(max((session.stopped_at - day_start).total_seconds(), 0.0))
 
 
 def _format_seconds(value: float) -> str:

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from ..alerting import Observation
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..normalize import NormalizedCircuitSample
 
@@ -49,6 +50,7 @@ class FeatureResult:
 
     events: list[CircuitEvent] = field(default_factory=list)
     alerts: list[AlertEvidence] = field(default_factory=list)
+    observations: list[Observation] = field(default_factory=list)
     state_updates: list[StateUpdate] = field(default_factory=list)
     repairs: list[Any] = field(default_factory=list)
     notifications: list[AlertEvidence] = field(default_factory=list)

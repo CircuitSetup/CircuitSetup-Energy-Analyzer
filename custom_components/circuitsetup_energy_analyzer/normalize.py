@@ -80,13 +80,17 @@ def build_circuit_sample(
             quality_issues.append(f"{sensor.entity_id} missing")
             continue
 
-        if now - source.last_updated > STALE_AFTER:
+        is_stale = now - source.last_updated > STALE_AFTER
+        if is_stale:
             quality_issues.append(f"{sensor.entity_id} stale")
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} unavailable")
+            continue
+        if is_stale:
+            values[sensor.role] = None
             continue
 
         try:

@@ -72,6 +72,13 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
             "always_on_alert_w": 25.0,
         }
     }
+    operating_detection_settings_by_circuit = {
+        "fridge": {
+            "operating_on_threshold_w": 25.0,
+            "operating_off_threshold_w": 10.0,
+            "operating_detection_source": "learned_recommendation",
+        }
+    }
     standby_by_circuit = {
         "office": {
             "samples": [
@@ -112,6 +119,9 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
             utility_comparison_settings_by_circuit
         ),
         standby_settings_by_circuit=standby_settings_by_circuit,
+        operating_detection_settings_by_circuit=(
+            operating_detection_settings_by_circuit
+        ),
         standby_by_circuit=standby_by_circuit,
     )
 
@@ -141,6 +151,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         is data.utility_comparison_settings_by_circuit
     )
     assert pruned.standby_settings_by_circuit is data.standby_settings_by_circuit
+    assert (
+        pruned.operating_detection_settings_by_circuit
+        is data.operating_detection_settings_by_circuit
+    )
     assert pruned.standby_by_circuit is data.standby_by_circuit
     assert data.events == [old, recent]
 
@@ -651,6 +665,15 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 6.0}],
             }
         },
+        operating_detection_settings_by_circuit={
+            "fridge": {
+                "operating_on_threshold_w": 25.0,
+                "operating_off_threshold_w": 10.0,
+                "operating_on_dwell_seconds": 10.0,
+                "operating_off_dwell_seconds": 45.0,
+                "operating_merge_gap_seconds": 90.0,
+            }
+        },
         demand_by_circuit={
             "hvac": {
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
@@ -733,6 +756,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.standby_by_circuit["office"]["samples"] == [
         {"timestamp": now.isoformat(), "real_power_w": 6.0}
     ]
+    assert restored.operating_detection_settings_by_circuit["fridge"] == {
+        "operating_on_threshold_w": 25.0,
+        "operating_off_threshold_w": 10.0,
+        "operating_on_dwell_seconds": 10.0,
+        "operating_off_dwell_seconds": 45.0,
+        "operating_merge_gap_seconds": 90.0,
+    }
     assert restored.nilm_signatures["mains"][0]["review_state"] == "expected"
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [
         {"date": "2026-06-02", "usage_kwh": 8.5}

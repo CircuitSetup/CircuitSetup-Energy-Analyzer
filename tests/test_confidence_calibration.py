@@ -37,7 +37,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
     assert fixture.samples[-1].states["sensor.refrigerator_energy"] == pytest.approx(
         110.0
     )
-    assert len(fixture.samples) == 13
+    assert len(fixture.samples) == 15
 
 
 @pytest.mark.parametrize(

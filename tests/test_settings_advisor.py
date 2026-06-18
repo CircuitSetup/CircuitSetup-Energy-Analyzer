@@ -226,6 +226,56 @@ def _energy_usage_inputs(
     )
 
 
+def _operating_detection_inputs(
+    advisor: Any,
+    *,
+    advanced_settings: dict[str, Any] | None = None,
+    appliance_profile: str = "refrigerator",
+    circuit_mode: str = "single_phase",
+    power_flow: str = "load",
+    idle_samples: list[float] | None = None,
+    start_samples: list[float] | None = None,
+) -> Any:
+    base = datetime(2026, 5, 25, 12, 0, tzinfo=UTC)
+    idle_values = (
+        idle_samples
+        if idle_samples is not None
+        else [4.2, 4.8, 5.1, 5.4, 5.8, 6.0, 6.2, 6.4, 6.5, 6.7, 6.8, 6.9, 7.0, 7.2]
+    )
+    start_values = (
+        start_samples
+        if start_samples is not None
+        else [84.5, 88.0, 90.0, 92.0, 96.0, 101.0]
+    )
+    return advisor.AdvisorInputs(
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="fridge",
+            circuit_name="Fridge",
+            appliance_profile=appliance_profile,
+            circuit_mode=circuit_mode,
+            power_flow=power_flow,
+            advanced_settings=advanced_settings or {},
+        ),
+        feature_history={
+            "operating_idle_samples": [
+                {
+                    "timestamp": (base + timedelta(hours=index * 16)).isoformat(),
+                    "real_power_w": value,
+                }
+                for index, value in enumerate(idle_values)
+            ],
+            "operating_start_samples": [
+                {
+                    "timestamp": (base + timedelta(days=index + 1)).isoformat(),
+                    "power_w": value,
+                }
+                for index, value in enumerate(start_values)
+            ],
+        },
+    )
+
+
 def test_energy_usage_recommendation_uses_7_day_pattern() -> None:
     advisor = _advisor()
     inputs = _energy_usage_inputs(advisor)
@@ -296,6 +346,82 @@ def test_energy_usage_recommendation_uses_default_for_flat_usage() -> None:
     ]
 
     assert "daily_spike_ratio" not in setting_keys
+
+
+def test_operating_detection_recommendations_use_idle_and_start_separation() -> None:
+    advisor = _advisor()
+    inputs = _operating_detection_inputs(advisor)
+
+    recommendations = advisor.build_settings_recommendations(inputs)
+    on_recommendation = _only_setting(
+        recommendations,
+        "operating_on_threshold_w",
+    )
+    off_recommendation = _only_setting(
+        recommendations,
+        "operating_off_threshold_w",
+    )
+
+    assert on_recommendation.setting_label == "Turn-On Power"
+    assert on_recommendation.current_value == 25.0
+    assert on_recommendation.suggested_value == 45.0
+    assert on_recommendation.unit == "W"
+    assert on_recommendation.group == "Operating Detection"
+    assert on_recommendation.feature == "operating_detection_thresholds"
+    assert on_recommendation.evidence["idle_sample_count"] == 14
+    assert on_recommendation.evidence["running_sample_count"] == 6
+    assert on_recommendation.evidence["distinct_run_sessions"] == 6
+    assert on_recommendation.evidence["learning_days"] == 9
+    assert on_recommendation.evidence["idle_p95_w"] == 7.2
+    assert on_recommendation.evidence["running_p10_w"] == 84.5
+    assert on_recommendation.evidence["suggested_on_threshold_w"] == 45.0
+    assert on_recommendation.evidence["suggested_off_threshold_w"] == 15.0
+    assert "confirmed starts" in on_recommendation.reason
+    assert advisor.recommendation_evidence_fingerprint(on_recommendation) == (
+        "operating_detection_thresholds:days=9;idle_p95=7.2;running_p10=84.5"
+    )
+    assert on_recommendation.apply_payload == {
+        "operating_on_threshold_w": 45.0,
+        "operating_off_threshold_w": 15.0,
+    }
+
+    assert off_recommendation.setting_label == "Turn-Off Power"
+    assert off_recommendation.current_value == 10.0
+    assert off_recommendation.suggested_value == 15.0
+    assert off_recommendation.apply_payload == {
+        "operating_on_threshold_w": 45.0,
+        "operating_off_threshold_w": 15.0,
+    }
+
+
+def test_operating_detection_recommendations_require_clear_separation() -> None:
+    advisor = _advisor()
+    inputs = _operating_detection_inputs(
+        advisor,
+        idle_samples=[12.0, 13.0, 14.5, 15.0, 16.0, 17.0, 18.0, 18.5, 19.0],
+        start_samples=[25.0, 26.0, 27.0, 28.0, 29.0, 30.0],
+    )
+
+    setting_keys = _setting_keys(advisor.build_settings_recommendations(inputs))
+
+    assert "operating_on_threshold_w" not in setting_keys
+    assert "operating_off_threshold_w" not in setting_keys
+
+
+def test_operating_detection_recommendations_skip_near_optimal_settings() -> None:
+    advisor = _advisor()
+    inputs = _operating_detection_inputs(
+        advisor,
+        advanced_settings={
+            "operating_on_threshold_w": 45.0,
+            "operating_off_threshold_w": 15.0,
+        },
+    )
+
+    setting_keys = _setting_keys(advisor.build_settings_recommendations(inputs))
+
+    assert "operating_on_threshold_w" not in setting_keys
+    assert "operating_off_threshold_w" not in setting_keys
 
 
 def test_energy_usage_recommendation_uses_window_total_fraction() -> None:

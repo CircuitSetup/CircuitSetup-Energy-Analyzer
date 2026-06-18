@@ -66,6 +66,14 @@ EXPECTED_ADVANCED_TOP_LEVEL_LABELS = {
 
 EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "preset": "Sensitivity",
+    "reset_operating_detection_settings_to_defaults": (
+        "Reset Operating Detection To Defaults"
+    ),
+    "operating_on_threshold_w": "Turn-On Power",
+    "operating_on_dwell_seconds": "Turn-On Confirmation Time",
+    "operating_off_threshold_w": "Turn-Off Power",
+    "operating_off_dwell_seconds": "Turn-Off Confirmation Time",
+    "operating_merge_gap_seconds": "Merge Short Interruptions",
     "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
     "window_days": "Energy Window Days",
     "daily_spike_ratio": "Daily Spike Ratio",
@@ -123,6 +131,7 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
 
 EXPECTED_ADVANCED_SECTION_LABELS = {
     "analysis_settings": "Sensitivity",
+    "operating_detection_settings": "Operating Detection",
     "energy_settings": "Energy Usage And Goals",
     "activity_settings": "Run And Activity Alerts",
     "billing_cost_settings": "Billing And Cost",
@@ -366,6 +375,7 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert settings_step["description"].startswith("**{circuit_name}**")
     assert "service" not in settings_step["description"].lower()
     assert "appliance type" in settings_step["description"].lower()
+    assert "operating detection source" in settings_step["description"].lower()
     assert "circuit mode" not in settings_step["description"].lower()
     assert "power flow" not in settings_step["description"].lower()
     assert " - " not in settings_step["description"]
@@ -956,6 +966,21 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
     assert "Metric Consistency Status" in readme
+
+
+def test_readme_explains_running_observation_and_alert_distinction() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        "Running is the current operating state used for automations." in readme
+    )
+    assert (
+        "Observation recorded means the analyzer noticed something unusual" in readme
+    )
+    assert (
+        "Possible issue means repeated evidence crossed the alert threshold."
+        in readme
+    )
 
 
 def test_alert_blueprint_is_user_friendly_and_actionable() -> None:

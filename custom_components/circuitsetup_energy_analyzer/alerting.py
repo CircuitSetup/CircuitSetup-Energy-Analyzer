@@ -23,6 +23,7 @@ class Observation:
     observed_value: float = 0.0
     baseline_value: float = 0.0
     message: str = ""
+    observation_key: str | None = None
     features: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -62,6 +63,11 @@ class ConservativeAlertPolicy:
         )
         key = (observation.circuit_id, observation.feature)
         observations = self._observations[key]
+        if observation.observation_key is not None:
+            for index, existing in enumerate(observations):
+                if existing.observation_key == observation.observation_key:
+                    observations[index] = observation
+                    return None
         observations.append(observation)
         while len(observations) > required_min_repeated:
             observations.popleft()

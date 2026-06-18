@@ -38,10 +38,22 @@ samples:
       sensor.refrigerator_voltage: 121.0
   - t: 120
     states:
+      sensor.refrigerator_power: 145
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 1.2
+      sensor.refrigerator_voltage: 121.1
+  - t: 180
+    states:
       sensor.refrigerator_power: 8
       sensor.refrigerator_energy: 100.0
       sensor.refrigerator_current: 0.1
       sensor.refrigerator_voltage: 121.1
+  - t: 240
+    states:
+      sensor.refrigerator_power: 8
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 0.1
+      sensor.refrigerator_voltage: 121.0
 
 segments:
   - pattern: daily_energy_deltas
@@ -62,7 +74,7 @@ labels:
       tolerance_seconds: 60
     - circuit_id: refrigerator
       event_type: stop
-      around_t: 120
+      around_t: 180
       tolerance_seconds: 60
   expected_alerts:
     - circuit_id: refrigerator

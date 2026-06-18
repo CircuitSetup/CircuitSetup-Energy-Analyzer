@@ -85,19 +85,29 @@ class NilmSampleProcessor:
         )
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
+        known_events = tuple(self._known_load_events(circuit_id, events))
         alerts: list[AlertEvidence] = []
         store_dirty = False
+        existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
+        candidate_edges = [*existing_unmatched, *edges]
+        matched_edges = ()
+        if candidate_edges and known_events:
+            mask = mask_known_loads(candidate_edges, known_events)
+            matched_edges = mask.matched_edges
+            next_unmatched = list(mask.unmatched_edges)
+        else:
+            next_unmatched = candidate_edges
 
         if edges:
-            known_events = self._known_load_events(circuit_id, events)
-            mask = mask_known_loads(edges, known_events)
-            for match in mask.matched_edges:
-                alerts.extend(
-                    self._observe_topology(circuit_config, match, context),
-                )
             self.total_events_by_circuit[circuit_id] += len(edges)
-            self.unmatched_edges_by_circuit[circuit_id].extend(mask.unmatched_edges)
+        self.unmatched_edges_by_circuit[circuit_id] = next_unmatched
 
+        for match in matched_edges:
+            alerts.extend(
+                self._observe_topology(circuit_config, match, context),
+            )
+
+        if edges or next_unmatched != existing_unmatched:
             signatures = cluster_recurring_signatures(
                 self.unmatched_edges_by_circuit[circuit_id],
             )

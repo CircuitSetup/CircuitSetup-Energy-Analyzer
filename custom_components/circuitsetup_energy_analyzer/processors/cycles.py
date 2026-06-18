@@ -28,6 +28,10 @@ from ..cycles import (
 )
 from ..models import AlertEvidence, BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
+from ..operating_detection import (
+    operating_state_is_running,
+    resolve_operating_detection_from_settings,
+)
 from ..storage import FeatureStoreData
 from .base import FeatureResult, ProcessingContext
 
@@ -66,15 +70,25 @@ class RunCycleProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return run-cycle alerts for the current retained event history."""
+        merge_gap_seconds = resolve_operating_detection_from_settings(
+            circuit_config,
+            getattr(
+                context.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_config.circuit_id, {}),
+        ).profile.merge_gap_seconds
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
             now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         baselines, baseline_dirty = self._cycle_baselines_for_config(
             context.store_data,
             circuit_config,
             context.now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         context_key = build_context_for_sample(
             circuit_config=circuit_config,
@@ -93,6 +107,8 @@ class RunCycleProcessor:
                 now=context.now,
             )
             return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
+        if _operating_state_is_unavailable(context, circuit_config.circuit_id):
+            return FeatureResult(store_dirty=baseline_dirty)
 
         policy = self._alert_policy_for_circuit(circuit_config.circuit_id)
         evidence = select_cycle_anomaly_evidence(
@@ -149,19 +165,20 @@ class RunCycleProcessor:
         )
         score = float(contextual_comparison.get("alert_score", evidence.score))
 
-        alert = policy.observe(
-            Observation(
-                circuit_id=circuit_config.circuit_id,
-                feature=evidence.feature,
-                score=score,
-                baseline_confidence=baseline_confidence,
-                observed_at=context.now,
-                observed_value=evidence.observed_value,
-                baseline_value=baseline_value,
-                message=evidence.message,
-                features=alert_features,
-            )
+        observation = Observation(
+            circuit_id=circuit_config.circuit_id,
+            feature=evidence.feature,
+            score=score,
+            baseline_confidence=baseline_confidence,
+            observed_at=context.now,
+            observed_value=evidence.observed_value,
+            baseline_value=baseline_value,
+            message=evidence.message,
+            observation_key=_observation_key(evidence.feature, summary),
+            features=alert_features,
         )
+        feature_result.observations.append(observation)
+        alert = policy.observe(observation)
         if alert is not None:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)
@@ -172,6 +189,8 @@ class RunCycleProcessor:
         store_data: FeatureStoreData,
         config: CircuitConfig,
         now: datetime,
+        *,
+        merge_gap_seconds: float,
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
@@ -179,6 +198,7 @@ class RunCycleProcessor:
             store_data.events,
             circuit_id=config.circuit_id,
             now=now,
+            merge_gap_seconds=merge_gap_seconds,
         )
         for feature, values in values_by_feature.items():
             key = _baseline_key(config.circuit_id, feature)
@@ -194,6 +214,25 @@ class RunCycleProcessor:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _observation_key(feature: str, summary: Any) -> str:
+    if feature == RUN_CYCLE_DURATION_FEATURE:
+        last_start = getattr(summary, "last_start", None)
+        if last_start is not None:
+            return f"{feature}:{last_start.isoformat()}"
+    return f"{feature}:{getattr(summary, 'date', '')}"
+
+
+def _operating_state_is_unavailable(
+    context: ProcessingContext,
+    circuit_id: str,
+) -> bool:
+    snapshots = getattr(context.state, "operating_state_snapshot_by_circuit", {}) or {}
+    if not isinstance(snapshots, dict):
+        return False
+    snapshot = snapshots.get(circuit_id)
+    return snapshot is not None and operating_state_is_running(snapshot) is None
 
 
 def _record_contextual_cycle_samples(

@@ -427,6 +427,10 @@ def test_health_status_priority_order_is_dashboard_friendly() -> None:
     assert health_summary(data_quality_problem=True) == ("needs_data", "Needs data")
     assert health_summary(paused=True) == ("paused", "Paused")
     assert health_summary(active_alerts=True) == ("possible_issue", "Possible issue")
+    assert health_summary(observations=True) == (
+        "observation",
+        "Observation recorded",
+    )
     assert health_summary(nilm_review_count=2) == ("nilm_review", "NILM review")
     assert health_summary(mixed=True) == ("mixed_observation", "Mixed observation")
     assert health_summary(learning=True) == ("learning", "Learning")

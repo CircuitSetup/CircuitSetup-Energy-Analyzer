@@ -87,6 +87,7 @@ def test_aggregate_dual_phase_preserves_missing_leg_power() -> None:
 
     result = aggregate_dual_phase("hvac", left, right)
 
+    assert result.combined_real_power is None
     assert result.leg_b.real_power is None
     assert result.leg_power_imbalance_ratio is None
 

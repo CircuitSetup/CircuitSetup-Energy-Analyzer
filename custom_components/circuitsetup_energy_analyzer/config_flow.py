@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
@@ -187,10 +188,21 @@ from .metric_consistency import (
 )
 from .models import (
     ApplianceProfile,
+    CircuitConfig,
     CircuitMode,
     PowerFlowMode,
     RetentionMode,
     SensorRole,
+)
+from .operating_detection import (
+    OPERATING_DETECTION_OVERRIDE_FIELDS,
+    OPERATING_MERGE_GAP_SECONDS,
+    OPERATING_OFF_DWELL_SECONDS,
+    OPERATING_OFF_THRESHOLD_W,
+    OPERATING_ON_DWELL_SECONDS,
+    OPERATING_ON_THRESHOLD_W,
+    resolve_operating_detection,
+    resolve_operating_detection_from_settings,
 )
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -363,6 +375,7 @@ RECOMMENDATION_ACTION_DISMISS = "dismiss"
 ERROR_INVALID_RECOMMENDATION = "invalid_recommendation"
 ERROR_RECOMMENDATIONS_NOT_LOADED = "recommendations_not_loaded"
 SECTION_ANALYSIS_SETTINGS = "analysis_settings"
+SECTION_OPERATING_DETECTION_SETTINGS = "operating_detection_settings"
 SECTION_ENERGY_SETTINGS = "energy_settings"
 SECTION_ACTIVITY_SETTINGS = "activity_settings"
 SECTION_BILLING_COST_SETTINGS = "billing_cost_settings"
@@ -374,6 +387,9 @@ SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
 SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
 SECTION_WATER_CONTEXT_SETTINGS = "water_context_settings"
 _ADVANCED_SECTION_RESET_FIELDS = {
+    SECTION_OPERATING_DETECTION_SETTINGS: (
+        "reset_operating_detection_settings_to_defaults"
+    ),
     SECTION_ENERGY_SETTINGS: "reset_energy_settings_to_defaults",
     SECTION_ACTIVITY_SETTINGS: "reset_activity_settings_to_defaults",
     SECTION_BILLING_COST_SETTINGS: "reset_billing_cost_settings_to_defaults",
@@ -387,6 +403,13 @@ _ADVANCED_SECTION_RESET_FIELDS = {
 }
 _ADVANCED_RESET_SETTING_KEYS = {
     "reset_analysis_settings_to_defaults": (FIELD_PRESET,),
+    "reset_operating_detection_settings_to_defaults": (
+        OPERATING_ON_THRESHOLD_W,
+        OPERATING_OFF_THRESHOLD_W,
+        OPERATING_ON_DWELL_SECONDS,
+        OPERATING_OFF_DWELL_SECONDS,
+        OPERATING_MERGE_GAP_SECONDS,
+    ),
     "reset_energy_settings_to_defaults": (
         FIELD_WINDOW_DAYS,
         FIELD_DAILY_SPIKE_RATIO,
@@ -449,6 +472,7 @@ _ADVANCED_RESET_SETTING_KEYS = {
 }
 _ADVANCED_SECTION_KEYS = {
     SECTION_ANALYSIS_SETTINGS,
+    SECTION_OPERATING_DETECTION_SETTINGS,
     SECTION_ENERGY_SETTINGS,
     SECTION_ACTIVITY_SETTINGS,
     SECTION_BILLING_COST_SETTINGS,
@@ -1698,6 +1722,12 @@ def _advanced_settings_schema(
         },
         collapsed=False,
     )
+    if _advanced_show_operating_detection_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_OPERATING_DETECTION_SETTINGS,
+            _operating_detection_fields(settings, circuit_context),
+        )
     if _advanced_show_energy_settings(circuit_context):
         _add_advanced_section(schema, SECTION_ENERGY_SETTINGS, _energy_fields(settings))
     if _advanced_show_activity_settings(circuit_context):
@@ -2095,7 +2125,7 @@ def _advanced_circuit_context(
     if not circuit_id:
         circuit_id = "selected"
     profile = _safe_appliance_profile(
-        raw_context.get("appliance_profile"),
+        raw_context.get("profile", raw_context.get("appliance_profile")),
         ApplianceProfile.MOTOR_LOAD.value,
     )
     mode = _safe_circuit_mode(
@@ -2124,6 +2154,10 @@ def _advanced_context_display(context: Mapping[str, str]) -> str:
     circuit_id = context.get("circuit_id", "selected")
     name = context.get("name") or circuit_id
     return f"{name} ({circuit_id})"
+
+
+def _advanced_show_operating_detection_settings(context: Mapping[str, str]) -> bool:
+    return not _is_advanced_mains_context(context)
 
 
 def _advanced_show_energy_settings(context: Mapping[str, str]) -> bool:
@@ -2192,6 +2226,73 @@ def _is_advanced_solar_only_context(context: Mapping[str, str]) -> bool:
         context.get("profile") == ApplianceProfile.SOLAR_INVERTER.value
         and not _is_advanced_mains_context(context)
     )
+
+
+def _operating_detection_fields(
+    settings: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[Any, Any]:
+    resolved = _resolved_operating_detection_for_context(
+        context,
+        settings=settings,
+    )
+    profile = resolved.profile
+    return {
+        vol.Optional(
+            OPERATING_ON_THRESHOLD_W,
+            default=float(profile.on_threshold_w),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            OPERATING_ON_DWELL_SECONDS,
+            default=float(profile.on_dwell_seconds),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            OPERATING_OFF_THRESHOLD_W,
+            default=float(profile.off_threshold_w),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            OPERATING_OFF_DWELL_SECONDS,
+            default=float(profile.off_dwell_seconds),
+        ): _number_selector(minimum=0.0, step=0.1),
+        vol.Optional(
+            OPERATING_MERGE_GAP_SECONDS,
+            default=float(profile.merge_gap_seconds),
+        ): _number_selector(minimum=0.0, step=0.1),
+    }
+
+
+def _operating_detection_config_for_context(
+    context: Mapping[str, str] | None,
+) -> CircuitConfig:
+    circuit_context = _advanced_circuit_context(context)
+    return CircuitConfig(
+        circuit_id=circuit_context["circuit_id"],
+        name=circuit_context["name"],
+        appliance_profile=ApplianceProfile(circuit_context["profile"]),
+        mode=CircuitMode(circuit_context["mode"]),
+        power_flow=PowerFlowMode(circuit_context["power_flow"]),
+    )
+
+
+def _resolved_operating_detection_for_context(
+    context: Mapping[str, str] | None,
+    *,
+    settings: Mapping[str, Any] | None = None,
+) -> Any:
+    config = _operating_detection_config_for_context(context)
+    try:
+        return resolve_operating_detection_from_settings(config, settings or {})
+    except ValueError:
+        return resolve_operating_detection(config)
+
+
+def _operating_detection_source_label(source: Any) -> str:
+    source_value = str(source or "").strip().lower()
+    if source_value == "user_override":
+        return "User override"
+    if source_value == "learned_recommendation":
+        return "Suggested from learned behavior"
+    return "Appliance profile default"
 
 
 def _safe_appliance_profile(value: Any, default: str) -> str:
@@ -3688,9 +3789,14 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     ) -> config_entries.ConfigFlowResult:
         """Edit advanced per-circuit settings exposed through services."""
         circuit_id = self._advanced_circuit_id or "mains"
+        config = _entry_config(self._config_entry)
+        context = _advanced_circuit_context_from_config(config, circuit_id)
         if user_input is not None:
             try:
-                settings = _advanced_settings_from_input(user_input)
+                settings = _advanced_settings_from_input(
+                    user_input,
+                    context=context,
+                )
             except SetupValidationError as err:
                 return await self._async_show_advanced_settings_form(
                     circuit_id,
@@ -4050,6 +4156,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         config = _entry_config(self._config_entry)
         context = _advanced_circuit_context_from_config(config, circuit_id)
         settings = _settings_map_for_entry(self._config_entry, CONF_ADVANCED_SETTINGS)
+        resolved_operating_detection = _resolved_operating_detection_for_context(
+            context,
+            settings=settings.get(circuit_id, {}),
+        )
         return self.async_show_form(
             step_id="advanced_settings",
             data_schema=_advanced_settings_schema(
@@ -4066,6 +4176,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "Single Phase",
                 ),
                 "power_flow": _power_flow_label(context.get("power_flow")),
+                "operating_detection_source": _operating_detection_source_label(
+                    resolved_operating_detection.source.value
+                ),
             },
         )
 
@@ -5229,7 +5342,11 @@ def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
     )
 
 
-def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+def _advanced_settings_from_input(
+    user_input: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     user_input = _flatten_advanced_settings_input(user_input)
     if bool(user_input.get(FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS, False)):
         return {}
@@ -5239,6 +5356,11 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
         raise SetupValidationError("invalid_sensitivity")
     settings[FIELD_PRESET] = preset
 
+    _set_operating_detection_overrides(
+        settings,
+        user_input,
+        context=context,
+    )
     _set_optional_int(settings, user_input, FIELD_WINDOW_DAYS)
     _set_optional_float(settings, user_input, FIELD_DAILY_SPIKE_RATIO)
     _set_optional_float(settings, user_input, FIELD_DAILY_GOAL_KWH)
@@ -5297,6 +5419,62 @@ def _advanced_settings_from_input(user_input: Mapping[str, Any]) -> dict[str, An
     )
     _reset_advanced_setting_sections(settings, user_input)
     return settings
+
+
+def _set_operating_detection_overrides(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> None:
+    if not any(key in user_input for key in OPERATING_DETECTION_OVERRIDE_FIELDS):
+        return
+
+    if context is None:
+        for key in OPERATING_DETECTION_OVERRIDE_FIELDS:
+            _set_optional_float(settings, user_input, key)
+        return
+
+    config = _operating_detection_config_for_context(context)
+    try:
+        default_profile = resolve_operating_detection(config).profile
+        resolved_profile = resolve_operating_detection(
+            config,
+            overrides={
+                key: float(user_input[key])
+                for key in OPERATING_DETECTION_OVERRIDE_FIELDS
+                if key in user_input
+            },
+        ).profile
+    except (TypeError, ValueError) as err:
+        raise SetupValidationError("invalid_advanced_settings") from err
+
+    profile_values = {
+        OPERATING_ON_THRESHOLD_W: (
+            resolved_profile.on_threshold_w,
+            default_profile.on_threshold_w,
+        ),
+        OPERATING_OFF_THRESHOLD_W: (
+            resolved_profile.off_threshold_w,
+            default_profile.off_threshold_w,
+        ),
+        OPERATING_ON_DWELL_SECONDS: (
+            resolved_profile.on_dwell_seconds,
+            default_profile.on_dwell_seconds,
+        ),
+        OPERATING_OFF_DWELL_SECONDS: (
+            resolved_profile.off_dwell_seconds,
+            default_profile.off_dwell_seconds,
+        ),
+        OPERATING_MERGE_GAP_SECONDS: (
+            resolved_profile.merge_gap_seconds,
+            default_profile.merge_gap_seconds,
+        ),
+    }
+    for key, (resolved_value, default_value) in profile_values.items():
+        if math.isclose(resolved_value, default_value, abs_tol=1e-9):
+            continue
+        settings[key] = resolved_value
 
 
 def _reset_advanced_setting_sections(

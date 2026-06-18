@@ -70,6 +70,7 @@ from .entity import (
     sync_entity_registry_visibility,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
@@ -143,6 +144,7 @@ def health_summary_value(state: Any, circuit_id: str) -> str:
         "learning": "Learning",
         "ready": "Ready",
         "needs_data": "Needs data",
+        "observation": "Observation recorded",
         "paused": "Paused",
         "possible_issue": "Possible issue",
         "mixed_observation": "Mixed observation",
@@ -868,6 +870,14 @@ def always_on_limit_usage_value(state: Any, circuit_id: str) -> float:
 
 def activity_summary_value(state: Any, circuit_id: str) -> str:
     """Return a user-facing summary of what the circuit is doing."""
+    operating_snapshot = _operating_state_snapshot(state, circuit_id)
+    if operating_snapshot is not None:
+        running = operating_state_is_running(operating_snapshot)
+        if running is True:
+            return "Running"
+        if running is False:
+            return "Idle"
+        return "Unavailable"
     run_status = run_cycle_status_value(state, circuit_id)
     standby_status = standby_status_value(state, circuit_id)
     if run_status == "running":
@@ -883,17 +893,44 @@ def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     """Return activity detail that would otherwise require several entities."""
     run_status = run_cycle_status_value(state, circuit_id)
     standby_status = standby_status_value(state, circuit_id)
-    return {
+    operating_snapshot = _operating_state_snapshot(state, circuit_id)
+    summary_explanation = _activity_summary_explanation(run_status, standby_status)
+    if isinstance(operating_snapshot, dict):
+        running = operating_state_is_running(operating_snapshot)
+        if running is True:
+            summary_explanation = "The appliance is currently active."
+        elif running is False:
+            summary_explanation = (
+                "The appliance has confirmed operating data and is currently idle."
+            )
+        else:
+            summary_explanation = (
+                "Current operating state is unavailable because source data is "
+                "missing or stale."
+            )
+    attributes = {
         "run_cycle_status": run_status,
         "standby_status": standby_status,
         "run_cycle_count": run_cycle_count_value(state, circuit_id),
         "run_cycle_runtime_seconds": run_cycle_runtime_value(state, circuit_id),
         "duty_cycle_percent": run_cycle_duty_cycle_value(state, circuit_id),
-        "summary_explanation": _activity_summary_explanation(
-            run_status,
-            standby_status,
-        ),
+        "summary_explanation": summary_explanation,
     }
+    if isinstance(operating_snapshot, dict):
+        attributes["operating_state"] = operating_snapshot.get("state", "unknown")
+        attributes["operating_stable_state"] = operating_snapshot.get(
+            "stable_state",
+            "unknown",
+        )
+    return attributes
+
+
+def _operating_state_snapshot(state: Any, circuit_id: str) -> dict[str, Any] | None:
+    snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
+    if not isinstance(snapshots, dict):
+        return None
+    snapshot = snapshots.get(circuit_id)
+    return snapshot if isinstance(snapshot, dict) else None
 
 
 def electrical_health_value(state: Any, circuit_id: str) -> str:
@@ -974,6 +1011,11 @@ def _health_summary_explanation(summary: str, readiness: str) -> str:
         return "One or more analyzer alerts are active for this circuit."
     if summary == "Needs data":
         return "The analyzer needs valid source sensor data before checks are reliable."
+    if summary == "Observation recorded":
+        return (
+            "A noteworthy observation was recorded, but repeated evidence is "
+            "still required before an alert is raised."
+        )
     if summary == "Learning":
         return "The analyzer is still building a baseline for this circuit."
     if summary == "Paused":
@@ -1443,6 +1485,10 @@ _STATUS_EXPLANATIONS: Mapping[str, str] = {
     "not_applicable": "This check does not apply to the current circuit configuration.",
     "not_dual_phase": "This check only applies to dual-phase circuits.",
     "off": "The latest power sample is below the configured standby threshold.",
+    "observation": (
+        "A noteworthy observation was recorded, but repeated evidence is still "
+        "required before an alert is raised."
+    ),
     "on": "The latest power sample is above the standby range.",
     "over_budget": "Billing-cycle usage is over the configured budget.",
     "over_goal": "Daily energy usage is over the configured goal.",

@@ -14,6 +14,12 @@ from .metric_consistency import (
     DEFAULT_MIN_APPARENT_POWER_VA,
     DEFAULT_POWER_FACTOR_TOLERANCE,
 )
+from .models import ApplianceProfile, CircuitConfig, CircuitMode, PowerFlowMode
+from .operating_detection import (
+    OPERATING_OFF_THRESHOLD_W,
+    OPERATING_ON_THRESHOLD_W,
+    resolve_operating_detection,
+)
 from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
@@ -27,10 +33,16 @@ DAILY_SPIKE_RATIO_SAFETY_MARGIN = 0.10
 DEFAULT_RECOMMENDATION_TTL = timedelta(days=30)
 DENIAL_COOLDOWN = timedelta(days=90)
 DISMISSAL_COOLDOWN = DEFAULT_RECOMMENDATION_TTL
+OPERATING_THRESHOLD_MIN_IDLE_SAMPLES = 10
+OPERATING_THRESHOLD_MIN_START_SAMPLES = 5
+OPERATING_THRESHOLD_MIN_SEPARATION_W = 15.0
+OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
 SETTING_LABELS = {
     "daily_spike_ratio": "Daily Spike Ratio",
     "max_active_minutes": "Max Active Minutes",
     "warning_ratio": "Capacity Warning Ratio",
+    "operating_on_threshold_w": "Turn-On Power",
+    "operating_off_threshold_w": "Turn-Off Power",
     "standby_threshold_w": "Standby Threshold W",
     "always_on_alert_w": "Always On Alert W",
     "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
@@ -270,6 +282,7 @@ def build_settings_recommendations(
         _energy_usage_recommendations,
         _cycle_recommendations,
         _capacity_recommendations,
+        _operating_detection_recommendations,
         _standby_recommendations,
         _dual_phase_recommendations,
         _metric_consistency_recommendations,
@@ -459,6 +472,118 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
             },
         )
     ]
+
+
+def _operating_detection_recommendations(
+    inputs: AdvisorInputs,
+) -> list[SettingRecommendation]:
+    if inputs.context.power_flow != PowerFlowMode.LOAD.value:
+        return []
+    if inputs.context.appliance_profile in {
+        ApplianceProfile.MIXED.value,
+        ApplianceProfile.MAINS_NILM.value,
+    }:
+        return []
+
+    idle_samples = _timestamped_numeric_values(
+        inputs.feature_history.get("operating_idle_samples"),
+        key="real_power_w",
+    )
+    start_samples = _timestamped_numeric_values(
+        inputs.feature_history.get("operating_start_samples"),
+        key="power_w",
+    )
+    if (
+        len(idle_samples) < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
+        or len(start_samples) < OPERATING_THRESHOLD_MIN_START_SAMPLES
+    ):
+        return []
+
+    learning_days = _learning_days(idle_samples + start_samples)
+    if learning_days < MIN_ADVISOR_DAYS:
+        return []
+
+    idle_values = [value for _, value in idle_samples]
+    start_values = [value for _, value in start_samples]
+    idle_p95 = round(_percentile(idle_values, 95), 1)
+    running_p10 = round(_percentile(start_values, 10), 1)
+    separation = running_p10 - idle_p95
+    if separation <= OPERATING_THRESHOLD_MIN_SEPARATION_W:
+        return []
+
+    suggested_on = float(_round_to_nearest((idle_p95 + running_p10) / 2.0, 5))
+    suggested_off_target = max(
+        idle_p95 + 2.0,
+        min(idle_p95 + min(10.0, separation * 0.2), suggested_on - 5.0),
+    )
+    suggested_off = float(_round_to_nearest(suggested_off_target, 5))
+    if suggested_off >= suggested_on:
+        suggested_off = max(0.0, suggested_on - 5.0)
+    if suggested_on <= suggested_off:
+        return []
+
+    current_on, current_off = _current_operating_thresholds(inputs)
+    evidence = {
+        "idle_sample_count": len(idle_values),
+        "running_sample_count": len(start_values),
+        "distinct_run_sessions": len(start_values),
+        "learning_days": learning_days,
+        "idle_p95_w": idle_p95,
+        "running_p10_w": running_p10,
+        "suggested_on_threshold_w": suggested_on,
+        "suggested_off_threshold_w": suggested_off,
+    }
+    confidence = _clamp(
+        0.72 + min(0.18, (separation - OPERATING_THRESHOLD_MIN_SEPARATION_W) / 100.0),
+        0.0,
+        0.92,
+    )
+    reason = (
+        f"Observed {len(start_values)} confirmed starts and {len(idle_values)} idle "
+        f"samples over {learning_days} days. The running and idle power "
+        "distributions are clearly separated."
+    )
+    recommendations: list[SettingRecommendation] = []
+    threshold_payload = {
+        OPERATING_ON_THRESHOLD_W: suggested_on,
+        OPERATING_OFF_THRESHOLD_W: suggested_off,
+    }
+
+    if abs(current_on - suggested_on) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+        recommendations.append(
+            _make_recommendation(
+                inputs,
+                setting_key=OPERATING_ON_THRESHOLD_W,
+                current_value=current_on,
+                suggested_value=suggested_on,
+                unit="W",
+                feature="operating_detection_thresholds",
+                group="Operating Detection",
+                confidence=confidence,
+                reason=reason,
+                evidence=evidence,
+                apply_payload=threshold_payload,
+            )
+        )
+
+    if abs(current_off - suggested_off) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+        recommendations.append(
+            _make_recommendation(
+                inputs,
+                setting_key=OPERATING_OFF_THRESHOLD_W,
+                current_value=current_off,
+                suggested_value=suggested_off,
+                unit="W",
+                feature="operating_detection_thresholds",
+                group="Operating Detection",
+                confidence=confidence,
+                reason=reason,
+                evidence=evidence,
+                apply_payload=threshold_payload,
+            )
+        )
+
+    return recommendations
 
 
 def _dual_phase_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendation]:
@@ -768,6 +893,7 @@ def _make_recommendation(
     confidence: float,
     reason: str,
     evidence: Mapping[str, Any],
+    apply_payload: Mapping[str, Any] | None = None,
 ) -> SettingRecommendation:
     context = inputs.context
     return SettingRecommendation(
@@ -788,7 +914,11 @@ def _make_recommendation(
         confidence=_clamp(confidence, 0.0, 1.0),
         reason=reason,
         evidence=evidence,
-        apply_payload={setting_key: suggested_value},
+        apply_payload=(
+            dict(apply_payload)
+            if apply_payload is not None
+            else {setting_key: suggested_value}
+        ),
         status=RecommendationStatus.PENDING,
         created_at=inputs.now,
         expires_at=inputs.now + DEFAULT_RECOMMENDATION_TTL,
@@ -856,6 +986,74 @@ def _optional_float_setting(
     return value
 
 
+def _current_operating_thresholds(inputs: AdvisorInputs) -> tuple[float, float]:
+    try:
+        resolved = resolve_operating_detection(
+            CircuitConfig(
+                circuit_id=inputs.context.circuit_id,
+                name=inputs.context.circuit_name,
+                appliance_profile=ApplianceProfile(inputs.context.appliance_profile),
+                mode=CircuitMode(inputs.context.circuit_mode),
+                power_flow=PowerFlowMode(inputs.context.power_flow),
+            ),
+            overrides=_operating_threshold_overrides(inputs.context.advanced_settings),
+        )
+    except ValueError:
+        resolved = resolve_operating_detection(
+            CircuitConfig(
+                circuit_id=inputs.context.circuit_id,
+                name=inputs.context.circuit_name,
+                appliance_profile=ApplianceProfile.MIXED,
+                mode=CircuitMode.SINGLE_PHASE,
+                power_flow=PowerFlowMode.LOAD,
+            )
+        )
+    return (
+        resolved.profile.on_threshold_w,
+        resolved.profile.off_threshold_w,
+    )
+
+
+def _operating_threshold_overrides(settings: Mapping[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    for key in (OPERATING_ON_THRESHOLD_W, OPERATING_OFF_THRESHOLD_W):
+        value = _optional_float_setting(settings, key)
+        if value is not None:
+            overrides[key] = value
+    return overrides
+
+
+def _timestamped_numeric_values(
+    values: Any,
+    *,
+    key: str,
+) -> list[tuple[datetime, float]]:
+    if values is None:
+        return []
+
+    samples: list[tuple[datetime, float]] = []
+    for item in values:
+        if not isinstance(item, Mapping):
+            continue
+        raw_timestamp = item.get("timestamp")
+        raw_value = item.get(key)
+        try:
+            timestamp = datetime.fromisoformat(str(raw_timestamp))
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            samples.append((timestamp, value))
+    return samples
+
+
+def _learning_days(samples: list[tuple[datetime, float]]) -> int:
+    if not samples:
+        return 0
+    timestamps = sorted(timestamp for timestamp, _ in samples)
+    return int((timestamps[-1] - timestamps[0]).total_seconds() // 86400) + 1
+
+
 def _round_ratio(value: float) -> float:
     return _clamp(round(value, 1), 0.05, 1.0)
 
@@ -895,5 +1093,12 @@ def _evidence_fingerprint(
             "capacity_warning_ratio:"
             f"samples={evidence.get('observed_samples')};"
             f"p95={evidence.get('p95_current_amps')}"
+        )
+    if feature == "operating_detection_thresholds":
+        return (
+            "operating_detection_thresholds:"
+            f"days={evidence.get('learning_days')};"
+            f"idle_p95={evidence.get('idle_p95_w')};"
+            f"running_p10={evidence.get('running_p10_w')}"
         )
     return feature
