@@ -268,6 +268,7 @@ def _solar_contextual_evidence(
                 context=context_key,
                 source="solar_flow",
             ),
+            time_zone=context.time_zone,
         )
     return evidence, store_dirty or before != samples
 
@@ -282,12 +283,12 @@ def _solar_context_key(
             "appliance_profile": config.appliance_profile.value,
             "circuit_mode": config.mode.value,
             "power_flow_mode": config.power_flow.value,
-            "season": season_for_datetime(context.now),
+            "season": season_for_datetime(context.now, time_zone=context.time_zone),
             "solar_flow_state": solar_flow_state(
                 result.status,
                 result.solar_surplus_status,
             ),
-            "time_of_day": time_of_day_bucket(context.now),
+            "time_of_day": time_of_day_bucket(context.now, time_zone=context.time_zone),
         }
     )
 

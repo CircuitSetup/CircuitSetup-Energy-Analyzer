@@ -801,6 +801,63 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
     assert evidence["baseline_fallback_level"] == "not_enough_data"
 
 
+def test_energy_usage_processor_context_uses_rollup_timestamp() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "ev": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+            }
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+    sample = CircuitSample(
+        timestamp=sample_time,
+        circuit_id="ev",
+        real_power=180.0,
+        current=1.5,
+        voltage=120.0,
+        energy=104.0,
+    )
+
+    processor.process(sample, config, context)
+
+    stored = store_data.contextual_baseline_samples_by_circuit["ev"][0]
+    assert stored["timestamp"] == now.isoformat()
+    assert stored["context"]["time_of_day"] == "evening"
+
+
 def test_energy_usage_alert_features_include_contextual_baseline_details() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -968,6 +1025,58 @@ def test_energy_goal_processor_updates_state_and_returns_goal_alert() -> None:
     }
 
 
+def test_energy_goal_processor_uses_ha_local_usage_date() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_goal import (
+        EnergyGoalProcessor,
+    )
+
+    now = datetime(2026, 6, 18, 2, 0, tzinfo=UTC)
+    state = AnalyzerState(
+        daily_energy_usage_by_circuit={"fridge": 20.5},
+        energy_usage_evidence_by_circuit={
+            "fridge": {
+                "date": "2026-06-17",
+                "daily_usage_kwh": 20.5,
+            }
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = EnergyGoalProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyGoalSettings(
+            daily_goal_kwh=20.0,
+            goal_alert_ratio=0.9,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("energy_goal_status_by_circuit", "fridge")] == "over_goal"
+    assert result.alerts
+
+
 def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.cycles import (
@@ -1041,6 +1150,66 @@ def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> N
     baseline = store_data.baselines["fridge:run_cycle_duration_s"]
     assert baseline.feature == RUN_CYCLE_DURATION_FEATURE
     assert baseline.median == 1200.0
+
+
+def test_run_cycle_processor_context_uses_rollup_timestamp() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=now - timedelta(hours=1),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=now - timedelta(minutes=30),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+        ),
+    ]
+    store_data = FeatureStoreData(events=events)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        learning_mature=lambda _config, _now: False,
+    )
+    sample = CircuitSample(
+        timestamp=sample_time,
+        circuit_id="fridge",
+        real_power=180.0,
+        current=1.5,
+        voltage=120.0,
+    )
+
+    processor.process(sample, config, context)
+
+    stored = store_data.contextual_baseline_samples_by_circuit["fridge"][0]
+    assert stored["timestamp"] == now.isoformat()
+    assert stored["context"]["time_of_day"] == "evening"
 
 
 def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() -> None:
@@ -2016,6 +2185,55 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
         store_data.contextual_baseline_samples_by_circuit["ev"][-1]["feature"]
         == "peak_demand_w"
     )
+
+
+def test_demand_processor_context_uses_rollup_timestamp() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+    sample = CircuitSample(
+        timestamp=sample_time,
+        circuit_id="ev",
+        real_power=2500.0,
+        current=20.8,
+        voltage=120.0,
+    )
+
+    processor.process(sample, config, context)
+
+    stored = store_data.contextual_baseline_samples_by_circuit["ev"][0]
+    assert stored["timestamp"] == now.isoformat()
+    assert stored["context"]["time_of_day"] == "evening"
 
 
 def test_capacity_processor_records_current_and_returns_capacity_alert() -> None:

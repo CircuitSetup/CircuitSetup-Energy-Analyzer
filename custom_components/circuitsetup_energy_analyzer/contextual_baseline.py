@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .baseline import build_baseline
+from .local_time import TimeZone, as_ha_local, local_date
 from .models import ApplianceProfile, CircuitConfig, PowerFlowMode
 from .normalize import NormalizedCircuitSample
 
@@ -114,9 +115,9 @@ class ContextualBaselineStats:
     fallback_level: str = "exact_context"
 
 
-def season_for_datetime(dt: datetime) -> str:
+def season_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
     """Return Northern Hemisphere meteorological season."""
-    month = dt.month
+    month = _calendar_datetime(dt, time_zone).month
     if month in {12, 1, 2}:
         return "winter"
     if month in {3, 4, 5}:
@@ -126,16 +127,17 @@ def season_for_datetime(dt: datetime) -> str:
     return "fall"
 
 
-def month_for_datetime(dt: datetime) -> str:
-    return f"{dt.month:02d}"
+def month_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    return f"{_calendar_datetime(dt, time_zone).month:02d}"
 
 
-def day_type_for_datetime(dt: datetime) -> str:
-    return "weekend" if dt.weekday() >= 5 else "weekday"
+def day_type_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    calendar_dt = _calendar_datetime(dt, time_zone)
+    return "weekend" if calendar_dt.weekday() >= 5 else "weekday"
 
 
-def time_of_day_bucket(dt: datetime) -> str:
-    hour = dt.hour
+def time_of_day_bucket(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    hour = _calendar_datetime(dt, time_zone).hour
     if hour < 6:
         return "night"
     if hour < 12:
@@ -344,16 +346,19 @@ def build_context_for_sample(
     store_data: Any,
     now: datetime,
     feature: str,
+    time_zone: TimeZone = None,
+    calendar_timestamp: datetime | None = None,
 ) -> ContextKey:
     """Build stable contextual dimensions from existing analyzer state."""
-    del sample, feature
+    del feature
     circuit_id = circuit_config.circuit_id
+    context_timestamp = calendar_timestamp or sample.timestamp
     values: dict[str, str] = {
         "appliance_profile": circuit_config.appliance_profile.value,
         "circuit_mode": circuit_config.mode.value,
-        "day_type": day_type_for_datetime(now),
-        "season": season_for_datetime(now),
-        "time_of_day": time_of_day_bucket(now),
+        "day_type": day_type_for_datetime(context_timestamp, time_zone=time_zone),
+        "season": season_for_datetime(context_timestamp, time_zone=time_zone),
+        "time_of_day": time_of_day_bucket(context_timestamp, time_zone=time_zone),
     }
     if circuit_config.power_flow is not PowerFlowMode.LOAD:
         values["power_flow_mode"] = circuit_config.power_flow.value
@@ -495,18 +500,21 @@ def stored_contextual_samples(
 def upsert_contextual_sample(
     samples: list[dict[str, Any]],
     sample: ContextualBaselineSample,
+    *,
+    time_zone: TimeZone = None,
 ) -> None:
     """Insert or replace one feature sample for the same local date/context."""
     payload = contextual_sample_to_dict(sample)
     fingerprint = sample.context.fingerprint()
-    sample_date = sample.timestamp.date()
+    sample_date = _sample_calendar_date(sample.timestamp, time_zone)
     for index, existing in enumerate(samples):
         existing_sample = contextual_sample_from_dict(sample.circuit_id, existing)
         if existing_sample is None:
             continue
         if (
             existing_sample.feature == sample.feature
-            and existing_sample.timestamp.date() == sample_date
+            and _sample_calendar_date(existing_sample.timestamp, time_zone)
+            == sample_date
             and existing_sample.context.fingerprint() == fingerprint
         ):
             samples[index] = payload
@@ -591,6 +599,18 @@ def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:
         return {}
     item = values.get(key, {})
     return item if isinstance(item, Mapping) else {}
+
+
+def _calendar_datetime(dt: datetime, time_zone: TimeZone) -> datetime:
+    if time_zone is None:
+        return dt
+    return as_ha_local(dt, time_zone)
+
+
+def _sample_calendar_date(dt: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None:
+        return dt.date()
+    return local_date(dt, time_zone)
 
 
 def _normalize_weather_mode(value: Any, temperature: float | None) -> str:

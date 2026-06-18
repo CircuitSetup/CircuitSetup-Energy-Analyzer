@@ -204,6 +204,28 @@ def test_process_events_into_state_replaces_active_alert_set() -> None:
     assert updated.anomaly_score_by_circuit == {"fridge": 0.0}
 
 
+def test_processing_context_uses_home_assistant_time_zone() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    hass = SimpleNamespace(
+        data={DOMAIN: {}},
+        config=SimpleNamespace(time_zone="America/New_York"),
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_data={},
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+
+    context = coordinator._build_processing_context(now)
+
+    assert context.time_zone == "America/New_York"
+
+
 def test_coordinator_refreshes_rain_pump_context_from_rain_and_hvac() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -1897,6 +1919,57 @@ def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
     }
 
 
+def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "fridge": {
+                    "days": [
+                        {"date": "2026-05-30", "usage_kwh": 6.0},
+                        {"date": "2026-05-31", "usage_kwh": 7.0},
+                    ],
+                }
+            },
+            demand_by_circuit={
+                "fridge": {
+                    "daily_peaks": [
+                        {"date": "2026-05-30", "peak_demand_w": 1000.0},
+                        {"date": "2026-05-31", "peak_demand_w": 1200.0},
+                    ],
+                }
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
+        {"date": "2026-05-31", "usage_kwh": 7.0}
+    ]
+    assert coordinator.store_data.demand_by_circuit["fridge"]["daily_peaks"] == [
+        {"date": "2026-05-31", "peak_demand_w": 1200.0}
+    ]
+
+
 def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         ALERT_FEEDBACK_MAX_ITEMS,
@@ -3009,6 +3082,77 @@ async def test_runtime_hvac_weather_context_does_not_learn_from_same_day_updates
     evidence = coordinator.state.weather_context_by_circuit["hvac"]
     assert evidence["status"] == "learning"
     assert len(coordinator.store_data.weather_context_history_by_circuit["hvac"]) == 1
+
+
+def test_weather_context_history_excludes_same_ha_local_day_samples() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(
+            weather_context_history_by_circuit={
+                "hvac": [
+                    {
+                        "timestamp": "2026-05-31T23:30:00+00:00",
+                        "temperature": 91.0,
+                        "runtime_minutes": 120.0,
+                        "duty_cycle_percent": 30.0,
+                    }
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    assert coordinator._weather_context_history_samples("hvac", now) == []
+
+
+def test_append_weather_context_history_replaces_same_ha_local_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        store_data=FeatureStoreData(
+            weather_context_history_by_circuit={
+                "hvac": [
+                    {
+                        "timestamp": "2026-05-31T23:30:00+00:00",
+                        "temperature": 88.0,
+                        "runtime_minutes": 90.0,
+                        "duty_cycle_percent": 20.0,
+                        "start_count": 1,
+                    }
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_count_by_circuit["hvac"] = 2
+
+    changed = coordinator._append_weather_context_history(
+        "hvac",
+        now,
+        temperature=91.0,
+        runtime_minutes=120.0,
+        duty_cycle_percent=30.0,
+    )
+
+    assert changed is True
+    assert coordinator.store_data.weather_context_history_by_circuit["hvac"] == [
+        {
+            "timestamp": "2026-06-01T03:30:00+00:00",
+            "temperature": 91.0,
+            "runtime_minutes": 120.0,
+            "duty_cycle_percent": 30.0,
+            "start_count": 2,
+        }
+    ]
 
 
 @pytest.mark.asyncio

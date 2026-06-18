@@ -214,6 +214,8 @@ def _contextual_standby_comparison(
         store_data=context.store_data,
         now=context.now,
         feature=STANDBY_POWER_FEATURE,
+        time_zone=context.time_zone,
+        calendar_timestamp=context.now,
     )
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_config.circuit_id,
@@ -243,6 +245,7 @@ def _contextual_standby_comparison(
                 context=context_key,
                 source="standby",
             ),
+            time_zone=context.time_zone,
         )
         sample_recorded = before != samples
         updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)

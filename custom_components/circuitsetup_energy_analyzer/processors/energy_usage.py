@@ -82,6 +82,7 @@ class EnergyUsageProcessor:
                 daily_spike_ratio=settings.daily_spike_ratio,
             ),
             retention_days=self._retention_days_for_circuit(circuit_id),
+            time_zone=context.time_zone,
         )
         if result is None:
             return FeatureResult()
@@ -219,6 +220,8 @@ def _contextual_daily_energy_comparison(
         store_data=context.store_data,
         now=context.now,
         feature=DAILY_ENERGY_FEATURE,
+        time_zone=context.time_zone,
+        calendar_timestamp=context.now,
     )
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_id,
@@ -247,6 +250,7 @@ def _contextual_daily_energy_comparison(
                 context=context_key,
                 source="energy_usage",
             ),
+            time_zone=context.time_zone,
         )
         updated_samples = stored_contextual_samples(circuit_id, samples)
         exact = select_contextual_baseline(

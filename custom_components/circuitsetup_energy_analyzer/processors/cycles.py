@@ -83,12 +83,14 @@ class RunCycleProcessor:
             circuit_id=circuit_config.circuit_id,
             now=context.now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
         )
         baselines, baseline_dirty = self._cycle_baselines_for_config(
             context.store_data,
             circuit_config,
             context.now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
         )
         context_key = build_context_for_sample(
             circuit_config=circuit_config,
@@ -97,6 +99,8 @@ class RunCycleProcessor:
             store_data=context.store_data,
             now=context.now,
             feature="run_cycle",
+            time_zone=context.time_zone,
+            calendar_timestamp=context.now,
         )
         if not self._learning_mature(circuit_config, context.now):
             contextual_dirty = _record_contextual_cycle_samples(
@@ -105,6 +109,7 @@ class RunCycleProcessor:
                 summary=summary,
                 context_key=context_key,
                 now=context.now,
+                time_zone=context.time_zone,
             )
             return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
@@ -127,6 +132,7 @@ class RunCycleProcessor:
                     summary=summary,
                     context_key=context_key,
                     now=context.now,
+                    time_zone=context.time_zone,
                 )
             )
             return feature_result
@@ -145,6 +151,7 @@ class RunCycleProcessor:
                 summary=summary,
                 context_key=context_key,
                 now=context.now,
+                time_zone=context.time_zone,
             )
         )
         if contextual_comparison.get("comparison_basis") == "contextual":
@@ -191,6 +198,7 @@ class RunCycleProcessor:
         now: datetime,
         *,
         merge_gap_seconds: float,
+        time_zone: str | None = None,
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
@@ -199,6 +207,7 @@ class RunCycleProcessor:
             circuit_id=config.circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=time_zone,
         )
         for feature, values in values_by_feature.items():
             key = _baseline_key(config.circuit_id, feature)
@@ -242,6 +251,7 @@ def _record_contextual_cycle_samples(
     summary: Any,
     context_key: Any,
     now: datetime,
+    time_zone: str | None = None,
 ) -> bool:
     samples = store_data.contextual_baseline_samples_by_circuit.setdefault(
         circuit_id,
@@ -261,6 +271,7 @@ def _record_contextual_cycle_samples(
                 context=context_key,
                 source="run_cycle",
             ),
+            time_zone=time_zone,
         )
     return before != samples
 

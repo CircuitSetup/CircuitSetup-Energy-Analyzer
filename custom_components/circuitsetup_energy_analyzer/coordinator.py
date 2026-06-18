@@ -117,6 +117,7 @@ from .goals import EnergyGoalSettings
 from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 )
+from .local_time import local_date
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -1261,7 +1262,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             entry_data=self.entry_data,
             known_load_circuit_ids=self._known_load_circuit_ids,
             sensitivity=self._sensitivity,
+            time_zone=self._ha_time_zone(),
         )
+
+    def _ha_time_zone(self: Self) -> str | None:
+        """Return Home Assistant's configured timezone name when available."""
+        value = getattr(getattr(self.hass, "config", None), "time_zone", None)
+        return str(value) if value else None
 
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
@@ -2163,6 +2170,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=self._ha_time_zone(),
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -3457,6 +3465,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=self._ha_time_zone(),
         )
         self.state.run_cycle_count_by_circuit[circuit_id] = (
             cycle_summary.start_count
@@ -3609,6 +3618,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 else "°F"
             ),
             observed_at=now,
+            time_zone=self._ha_time_zone(),
         )
         if outdoor_temperature_reading is not None:
             evidence["temperature_source_entity"] = outdoor_entity
@@ -4163,7 +4173,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if not isinstance(raw_sample, Mapping):
                 continue
             sample_time = _datetime_or_none(raw_sample.get("timestamp"))
-            if sample_time is None or sample_time.date() >= now.date():
+            if sample_time is None or _ha_local_date(
+                sample_time,
+                self._ha_time_zone(),
+            ) >= _ha_local_date(now, self._ha_time_zone()):
                 continue
             temperature = _float_or_none(raw_sample.get("temperature"))
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
@@ -4211,7 +4224,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         for index in range(len(history) - 1, -1, -1):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
-            if existing_time is not None and existing_time.date() == now.date():
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                self._ha_time_zone(),
+            ) == _ha_local_date(now, self._ha_time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -5984,7 +6000,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _prune_energy_usage(self: Self, now: datetime) -> None:
         for circuit_id, history in self.store_data.energy_usage_by_circuit.items():
             retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = (now.date() - RETENTION_WINDOWS[retention_mode]).isoformat()
+            cutoff = (
+                _ha_local_date(now, self._ha_time_zone())
+                - RETENTION_WINDOWS[retention_mode]
+            ).isoformat()
             days = history.get("days", [])
             if not isinstance(days, list):
                 continue
@@ -5998,7 +6017,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for circuit_id, history in self.store_data.demand_by_circuit.items():
             retention_mode = self._retention_mode_for_circuit(circuit_id)
             cutoff_datetime = now - RETENTION_WINDOWS[retention_mode]
-            cutoff = cutoff_datetime.date().isoformat()
+            cutoff = (
+                _ha_local_date(now, self._ha_time_zone())
+                - RETENTION_WINDOWS[retention_mode]
+            ).isoformat()
             capacity_samples = history.get("capacity_current_samples")
             if isinstance(capacity_samples, list):
                 history["capacity_current_samples"] = [
@@ -6625,6 +6647,12 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
+    if time_zone is None or value.tzinfo is None:
+        return value.date()
+    return local_date(value, time_zone)
 
 
 def _observation_within_cutoff(

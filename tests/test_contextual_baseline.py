@@ -16,6 +16,7 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     solar_flow_state,
     temperature_bin,
     time_of_day_bucket,
+    upsert_contextual_sample,
     water_flow_state,
     weather_mode_for_temperature,
 )
@@ -88,6 +89,14 @@ def test_context_bucket_helpers() -> None:
     assert water_flow_state(False, 0.0) == "no_flow"
     assert solar_flow_state("exporting", "high_surplus") == "high_surplus"
     assert solar_flow_state("exporting", "no_surplus") == "exporting"
+
+
+def test_context_bucket_helpers_accept_ha_local_timezone() -> None:
+    timestamp = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+
+    assert season_for_datetime(timestamp, time_zone="America/New_York") == "spring"
+    assert day_type_for_datetime(timestamp, time_zone="America/New_York") == "weekend"
+    assert time_of_day_bucket(timestamp, time_zone="America/New_York") == "evening"
 
 
 def test_contextual_baseline_builds_robust_stats() -> None:
@@ -216,6 +225,85 @@ def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
         "time_of_day": "afternoon",
         "weather_mode": "cooling",
     }
+
+
+def test_build_context_for_sample_uses_sample_local_calendar() -> None:
+    sample_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    now = datetime(2026, 6, 2, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("ev", sample_time),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="peak_demand_w",
+        time_zone="America/New_York",
+    )
+
+    values = context.as_dict()
+    assert values["season"] == "spring"
+    assert values["day_type"] == "weekend"
+    assert values["time_of_day"] == "evening"
+
+
+def test_build_context_for_sample_accepts_rollup_calendar_timestamp() -> None:
+    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    rollup_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("ev", sample_time),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        now=rollup_time,
+        feature="peak_demand_w",
+        time_zone="America/New_York",
+        calendar_timestamp=rollup_time,
+    )
+
+    values = context.as_dict()
+    assert values["season"] == "spring"
+    assert values["day_type"] == "weekend"
+    assert values["time_of_day"] == "evening"
+
+
+def test_upsert_contextual_sample_replaces_same_ha_local_date() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples: list[dict[str, object]] = []
+    first = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 2, 23, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=8.0,
+        context=context,
+    )
+    second = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 3, 3, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=9.0,
+        context=context,
+    )
+
+    upsert_contextual_sample(samples, first, time_zone="America/New_York")
+    upsert_contextual_sample(samples, second, time_zone="America/New_York")
+
+    assert len(samples) == 1
+    assert samples[0]["timestamp"] == "2026-06-03T03:30:00+00:00"
+    assert samples[0]["value"] == 9.0
 
 
 def test_build_context_for_water_and_solar_state() -> None:

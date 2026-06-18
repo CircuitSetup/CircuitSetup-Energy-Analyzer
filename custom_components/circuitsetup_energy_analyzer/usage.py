@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+
+from .local_time import TimeZone, local_date
 
 DEFAULT_USAGE_WINDOW_DAYS = 7
 DEFAULT_DAILY_USAGE_SPIKE_RATIO = 0.25
@@ -58,6 +60,7 @@ def record_energy_usage(
     energy_kwh: float | None,
     settings: EnergyUsageSettings,
     retention_days: int = 45,
+    time_zone: TimeZone = None,
 ) -> EnergyUsageResult | None:
     """Fold a cumulative kWh sample into daily usage history."""
     if energy_kwh is None:
@@ -65,7 +68,7 @@ def record_energy_usage(
 
     window_days = max(int(settings.window_days), 1)
     threshold_ratio = max(float(settings.daily_spike_ratio), 0.0)
-    today = timestamp.date().isoformat()
+    today = _calendar_date(timestamp, time_zone).isoformat()
     days = _coerce_days(history.get("days"))
     prior_days = _prior_days(days, today, window_days)
 
@@ -82,7 +85,12 @@ def record_energy_usage(
 
     history["last_energy_kwh"] = float(energy_kwh)
     history["last_sample_at"] = timestamp.isoformat()
-    history["days"] = _prune_days(days, timestamp, retention_days)
+    history["days"] = _prune_days(
+        days,
+        timestamp,
+        retention_days,
+        time_zone=time_zone,
+    )
 
     today_usage = _round_kwh(_usage_for_date(days, today))
     baseline_total = _round_kwh(sum(day["usage_kwh"] for day in prior_days))
@@ -208,12 +216,22 @@ def _prune_days(
     days: list[dict[str, float | str]],
     timestamp: datetime,
     retention_days: int,
+    *,
+    time_zone: TimeZone = None,
 ) -> list[dict[str, float | str]]:
-    cutoff = (timestamp.date() - timedelta(days=max(retention_days, 1))).isoformat()
+    cutoff = (
+        _calendar_date(timestamp, time_zone) - timedelta(days=max(retention_days, 1))
+    ).isoformat()
     return sorted(
         (day for day in days if str(day["date"]) >= cutoff),
         key=lambda day: str(day["date"]),
     )
+
+
+def _calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or timestamp.tzinfo is None:
+        return timestamp.date()
+    return local_date(timestamp, time_zone)
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

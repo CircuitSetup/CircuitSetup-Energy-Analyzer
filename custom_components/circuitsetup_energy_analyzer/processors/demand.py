@@ -72,6 +72,7 @@ class DemandProcessor:
             real_power_w=_demand_power_w(sample),
             settings=self._settings_for_config(circuit_config, circuit_id),
             retention_days=self._retention_days_for_circuit(circuit_id),
+            time_zone=context.time_zone,
         )
         if result is None:
             return FeatureResult()
@@ -275,6 +276,8 @@ def _contextual_demand_comparison(
         store_data=context.store_data,
         now=context.now,
         feature=DEMAND_PEAK_FEATURE,
+        time_zone=context.time_zone,
+        calendar_timestamp=context.now,
     )
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_config.circuit_id,
@@ -304,6 +307,7 @@ def _contextual_demand_comparison(
                 context=context_key,
                 source="demand",
             ),
+            time_zone=context.time_zone,
         )
         sample_recorded = before != samples
         updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)

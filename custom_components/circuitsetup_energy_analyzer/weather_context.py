@@ -12,6 +12,7 @@ from .contextual_baseline import (
 from .contextual_baseline import (
     temperature_bin as contextual_temperature_bin,
 )
+from .local_time import TimeZone
 
 MIN_WEATHER_CONTEXT_SAMPLES = 3
 
@@ -38,6 +39,7 @@ def evaluate_weather_context(
     display_temperature: float | None = None,
     display_temperature_unit: str = "°F",
     observed_at: datetime | None = None,
+    time_zone: TimeZone = None,
 ) -> dict[str, Any]:
     """Return weather context for current HVAC activity."""
 
@@ -60,6 +62,7 @@ def evaluate_weather_context(
         mode=weather_mode,
         history=list(history),
         observed_at=observed_at,
+        time_zone=time_zone,
     )
     if comparable is None:
         return {
@@ -137,9 +140,14 @@ def _select_weather_baseline(
     mode: str,
     history: list[WeatherContextSample],
     observed_at: datetime | None,
+    time_zone: TimeZone = None,
 ) -> dict[str, Any] | None:
     current_temperature_bin = contextual_temperature_bin(temperature)
-    current_season = season_for_datetime(observed_at) if observed_at else None
+    current_season = (
+        season_for_datetime(observed_at, time_zone=time_zone)
+        if observed_at
+        else None
+    )
     fallback_groups: list[tuple[str, str, list[WeatherContextSample]]] = []
     if current_season is not None:
         fallback_groups.append(
@@ -150,7 +158,7 @@ def _select_weather_baseline(
                     sample
                     for sample in history
                     if _similar_temperature(sample, temperature)
-                    and _sample_season(sample) == current_season
+                    and _sample_season(sample, time_zone) == current_season
                 ],
             )
         )
@@ -173,7 +181,7 @@ def _select_weather_baseline(
                 [
                     sample
                     for sample in history
-                    if _sample_season(sample) == current_season
+                    if _sample_season(sample, time_zone) == current_season
                 ],
             )
         )
@@ -193,8 +201,13 @@ def _similar_temperature(sample: WeatherContextSample, temperature: float) -> bo
     return abs(sample.temperature - temperature) <= 3.0
 
 
-def _sample_season(sample: WeatherContextSample) -> str | None:
-    return season_for_datetime(sample.timestamp) if sample.timestamp else None
+def _sample_season(
+    sample: WeatherContextSample,
+    time_zone: TimeZone = None,
+) -> str | None:
+    if sample.timestamp is None:
+        return None
+    return season_for_datetime(sample.timestamp, time_zone=time_zone)
 
 
 def _baseline_confidence(sample_count: int, fallback_level: str) -> float:

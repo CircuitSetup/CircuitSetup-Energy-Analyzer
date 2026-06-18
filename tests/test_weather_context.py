@@ -135,6 +135,49 @@ def test_weather_context_uses_exact_temperature_season_baseline() -> None:
     assert result["contextual_status"] == "weather_correlated"
 
 
+def test_weather_context_season_uses_ha_local_timezone() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=94.0,
+        current_runtime_minutes=101.0,
+        current_duty_cycle_percent=50.0,
+        history=[
+            WeatherContextSample(
+                timestamp=timestamp,
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for timestamp, temperature, runtime, duty in (
+                (
+                    datetime(2026, 5, 30, 18, tzinfo=UTC),
+                    93.0,
+                    95.0,
+                    46.0,
+                ),
+                (
+                    datetime(2026, 5, 31, 18, tzinfo=UTC),
+                    95.0,
+                    100.0,
+                    50.0,
+                ),
+                (
+                    datetime(2026, 6, 1, 1, tzinfo=UTC),
+                    92.0,
+                    110.0,
+                    54.0,
+                ),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 1, 3, 30, tzinfo=UTC),
+        time_zone="America/New_York",
+    )
+
+    assert result["baseline_context"] == "cooling, very_hot, spring"
+    assert result["baseline_fallback_level"] == "exact_context"
+    assert result["baseline_sample_count"] == 3
+
+
 def test_weather_context_falls_back_to_temperature_context_without_season() -> None:
     result = evaluate_weather_context(
         outdoor_temperature=94.0,
