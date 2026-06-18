@@ -10,6 +10,8 @@ from typing import Any, Self
 from .models import AlertEvidence, CircuitConfig, Severity
 from .ux import friendly_feature_name
 
+ALERT_FINGERPRINT_SCHEMA_VERSION = "alert:v2"
+
 
 @dataclass(frozen=True, slots=True)
 class Observation:
@@ -169,7 +171,7 @@ def alert_feedback_fingerprint(
     config: CircuitConfig | None = None,
 ) -> str:
     """Return a stable key for matching repeated versions of alert evidence."""
-    parts = [alert.circuit_id, _alert_feature(alert)]
+    parts = [ALERT_FINGERPRINT_SCHEMA_VERSION, alert.circuit_id, _alert_feature(alert)]
     if alert.event_type is not None:
         parts.append(f"event={alert.event_type.value}")
     if config is not None:
@@ -187,7 +189,9 @@ def alert_feedback_fingerprint(
         (
             f"observed={_value_bucket(alert.observed_value)}",
             f"baseline={_value_bucket(alert.baseline_value)}",
-            f"ratio={_ratio_bucket(alert.change_ratio)}",
+            "direction="
+            f"{_change_direction(alert.observed_value, alert.baseline_value)}",
+            f"ratio={_ratio_bucket(alert)}",
         )
     )
     if (temperature := _temperature_context_bucket(alert.features)) is not None:
@@ -206,14 +210,27 @@ def _alert_feature(alert: AlertEvidence) -> str:
 
 
 def _value_bucket(value: float) -> str:
+    if float(value) == 0.0:
+        return "zero"
     step = 0.5
     bucket_start = _floor_to_step(float(value), step)
     bucket_end = bucket_start + step
     return f"{bucket_start:.1f}-{bucket_end:.1f}"
 
 
-def _ratio_bucket(change_ratio: float) -> str:
-    percent = abs(float(change_ratio) * 100.0)
+def _change_direction(observed_value: float, baseline_value: float) -> str:
+    if observed_value > baseline_value:
+        return "increase"
+    if observed_value < baseline_value:
+        return "decrease"
+    return "no_change"
+
+
+def _ratio_bucket(alert: AlertEvidence) -> str:
+    if alert.baseline_value == 0.0:
+        direction = _change_direction(alert.observed_value, alert.baseline_value)
+        return f"zero_baseline_{direction}"
+    percent = abs(float(alert.change_ratio) * 100.0)
     for bucket_start, bucket_end in (
         (0, 10),
         (10, 25),
