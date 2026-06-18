@@ -404,8 +404,6 @@ def _rain_confidence(
         confidence += 0.1
     if compressor_adjustment > 0.0:
         confidence += 0.05
-    if status in {"possible_excess_pump_activity", "weather_explained"}:
-        confidence += 0.1
     return min(confidence, 0.95)
 
 
@@ -422,12 +420,6 @@ def _flow_confidence(
     if recent_flow_explains_activity:
         confidence += 0.1
     if mapped_appliance_count > 0:
-        confidence += 0.05
-    if status in {
-        "possible_flow_without_load",
-        "possible_load_without_flow",
-        "possible_sensor_problem",
-    }:
         confidence += 0.05
     return min(confidence, 0.92)
 
