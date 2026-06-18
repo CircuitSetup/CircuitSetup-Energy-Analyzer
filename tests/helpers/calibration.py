@@ -324,13 +324,8 @@ def evaluate_replay_result(
                 matched_alert_offsets.append(_offset_seconds(fixture, alert.timestamp))
                 break
 
-    false_positive_alerts = sum(
-        1
-        for index, alert in enumerate(result.alerts)
-        if index not in matched_alert_indexes
-        and _is_false_positive(fixture.labels, fixture, alert)
-    )
     true_positive_alerts = len(matched_alert_indexes)
+    false_positive_alerts = len(result.alerts) - true_positive_alerts
     false_negative_alerts = (
         len(fixture.labels.expected_alerts) - true_positive_alerts
     )
@@ -660,23 +655,6 @@ def _alert_matches(
         and alert.repeated_count >= expected.min_repeated_count
         and _severity_matches(alert.severity, expected.severity)
         and _confidence_matches(alert, expected.min_confidence)
-    )
-
-
-def _is_false_positive(
-    labels: CalibrationLabels,
-    fixture: CalibrationFixture,
-    alert: AlertEvidence,
-) -> bool:
-    if any(
-        _alert_in_no_alert_window(fixture, alert, window)
-        for window in labels.expected_no_alerts
-    ):
-        return True
-    return not any(
-        alert.circuit_id == expected.circuit_id
-        and _feature_matches(expected.feature, alert.feature)
-        for expected in labels.expected_alerts
     )
 
 

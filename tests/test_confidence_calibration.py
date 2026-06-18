@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,37 @@ def test_abnormal_fixture_detects_expected_alert_with_latency() -> None:
     assert metrics.detection_latency_seconds == 172800.0
     assert metrics.precision == 1.0
     assert metrics.recall == 1.0
+
+
+def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
+    result = replay_fixture_processors(fixture)
+    result.alerts.append(result.alerts[0])
+
+    metrics = evaluate_replay_result(fixture, result)
+
+    assert metrics.true_positive_alerts == 1
+    assert metrics.false_positive_alerts == 1
+    assert metrics.precision == 0.5
+
+
+def test_out_of_window_expected_feature_alert_counts_as_false_positive() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
+    result = replay_fixture_processors(fixture)
+    expected = fixture.labels.expected_alerts[0]
+    result.alerts.append(
+        replace(
+            result.alerts[0],
+            timestamp=fixture.start_time
+            + timedelta(seconds=expected.latest_t + 60),
+        )
+    )
+
+    metrics = evaluate_replay_result(fixture, result)
+
+    assert metrics.true_positive_alerts == 1
+    assert metrics.false_positive_alerts == 1
+    assert metrics.precision == 0.5
 
 
 def test_calibration_report_markdown_lists_fixture_metrics() -> None:
