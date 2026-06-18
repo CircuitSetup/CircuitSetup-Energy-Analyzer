@@ -535,6 +535,8 @@ async def test_setting_recommendation_services_dispatch() -> None:
         SERVICE_DENY_SETTING_RECOMMENDATION,
         SERVICE_DISMISS_SETTING_RECOMMENDATION,
         SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS,
+        SERVICE_RESET_SETTING_RECOMMENDATION,
+        SERVICE_UNDO_SETTING_RECOMMENDATION,
         async_setup_services,
     )
 
@@ -598,9 +600,27 @@ async def test_setting_recommendation_services_dispatch() -> None:
                 ("async_dismiss_setting_recommendation", (recommendation_id,))
             )
 
+        async def async_undo_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> bool:
+            self.calls.append(
+                ("async_undo_setting_recommendation", (recommendation_id,))
+            )
+            return True
+
+        async def async_reset_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> bool:
+            self.calls.append(
+                ("async_reset_setting_recommendation", (recommendation_id,))
+            )
+            return True
+
     fridge_coordinator = FakeCoordinator(
         {"fridge"},
-        {"rec-apply", "rec-deny", "rec-dismiss"},
+        {"rec-apply", "rec-deny", "rec-dismiss", "rec-undo", "rec-reset"},
     )
     mains_coordinator = FakeCoordinator({"mains"})
     hass = SimpleNamespace(
@@ -630,6 +650,12 @@ async def test_setting_recommendation_services_dispatch() -> None:
     await hass.services.registered[(DOMAIN, SERVICE_DISMISS_SETTING_RECOMMENDATION)](
         SimpleNamespace(data={"recommendation_id": "rec-dismiss"})
     )
+    await hass.services.registered[(DOMAIN, SERVICE_UNDO_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"recommendation_id": "rec-undo"})
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_RESET_SETTING_RECOMMENDATION)](
+        SimpleNamespace(data={"recommendation_id": "rec-reset"})
+    )
 
     assert fridge_coordinator.calls == [
         ("async_recalculate_setting_recommendations", (None,)),
@@ -637,10 +663,58 @@ async def test_setting_recommendation_services_dispatch() -> None:
         ("async_apply_setting_recommendation", ("rec-apply",)),
         ("async_deny_setting_recommendation", ("rec-deny",)),
         ("async_dismiss_setting_recommendation", ("rec-dismiss",)),
+        ("async_undo_setting_recommendation", ("rec-undo",)),
+        ("async_reset_setting_recommendation", ("rec-reset",)),
     ]
     assert mains_coordinator.calls == [
         ("async_recalculate_setting_recommendations", (None,)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_setting_recommendation_undo_requires_changed_recommendation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_UNDO_SETTING_RECOMMENDATION,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.store_data = SimpleNamespace(
+                settings_recommendations={"rec-undo": object()}
+            )
+            self.state = SimpleNamespace(settings_recommendations_by_circuit={})
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_undo_setting_recommendation(
+            self,
+            recommendation_id: str,
+        ) -> bool:
+            assert recommendation_id == "rec-undo"
+            return False
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry": FakeCoordinator()}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="could not be changed"):
+        await hass.services.registered[(DOMAIN, SERVICE_UNDO_SETTING_RECOMMENDATION)](
+            SimpleNamespace(data={"recommendation_id": "rec-undo"})
+        )
 
 
 @pytest.mark.asyncio

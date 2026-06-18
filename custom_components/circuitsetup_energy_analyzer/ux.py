@@ -188,6 +188,18 @@ def alert_evidence_detail(
     }
     if feature_needs_electrical_safety_notice(feature):
         detail["safety_notice"] = ELECTRICAL_SAFETY_NOTICE
+    if alert.feedback_status is not None:
+        detail["feedback_status"] = alert.feedback_status
+    if alert.feedback_effect is not None:
+        detail["feedback_effect"] = alert.feedback_effect
+    if alert.feedback_expires_at is not None:
+        detail["feedback_expires_at"] = alert.feedback_expires_at.isoformat()
+    if alert.matching_feedback_fingerprint is not None:
+        detail["matching_feedback_fingerprint"] = (
+            alert.matching_feedback_fingerprint
+        )
+    if alert.adjusted_min_repeated is not None:
+        detail["adjusted_min_repeated"] = alert.adjusted_min_repeated
     return detail
 
 

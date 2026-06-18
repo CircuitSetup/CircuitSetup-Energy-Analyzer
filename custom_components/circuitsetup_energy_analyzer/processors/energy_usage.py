@@ -6,6 +6,17 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..alerting import Observation
+from ..contextual_baseline import (
+    DAILY_ENERGY_FEATURE,
+    ContextualBaselineSample,
+    build_context_for_sample,
+    contextual_stats_storage_key,
+    contextual_stats_to_dict,
+    daily_energy_fallback_contexts,
+    select_contextual_baseline,
+    stored_contextual_samples,
+    upsert_contextual_sample,
+)
 from ..models import AlertEvidence, CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -75,6 +86,12 @@ class EnergyUsageProcessor:
         if result is None:
             return FeatureResult()
 
+        contextual_comparison = _contextual_daily_energy_comparison(
+            result,
+            circuit_config,
+            sample,
+            context,
+        )
         feature_result = FeatureResult(
             state_updates=[
                 StateUpdate(
@@ -87,7 +104,10 @@ class EnergyUsageProcessor:
                 ),
                 StateUpdate(
                     ("energy_usage_evidence_by_circuit", circuit_id),
-                    energy_usage_evidence_payload(result),
+                    energy_usage_evidence_payload(
+                        result,
+                        contextual_comparison,
+                    ),
                 ),
             ],
             store_dirty=True,
@@ -95,27 +115,37 @@ class EnergyUsageProcessor:
 
         if result.spike is None:
             return feature_result
+        if contextual_comparison.get("status_override") == "context_explained":
+            return feature_result
 
         spike = result.spike
+        alert_baseline_value = float(
+            contextual_comparison.get("alert_baseline_value", spike.threshold_kwh)
+        )
         score = (
-            spike.daily_usage_kwh / spike.threshold_kwh
-            if spike.threshold_kwh > 0.0
+            spike.daily_usage_kwh / alert_baseline_value
+            if alert_baseline_value > 0.0
             else 0.0
         )
+        baseline_confidence = float(
+            contextual_comparison.get(
+                "alert_baseline_confidence",
+                min(spike.baseline_day_count / spike.window_days, 1.0),
+            )
+        )
+        alert_features = dict(spike.features)
+        alert_features.update(_contextual_alert_features(contextual_comparison))
         alert = self._alert_policy_for_circuit(circuit_id).observe(
             Observation(
                 circuit_id=circuit_id,
                 feature="daily_energy_usage_spike",
                 score=score,
-                baseline_confidence=min(
-                    spike.baseline_day_count / spike.window_days,
-                    1.0,
-                ),
+                baseline_confidence=baseline_confidence,
                 observed_at=context.now,
                 observed_value=spike.daily_usage_kwh,
-                baseline_value=spike.threshold_kwh,
+                baseline_value=alert_baseline_value,
                 message=energy_usage_spike_message(circuit_config, spike),
-                features=spike.features,
+                features=alert_features,
             )
         )
         if alert is not None:
@@ -139,10 +169,15 @@ def energy_usage_spike_message(
     )
 
 
-def energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
+def energy_usage_evidence_payload(
+    result: Any,
+    contextual_comparison: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the analyzer state payload for daily usage tracking."""
     status = "over_threshold" if result.spike is not None else result.tracking_status
-    return {
+    if contextual_comparison and contextual_comparison.get("status_override"):
+        status = str(contextual_comparison["status_override"])
+    payload = {
         "date": result.date,
         "daily_usage_kwh": result.daily_usage_kwh,
         "baseline_total_kwh": result.baseline_total_kwh,
@@ -158,6 +193,121 @@ def energy_usage_evidence_payload(result: Any) -> dict[str, Any]:
         "status_reason": result.status_reason,
         "suggested_next_check": _energy_usage_next_check(status),
     }
+    if contextual_comparison:
+        payload.update(
+            {
+                key: value
+                for key, value in contextual_comparison.items()
+                if not key.startswith("alert_") and key != "status_override"
+            }
+        )
+    return payload
+
+
+def _contextual_daily_energy_comparison(
+    result: Any,
+    circuit_config: CircuitConfig,
+    sample: NormalizedCircuitSample,
+    context: ProcessingContext,
+) -> dict[str, Any]:
+    """Record and compare daily energy against contextual history."""
+    circuit_id = circuit_config.circuit_id
+    context_key = build_context_for_sample(
+        circuit_config=circuit_config,
+        sample=sample,
+        state=context.state,
+        store_data=context.store_data,
+        now=context.now,
+        feature=DAILY_ENERGY_FEATURE,
+    )
+    raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
+        circuit_id,
+        [],
+    )
+    historical_samples = stored_contextual_samples(circuit_id, raw_samples)
+    selected = select_contextual_baseline(
+        circuit_id=circuit_id,
+        feature=DAILY_ENERGY_FEATURE,
+        samples=historical_samples,
+        fallback_contexts=daily_energy_fallback_contexts(context_key),
+    )
+
+    if result.daily_usage_kwh > 0.0:
+        samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        upsert_contextual_sample(
+            samples,
+            ContextualBaselineSample(
+                timestamp=context.now,
+                circuit_id=circuit_id,
+                feature=DAILY_ENERGY_FEATURE,
+                value=result.daily_usage_kwh,
+                context=context_key,
+                source="energy_usage",
+            ),
+        )
+        updated_samples = stored_contextual_samples(circuit_id, samples)
+        exact = select_contextual_baseline(
+            circuit_id=circuit_id,
+            feature=DAILY_ENERGY_FEATURE,
+            samples=updated_samples,
+            fallback_contexts=[("exact_context", context_key, 7)],
+        )
+        if exact is not None:
+            context.store_data.contextual_baselines_by_circuit.setdefault(
+                circuit_id,
+                {},
+            )[contextual_stats_storage_key(exact)] = contextual_stats_to_dict(exact)
+
+    if selected is None:
+        return {
+            "comparison_basis": "rolling",
+            "baseline_fallback_level": "not_enough_data",
+            "global_baseline_used": True,
+        }
+
+    attrs: dict[str, Any] = {
+        "comparison_basis": "contextual",
+        "baseline_context": ", ".join(selected.context.values()),
+        "baseline_fallback_level": selected.fallback_level,
+        "baseline_sample_count": selected.sample_count,
+        "contextual_baseline_median_kwh": round(selected.median, 3),
+        "contextual_baseline_p90_kwh": round(selected.p90, 3),
+        "contextual_baseline_confidence": selected.confidence,
+        "contextual_expected_range": [round(selected.p10, 3), round(selected.p90, 3)],
+        "global_baseline_used": False,
+        "alert_baseline_value": selected.p90,
+        "alert_baseline_confidence": selected.confidence,
+    }
+    if result.spike is not None and result.daily_usage_kwh <= selected.p90:
+        attrs["status_override"] = "context_explained"
+    return attrs
+
+
+def _contextual_alert_features(
+    contextual_comparison: dict[str, Any],
+) -> dict[str, Any]:
+    features: dict[str, Any] = {}
+    for key in (
+        "comparison_basis",
+        "baseline_context",
+        "baseline_fallback_level",
+    ):
+        value = contextual_comparison.get(key)
+        if value is not None:
+            features[key] = value
+    for source, target in (
+        ("baseline_sample_count", "baseline_sample_count"),
+        ("contextual_baseline_median_kwh", "contextual_baseline_median_kwh"),
+        ("contextual_baseline_p90_kwh", "contextual_baseline_p90_kwh"),
+        ("contextual_baseline_confidence", "contextual_baseline_confidence"),
+    ):
+        value = contextual_comparison.get(source)
+        if value is not None:
+            features[target] = float(value)
+    return features
 
 
 def _status_label_for_evidence(status: str) -> str:

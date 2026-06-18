@@ -540,6 +540,57 @@ def test_cluster_recurring_signatures_is_stable_for_permuted_similar_edges() -> 
     assert first_order[0].median_delta_w == 121.0
 
 
+def test_nilm_signature_fingerprint_ignores_cluster_order_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        nilm_signature_fingerprint,
+    )
+
+    first = NilmSignature(
+        signature_id="on-1",
+        median_delta_w=612.0,
+        median_delta_var=142.0,
+        median_delta_va=628.0,
+        median_delta_pf=-0.03,
+        occurrence_count=3,
+        confidence=0.7,
+        median_leg_a_delta_w=610.0,
+        median_leg_b_delta_w=15.0,
+        leg_balance_ratio=0.95,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+    reordered = NilmSignature(
+        signature_id="on-2",
+        median_delta_w=625.0,
+        median_delta_var=151.0,
+        median_delta_va=638.0,
+        median_delta_pf=-0.02,
+        occurrence_count=6,
+        confidence=0.9,
+        median_leg_a_delta_w=625.0,
+        median_leg_b_delta_w=18.0,
+        leg_balance_ratio=0.94,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+    off_signature = NilmSignature(
+        signature_id="off-1",
+        median_delta_w=-618.0,
+        median_delta_var=-146.0,
+        median_delta_va=-632.0,
+        median_delta_pf=0.03,
+        occurrence_count=3,
+        confidence=0.7,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+
+    assert nilm_signature_fingerprint(first) == nilm_signature_fingerprint(reordered)
+    assert nilm_signature_fingerprint(first) != nilm_signature_fingerprint(
+        off_signature
+    )
+
+
 def test_classify_signature_is_conservative_and_allows_user_label_override() -> None:
     assert (
         classify_signature(

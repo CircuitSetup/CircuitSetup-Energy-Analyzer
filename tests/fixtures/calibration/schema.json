@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CircuitSetup confidence calibration fixture",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "description",
+    "scenario_type",
+    "start_time",
+    "circuits",
+    "labels",
+    "calibration_expectations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "scenario_type": { "enum": ["normal", "abnormal"] },
+    "start_time": { "type": "string", "format": "date-time" },
+    "circuits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["circuit_id", "name", "appliance_profile", "circuit_mode"],
+        "properties": {
+          "circuit_id": { "type": "string" },
+          "name": { "type": "string" },
+          "appliance_profile": { "type": "string" },
+          "circuit_mode": { "type": "string" },
+          "power_flow": { "type": "string" },
+          "sources": { "type": "object" }
+        }
+      }
+    },
+    "samples": { "type": "array" },
+    "segments": { "type": "array" },
+    "labels": { "type": "object" },
+    "calibration_expectations": { "type": "object" }
+  }
+}

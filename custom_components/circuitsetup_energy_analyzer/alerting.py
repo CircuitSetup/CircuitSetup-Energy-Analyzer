@@ -5,9 +5,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Self
+from typing import Any, Self
 
-from .models import AlertEvidence, Severity
+from .models import AlertEvidence, CircuitConfig, Severity
 from .ux import friendly_feature_name
 
 
@@ -24,7 +24,7 @@ class Observation:
     baseline_value: float = 0.0
     message: str = ""
     observation_key: str | None = None
-    features: Mapping[str, float] = field(default_factory=dict)
+    features: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
@@ -45,13 +45,22 @@ class ConservativeAlertPolicy:
         self.min_average_score = min_average_score
         self.min_baseline_confidence = min_baseline_confidence
         self._observations: defaultdict[tuple[str, str], deque[Observation]] = (
-            defaultdict(lambda: deque(maxlen=self.min_repeated))
+            defaultdict(deque)
         )
 
-    def observe(self: Self, observation: Observation) -> AlertEvidence | None:
+    def observe(
+        self: Self,
+        observation: Observation,
+        *,
+        min_repeated: int | None = None,
+    ) -> AlertEvidence | None:
         if observation.baseline_confidence < self.min_baseline_confidence:
             return None
 
+        required_min_repeated = max(
+            self.min_repeated,
+            int(min_repeated) if min_repeated is not None else self.min_repeated,
+        )
         key = (observation.circuit_id, observation.feature)
         observations = self._observations[key]
         if observation.observation_key is not None:
@@ -60,8 +69,10 @@ class ConservativeAlertPolicy:
                     observations[index] = observation
                     return None
         observations.append(observation)
+        while len(observations) > required_min_repeated:
+            observations.popleft()
 
-        if len(observations) < self.min_repeated:
+        if len(observations) < required_min_repeated:
             return None
 
         total_score = sum(item.score for item in observations)
@@ -105,3 +116,126 @@ class ConservativeAlertPolicy:
             return 0.0
 
         return (observed_value - baseline_value) / baseline_value
+
+
+def alert_feedback_fingerprint_for_observation(
+    observation: Observation,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    """Return the alert feedback key an observation would produce if promoted."""
+    return alert_feedback_fingerprint(
+        AlertEvidence(
+            timestamp=observation.observed_at,
+            circuit_id=observation.circuit_id,
+            severity=Severity.WARNING,
+            message=observation.message,
+            feature=observation.feature,
+            observed_value=observation.observed_value,
+            baseline_value=observation.baseline_value,
+            change_ratio=ConservativeAlertPolicy._change_ratio(
+                observation.observed_value,
+                observation.baseline_value,
+            ),
+            features=observation.features,
+        ),
+        config=config,
+    )
+
+
+def alert_feedback_fingerprint(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+) -> str:
+    """Return a stable key for matching repeated versions of alert evidence."""
+    parts = [alert.circuit_id, _alert_feature(alert)]
+    if alert.event_type is not None:
+        parts.append(f"event={alert.event_type.value}")
+    if config is not None:
+        source_roles = sorted({sensor.role.value for sensor in config.sensors})
+        if source_roles:
+            parts.append(f"sources={'+'.join(source_roles)}")
+        parts.extend(
+            (
+                f"profile={config.appliance_profile.value}",
+                f"mode={config.mode.value}",
+                f"power_flow={config.power_flow.value}",
+            )
+        )
+    parts.extend(
+        (
+            f"observed={_value_bucket(alert.observed_value)}",
+            f"baseline={_value_bucket(alert.baseline_value)}",
+            f"ratio={_ratio_bucket(alert.change_ratio)}",
+        )
+    )
+    if (temperature := _temperature_context_bucket(alert.features)) is not None:
+        parts.append(f"temp={temperature}")
+    if (baseline_context := _baseline_context_bucket(alert.features)) is not None:
+        parts.append(f"context={baseline_context}")
+    return "|".join(parts)
+
+
+def _alert_feature(alert: AlertEvidence) -> str:
+    if alert.feature:
+        return alert.feature
+    if alert.event_type is not None:
+        return alert.event_type.value
+    return "alert"
+
+
+def _value_bucket(value: float) -> str:
+    step = 0.5
+    bucket_start = _floor_to_step(float(value), step)
+    bucket_end = bucket_start + step
+    return f"{bucket_start:.1f}-{bucket_end:.1f}"
+
+
+def _ratio_bucket(change_ratio: float) -> str:
+    percent = abs(float(change_ratio) * 100.0)
+    for bucket_start, bucket_end in (
+        (0, 10),
+        (10, 25),
+        (25, 50),
+        (50, 75),
+        (75, 100),
+        (100, 150),
+        (150, 200),
+    ):
+        if percent < bucket_end:
+            return f"{bucket_start}-{bucket_end}pct"
+    return "200pct-plus"
+
+
+def _temperature_context_bucket(features: Mapping[str, object]) -> str | None:
+    for key in (
+        "outdoor_temperature_f",
+        "current_outdoor_temperature_f",
+        "temperature_f",
+        "outdoor_temperature",
+        "current_outdoor_temperature",
+    ):
+        value = features.get(key)
+        if isinstance(value, int | float):
+            bucket_start = int(_floor_to_step(float(value), 5.0))
+            return f"{bucket_start}-{bucket_start + 5}f"
+    return None
+
+
+def _baseline_context_bucket(features: Mapping[str, object]) -> str | None:
+    if str(features.get("comparison_basis", "")).strip().lower() != "contextual":
+        return None
+    baseline_context = str(features.get("baseline_context", "")).strip()
+    if not baseline_context:
+        return None
+    fallback_level = str(features.get("baseline_fallback_level", "")).strip()
+    parts = ["contextual"]
+    if fallback_level:
+        parts.append(fallback_level)
+    parts.append(baseline_context)
+    return "+".join(parts)
+
+
+def _floor_to_step(value: float, step: float) -> float:
+    return (value // step) * step

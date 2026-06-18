@@ -1224,3 +1224,65 @@ dismiss_setting_recommendation:
       example: 01JZEXAMPLEENTRYID
       selector:
         text:
+undo_setting_recommendation:
+  name: Undo setting recommendation
+  description: "Advanced/script action: undo an applied advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
+  fields:
+    recommendation_id:
+      name: Recommendation ID
+      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
+      required: false
+      example: fridge:daily_spike_ratio:v1
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is undone without typing the recommendation ID.
+      required: false
+      selector:
+        entity:
+          integration: circuitsetup_energy_analyzer
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    entry_id:
+      name: Entry ID
+      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
+      required: false
+      example: 01JZEXAMPLEENTRYID
+      selector:
+        text:
+reset_setting_recommendation:
+  name: Reset setting recommendation
+  description: "Advanced/script action: reset an advanced setting recommendation's setting to its built-in default by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
+  fields:
+    recommendation_id:
+      name: Recommendation ID
+      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
+      required: false
+      example: fridge:daily_spike_ratio:v1
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, its setting is reset without typing the recommendation ID.
+      required: false
+      selector:
+        entity:
+          integration: circuitsetup_energy_analyzer
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    entry_id:
+      name: Entry ID
+      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
+      required: false
+      example: 01JZEXAMPLEENTRYID
+      selector:
+        text:

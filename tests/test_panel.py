@@ -28,6 +28,7 @@ def _alert(
     feature: str = "leg_imbalance",
     *,
     timestamp: datetime | None = None,
+    **overrides,
 ) -> AlertEvidence:
     timestamp = timestamp or datetime(2026, 6, 6, 9, 0, tzinfo=UTC)
     return AlertEvidence(
@@ -43,6 +44,7 @@ def _alert(
         first_seen=timestamp - timedelta(hours=1),
         last_seen=timestamp,
         features={feature: 2.1},
+        **overrides,
     )
 
 
@@ -116,6 +118,64 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
+
+
+def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    fingerprint = (
+        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
+    )
+    alert = _alert(
+        feedback_status="expected",
+        feedback_effect="Notifications suppressed for this expected pattern",
+        feedback_expires_at=datetime(2026, 9, 15, 12, 0, tzinfo=UTC),
+        matching_feedback_fingerprint=fingerprint,
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(alert)],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["alert"]["feedback_status"] == "expected"
+    assert payload["alert"]["feedback_effect"] == (
+        "Notifications suppressed for this expected pattern"
+    )
+    assert payload["alert"]["feedback_expires_at"] == (
+        "2026-09-15T12:00:00+00:00"
+    )
+    assert payload["alert"]["matching_feedback_fingerprint"] == fingerprint
+
+
+def test_alert_evidence_payload_explains_unhelpful_adjusted_requirement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    fingerprint = (
+        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
+    )
+    alert = _alert(
+        feedback_status="unhelpful",
+        feedback_effect="Future matching alerts require stronger repeated evidence",
+        feedback_expires_at=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        matching_feedback_fingerprint=fingerprint,
+        adjusted_min_repeated=5,
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(alert)],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["alert"]["feedback_status"] == "unhelpful"
+    assert payload["alert"]["feedback_effect"] == (
+        "Future matching alerts require stronger repeated evidence"
+    )
+    assert payload["alert"]["adjusted_min_repeated"] == 5
 
 
 def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit() -> (
@@ -334,6 +394,18 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     assert payload["setting_recommendations"][0]["actions"]["dismiss"]["service"] == (
         "dismiss_setting_recommendation"
     )
+    assert payload["setting_recommendations"][0]["actions"]["undo"]["service"] == (
+        "undo_setting_recommendation"
+    )
+    assert payload["setting_recommendations"][0]["actions"]["undo"][
+        "enabled"
+    ] is False
+    assert payload["setting_recommendations"][0]["actions"]["reset"]["service"] == (
+        "reset_setting_recommendation"
+    )
+    assert payload["setting_recommendations"][0]["actions"]["reset"][
+        "enabled"
+    ] is True
     assert payload["setting_recommendations"][0]["display_label"] == (
         "Raise daily spike threshold"
     )
@@ -344,6 +416,42 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     assert payload["setting_recommendations"][1]["display_label"] == (
         "Standby threshold"
     )
+
+
+def test_alert_evidence_payload_enables_undo_for_applied_recommendations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    coordinator = _coordinator(alert)
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:daily_spike_ratio:v1",
+                "title": "Raise daily spike threshold",
+                "feature": "daily_spike_ratio",
+                "status": "applied",
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    actions = payload["setting_recommendations"][0]["actions"]
+    assert actions["apply"]["enabled"] is False
+    assert actions["deny"]["enabled"] is False
+    assert actions["dismiss"]["enabled"] is False
+    assert actions["undo"]["enabled"] is True
+    assert actions["undo"]["data"] == {
+        "recommendation_id": "hvac:daily_spike_ratio:v1",
+        "entry_id": "entry-1",
+    }
+    assert actions["reset"]["enabled"] is True
 
 
 def test_alert_evidence_payload_guides_recommendation_preview() -> None:

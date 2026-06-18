@@ -8,8 +8,20 @@ from typing import Any, Protocol
 
 from ..alerting import Observation
 from ..baseline import build_baseline
+from ..contextual_baseline import (
+    ContextualBaselineSample,
+    build_context_for_sample,
+    contextual_stats_storage_key,
+    contextual_stats_to_dict,
+    daily_energy_fallback_contexts,
+    select_contextual_baseline,
+    stored_contextual_samples,
+    upsert_contextual_sample,
+)
 from ..cycles import (
     RUN_CYCLE_DURATION_FEATURE,
+    RUN_CYCLE_DUTY_CYCLE_FEATURE,
+    RUN_CYCLE_START_COUNT_FEATURE,
     cycle_baseline_feature_values,
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
@@ -78,8 +90,23 @@ class RunCycleProcessor:
             context.now,
             merge_gap_seconds=merge_gap_seconds,
         )
+        context_key = build_context_for_sample(
+            circuit_config=circuit_config,
+            sample=sample,
+            state=context.state,
+            store_data=context.store_data,
+            now=context.now,
+            feature="run_cycle",
+        )
         if not self._learning_mature(circuit_config, context.now):
-            return FeatureResult(store_dirty=baseline_dirty)
+            contextual_dirty = _record_contextual_cycle_samples(
+                store_data=context.store_data,
+                circuit_id=circuit_config.circuit_id,
+                summary=summary,
+                context_key=context_key,
+                now=context.now,
+            )
+            return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
             return FeatureResult(store_dirty=baseline_dirty)
 
@@ -92,24 +119,65 @@ class RunCycleProcessor:
         )
         feature_result = FeatureResult(store_dirty=baseline_dirty)
         if evidence is None:
+            feature_result.store_dirty = (
+                feature_result.store_dirty
+                or _record_contextual_cycle_samples(
+                    store_data=context.store_data,
+                    circuit_id=circuit_config.circuit_id,
+                    summary=summary,
+                    context_key=context_key,
+                    now=context.now,
+                )
+            )
             return feature_result
+        contextual_comparison = _contextual_cycle_comparison(
+            store_data=context.store_data,
+            circuit_id=circuit_config.circuit_id,
+            feature=evidence.feature,
+            observed_value=evidence.observed_value,
+            context_key=context_key,
+        )
+        feature_result.store_dirty = (
+            feature_result.store_dirty
+            or _record_contextual_cycle_samples(
+                store_data=context.store_data,
+                circuit_id=circuit_config.circuit_id,
+                summary=summary,
+                context_key=context_key,
+                now=context.now,
+            )
+        )
+        if contextual_comparison.get("comparison_basis") == "contextual":
+            feature_result.store_dirty = True
+        if contextual_comparison.get("status_override") == "context_explained":
+            return feature_result
+
+        alert_features = dict(evidence.features)
+        alert_features.update(_contextual_alert_features(contextual_comparison))
+        baseline_value = float(
+            contextual_comparison.get("alert_baseline_value", evidence.baseline_value)
+        )
+        baseline_confidence = float(
+            contextual_comparison.get(
+                "alert_baseline_confidence",
+                evidence.baseline_confidence,
+            )
+        )
+        score = float(contextual_comparison.get("alert_score", evidence.score))
 
         observation = Observation(
             circuit_id=circuit_config.circuit_id,
             feature=evidence.feature,
-            score=evidence.score,
-            baseline_confidence=evidence.baseline_confidence,
+            score=score,
+            baseline_confidence=baseline_confidence,
             observed_at=context.now,
             observed_value=evidence.observed_value,
-            baseline_value=evidence.baseline_value,
+            baseline_value=baseline_value,
             message=evidence.message,
             observation_key=_observation_key(evidence.feature, summary),
-            features=evidence.features,
+            features=alert_features,
         )
-        feature_result = FeatureResult(
-            observations=[observation],
-            store_dirty=baseline_dirty,
-        )
+        feature_result.observations.append(observation)
         alert = policy.observe(observation)
         if alert is not None:
             feature_result.alerts.append(alert)
@@ -165,3 +233,92 @@ def _operating_state_is_unavailable(
         return False
     snapshot = snapshots.get(circuit_id)
     return snapshot is not None and operating_state_is_running(snapshot) is None
+
+
+def _record_contextual_cycle_samples(
+    *,
+    store_data: FeatureStoreData,
+    circuit_id: str,
+    summary: Any,
+    context_key: Any,
+    now: datetime,
+) -> bool:
+    samples = store_data.contextual_baseline_samples_by_circuit.setdefault(
+        circuit_id,
+        [],
+    )
+    before = [dict(sample) for sample in samples]
+    for feature, value in _cycle_feature_values(summary).items():
+        if value <= 0.0:
+            continue
+        upsert_contextual_sample(
+            samples,
+            ContextualBaselineSample(
+                timestamp=now,
+                circuit_id=circuit_id,
+                feature=feature,
+                value=value,
+                context=context_key,
+                source="run_cycle",
+            ),
+        )
+    return before != samples
+
+
+def _contextual_cycle_comparison(
+    *,
+    store_data: FeatureStoreData,
+    circuit_id: str,
+    feature: str,
+    observed_value: float,
+    context_key: Any,
+) -> dict[str, Any]:
+    raw_samples = store_data.contextual_baseline_samples_by_circuit.get(
+        circuit_id,
+        [],
+    )
+    selected = select_contextual_baseline(
+        circuit_id=circuit_id,
+        feature=feature,
+        samples=stored_contextual_samples(circuit_id, raw_samples),
+        fallback_contexts=daily_energy_fallback_contexts(context_key),
+    )
+    if selected is None:
+        return {"comparison_basis": "global", "baseline_fallback_level": "global"}
+
+    store_data.contextual_baselines_by_circuit.setdefault(circuit_id, {})[
+        contextual_stats_storage_key(selected)
+    ] = contextual_stats_to_dict(selected)
+    attrs: dict[str, Any] = {
+        "comparison_basis": "contextual",
+        "baseline_context": ", ".join(selected.context.values()),
+        "baseline_fallback_level": selected.fallback_level,
+        "baseline_sample_count": selected.sample_count,
+        "contextual_baseline_median": round(selected.median, 3),
+        "contextual_baseline_p90": round(selected.p90, 3),
+        "contextual_baseline_confidence": selected.confidence,
+        "alert_baseline_value": selected.p90,
+        "alert_baseline_confidence": selected.confidence,
+        "alert_score": (
+            float(observed_value) / selected.p90 if selected.p90 > 0.0 else 0.0
+        ),
+    }
+    if observed_value <= selected.p90:
+        attrs["status_override"] = "context_explained"
+    return attrs
+
+
+def _contextual_alert_features(contextual_comparison: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in contextual_comparison.items()
+        if not key.startswith("alert_") and key != "status_override"
+    }
+
+
+def _cycle_feature_values(summary: Any) -> dict[str, float]:
+    return {
+        RUN_CYCLE_DURATION_FEATURE: float(summary.active_cycle_seconds),
+        RUN_CYCLE_DUTY_CYCLE_FEATURE: float(summary.duty_cycle_percent),
+        RUN_CYCLE_START_COUNT_FEATURE: float(summary.start_count),
+    }

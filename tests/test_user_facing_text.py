@@ -1310,6 +1310,8 @@ def test_recommendation_action_services_document_entity_targets() -> None:
         "apply_setting_recommendation",
         "deny_setting_recommendation",
         "dismiss_setting_recommendation",
+        "undo_setting_recommendation",
+        "reset_setting_recommendation",
     ):
         fields = services[service_name]["fields"]
         assert fields["recommendation_id"]["required"] is False

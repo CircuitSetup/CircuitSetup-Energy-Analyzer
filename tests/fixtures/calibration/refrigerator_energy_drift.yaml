@@ -1,0 +1,99 @@
+schema_version: 1
+id: refrigerator_energy_drift
+description: Refrigerator uses materially more energy after the baseline window.
+scenario_type: abnormal
+appliance_profile: refrigerator
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: refrigerator
+    name: Refrigerator
+    appliance_profile: refrigerator
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.refrigerator_power
+      energy: sensor.refrigerator_energy
+      current: sensor.refrigerator_current
+      voltage: sensor.refrigerator_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.refrigerator_power: 8
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 0.1
+      sensor.refrigerator_voltage: 121.2
+  - t: 60
+    states:
+      sensor.refrigerator_power: 145
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 1.2
+      sensor.refrigerator_voltage: 121.0
+  - t: 120
+    states:
+      sensor.refrigerator_power: 145
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 1.2
+      sensor.refrigerator_voltage: 121.1
+  - t: 180
+    states:
+      sensor.refrigerator_power: 8
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 0.1
+      sensor.refrigerator_voltage: 121.1
+  - t: 240
+    states:
+      sensor.refrigerator_power: 8
+      sensor.refrigerator_energy: 100.0
+      sensor.refrigerator_current: 0.1
+      sensor.refrigerator_voltage: 121.0
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 100.0
+    power_w: 145
+    current_a: 1.2
+    voltage_v: 121.0
+    daily_usage_kwh: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 4.0, 5.0, 6.0]
+
+labels:
+  abnormal_condition_start_t: 691200
+  expected_events:
+    - circuit_id: refrigerator
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: refrigerator
+      event_type: stop
+      around_t: 180
+      tolerance_seconds: 60
+  expected_alerts:
+    - circuit_id: refrigerator
+      feature: daily_energy_usage_spike
+      earliest_t: 864000
+      latest_t: 864000
+      severity: warning
+      min_repeated_count: 3
+      min_confidence: 0.6
+  expected_no_alerts:
+    - circuit_id: refrigerator
+      feature: "*"
+      start_t: 0
+      end_t: 691199
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 1
+  max_false_negative_alerts: 0
+  max_detection_latency_seconds: 172800
+  expected_precision_at_least: 1.0
+  expected_recall_at_least: 1.0

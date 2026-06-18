@@ -1848,6 +1848,55 @@ async def test_runtime_entry_retention_applies_when_circuit_omits_retention() ->
     assert old_event not in fake_store.saved_events[-1]
 
 
+def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    old_sample = {
+        "timestamp": (now - timedelta(days=30)).isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 7.5,
+        "context": {"season": "spring"},
+        "source": "test",
+    }
+    recent_sample = {
+        "timestamp": (now - timedelta(days=2)).isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 8.5,
+        "context": {"season": "summer"},
+        "source": "test",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            contextual_baseline_samples_by_circuit={
+                "hvac": [old_sample, recent_sample]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.contextual_baseline_samples_by_circuit == {
+        "hvac": [recent_sample]
+    }
+
+
 def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         ALERT_FEEDBACK_MAX_ITEMS,
@@ -1889,6 +1938,238 @@ def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
         f"fridge:real_power:{ALERT_FEEDBACK_MAX_ITEMS + 24}"
         not in coordinator.store_data.alert_feedback
     )
+
+
+@pytest.mark.asyncio
+async def test_expected_alert_feedback_suppresses_matching_future_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    previous_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    repeated_alert = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue again",
+        feature="daily_energy_spike",
+        observed_value=2.64,
+        baseline_value=2.0,
+        change_ratio=0.32,
+    )
+    fingerprint = alert_feedback_fingerprint(previous_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+
+    _, active_alerts = await coordinator._apply_feature_result(
+        FeatureResult(alerts=[repeated_alert], notifications=[repeated_alert])
+    )
+
+    assert notifications == []
+    assert active_alerts == []
+    assert len(coordinator.store_data.alerts) == 1
+    stored_alert = coordinator.store_data.alerts[0]
+    assert stored_alert.feedback_status == "expected"
+    assert stored_alert.matching_feedback_fingerprint == fingerprint
+    assert stored_alert.feedback_effect == (
+        "Notifications suppressed for this expected pattern"
+    )
+
+
+@pytest.mark.asyncio
+async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    expected_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    unrelated_alert = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="standby_power",
+        observed_value=40.0,
+        baseline_value=10.0,
+        change_ratio=3.0,
+    )
+    fingerprint = alert_feedback_fingerprint(expected_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+
+    _, active_alerts = await coordinator._apply_feature_result(
+        FeatureResult(alerts=[unrelated_alert], notifications=[unrelated_alert])
+    )
+
+    assert active_alerts == [unrelated_alert]
+    assert notifications == [unrelated_alert]
+    assert coordinator.store_data.alerts == [unrelated_alert]
+
+
+def test_unhelpful_feedback_raises_future_alert_requirement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        Observation,
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    prior_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_usage_spike",
+        observed_value=2.6,
+        baseline_value=2.0,
+        change_ratio=0.3,
+    )
+    fingerprint = alert_feedback_fingerprint(prior_alert)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "decided_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=45)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_usage_spike",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+    policy = coordinator._usage_alert_policy_for_circuit("fridge")
+
+    for index in range(4):
+        assert (
+            policy.observe(
+                Observation(
+                    circuit_id="fridge",
+                    feature="daily_energy_usage_spike",
+                    score=1.6,
+                    baseline_confidence=1.0,
+                    observed_at=now + timedelta(hours=index),
+                    observed_value=2.61,
+                    baseline_value=2.0,
+                )
+            )
+            is None
+        )
+
+    alert = policy.observe(
+        Observation(
+            circuit_id="fridge",
+            feature="daily_energy_usage_spike",
+            score=1.6,
+            baseline_confidence=1.0,
+            observed_at=now + timedelta(hours=4),
+            observed_value=2.62,
+            baseline_value=2.0,
+        )
+    )
+
+    assert alert is not None
+    assert alert.repeated_count == 5
+    assert alert.adjusted_min_repeated == 5
 
 
 def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
@@ -4833,6 +5114,155 @@ def test_nilm_signature_payloads_do_not_reuse_label_for_changed_topology() -> No
     assert payloads[0]["classification"] == "possible 240 V resistive load"
 
 
+def test_nilm_signature_payloads_reuse_review_by_stable_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint,
+    )
+
+    saved_signature = NilmSignature(
+        signature_id="on-1",
+        median_delta_w=612.0,
+        median_delta_var=142.0,
+        median_delta_va=628.0,
+        median_delta_pf=-0.03,
+        occurrence_count=3,
+        confidence=0.7,
+        median_leg_a_delta_w=610.0,
+        median_leg_b_delta_w=15.0,
+        leg_balance_ratio=0.95,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-1",
+                        "feedback_fingerprint": nilm_signature_fingerprint(
+                            saved_signature
+                        ),
+                        "median_delta_w": saved_signature.median_delta_w,
+                        "median_delta_var": saved_signature.median_delta_var,
+                        "median_delta_va": saved_signature.median_delta_va,
+                        "median_delta_pf": saved_signature.median_delta_pf,
+                        "split_phase_type": saved_signature.split_phase_type,
+                        "dominant_leg": saved_signature.dominant_leg,
+                        "user_label": "Guest room heater",
+                        "expected": True,
+                        "review_state": "expected",
+                    }
+                ]
+            }
+        ),
+    )
+
+    payloads = coordinator._nilm_signature_payloads(
+        "mains",
+        [
+            NilmSignature(
+                signature_id="on-2",
+                median_delta_w=625.0,
+                median_delta_var=151.0,
+                median_delta_va=638.0,
+                median_delta_pf=-0.02,
+                occurrence_count=6,
+                confidence=0.9,
+                median_leg_a_delta_w=625.0,
+                median_leg_b_delta_w=18.0,
+                leg_balance_ratio=0.94,
+                dominant_leg="a",
+                split_phase_type="single_leg_a",
+            )
+        ],
+    )
+
+    assert payloads[0]["signature_id"] == "on-2"
+    assert payloads[0]["user_label"] == "Guest room heater"
+    assert payloads[0]["expected"] is True
+    assert payloads[0]["review_state"] == "expected"
+
+
+def test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint,
+    )
+
+    source = NilmSignature("on-1", 600.0, 140.0, 620.0, -0.02, 3, 0.7)
+    target = NilmSignature(
+        "on-2",
+        1800.0,
+        80.0,
+        1810.0,
+        0.0,
+        4,
+        0.8,
+        dominant_leg="balanced",
+        split_phase_type="balanced_240v",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": source.signature_id,
+                        "feedback_fingerprint": nilm_signature_fingerprint(source),
+                        "median_delta_w": source.median_delta_w,
+                        "median_delta_var": source.median_delta_var,
+                        "median_delta_va": source.median_delta_va,
+                        "split_phase_type": source.split_phase_type,
+                        "review_state": "merged",
+                        "merged_into": target.signature_id,
+                        "merged_into_fingerprint": nilm_signature_fingerprint(target),
+                    },
+                    {
+                        "signature_id": target.signature_id,
+                        "feedback_fingerprint": nilm_signature_fingerprint(target),
+                        "median_delta_w": target.median_delta_w,
+                        "median_delta_var": target.median_delta_var,
+                        "median_delta_va": target.median_delta_va,
+                        "split_phase_type": target.split_phase_type,
+                        "review_state": "expected",
+                    },
+                ]
+            }
+        ),
+    )
+
+    payloads = coordinator._nilm_signature_payloads(
+        "mains",
+        [
+            NilmSignature("on-4", 610.0, 145.0, 630.0, -0.02, 6, 0.9),
+            NilmSignature(
+                "on-5",
+                1815.0,
+                85.0,
+                1822.0,
+                0.0,
+                5,
+                0.9,
+                dominant_leg="balanced",
+                split_phase_type="balanced_240v",
+            ),
+        ],
+    )
+
+    by_id = {payload["signature_id"]: payload for payload in payloads}
+    assert by_id["on-4"]["review_state"] == "merged"
+    assert by_id["on-4"]["merged_into"] == "on-5"
+    assert by_id["on-5"]["review_state"] == "expected"
+
+
 @pytest.mark.asyncio
 async def test_runtime_known_load_option_controls_nilm_masking() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -6196,7 +6626,94 @@ async def test_expected_alert_feedback_suppresses_repeated_notification(
 
 
 @pytest.mark.asyncio
-async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
+async def test_contextual_alert_feedback_only_suppresses_matching_context(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    hot_context = {
+        "comparison_basis": "contextual",
+        "baseline_context": "season=summer|temperature_bin=very_hot",
+        "baseline_fallback_level": "exact",
+    }
+    mild_context = {
+        "comparison_basis": "contextual",
+        "baseline_context": "season=summer|temperature_bin=mild",
+        "baseline_fallback_level": "exact",
+    }
+    expected_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Expected hot day use",
+        feature="daily_energy_spike",
+        features=hot_context,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(alerts=[expected_alert]),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
+    )
+
+    assert (
+        await coordinator.async_mark_alert_expected(
+            notification_id_for_alert(expected_alert)
+        )
+        is True
+    )
+    assert (
+        coordinator.store_data.alert_feedback[
+            alert_feedback_fingerprint(expected_alert)
+        ]["action"]
+        == "expected"
+    )
+
+    repeated_hot_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 3, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Expected hot day use again",
+        feature="daily_energy_spike",
+        features=hot_context,
+    )
+    mild_alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Mild day use needs attention",
+        feature="daily_energy_spike",
+        features=mild_context,
+    )
+
+    await coordinator._notify_alert(repeated_hot_alert)
+    await coordinator._notify_alert(mild_alert)
+
+    assert notifications == [mild_alert]
+
+
+@pytest.mark.asyncio
+async def test_alert_feedback_methods_store_fingerprint_key() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -6225,12 +6742,17 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         is True
     )
 
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "action"
-    ] == "expected"
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "alert_id"
-    ] == notification_id_for_alert(alert)
+    fingerprint = alert_feedback_fingerprint(alert)
+    feedback = coordinator.store_data.alert_feedback[fingerprint]
+    assert feedback["fingerprint"] == fingerprint
+    assert feedback["status"] == "expected"
+    assert feedback["action"] == "expected"
+    assert feedback["alert_id"] == notification_id_for_alert(alert)
+    assert feedback["source_alert_id"] == notification_id_for_alert(alert)
+    assert feedback["circuit_id"] == "fridge"
+    assert feedback["feature"] == "reactive_power"
+    assert feedback["evidence_count"] == 1
+    assert feedback["expires_at"] == "2026-08-31T12:05:00+00:00"
 
     unhelpful_alert = AlertEvidence(
         timestamp=datetime(2026, 6, 2, 12, 1, tzinfo=UTC),
@@ -6251,9 +6773,13 @@ async def test_alert_feedback_methods_store_circuit_feature_key() -> None:
         is True
     )
 
-    assert coordinator.store_data.alert_feedback["fridge:power_factor"]["action"] == (
-        "unhelpful"
-    )
+    unhelpful_fingerprint = alert_feedback_fingerprint(unhelpful_alert)
+    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
+        "action"
+    ] == "unhelpful"
+    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
+        "expires_at"
+    ] == "2026-07-17T12:05:00+00:00"
 
 
 @pytest.mark.parametrize(
@@ -6268,6 +6794,9 @@ async def test_alert_feedback_methods_store_feedback_and_retire_visible_alert(
     method_name: str,
     feedback_action: str,
 ) -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -6297,12 +6826,11 @@ async def test_alert_feedback_methods_store_feedback_and_retire_visible_alert(
     result = await getattr(coordinator, method_name)(alert_id)
 
     assert result is True
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "action"
-    ] == feedback_action
-    assert coordinator.store_data.alert_feedback["fridge:reactive_power"][
-        "alert_id"
-    ] == alert_id
+    fingerprint = alert_feedback_fingerprint(alert)
+    assert coordinator.store_data.alert_feedback[fingerprint]["action"] == (
+        feedback_action
+    )
+    assert coordinator.store_data.alert_feedback[fingerprint]["alert_id"] == alert_id
     assert [
         notification_id_for_alert(stored_alert)
         for stored_alert in coordinator.store_data.alerts
@@ -7084,6 +7612,80 @@ async def test_coordinator_builds_operating_detection_recommendations_after_matu
 
 
 @pytest.mark.asyncio
+async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    prior_alert = AlertEvidence(
+        timestamp=now - timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Daily usage spike",
+        feature="daily_energy_usage_spike",
+        observed_value=3.0,
+        baseline_value=2.0,
+        change_ratio=0.5,
+    )
+    fingerprint = alert_feedback_fingerprint(prior_alert)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {"daily_spike_ratio": 0.25},
+            },
+        },
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "decided_at": (now - timedelta(days=1)).isoformat(),
+                    "created_at": (now - timedelta(days=2)).isoformat(),
+                    "expires_at": (now + timedelta(days=30)).isoformat(),
+                    "last_seen": (now - timedelta(days=1)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "daily_energy_usage_spike",
+                    "change_ratio": 0.5,
+                    "observed_value": 3.0,
+                    "baseline_value": 2.0,
+                    "evidence_count": 2,
+                },
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_recalculate_setting_recommendations("fridge")
+
+    recommendation = coordinator.state.settings_recommendations_by_circuit["fridge"][0]
+    assert recommendation["setting_key"] == "daily_spike_ratio"
+    assert recommendation["suggested_value"] == 0.6
+    assert recommendation["current_value"] == 0.25
+    assert recommendation["evidence"]["source"] == "unhelpful_alert_feedback"
+    assert recommendation["evidence"]["unhelpful_feedback_count"] == 2
+    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][
+        "daily_spike_ratio"
+    ] == 0.25
+
+
+@pytest.mark.asyncio
 async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -7136,6 +7738,9 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
         ].status
         is settings_advisor.RecommendationStatus.APPLIED
     )
+    recommendations = coordinator.state.settings_recommendations_by_circuit["hvac"]
+    assert recommendations[0]["recommendation_id"] == recommendation.recommendation_id
+    assert recommendations[0]["status"] == "applied"
     assert (
         coordinator.state.settings_recommendation_count_by_circuit.get("hvac", 0)
         == 0
@@ -7206,6 +7811,126 @@ async def test_apply_operating_detection_recommendation_preserves_learned_source
             "operating_detection_source"
         ]
         == "learned_recommendation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_undo_setting_recommendation_restores_previous_value() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(
+        settings_advisor,
+        status=settings_advisor.RecommendationStatus.APPLIED,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.3},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_settings_by_circuit={"hvac": {"daily_spike_ratio": 0.3}},
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_undo_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.PENDING
+    )
+
+
+@pytest.mark.asyncio
+async def test_reset_setting_recommendation_restores_builtin_default() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import settings_advisor
+
+    recommendation = _settings_recommendation(
+        settings_advisor,
+        current_value=0.35,
+        suggested_value=0.5,
+        apply_payload={"daily_spike_ratio": 0.5},
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "dual_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"daily_spike_ratio": 0.35},
+            },
+        },
+        store_data=FeatureStoreData(
+            energy_usage_settings_by_circuit={"hvac": {"daily_spike_ratio": 0.35}},
+            settings_recommendations={
+                recommendation.recommendation_id: recommendation,
+            },
+        ),
+    )
+
+    await coordinator.async_reset_setting_recommendation(
+        recommendation.recommendation_id,
+    )
+
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
+            "daily_spike_ratio"
+        ]
+        == 0.25
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[
+            recommendation.recommendation_id
+        ].status
+        is settings_advisor.RecommendationStatus.STALE
     )
 
 
