@@ -69,6 +69,12 @@ from .entity import (
     sync_entity_registry_categories,
     sync_entity_registry_visibility,
 )
+from .entity_catalog import (
+    CORE_DUPLICATE_REMOVAL_PHASE,
+    compact_creation_rule_for_entity,
+    legacy_compatibility_keys_for_coordinator,
+    rule_key,
+)
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
@@ -2660,6 +2666,24 @@ def _applicable_sensor_descriptions(
     )
 
 
+def _compact_sensor_descriptions_for_setup(
+    descriptions: Iterable[DiagnosticSensorDescription],
+    coordinator: Any,
+) -> tuple[DiagnosticSensorDescription, ...]:
+    compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    compact_descriptions: list[DiagnosticSensorDescription] = []
+    for description in descriptions:
+        rule = compact_creation_rule_for_entity("sensor", description.key)
+        if (
+            rule.removal_phase == CORE_DUPLICATE_REMOVAL_PHASE
+            and rule_key(rule) not in compatibility_keys
+            and rule.key not in compatibility_keys
+        ):
+            continue
+        compact_descriptions.append(description)
+    return tuple(compact_descriptions)
+
+
 def _sensor_roles(circuit: Any) -> set[SensorRole]:
     sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
         circuit,
@@ -3167,6 +3191,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             raw_circuit,
             coordinator,
             configured_circuits,
+        )
+        descriptions = _compact_sensor_descriptions_for_setup(
+            descriptions,
+            coordinator,
         )
         entities.extend(
             CircuitAnalyzerSensor(

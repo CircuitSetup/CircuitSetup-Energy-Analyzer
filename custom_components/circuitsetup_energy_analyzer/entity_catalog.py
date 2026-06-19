@@ -6,11 +6,14 @@ from enum import StrEnum
 from typing import Any
 
 from .const import (
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     DEFAULT_ENTITY_DETAIL_LEVEL,
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
+
+CORE_DUPLICATE_REMOVAL_PHASE = "core_duplicate_condensation"
 
 
 class EntityExposure(StrEnum):
@@ -56,6 +59,7 @@ class EntityCreationRule:
     create_in_expert: bool = False
     replacement: str | None = None
     legacy: bool = False
+    removal_phase: str | None = None
 
 
 _DETAIL_ORDER = {
@@ -109,6 +113,18 @@ def compact_creation_rule_for_entity(domain: str, key: str) -> EntityCreationRul
 def compact_creation_rules_by_key() -> Mapping[tuple[str, str], EntityCreationRule]:
     """Return all known compact-model creation rules."""
     return COMPACT_ENTITY_RULES
+
+
+def legacy_compatibility_keys_for_coordinator(coordinator: Any) -> set[str]:
+    """Return legacy entity keys explicitly preserved for this config entry."""
+    keys: set[str] = set()
+    for field_name in ("options", "entry_data"):
+        container = getattr(coordinator, field_name, {})
+        if not isinstance(container, Mapping):
+            continue
+        raw_value = container.get(CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS)
+        keys.update(_normalize_legacy_compatibility_keys(raw_value))
+    return keys
 
 
 def desired_compact_entity_rules(
@@ -184,6 +200,16 @@ def _normalize_groups(groups: Collection[str | EntityGroup]) -> set[EntityGroup]
     return normalized
 
 
+def _normalize_legacy_compatibility_keys(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return {value} if value.strip() else set()
+    if isinstance(value, Collection):
+        return {str(item) for item in value if str(item).strip()}
+    return set()
+
+
 def _rule(
     domain: str,
     key: str,
@@ -196,6 +222,7 @@ def _rule(
     expert: bool = False,
     replacement: str | None = None,
     legacy: bool = False,
+    removal_phase: str | None = None,
 ) -> EntityCreationRule:
     return EntityCreationRule(
         key=key,
@@ -208,6 +235,7 @@ def _rule(
         create_in_expert=expert,
         replacement=replacement,
         legacy=legacy,
+        removal_phase=removal_phase,
     )
 
 
@@ -218,6 +246,8 @@ def _legacy_sensor(
     key: str,
     replacement: str,
     group: EntityGroup,
+    *,
+    removal_phase: str | None = None,
 ) -> EntityCreationRule:
     return _rule(
         "sensor",
@@ -227,6 +257,7 @@ def _legacy_sensor(
         ENTITY_DETAIL_EXPERT,
         replacement=replacement,
         legacy=True,
+        removal_phase=removal_phase,
     )
 
 
@@ -593,36 +624,43 @@ _RULES: tuple[EntityCreationRule, ...] = (
         "sensitivity",
         "select.<circuit>_alert_sensitivity",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "readiness",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "learning_progress",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "data_quality_checklist",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "alert_evidence",
         "Evidence panel and sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "last_event",
         "Evidence panel or sensor.<circuit>_activity_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "recent_activity_count",
         "Evidence panel or optional recent activity timeline",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
+        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "power_quality_evidence",

@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -4061,19 +4062,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_setup_health",
         "entry-1_fridge_anomaly_score",
-        "entry-1_fridge_last_event",
         "entry-1_fridge_health_summary",
         "entry-1_fridge_activity_summary",
         "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
-        "entry-1_fridge_readiness",
-        "entry-1_fridge_learning_progress",
-        "entry-1_fridge_data_quality_checklist",
         "entry-1_fridge_energy_dashboard_status",
-        "entry-1_fridge_alert_evidence",
         "entry-1_fridge_recent_activity",
-        "entry-1_fridge_recent_activity_count",
-        "entry-1_fridge_sensitivity",
         "entry-1_fridge_settings_suggestions",
         "entry-1_fridge_circuit_mode",
         "entry-1_fridge_power_flow",
@@ -4097,6 +4091,103 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     }
     assert not isinstance(added_entities[1].state, AnalyzerState)
     assert added_entities[1].coordinator_state is coordinator.data
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_omits_core_duplicate_legacy_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        entry_data={},
+        options={},
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_fridge_health_summary",
+        "entry-1_fridge_activity_summary",
+        "entry-1_fridge_electrical_health",
+        "entry-1_fridge_energy_summary",
+        "entry-1_fridge_recent_activity",
+    } <= unique_ids
+    assert {
+        "entry-1_fridge_sensitivity",
+        "entry-1_fridge_readiness",
+        "entry-1_fridge_learning_progress",
+        "entry-1_fridge_data_quality_checklist",
+        "entry-1_fridge_alert_evidence",
+        "entry-1_fridge_last_event",
+        "entry-1_fridge_recent_activity_count",
+    }.isdisjoint(unique_ids)
+
+
+@pytest.mark.parametrize(
+    ("entry_data", "options", "expected_kept_unique_ids"),
+    (
+        (
+            {},
+            {CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["sensor:sensitivity"]},
+            {"entry-1_fridge_sensitivity"},
+        ),
+        (
+            {CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["readiness"]},
+            {},
+            {"entry-1_fridge_readiness"},
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_preserves_legacy_compatibility_sensor_keys(
+    entry_data: dict[str, object],
+    options: dict[str, object],
+    expected_kept_unique_ids: set[str],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        entry_data=entry_data,
+        options=options,
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert expected_kept_unique_ids <= unique_ids
+    assert {
+        "entry-1_fridge_sensitivity",
+        "entry-1_fridge_readiness",
+        "entry-1_fridge_learning_progress",
+        "entry-1_fridge_data_quality_checklist",
+        "entry-1_fridge_alert_evidence",
+        "entry-1_fridge_last_event",
+        "entry-1_fridge_recent_activity_count",
+    }.isdisjoint(unique_ids - expected_kept_unique_ids)
 
 
 @pytest.mark.asyncio

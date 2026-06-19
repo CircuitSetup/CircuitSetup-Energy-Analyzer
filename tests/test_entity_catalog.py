@@ -13,6 +13,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
+    CORE_DUPLICATE_REMOVAL_PHASE,
     EntityCreationRule,
     EntityExposure,
     EntityGroup,
@@ -157,6 +158,29 @@ def test_compact_creation_rule_documents_requested_replacements() -> None:
     assert run_cycle_status.replacement == "sensor.<circuit>_activity_summary"
     assert maintenance_start.legacy
     assert maintenance_start.replacement == "switch.<circuit>_maintenance"
+
+
+def test_core_duplicate_rules_are_marked_for_phase_two_removal() -> None:
+    rules = compact_creation_rules_by_key()
+
+    core_duplicate_sensor_keys = {
+        key
+        for (domain, key), rule in rules.items()
+        if domain == "sensor" and rule.removal_phase == CORE_DUPLICATE_REMOVAL_PHASE
+    }
+
+    assert core_duplicate_sensor_keys == {
+        "sensitivity",
+        "readiness",
+        "learning_progress",
+        "data_quality_checklist",
+        "alert_evidence",
+        "last_event",
+        "recent_activity_count",
+    }
+    assert rules[("sensor", "recent_activity")].removal_phase is None
+    assert rules[("sensor", "run_cycle_status")].removal_phase is None
+    assert rules[("sensor", "power_quality_evidence")].removal_phase is None
 
 
 def test_compact_creation_catalog_covers_every_current_entity_description() -> None:
