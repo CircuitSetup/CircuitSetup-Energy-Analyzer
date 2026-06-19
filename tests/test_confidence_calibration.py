@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.models import EventType
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
     assert_fixture_expectations,
@@ -45,6 +46,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
     [
         "normal_refrigerator_week",
         "refrigerator_energy_drift",
+        "normal_washer_cycle",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -79,6 +81,26 @@ def test_abnormal_fixture_detects_expected_alert_with_latency() -> None:
     assert metrics.detection_latency_seconds == 172800.0
     assert metrics.precision == 1.0
     assert metrics.recall == 1.0
+
+
+def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_washer_cycle.yaml")
+    pause_samples = [
+        sample
+        for sample in fixture.samples
+        if 60 < sample.t < 300
+        and float(sample.states.get("sensor.washer_power", 0.0)) < 8.0
+    ]
+
+    result = replay_fixture_processors(fixture)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "washer"
+    ]
+
+    assert pause_samples
+    assert event_types == [EventType.START, EventType.STOP]
 
 
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
@@ -122,9 +144,10 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 2 |" in report
+    assert "| Fixtures | 3 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
+    assert "normal_washer_cycle" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:

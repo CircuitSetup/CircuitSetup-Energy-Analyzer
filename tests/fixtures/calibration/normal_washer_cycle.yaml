@@ -1,0 +1,102 @@
+schema_version: 1
+id: normal_washer_cycle
+description: Normal washer cycle with pauses and steady daily energy stays quiet.
+scenario_type: normal
+appliance_profile: washer
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: washer
+    name: Washer
+    appliance_profile: washer
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.washer_power
+      energy: sensor.washer_energy
+      current: sensor.washer_current
+      voltage: sensor.washer_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.washer_power: 2
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 0.1
+      sensor.washer_voltage: 120.4
+  - t: 60
+    states:
+      sensor.washer_power: 80
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 0.8
+      sensor.washer_voltage: 120.2
+  - t: 120
+    states:
+      sensor.washer_power: 220
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 2.1
+      sensor.washer_voltage: 120.1
+  - t: 180
+    states:
+      sensor.washer_power: 4
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 0.1
+      sensor.washer_voltage: 120.2
+  - t: 240
+    states:
+      sensor.washer_power: 420
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 3.8
+      sensor.washer_voltage: 119.9
+  - t: 300
+    states:
+      sensor.washer_power: 4
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 0.1
+      sensor.washer_voltage: 120.3
+  - t: 360
+    states:
+      sensor.washer_power: 3
+      sensor.washer_energy: 50.0
+      sensor.washer_current: 0.1
+      sensor.washer_voltage: 120.3
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 50.0
+    power_w: 2
+    current_a: 0.1
+    voltage_v: 120.2
+    daily_usage_kwh: [0.45, 0.44, 0.46, 0.45, 0.44, 0.46, 0.45, 0.45, 0.44, 0.46]
+
+labels:
+  expected_events:
+    - circuit_id: washer
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: washer
+      event_type: stop
+      around_t: 300
+      tolerance_seconds: 120
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: washer
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null
