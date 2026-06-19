@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
+from custom_components.circuitsetup_energy_analyzer.const import STORAGE_VERSION
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     BaselineStats,
@@ -19,6 +20,7 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
     event_to_dict,
     feature_store_data_from_dict,
     feature_store_data_to_dict,
+    migrate_v1_to_v2,
     prune_events,
 )
 
@@ -216,6 +218,113 @@ def test_storage_migrates_legacy_sensitivity_names_on_load_and_save() -> None:
     }
 
 
+async def test_storage_v1_migrates_context_and_expires_legacy_feedback() -> None:
+    raw = {
+        "alert_feedback": {
+            "fridge:daily_energy_spike": {
+                "action": "expected",
+                "created_at": "2026-06-02T12:00:00+00:00",
+            },
+            "alert:v2|fridge|daily_energy_spike|direction=increase": {
+                "action": "expected",
+                "created_at": "2026-06-03T12:00:00+00:00",
+            },
+        },
+        "contextual_baselines_by_circuit": {
+            "hvac": {
+                "daily_energy_kwh|season=summer": {
+                    "feature": "daily_energy_kwh",
+                    "context_fingerprint": "season=summer",
+                    "context": {"season": "summer"},
+                    "sample_count": 7,
+                    "median": 8.0,
+                    "mad": 1.0,
+                    "p10": 6.0,
+                    "p90": 10.0,
+                    "confidence": 0.8,
+                }
+            }
+        },
+        "sensitivity_by_circuit": {"fridge": "quiet"},
+    }
+
+    migrated = await migrate_v1_to_v2(raw)
+
+    assert migrated["schema_version"] == STORAGE_VERSION
+    assert set(migrated["alert_feedback"]) == {
+        "alert:v2|fridge|daily_energy_spike|direction=increase"
+    }
+    contextual = migrated["contextual_baselines_by_circuit"]["hvac"]
+    assert set(contextual) == {"daily_energy_kwh|context:v2|season=summer"}
+    assert (
+        contextual["daily_energy_kwh|context:v2|season=summer"][
+            "context_fingerprint"
+        ]
+        == "context:v2|season=summer"
+    )
+    assert migrated["sensitivity_by_circuit"] == {"fridge": "quiet"}
+
+
+def test_feature_store_resets_malformed_optional_sections_safely() -> None:
+    restored = feature_store_data_from_dict(
+        {
+            "schema_version": STORAGE_VERSION,
+            "weather_context_history_by_circuit": {"hvac": "not-a-list"},
+            "alert_feedback": {
+                "alert:v2|fridge|daily_energy_spike": {
+                    "action": "expected",
+                },
+                "bad-feedback": "not-a-dict",
+            },
+            "energy_usage_by_circuit": {"fridge": "not-a-dict"},
+            "sensitivity_by_circuit": "not-a-dict",
+            "settings_recommendations": {
+                "valid": {
+                    "recommendation_id": "rec-hvac-daily-spike",
+                    "unique_key": "hvac:daily_spike_ratio",
+                    "circuit_id": "hvac",
+                    "circuit_name": "HVAC",
+                    "setting_key": "daily_spike_ratio",
+                    "setting_label": "Daily spike ratio",
+                    "current_value": 0.25,
+                    "suggested_value": 0.35,
+                    "unit": "ratio",
+                    "feature": "daily_energy_spike_ratio",
+                    "group": "energy_usage",
+                    "confidence": 0.82,
+                    "reason": "Recent usage is above the configured threshold.",
+                    "evidence": {"observed_ratio": 0.43},
+                    "apply_payload": {"daily_spike_ratio": 0.35},
+                    "status": "pending",
+                    "created_at": "2026-06-02T12:00:00+00:00",
+                    "expires_at": "2026-07-02T12:00:00+00:00",
+                    "advisor_version": 1,
+                },
+                "bad": {"recommendation_id": "missing-required-fields"},
+            },
+            "settings_recommendation_decisions": {
+                "valid": {
+                    "unique_key": "hvac:daily_spike_ratio",
+                    "status": "denied",
+                    "decided_at": "2026-06-03T12:00:00+00:00",
+                    "denied_value": 0.35,
+                    "evidence_fingerprint": "observed-ratio-043",
+                },
+                "bad": {"unique_key": "missing-required-fields"},
+            },
+        }
+    )
+
+    assert restored.weather_context_history_by_circuit == {}
+    assert restored.energy_usage_by_circuit == {}
+    assert restored.alert_feedback == {
+        "alert:v2|fridge|daily_energy_spike": {"action": "expected"}
+    }
+    assert restored.sensitivity_by_circuit == {}
+    assert set(restored.settings_recommendations) == {"valid"}
+    assert set(restored.settings_recommendation_decisions) == {"valid"}
+
+
 def test_feature_store_round_trips_unknown_load_inventory() -> None:
     data = FeatureStoreData(
         nilm_unknown_loads_by_circuit={
@@ -361,12 +470,13 @@ def test_feature_store_round_trips_contextual_baselines() -> None:
 
 def test_feature_store_preserves_fractional_contextual_sample_count() -> None:
     raw = {
+        "schema_version": STORAGE_VERSION,
         "events": [],
         "contextual_baselines_by_circuit": {
             "hvac": {
-                "daily_energy_kwh|season=summer": {
+                "daily_energy_kwh|context:v2|season=summer": {
                     "feature": "daily_energy_kwh",
-                    "context_fingerprint": "season=summer",
+                    "context_fingerprint": "context:v2|season=summer",
                     "context": {"season": "summer"},
                     "sample_count": 1.3,
                     "median": 7.8,
@@ -383,7 +493,7 @@ def test_feature_store_preserves_fractional_contextual_sample_count() -> None:
     restored = feature_store_data_from_dict(raw)
 
     assert restored.contextual_baselines_by_circuit["hvac"][
-        "daily_energy_kwh|season=summer"
+        "daily_energy_kwh|context:v2|season=summer"
     ]["sample_count"] == 1.3
 
 
@@ -523,6 +633,7 @@ def test_prune_events_caps_contextual_stats_per_feature_by_strength() -> None:
 def test_feature_store_drops_malformed_contextual_baseline_entries() -> None:
     restored = feature_store_data_from_dict(
         {
+            "schema_version": STORAGE_VERSION,
             "contextual_baseline_samples_by_circuit": {
                 "hvac": [
                     {
@@ -544,7 +655,7 @@ def test_feature_store_drops_malformed_contextual_baseline_entries() -> None:
                     "bad": [],
                     "good": {
                         "feature": "daily_energy_kwh",
-                        "context_fingerprint": "season=summer",
+                        "context_fingerprint": "context:v2|season=summer",
                         "context": {"season": "summer"},
                         "sample_count": 7,
                         "median": 8.0,
