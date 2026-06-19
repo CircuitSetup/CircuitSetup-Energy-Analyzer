@@ -11,6 +11,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 CONF_CIRCUITS = "circuits"
 CONF_SOURCE_ENTITIES = "source_entities"
 DOMAIN = "circuitsetup_energy_analyzer"
+PANEL_SETUP_KEY = "_panel_setup"
+PANEL_REGISTERED_VALUE = "registered"
+SERVICE_RELEARN_BASELINE = "relearn_baseline"
 LIFECYCLE_LOG_BLOCKLIST = (
     "traceback",
     "duplicate entity",
@@ -97,6 +100,8 @@ async def test_config_entry_setup_reload_unload_lifecycle(
         "sensor.fridge_power",
         "sensor.fridge_energy",
     )
+    assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
+    assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
 
     assert await hass.config_entries.async_reload(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -106,12 +111,16 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert reloaded_coordinator is not coordinator
     assert reloaded_coordinator.started is True
     assert reloaded_coordinator.source_entities == coordinator.source_entities
+    assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
+    assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
 
     assert await hass.config_entries.async_unload(entry.entry_id) is True
     await hass.async_block_till_done()
 
     assert reloaded_coordinator.started is False
     assert entry.entry_id not in hass.data[DOMAIN]
+    assert not hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
+    assert PANEL_SETUP_KEY not in hass.data.get(DOMAIN, {})
 
     remove_result = await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
