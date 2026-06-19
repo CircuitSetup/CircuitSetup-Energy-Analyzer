@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,15 +11,33 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 CONF_CIRCUITS = "circuits"
 CONF_SOURCE_ENTITIES = "source_entities"
 DOMAIN = "circuitsetup_energy_analyzer"
+LIFECYCLE_LOG_BLOCKLIST = (
+    "traceback",
+    "duplicate entity",
+    "duplicate service",
+    "duplicate listener",
+    "duplicate panel",
+    "blocking i/o",
+    "coroutine was never awaited",
+    "was never awaited",
+    "coroutine-not-awaited",
+    "unhandled homeassistanterror",
+    "translation failure",
+    "invalid dashboard entity",
+)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 @pytest.mark.asyncio
 async def test_config_entry_setup_reload_unload_lifecycle(
     hass: Any,
+    caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
 ) -> None:
     """Exercise a real Home Assistant config-entry lifecycle."""
+
+    caplog.set_level(logging.WARNING)
 
     import custom_components
 
@@ -92,3 +112,48 @@ async def test_config_entry_setup_reload_unload_lifecycle(
 
     assert reloaded_coordinator.started is False
     assert entry.entry_id not in hass.data[DOMAIN]
+
+    remove_result = await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert remove_result.get("require_restart") is False
+    assert hass.config_entries.async_get_entry(entry.entry_id) is None
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+def _unexpected_lifecycle_log_messages(
+    records: list[logging.LogRecord],
+) -> list[str]:
+    messages: list[str] = []
+    for record in records:
+        message = record.getMessage()
+        if (
+            record.levelno >= logging.ERROR
+            or record.exc_info is not None
+            or _contains_lifecycle_hazard(message)
+        ):
+            messages.append(message)
+    return messages
+
+
+def _unexpected_lifecycle_warning_messages(warnings: Any) -> list[str]:
+    messages: list[str] = []
+    for warning in warnings:
+        message = str(warning.message)
+        if _contains_lifecycle_hazard(message):
+            messages.append(message)
+    return messages
+
+
+def _contains_lifecycle_hazard(message: str) -> bool:
+    normalized = _normalize_lifecycle_hazard_text(message)
+    return any(
+        _normalize_lifecycle_hazard_text(fragment) in normalized
+        for fragment in LIFECYCLE_LOG_BLOCKLIST
+    )
+
+
+def _normalize_lifecycle_hazard_text(message: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", message.lower()).split())
