@@ -109,7 +109,8 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
     message = alert_notification_message(alert, config=config)
 
     assert "Possible issue: HVAC leg imbalance" in message
-    assert "## HVAC" in message
+    assert message.startswith("**HVAC**\n\nPossible issue: HVAC leg imbalance")
+    assert "## HVAC" not in message
     assert (
         "[Open evidence graph](/circuitsetup-energy-analyzer-evidence?"
         in message
@@ -119,6 +120,71 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
     assert "Graph entities" not in message
     assert "sensor.hvac_l1_watts" not in message
     assert "sensor.hvac_l2_current" not in message
+
+
+@pytest.mark.asyncio
+async def test_alert_notification_uses_short_title_and_bold_appliance_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    calls: list[dict[str, object]] = []
+
+    def fake_create(hass, message, *, title, notification_id):
+        calls.append(
+            {
+                "hass": hass,
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            }
+        )
+
+    homeassistant = ModuleType("homeassistant")
+    components = ModuleType("homeassistant.components")
+    persistent_notification = ModuleType(
+        "homeassistant.components.persistent_notification",
+    )
+    persistent_notification.async_create = fake_create
+    components.persistent_notification = persistent_notification
+    homeassistant.components = components
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.persistent_notification",
+        persistent_notification,
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="water_heater",
+        severity=Severity.WARNING,
+        message="Possible issue: Water Heater demand was high",
+        feature="demand_monthly_peak",
+        observed_value=4100.0,
+        baseline_value=4100.0,
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    await notifications.async_create_alert_notification(
+        SimpleNamespace(),
+        alert,
+        config=config,
+    )
+
+    assert calls
+    assert calls[0]["title"] == "Energy Analyzer Alert"
+    message = str(calls[0]["message"])
+    assert message.startswith(
+        "**Water Heater**\n\nPossible issue: Water Heater demand was high"
+    )
+    assert "Baseline value" not in message
+    assert "Comparison value: 4100.0" in message
 
 
 def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() -> None:

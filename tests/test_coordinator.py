@@ -10034,7 +10034,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
     alert = notifications[0]
     assert alert.feature == "demand_monthly_peak"
     assert "Mains demand averaged 3700 W" in alert.message
-    assert "near this month's top 3 demand windows" in alert.message
+    assert "within 92.5% of this month's #3 demand window cutoff" in alert.message
     assert alert.observed_value == 3700.0
     assert alert.baseline_value == 4000.0
     assert alert.features["monthly_peak_usage_percent"] == 92.5
