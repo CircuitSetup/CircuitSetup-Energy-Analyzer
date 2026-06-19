@@ -55,6 +55,54 @@ def test_rain_and_compressor_together_explain_higher_sump_runtime() -> None:
     assert evidence["compressor_adjustment_minutes"] > 0.0
 
 
+def test_positive_rain_intensity_explains_pump_runtime_without_binary_sensor() -> None:
+    evidence = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=18.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=None,
+            rain_intensity_per_hour=0.35,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+
+    assert evidence["status"] == "rain_explained"
+    assert "rain" in evidence["contributing_factors"]
+    assert "rain_intensity" in evidence["contributing_factors"]
+    assert evidence["baseline_context"] == "raining, moderate"
+    assert evidence["baseline_fallback_level"] == "rain_adjusted_context"
+    assert evidence["rain_context_issues"] == []
+
+
+def test_conflicting_rain_sensor_and_intensity_records_context_issue() -> None:
+    evidence = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=7.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=False,
+            rain_intensity_per_hour=0.35,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+
+    assert evidence["status"] == "normal"
+    assert evidence["rain_adjustment_minutes"] == 0.0
+    assert "rain" not in evidence["contributing_factors"]
+    assert evidence["baseline_context"] == "ambiguous, moderate"
+    assert evidence["baseline_fallback_level"] == "ambiguous_rain_context"
+    assert evidence["rain_context_issues"] == ["rain_activity_conflict"]
+
+
 def test_high_pump_runtime_after_adjustment_is_possible_issue() -> None:
     evidence = evaluate_rain_pump_correlation(
         RainPumpCorrelationInput(
@@ -75,6 +123,41 @@ def test_high_pump_runtime_after_adjustment_is_possible_issue() -> None:
     assert evidence["confidence"] >= 0.75
     assert evidence["baseline_context"] == "raining, moderate"
     assert evidence["baseline_fallback_level"] == "rain_adjusted_context"
+
+
+def test_rain_pump_confidence_does_not_increase_for_problem_status() -> None:
+    normal = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=6.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=False,
+            rain_intensity_per_hour=None,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+    possible_issue = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            circuit_id="sump_pump",
+            appliance_profile="sump_pump",
+            pump_runtime_minutes=60.0,
+            dry_baseline_minutes=6.0,
+            comparable_window_count=18,
+            rain_active=False,
+            rain_intensity_per_hour=None,
+            compressor_runtime_minutes=0.0,
+            compressor_duty_cycle_percent=0.0,
+            sensitivity_delta_threshold_pct=25.0,
+        )
+    )
+
+    assert normal["status"] == "normal"
+    assert possible_issue["status"] == "possible_excess_pump_activity"
+    assert possible_issue["confidence"] == normal["confidence"]
 
 
 def test_flow_without_any_water_load_is_possible_leak_candidate() -> None:
@@ -102,6 +185,39 @@ def test_flow_without_any_water_load_is_possible_leak_candidate() -> None:
     assert evidence["baseline_sample_count"] == 12
     assert evidence["contextual_status"] == "possible_flow_without_load"
     assert evidence["contextual_baseline_confidence"] == evidence["confidence"]
+
+
+def test_flow_confidence_does_not_increase_for_problem_status() -> None:
+    normal = evaluate_flow_correlation(
+        FlowCorrelationInput(
+            circuit_id="washer",
+            appliance_profile="washer",
+            flow_active_minutes=0.0,
+            appliance_runtime_minutes=0.0,
+            recent_related_runtime_minutes=0.0,
+            mapped_appliance_count=3,
+            threshold_minutes=5,
+            expects_water_flow=True,
+            comparable_window_count=12,
+        )
+    )
+    possible_issue = evaluate_flow_correlation(
+        FlowCorrelationInput(
+            circuit_id="washer",
+            appliance_profile="washer",
+            flow_active_minutes=14.0,
+            appliance_runtime_minutes=0.0,
+            recent_related_runtime_minutes=0.0,
+            mapped_appliance_count=3,
+            threshold_minutes=5,
+            expects_water_flow=True,
+            comparable_window_count=12,
+        )
+    )
+
+    assert normal["status"] == "normal"
+    assert possible_issue["status"] == "possible_flow_without_load"
+    assert possible_issue["confidence"] == normal["confidence"]
 
 
 def test_flow_correlation_is_unconfigured_when_appliance_does_not_expect_flow() -> None:

@@ -222,6 +222,77 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_source_selection_expands_source_device_only_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    async def fake_discover_for_devices(hass, source_devices):
+        assert hass == "hass"
+        assert source_devices == ("meter-device",)
+        return ["sensor.device_l1_power", "sensor.device_l2_power"]
+
+    monkeypatch.setattr(
+        config_flow,
+        "async_discover_energy_source_entities_for_devices",
+        fake_discover_for_devices,
+    )
+
+    selected = await config_flow._async_source_selection_with_device_entities(
+        "hass",
+        {CONF_SOURCE_DEVICES: ["meter-device"]},
+    )
+
+    assert selected[CONF_SOURCE_DEVICES] == ["meter-device"]
+    assert selected[CONF_EXTRA_SOURCE_ENTITIES] == []
+    assert selected[CONF_SOURCE_ENTITIES] == [
+        "sensor.device_l1_power",
+        "sensor.device_l2_power",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_selection_merges_source_devices_extras_and_legacy_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    async def fake_discover_for_devices(_hass, source_devices):
+        assert source_devices == ("meter-device",)
+        return ["sensor.device_l1_power", "sensor.device_l2_power"]
+
+    monkeypatch.setattr(
+        config_flow,
+        "async_discover_energy_source_entities_for_devices",
+        fake_discover_for_devices,
+    )
+
+    selected = await config_flow._async_source_selection_with_device_entities(
+        object(),
+        {
+            CONF_SOURCE_DEVICES: "meter-device",
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.extra_power",
+                "sensor.device_l1_power",
+            ],
+            CONF_SOURCE_ENTITIES: ["sensor.legacy_power"],
+        },
+    )
+
+    assert selected[CONF_SOURCE_DEVICES] == ["meter-device"]
+    assert selected[CONF_EXTRA_SOURCE_ENTITIES] == [
+        "sensor.extra_power",
+        "sensor.device_l1_power",
+    ]
+    assert selected[CONF_SOURCE_ENTITIES] == [
+        "sensor.device_l1_power",
+        "sensor.device_l2_power",
+        "sensor.extra_power",
+        "sensor.legacy_power",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_user_flow_auto_routes_mains_sources_to_mains_sensors() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerConfigFlow,

@@ -1,0 +1,108 @@
+schema_version: 1
+id: normal_dryer_heat_cycle
+description: Normal dryer heat cycle and steady daily energy use stays quiet.
+scenario_type: normal
+appliance_profile: dryer
+circuit_mode: dual_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: dryer
+    name: Dryer
+    appliance_profile: dryer
+    circuit_mode: dual_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.dryer_power
+      energy: sensor.dryer_energy
+      current: sensor.dryer_current
+      voltage: sensor.dryer_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.dryer_power: 0
+      sensor.dryer_energy: 300.0
+      sensor.dryer_current: 0.0
+      sensor.dryer_voltage: 240.0
+  - t: 60
+    states:
+      sensor.dryer_power: 5200
+      sensor.dryer_energy: 300.0
+      sensor.dryer_current: 21.7
+      sensor.dryer_voltage: 240.0
+  - t: 120
+    states:
+      sensor.dryer_power: 5200
+      sensor.dryer_energy: 300.09
+      sensor.dryer_current: 21.7
+      sensor.dryer_voltage: 239.8
+  - t: 900
+    states:
+      sensor.dryer_power: 1900
+      sensor.dryer_energy: 301.3
+      sensor.dryer_current: 7.9
+      sensor.dryer_voltage: 240.3
+  - t: 1800
+    states:
+      sensor.dryer_power: 4800
+      sensor.dryer_energy: 302.4
+      sensor.dryer_current: 20.0
+      sensor.dryer_voltage: 240.2
+  - t: 3600
+    states:
+      sensor.dryer_power: 4400
+      sensor.dryer_energy: 304.7
+      sensor.dryer_current: 18.3
+      sensor.dryer_voltage: 240.1
+  - t: 3660
+    states:
+      sensor.dryer_power: 20
+      sensor.dryer_energy: 304.75
+      sensor.dryer_current: 0.1
+      sensor.dryer_voltage: 240.0
+  - t: 3720
+    states:
+      sensor.dryer_power: 20
+      sensor.dryer_energy: 304.75
+      sensor.dryer_current: 0.1
+      sensor.dryer_voltage: 239.9
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 304.75
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 240.0
+    daily_usage_kwh: [3.1, 3.2, 3.0, 3.3, 3.1, 3.2, 3.0, 3.3, 3.1, 3.2]
+
+labels:
+  expected_events:
+    - circuit_id: dryer
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: dryer
+      event_type: stop
+      around_t: 3660
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: dryer
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

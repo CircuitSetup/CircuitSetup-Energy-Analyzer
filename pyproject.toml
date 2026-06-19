@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circuitsetup-energy-analyzer"
-version = "0.8.47"
+version = "0.9.0"
 description = "Home Assistant custom integration for CircuitSetup Energy Meter appliance diagnostics"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+  "home-assistant-frontend==20250109.2",
   "pytest==8.3.4",
   "pytest-asyncio==0.24.0",
   "pytest-homeassistant-custom-component==0.13.205",

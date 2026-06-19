@@ -10,6 +10,7 @@ from ..contextual_baseline import (
     DAILY_ENERGY_FEATURE,
     ContextualBaselineSample,
     build_context_for_sample,
+    context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -82,6 +83,7 @@ class EnergyUsageProcessor:
                 daily_spike_ratio=settings.daily_spike_ratio,
             ),
             retention_days=self._retention_days_for_circuit(circuit_id),
+            time_zone=context.time_zone,
         )
         if result is None:
             return FeatureResult()
@@ -219,6 +221,8 @@ def _contextual_daily_energy_comparison(
         store_data=context.store_data,
         now=context.now,
         feature=DAILY_ENERGY_FEATURE,
+        time_zone=context.time_zone,
+        calendar_timestamp=context.now,
     )
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_id,
@@ -232,7 +236,9 @@ def _contextual_daily_energy_comparison(
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
-    if result.daily_usage_kwh > 0.0:
+    if result.daily_usage_kwh > 0.0 and context_allows_baseline_learning(
+        context_key
+    ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_id,
             [],
@@ -247,6 +253,7 @@ def _contextual_daily_energy_comparison(
                 context=context_key,
                 source="energy_usage",
             ),
+            time_zone=context.time_zone,
         )
         updated_samples = stored_contextual_samples(circuit_id, samples)
         exact = select_contextual_baseline(

@@ -74,6 +74,7 @@ jobs:
           python -m pip install -e .
           python -m pip install --upgrade --no-cache-dir pytest pytest-asyncio pytest-homeassistant-custom-component
           python -m pip install --upgrade --no-cache-dir git+https://github.com/home-assistant/core.git@dev
+          python -m pip install --upgrade --no-cache-dir home-assistant-frontend==20250109.2
 
       - name: Show Home Assistant version
         run: |

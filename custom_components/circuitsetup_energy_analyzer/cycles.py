@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any
 
 from .baseline import score_deviation
+from .local_time import TimeZone, local_date, local_day_end, local_day_start
 from .models import (
     ApplianceProfile,
     BaselineStats,
@@ -39,6 +40,7 @@ class CircuitCycleSummary:
     first_start: datetime | None = None
     last_start: datetime | None = None
     last_stop: datetime | None = None
+    day_start: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,9 +78,10 @@ def summarize_circuit_cycles(
     circuit_id: str,
     now: datetime,
     merge_gap_seconds: float = 0.0,
+    time_zone: TimeZone = None,
 ) -> CircuitCycleSummary:
     """Summarize today's appliance run cycles from retained start/stop events."""
-    day_start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+    day_start = _day_start_for_datetime(now, time_zone)
     sessions = build_normalized_run_sessions(
         events,
         circuit_id=circuit_id,
@@ -138,7 +141,7 @@ def summarize_circuit_cycles(
 
     return CircuitCycleSummary(
         circuit_id=circuit_id,
-        date=now.date().isoformat(),
+        date=_calendar_date(now, time_zone).isoformat(),
         status=status,
         start_count=start_count,
         completed_cycle_count=completed_cycle_count,
@@ -150,6 +153,7 @@ def summarize_circuit_cycles(
         first_start=first_start,
         last_start=last_start,
         last_stop=last_stop,
+        day_start=day_start,
     )
 
 
@@ -159,23 +163,26 @@ def cycle_baseline_feature_values(
     circuit_id: str,
     now: datetime,
     merge_gap_seconds: float = 0.0,
+    time_zone: TimeZone = None,
 ) -> dict[str, list[float]]:
     """Return prior cycle-feature samples suitable for robust baselines."""
-    day_start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+    day_start = _day_start_for_datetime(now, time_zone)
+    current_date = _calendar_date(now, time_zone)
     circuit_events = _circuit_cycle_events(events, circuit_id)
     prior_dates = sorted(
         {
-            event.timestamp.date()
+            _calendar_date(event.timestamp, time_zone)
             for event in circuit_events
-            if event.timestamp.date() < now.date()
+            if _calendar_date(event.timestamp, time_zone) < current_date
         }
     )
     daily_summaries = [
         summarize_circuit_cycles(
             circuit_events,
             circuit_id=circuit_id,
-            now=_end_of_day(day, now),
+            now=_end_of_day(day, now, time_zone),
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=time_zone,
         )
         for day in prior_dates
     ]
@@ -462,8 +469,22 @@ def _circuit_cycle_events(
     )
 
 
-def _end_of_day(day: date, now: datetime) -> datetime:
+def _end_of_day(day: date, now: datetime, time_zone: TimeZone = None) -> datetime:
+    if time_zone is not None:
+        return local_day_end(day, time_zone)
     return datetime.combine(day, time.max, tzinfo=now.tzinfo)
+
+
+def _day_start_for_datetime(now: datetime, time_zone: TimeZone) -> datetime:
+    if time_zone is None or now.tzinfo is None:
+        return datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+    return local_day_start(now, time_zone)
+
+
+def _calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or timestamp.tzinfo is None:
+        return timestamp.date()
+    return local_date(timestamp, time_zone)
 
 
 def _session_runtime_within_day(

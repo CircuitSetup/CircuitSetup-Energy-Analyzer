@@ -90,6 +90,103 @@ def test_cycle_summary_includes_cycle_running_across_midnight() -> None:
     assert summary.duty_cycle_percent == 1.4
 
 
+def test_cycle_summary_uses_ha_local_day_boundary() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 5, 31, 23, 30, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 1, 0, 0, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    summary = summarize_circuit_cycles(
+        events,
+        circuit_id="fridge",
+        now=now,
+        time_zone="America/New_York",
+    )
+
+    assert summary.date == "2026-05-31"
+    assert summary.start_count == 1
+    assert summary.completed_cycle_count == 1
+    assert summary.runtime_seconds == 1800.0
+    assert summary.average_cycle_seconds == 1800.0
+    assert summary.day_elapsed_seconds == 84600.0
+    assert summary.duty_cycle_percent == 2.1
+
+
+def test_cycle_summary_uses_absolute_elapsed_time_on_spring_forward_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    summary = summarize_circuit_cycles(
+        [],
+        circuit_id="hvac",
+        now=datetime(2026, 3, 9, 3, 30, tzinfo=UTC),
+        time_zone="America/New_York",
+    )
+
+    assert summary.date == "2026-03-08"
+    assert summary.day_elapsed_seconds == 81000.0
+
+
+def test_cycle_summary_uses_absolute_elapsed_time_on_fall_back_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    summary = summarize_circuit_cycles(
+        [],
+        circuit_id="hvac",
+        now=datetime(2026, 11, 2, 4, 30, tzinfo=UTC),
+        time_zone="America/New_York",
+    )
+
+    assert summary.date == "2026-11-01"
+    assert summary.day_elapsed_seconds == 88200.0
+
+
+def test_cycle_baselines_use_ha_local_prior_dates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        cycle_baseline_feature_values,
+    )
+
+    now = datetime(2026, 6, 2, 3, 30, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 1, 23, 30, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 2, 0, 0, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    values = cycle_baseline_feature_values(
+        events,
+        circuit_id="fridge",
+        now=now,
+        time_zone="America/New_York",
+    )
+
+    assert values["run_cycle_daily_start_count"] == []
+    assert values["run_cycle_daily_duty_cycle_percent"] == []
+
+
 def test_cycle_summary_reports_no_activity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.cycles import (
         summarize_circuit_cycles,

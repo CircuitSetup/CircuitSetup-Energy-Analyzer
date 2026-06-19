@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .baseline import build_baseline
@@ -12,6 +12,7 @@ from .contextual_baseline import (
 from .contextual_baseline import (
     temperature_bin as contextual_temperature_bin,
 )
+from .local_time import TimeZone, local_date
 
 MIN_WEATHER_CONTEXT_SAMPLES = 3
 
@@ -38,6 +39,7 @@ def evaluate_weather_context(
     display_temperature: float | None = None,
     display_temperature_unit: str = "°F",
     observed_at: datetime | None = None,
+    time_zone: TimeZone = None,
 ) -> dict[str, Any]:
     """Return weather context for current HVAC activity."""
 
@@ -60,6 +62,7 @@ def evaluate_weather_context(
         mode=weather_mode,
         history=list(history),
         observed_at=observed_at,
+        time_zone=time_zone,
     )
     if comparable is None:
         return {
@@ -118,7 +121,7 @@ def evaluate_weather_context(
         "baseline_fallback_level": comparable["fallback_level"],
         "baseline_sample_count": len(comparable_samples),
         "baseline_confidence": _baseline_confidence(
-            len(comparable_samples),
+            int(comparable["distinct_date_count"]),
             str(comparable["fallback_level"]),
         ),
         "contextual_status": status,
@@ -137,9 +140,14 @@ def _select_weather_baseline(
     mode: str,
     history: list[WeatherContextSample],
     observed_at: datetime | None,
+    time_zone: TimeZone = None,
 ) -> dict[str, Any] | None:
     current_temperature_bin = contextual_temperature_bin(temperature)
-    current_season = season_for_datetime(observed_at) if observed_at else None
+    current_season = (
+        season_for_datetime(observed_at, time_zone=time_zone)
+        if observed_at
+        else None
+    )
     fallback_groups: list[tuple[str, str, list[WeatherContextSample]]] = []
     if current_season is not None:
         fallback_groups.append(
@@ -150,7 +158,7 @@ def _select_weather_baseline(
                     sample
                     for sample in history
                     if _similar_temperature(sample, temperature)
-                    and _sample_season(sample) == current_season
+                    and _sample_season(sample, time_zone) == current_season
                 ],
             )
         )
@@ -173,18 +181,20 @@ def _select_weather_baseline(
                 [
                     sample
                     for sample in history
-                    if _sample_season(sample) == current_season
+                    if _sample_season(sample, time_zone) == current_season
                 ],
             )
         )
     fallback_groups.append(("global_circuit", mode, list(history)))
 
     for fallback_level, baseline_context, samples in fallback_groups:
-        if len(samples) >= MIN_WEATHER_CONTEXT_SAMPLES:
+        distinct_date_count = _distinct_local_date_count(samples, time_zone)
+        if distinct_date_count >= MIN_WEATHER_CONTEXT_SAMPLES:
             return {
                 "fallback_level": fallback_level,
                 "baseline_context": baseline_context,
                 "samples": samples,
+                "distinct_date_count": distinct_date_count,
             }
     return None
 
@@ -193,18 +203,51 @@ def _similar_temperature(sample: WeatherContextSample, temperature: float) -> bo
     return abs(sample.temperature - temperature) <= 3.0
 
 
-def _sample_season(sample: WeatherContextSample) -> str | None:
-    return season_for_datetime(sample.timestamp) if sample.timestamp else None
+def _sample_season(
+    sample: WeatherContextSample,
+    time_zone: TimeZone = None,
+) -> str | None:
+    if sample.timestamp is None:
+        return None
+    return season_for_datetime(sample.timestamp, time_zone=time_zone)
 
 
-def _baseline_confidence(sample_count: int, fallback_level: str) -> float:
+def _distinct_local_date_count(
+    samples: Iterable[WeatherContextSample],
+    time_zone: TimeZone,
+) -> int:
+    dates = set()
+    for sample in samples:
+        if sample.timestamp is None:
+            continue
+        dates.add(_sample_calendar_date(sample.timestamp, time_zone))
+    return len(dates)
+
+
+def _sample_calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or _is_naive_datetime(timestamp):
+        return timestamp.date()
+    return local_date(timestamp, time_zone)
+
+
+def _is_naive_datetime(timestamp: datetime) -> bool:
+    return (
+        timestamp.tzinfo is None
+        or timestamp.tzinfo.utcoffset(timestamp) is None
+    )
+
+
+def _baseline_confidence(distinct_date_count: int, fallback_level: str) -> float:
     specificity_weight = {
         "exact_context": 1.0,
         "temperature_context": 0.85,
         "seasonal_context": 0.75,
         "global_circuit": 0.65,
     }.get(fallback_level, 0.65)
-    sample_confidence = min(1.0, sample_count / MIN_WEATHER_CONTEXT_SAMPLES)
+    sample_confidence = min(
+        1.0,
+        distinct_date_count / MIN_WEATHER_CONTEXT_SAMPLES,
+    )
     return round(sample_confidence * specificity_weight, 3)
 
 

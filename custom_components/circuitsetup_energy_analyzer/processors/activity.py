@@ -68,6 +68,7 @@ class ActivityAlertProcessor:
             circuit_id=circuit_config.circuit_id,
             now=context.now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
         )
         evidence = evaluate_activity_alert(
             circuit_id=circuit_config.circuit_id,

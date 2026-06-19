@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Self
 
+from .alerting import ALERT_FINGERPRINT_SCHEMA_VERSION
 from .const import STORAGE_KEY, STORAGE_VERSION
-from .contextual_baseline import contextual_sample_from_dict
+from .contextual_baseline import (
+    CONTEXT_FINGERPRINT_SCHEMA_VERSION,
+    ContextKey,
+    contextual_sample_from_dict,
+)
 from .models import (
     AlertEvidence,
     BaselineStats,
@@ -269,6 +275,7 @@ def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
 def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
     """Serialize the full feature store payload for Home Assistant storage."""
     return {
+        "schema_version": STORAGE_VERSION,
         "events": [event_to_dict(event) for event in data.events],
         "baselines": {
             key: baseline_to_dict(baseline)
@@ -375,18 +382,13 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
     """Deserialize the full feature store payload from Home Assistant storage."""
     if raw is None:
         return FeatureStoreData()
+    raw = _migrated_feature_store_payload(raw)
 
     return FeatureStoreData(
-        events=[event_from_dict(event) for event in raw.get("events", [])],
-        baselines={
-            str(key): baseline_from_dict(baseline)
-            for key, baseline in raw.get("baselines", {}).items()
-        },
-        alerts=[alert_from_dict(alert) for alert in raw.get("alerts", [])],
-        nilm_signatures={
-            str(circuit_id): [dict(signature) for signature in signatures]
-            for circuit_id, signatures in raw.get("nilm_signatures", {}).items()
-        },
+        events=_events_from_raw(raw.get("events", [])),
+        baselines=_baselines_from_raw(raw.get("baselines", {})),
+        alerts=_alerts_from_raw(raw.get("alerts", [])),
+        nilm_signatures=_dict_of_list_dicts(raw.get("nilm_signatures", {})),
         nilm_unknown_loads_by_circuit=_dict_of_dicts(
             raw.get("nilm_unknown_loads_by_circuit", {})
         ),
@@ -415,10 +417,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         sensitivity_by_circuit={
             str(circuit_id): normalize_sensitivity(sensitivity)
-            for circuit_id, sensitivity in raw.get(
-                "sensitivity_by_circuit",
-                {},
-            ).items()
+            for circuit_id, sensitivity in _mapping_items(
+                raw.get("sensitivity_by_circuit", {})
+            )
         },
         maintenance_by_circuit=_dict_of_dicts(
             raw.get("maintenance_by_circuit", {}),
@@ -473,28 +474,191 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         operating_detection_settings_by_circuit=_dict_of_dicts(
             raw.get("operating_detection_settings_by_circuit", {}),
         ),
-        settings_recommendations={
-            str(recommendation_id): recommendation_from_dict(recommendation)
-            for recommendation_id, recommendation in raw.get(
-                "settings_recommendations",
-                {},
-            ).items()
-        },
-        settings_recommendation_decisions={
-            str(unique_key): decision_from_dict(decision)
-            for unique_key, decision in raw.get(
-                "settings_recommendation_decisions",
-                {},
-            ).items()
-        },
-        settings_recommendation_notification_episode_key=tuple(
-            tuple(str(item) for item in part)
-            for part in raw.get(
-                "settings_recommendation_notification_episode_key",
-                [],
-            )
+        settings_recommendations=_recommendations_from_raw(
+            raw.get("settings_recommendations", {})
+        ),
+        settings_recommendation_decisions=_recommendation_decisions_from_raw(
+            raw.get("settings_recommendation_decisions", {})
+        ),
+        settings_recommendation_notification_episode_key=_episode_key_from_raw(
+            raw.get("settings_recommendation_notification_episode_key", [])
         ),
     )
+
+
+async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a v1 feature-store payload to current storage semantics."""
+
+    return _migrate_v1_to_v2_payload(data)
+
+
+def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {"schema_version": STORAGE_VERSION}
+
+    version = _schema_version(raw)
+    payload = _copy_payload(raw)
+    if version < 2:
+        payload = _migrate_v1_to_v2_payload(payload)
+    payload["schema_version"] = STORAGE_VERSION
+    return payload
+
+
+def _schema_version(raw: Mapping[str, Any]) -> int:
+    try:
+        return max(int(raw.get("schema_version", 1)), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _migrate_v1_to_v2_payload(data: Any) -> dict[str, Any]:
+    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
+    payload["schema_version"] = STORAGE_VERSION
+    payload["alert_feedback"] = _migrate_alert_feedback_v1_to_v2(
+        payload.get("alert_feedback", {})
+    )
+    payload["contextual_baselines_by_circuit"] = (
+        _migrate_contextual_baselines_v1_to_v2(
+            payload.get("contextual_baselines_by_circuit", {})
+        )
+    )
+    return payload
+
+
+def _migrate_alert_feedback_v1_to_v2(values: Any) -> dict[str, dict[str, Any]]:
+    migrated: dict[str, dict[str, Any]] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        feedback = dict(value)
+        fingerprint = str(feedback.get("fingerprint") or key)
+        if not fingerprint.startswith(ALERT_FINGERPRINT_SCHEMA_VERSION):
+            continue
+        feedback.setdefault("fingerprint", fingerprint)
+        migrated[fingerprint] = feedback
+    return migrated
+
+
+def _migrate_contextual_baselines_v1_to_v2(
+    values: Any,
+) -> dict[str, dict[str, Any]]:
+    migrated: dict[str, dict[str, Any]] = {}
+    for circuit_id, stats_by_key in _mapping_items(values):
+        if not isinstance(stats_by_key, Mapping):
+            continue
+        migrated_stats: dict[str, Any] = {}
+        for _key, raw_stats in _mapping_items(stats_by_key):
+            if not isinstance(raw_stats, Mapping):
+                continue
+            stats = dict(raw_stats)
+            feature = str(stats.get("feature") or "")
+            if not feature:
+                continue
+            stats["context_fingerprint"] = _v2_context_fingerprint(stats)
+            migrated_stats[f"{feature}|{stats['context_fingerprint']}"] = stats
+        if migrated_stats:
+            migrated[str(circuit_id)] = migrated_stats
+    return migrated
+
+
+def _v2_context_fingerprint(stats: Mapping[str, Any]) -> str:
+    fingerprint = str(stats.get("context_fingerprint") or "")
+    if fingerprint.startswith(CONTEXT_FINGERPRINT_SCHEMA_VERSION):
+        return fingerprint
+    if fingerprint:
+        return f"{CONTEXT_FINGERPRINT_SCHEMA_VERSION}|{fingerprint}"
+    context = stats.get("context", {})
+    if isinstance(context, Mapping):
+        return ContextKey.from_mapping(context).fingerprint()
+    return CONTEXT_FINGERPRINT_SCHEMA_VERSION
+
+
+def _copy_payload(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _copy_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_payload(item) for item in value]
+    return value
+
+
+def _events_from_raw(values: Any) -> list[CircuitEvent]:
+    events: list[CircuitEvent] = []
+    for value in _list_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        try:
+            events.append(event_from_dict(dict(value)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return events
+
+
+def _baselines_from_raw(values: Any) -> dict[str, BaselineStats]:
+    baselines: dict[str, BaselineStats] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        try:
+            baselines[str(key)] = baseline_from_dict(dict(value))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return baselines
+
+
+def _alerts_from_raw(values: Any) -> list[AlertEvidence]:
+    alerts: list[AlertEvidence] = []
+    for value in _list_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        try:
+            alerts.append(alert_from_dict(dict(value)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return alerts
+
+
+def _recommendations_from_raw(values: Any) -> dict[str, SettingRecommendation]:
+    recommendations: dict[str, SettingRecommendation] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        try:
+            recommendations[str(key)] = recommendation_from_dict(value)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return recommendations
+
+
+def _recommendation_decisions_from_raw(
+    values: Any,
+) -> dict[str, RecommendationDecision]:
+    decisions: dict[str, RecommendationDecision] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, Mapping):
+            continue
+        try:
+            decisions[str(key)] = decision_from_dict(value)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return decisions
+
+
+def _episode_key_from_raw(values: Any) -> tuple[tuple[str, ...], ...]:
+    parts: list[tuple[str, ...]] = []
+    for value in _list_items(values):
+        if isinstance(value, list | tuple):
+            parts.append(tuple(str(item) for item in value))
+    return tuple(parts)
+
+
+def _mapping_items(values: Any) -> Iterable[tuple[Any, Any]]:
+    if not isinstance(values, Mapping):
+        return ()
+    return values.items()
+
+
+def _list_items(values: Any) -> Iterable[Any]:
+    return values if isinstance(values, list) else ()
 
 
 def prune_events(
@@ -599,7 +763,20 @@ class FeatureStore:
     def __init__(self: Self, hass: HomeAssistant, entry_id: str) -> None:
         from homeassistant.helpers.storage import Store as HAStore
 
-        self._store: Store[dict[str, Any]] = HAStore(
+        class CircuitSetupFeatureStore(HAStore):
+            async def _async_migrate_func(
+                self,
+                old_major_version: int,
+                old_minor_version: int,
+                old_data: dict[str, Any],
+            ) -> dict[str, Any]:
+                if old_major_version == 1:
+                    return await migrate_v1_to_v2(old_data)
+                if old_major_version == STORAGE_VERSION:
+                    return _migrated_feature_store_payload(old_data)
+                raise NotImplementedError
+
+        self._store: Store[dict[str, Any]] = CircuitSetupFeatureStore(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY}.{entry_id}",
@@ -640,14 +817,22 @@ def _json_safe_feature_value(value: Any) -> Any:
 
 
 def _dict_of_dicts(values: Any) -> dict[str, dict[str, Any]]:
-    return {str(key): dict(value) for key, value in dict(values).items()}
+    sanitized: dict[str, dict[str, Any]] = {}
+    for key, value in _mapping_items(values):
+        if isinstance(value, Mapping):
+            sanitized[str(key)] = dict(value)
+    return sanitized
 
 
 def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
-    return {
-        str(key): [dict(item) for item in list(value)]
-        for key, value in dict(values).items()
-    }
+    sanitized: dict[str, list[dict[str, Any]]] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, list):
+            continue
+        items = [dict(item) for item in value if isinstance(item, Mapping)]
+        if items:
+            sanitized[str(key)] = items
+    return sanitized
 
 
 def _contextual_samples_by_circuit(values: Any) -> dict[str, list[dict[str, Any]]]:
@@ -694,7 +879,9 @@ def _contextual_baselines_by_circuit(values: Any) -> dict[str, dict[str, Any]]:
                     "feature": str(raw_stats["feature"]),
                     "context_fingerprint": str(raw_stats["context_fingerprint"]),
                     "context": {str(k): str(v) for k, v in context.items()},
-                    "sample_count": int(raw_stats["sample_count"]),
+                    "sample_count": _contextual_stats_sample_count_value(
+                        raw_stats["sample_count"]
+                    ),
                     "median": float(raw_stats["median"]),
                     "mad": float(raw_stats["mad"]),
                     "p10": float(raw_stats["p10"]),
@@ -775,11 +962,25 @@ def _prune_contextual_baselines(
     return pruned if changed else baselines_by_circuit
 
 
-def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> int:
+def _contextual_stats_sample_count(stats: Mapping[str, Any]) -> float:
     try:
-        return max(int(stats.get("sample_count", 0)), 0)
+        return float(
+            max(
+                _contextual_stats_sample_count_value(stats.get("sample_count", 0)),
+                0,
+            )
+        )
     except (TypeError, ValueError):
-        return 0
+        return 0.0
+
+
+def _contextual_stats_sample_count_value(value: Any) -> int | float:
+    parsed = float(value)
+    if not isfinite(parsed):
+        raise ValueError("contextual sample count must be finite")
+    if parsed < 0.0:
+        parsed = 0.0
+    return int(parsed) if parsed.is_integer() else parsed
 
 
 def _contextual_stats_last_seen(stats: Mapping[str, Any]) -> datetime:

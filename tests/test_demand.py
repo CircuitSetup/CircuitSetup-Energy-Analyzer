@@ -66,6 +66,50 @@ def test_record_demand_sample_flags_configured_limit() -> None:
     }
 
 
+def test_record_demand_sample_uses_ha_local_day_and_month() -> None:
+    history = {
+        "samples": [],
+        "daily_peaks": [],
+        "monthly_peak_windows": [
+            {
+                "timestamp": "2026-05-30T18:15:00+00:00",
+                "demand_w": 5000.0,
+                "window_minutes": 15,
+            },
+            {
+                "timestamp": "2026-05-31T20:30:00+00:00",
+                "demand_w": 4500.0,
+                "window_minutes": 15,
+            },
+            {
+                "timestamp": "2026-06-01T02:45:00+00:00",
+                "demand_w": 4000.0,
+                "window_minutes": 15,
+            },
+        ],
+    }
+
+    result = record_demand_sample(
+        history,
+        circuit_id="mains",
+        timestamp=datetime(2026, 6, 1, 3, 30, tzinfo=UTC),
+        real_power_w=4100.0,
+        settings=DemandSettings(),
+        time_zone="America/New_York",
+    )
+
+    assert result is not None
+    assert result.date == "2026-05-31"
+    assert result.peak_demand_w == 4100.0
+    assert result.monthly_peak_rank == 3
+    assert result.monthly_peak_status == "monthly_peak"
+    assert result.monthly_peak_warning is not None
+    assert result.monthly_peak_warning.date == "2026-05-31"
+    assert history["daily_peaks"] == [
+        {"date": "2026-05-31", "peak_demand_w": 4100.0}
+    ]
+
+
 def test_record_demand_sample_prunes_old_window_samples() -> None:
     history = {
         "samples": [

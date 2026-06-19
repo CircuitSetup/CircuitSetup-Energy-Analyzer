@@ -88,6 +88,40 @@ def test_activity_alert_flags_idle_period_over_configured_duration() -> None:
     }
 
 
+def test_activity_alert_idle_period_uses_summary_day_start() -> None:
+    from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
+        ActivityAlertSettings,
+        evaluate_activity_alert,
+    )
+
+    summary = CircuitCycleSummary(
+        circuit_id="fridge",
+        date="2026-05-31",
+        status="idle",
+        start_count=1,
+        completed_cycle_count=1,
+        runtime_seconds=1800.0,
+        average_cycle_seconds=1800.0,
+        active_cycle_seconds=0.0,
+        duty_cycle_percent=2.1,
+        day_elapsed_seconds=84600.0,
+        day_start=datetime(2026, 5, 31, 4, 0, tzinfo=UTC),
+        last_start=datetime(2026, 5, 31, 23, 30, tzinfo=UTC),
+        last_stop=datetime(2026, 6, 1, 0, 0, tzinfo=UTC),
+    )
+
+    evidence = evaluate_activity_alert(
+        circuit_id="fridge",
+        circuit_name="Kitchen Fridge",
+        summary=summary,
+        settings=ActivityAlertSettings(max_idle_minutes=180.0),
+    )
+
+    assert evidence is not None
+    assert evidence.observed_value == 210.0
+    assert evidence.features["idle_seconds"] == 12600.0
+
+
 def test_activity_alert_can_flag_no_activity_since_day_start() -> None:
     from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
         ActivityAlertSettings,

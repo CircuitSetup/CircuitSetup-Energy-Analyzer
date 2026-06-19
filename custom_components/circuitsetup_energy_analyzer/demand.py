@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+
+from .local_time import TimeZone, local_date, local_month_key
 
 DEFAULT_DEMAND_WINDOW_MINUTES = 15
 DEFAULT_PEAK_RANK_COUNT = 3
@@ -80,6 +82,7 @@ def record_demand_sample(
     real_power_w: float | None,
     settings: DemandSettings,
     retention_days: int = 45,
+    time_zone: TimeZone = None,
 ) -> DemandResult | None:
     """Fold a real-power sample into a rolling demand window."""
     if real_power_w is None:
@@ -87,7 +90,7 @@ def record_demand_sample(
 
     window_minutes = max(int(settings.window_minutes), 1)
     window = timedelta(minutes=window_minutes)
-    today = timestamp.date().isoformat()
+    today = _calendar_date(timestamp, time_zone).isoformat()
     samples = _coerce_samples(history.get("samples"))
     samples.append(
         {
@@ -109,10 +112,16 @@ def record_demand_sample(
         peak_rank_count=settings.peak_rank_count,
         peak_warning_ratio=settings.peak_warning_ratio,
         retention_days=retention_days,
+        time_zone=time_zone,
     )
 
     history["samples"] = samples
-    history["daily_peaks"] = _prune_daily_peaks(daily_peaks, timestamp, retention_days)
+    history["daily_peaks"] = _prune_daily_peaks(
+        daily_peaks,
+        timestamp,
+        retention_days,
+        time_zone=time_zone,
+    )
 
     limit_w = _positive_float_or_none(settings.demand_limit_w)
     limit_usage = (
@@ -242,13 +251,16 @@ def _record_monthly_peak_window(
     peak_rank_count: int,
     peak_warning_ratio: float,
     retention_days: int,
+    time_zone: TimeZone = None,
 ) -> dict[str, Any]:
     rank_count = max(int(peak_rank_count), 1)
     warning_ratio = min(max(float(peak_warning_ratio), 0.0), 1.0)
     windows = _coerce_monthly_peak_windows(history.get("monthly_peak_windows"))
-    month = timestamp.strftime("%Y-%m")
+    month = _month_key_for_datetime(timestamp, time_zone)
     monthly_before = [
-        window for window in windows if _month_key(str(window["timestamp"])) == month
+        window
+        for window in windows
+        if _month_key(str(window["timestamp"]), time_zone) == month
     ]
     monthly_demands = sorted(
         (float(window["demand_w"]) for window in monthly_before),
@@ -274,7 +286,7 @@ def _record_monthly_peak_window(
     if has_monthly_baseline and status in {"monthly_peak", "near_monthly_peak"}:
         warning = DemandPeakEvidence(
             circuit_id=circuit_id,
-            date=timestamp.date().isoformat(),
+            date=_calendar_date(timestamp, time_zone).isoformat(),
             current_demand_w=current_demand_w,
             monthly_peak_rank=rank,
             monthly_peak_cutoff_w=cutoff_w,
@@ -306,6 +318,7 @@ def _record_monthly_peak_window(
         windows,
         timestamp=timestamp,
         retention_days=retention_days,
+        time_zone=time_zone,
     )
     recorded = pruned_windows != before_windows
     if recorded or "monthly_peak_windows" in history:
@@ -388,8 +401,12 @@ def _prune_daily_peaks(
     daily_peaks: list[dict[str, float | str]],
     timestamp: datetime,
     retention_days: int,
+    *,
+    time_zone: TimeZone = None,
 ) -> list[dict[str, float | str]]:
-    cutoff = (timestamp.date() - timedelta(days=max(retention_days, 1))).isoformat()
+    cutoff = (
+        _calendar_date(timestamp, time_zone) - timedelta(days=max(retention_days, 1))
+    ).isoformat()
     return [
         peak
         for peak in daily_peaks
@@ -402,6 +419,7 @@ def _prune_monthly_peak_windows(
     *,
     timestamp: datetime,
     retention_days: int,
+    time_zone: TimeZone = None,
 ) -> list[dict[str, float | int | str]]:
     cutoff = timestamp - timedelta(days=max(retention_days, 1))
     retained = [
@@ -412,7 +430,10 @@ def _prune_monthly_peak_windows(
     ]
     by_month: dict[str, list[dict[str, float | int | str]]] = {}
     for window in retained:
-        by_month.setdefault(_month_key(str(window["timestamp"])), []).append(window)
+        by_month.setdefault(
+            _month_key(str(window["timestamp"]), time_zone),
+            [],
+        ).append(window)
 
     top_windows: list[dict[str, float | int | str]] = []
     for month in sorted(by_month):
@@ -434,11 +455,23 @@ def _prune_monthly_peak_windows(
     ]
 
 
-def _month_key(timestamp: str) -> str:
+def _month_key(timestamp: str, time_zone: TimeZone = None) -> str:
     parsed = _datetime_or_none(timestamp)
     if parsed is None:
         return ""
-    return parsed.strftime("%Y-%m")
+    return _month_key_for_datetime(parsed, time_zone)
+
+
+def _month_key_for_datetime(timestamp: datetime, time_zone: TimeZone) -> str:
+    if time_zone is None or timestamp.tzinfo is None:
+        return timestamp.strftime("%Y-%m")
+    return local_month_key(timestamp, time_zone)
+
+
+def _calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or timestamp.tzinfo is None:
+        return timestamp.date()
+    return local_date(timestamp, time_zone)
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

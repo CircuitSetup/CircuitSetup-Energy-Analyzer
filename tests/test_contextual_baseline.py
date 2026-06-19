@@ -8,6 +8,8 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
     build_contextual_baseline,
+    contextual_sample_from_dict,
+    contextual_sample_to_dict,
     day_type_for_datetime,
     rain_intensity_bin,
     rain_state,
@@ -16,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     solar_flow_state,
     temperature_bin,
     time_of_day_bucket,
+    upsert_contextual_sample,
     water_flow_state,
     weather_mode_for_temperature,
 )
@@ -49,7 +52,7 @@ def test_context_fingerprint_stable_and_order_independent() -> None:
     )
 
     assert first.fingerprint() == (
-        "season=summer|temperature_bin=very_hot|weather_mode=cooling"
+        "context:v2|season=summer|temperature_bin=very_hot|weather_mode=cooling"
     )
     assert second.fingerprint() == first.fingerprint()
     assert second.as_dict() == {
@@ -83,11 +86,23 @@ def test_context_bucket_helpers() -> None:
     assert rain_intensity_bin(0.9) == "heavy"
     assert rain_state(False, None) == "dry"
     assert rain_state(True, 0.9) == "heavy_rain"
+    assert rain_state(None, 0.4) == "raining"
+    assert rain_state(None, 0.9) == "heavy_rain"
+    assert rain_state(False, 0.4) == "ambiguous"
+    assert rain_state(False, 0.0) == "dry"
     assert water_flow_state(True, 12.0) == "active_flow"
     assert water_flow_state(False, 3.0) == "recent_flow"
     assert water_flow_state(False, 0.0) == "no_flow"
     assert solar_flow_state("exporting", "high_surplus") == "high_surplus"
     assert solar_flow_state("exporting", "no_surplus") == "exporting"
+
+
+def test_context_bucket_helpers_accept_ha_local_timezone() -> None:
+    timestamp = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+
+    assert season_for_datetime(timestamp, time_zone="America/New_York") == "spring"
+    assert day_type_for_datetime(timestamp, time_zone="America/New_York") == "weekend"
+    assert time_of_day_bucket(timestamp, time_zone="America/New_York") == "evening"
 
 
 def test_contextual_baseline_builds_robust_stats() -> None:
@@ -113,7 +128,7 @@ def test_contextual_baseline_builds_robust_stats() -> None:
     )
 
     assert stats is not None
-    assert stats.context_fingerprint == "season=summer"
+    assert stats.context_fingerprint == "context:v2|season=summer"
     assert stats.sample_count == 5
     assert stats.median == 8.0
     assert stats.p90 == 40.0
@@ -152,6 +167,193 @@ def test_contextual_baseline_fallback_prefers_reliable_context() -> None:
     assert selected.fallback_level == "temperature_context"
     assert selected.sample_count == 11
     assert selected.context == {"temperature_bin": "very_hot"}
+
+
+def test_contextual_baseline_excludes_maintenance_samples_from_fallback() -> None:
+    requested = ContextKey.from_mapping({"season": "summer"})
+    maintenance_context = ContextKey.from_mapping(
+        {
+            "maintenance_state": "active",
+            "season": "summer",
+        }
+    )
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC) + timedelta(days=offset),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=12.0 + offset,
+            context=maintenance_context,
+        )
+        for offset in range(7)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=requested,
+        samples=samples,
+        fallback_level="seasonal_context",
+        required_samples=7,
+    )
+
+    assert stats is None
+
+
+def test_contextual_baseline_uses_sample_weight_for_reliability_and_stats() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=100.0,
+            context=context,
+            weight=0.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=10.0,
+            context=context,
+            weight=3.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 3, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=20.0,
+            context=context,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 4, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=30.0,
+            context=context,
+        ),
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=5,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 5
+    assert stats.median == 10.0
+    assert stats.p90 == 30.0
+    assert stats.first_seen == datetime(2026, 6, 2, tzinfo=UTC)
+
+
+def test_contextual_baseline_weighted_stats_match_expanded_samples() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=10.0,
+            context=context,
+            weight=2.0,
+        ),
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=20.0,
+            context=context,
+            weight=2.0,
+        ),
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=4,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 4
+    assert stats.median == 15.0
+    assert stats.mad == 5.0
+
+
+def test_contextual_baseline_supports_subunit_fractional_weights() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples = [
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, day, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=float(day * 10),
+            context=context,
+            weight=0.25,
+        )
+        for day in range(1, 5)
+    ]
+
+    stats = build_contextual_baseline(
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        context=context,
+        samples=samples,
+        fallback_level="exact_context",
+        required_samples=1,
+    )
+
+    assert stats is not None
+    assert stats.sample_count == 1
+    assert stats.median == 25.0
+    assert stats.mad == 10.0
+    assert stats.p10 == 10.0
+    assert stats.p90 == 40.0
+
+
+def test_contextual_sample_serialization_preserves_non_default_weight() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    sample = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=12.0,
+        context=context,
+        weight=2.5,
+    )
+
+    payload = contextual_sample_to_dict(sample)
+    restored = contextual_sample_from_dict("hvac", payload)
+
+    assert payload["weight"] == 2.5
+    assert restored is not None
+    assert restored.weight == 2.5
+
+
+def test_contextual_sample_serialization_normalizes_invalid_weight() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    sample = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 1, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=12.0,
+        context=context,
+        weight=float("nan"),
+    )
+
+    payload = contextual_sample_to_dict(sample)
+    restored = contextual_sample_from_dict("hvac", payload)
+
+    assert payload["weight"] == 0.0
+    assert restored is not None
+    assert restored.weight == 0.0
 
 
 def test_exact_context_requires_matching_dimension_set() -> None:
@@ -216,6 +418,190 @@ def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
         "time_of_day": "afternoon",
         "weather_mode": "cooling",
     }
+
+
+def test_build_context_for_sample_uses_sample_local_calendar() -> None:
+    sample_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    now = datetime(2026, 6, 2, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("ev", sample_time),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="peak_demand_w",
+        time_zone="America/New_York",
+    )
+
+    values = context.as_dict()
+    assert values["season"] == "spring"
+    assert values["day_type"] == "weekend"
+    assert values["time_of_day"] == "evening"
+
+
+def test_build_context_for_sample_accepts_rollup_calendar_timestamp() -> None:
+    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    rollup_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("ev", sample_time),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        now=rollup_time,
+        feature="peak_demand_w",
+        time_zone="America/New_York",
+        calendar_timestamp=rollup_time,
+    )
+
+    values = context.as_dict()
+    assert values["season"] == "spring"
+    assert values["day_type"] == "weekend"
+    assert values["time_of_day"] == "evening"
+
+
+def test_build_context_for_sample_carries_rain_context_issue() -> None:
+    now = datetime(2026, 6, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "rain_intensity_mm_per_hour": 0.35,
+                "rain_context_issues": ["rain_activity_conflict"],
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict() == {
+        "appliance_profile": "sump_pump",
+        "circuit_mode": "single_phase",
+        "rain_context_issue": "rain_activity_conflict",
+        "rain_intensity_bin": "moderate",
+        "rain_state": "ambiguous",
+        "season": "summer",
+    }
+
+
+def test_build_context_preserves_raw_rain_conflict_when_unit_unknown() -> None:
+    now = datetime(2026, 6, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "rain_intensity_per_hour": 0.35,
+                "rain_intensity_unit": None,
+                "rain_intensity_mm_per_hour": None,
+                "rain_context_issues": ["rain_intensity_unit_missing"],
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict() == {
+        "appliance_profile": "sump_pump",
+        "circuit_mode": "single_phase",
+        "rain_context_issue": "rain_activity_conflict",
+        "rain_intensity_bin": "unknown",
+        "rain_state": "unknown",
+        "season": "summer",
+    }
+
+
+def test_upsert_contextual_sample_replaces_same_ha_local_date() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples: list[dict[str, object]] = []
+    first = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 2, 23, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=8.0,
+        context=context,
+    )
+    second = ContextualBaselineSample(
+        timestamp=datetime(2026, 6, 3, 3, 30, tzinfo=UTC),
+        circuit_id="hvac",
+        feature="daily_energy_kwh",
+        value=9.0,
+        context=context,
+    )
+
+    upsert_contextual_sample(samples, first, time_zone="America/New_York")
+    upsert_contextual_sample(samples, second, time_zone="America/New_York")
+
+    assert len(samples) == 1
+    assert samples[0]["timestamp"] == "2026-06-03T03:30:00+00:00"
+    assert samples[0]["value"] == 9.0
+
+
+def test_upsert_contextual_sample_tolerates_legacy_naive_timestamp() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples: list[dict[str, object]] = [
+        {
+            "timestamp": "2026-06-01T03:30:00",
+            "feature": "daily_energy_kwh",
+            "value": 7.0,
+            "context": {"season": "summer"},
+            "source": "processor",
+        }
+    ]
+
+    upsert_contextual_sample(
+        samples,
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, 14, 0, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=8.0,
+            context=context,
+        ),
+        time_zone="America/New_York",
+    )
+
+    assert len(samples) == 1
+    assert samples[0]["timestamp"] == "2026-06-01T14:00:00+00:00"
+    assert samples[0]["value"] == 8.0
 
 
 def test_build_context_for_water_and_solar_state() -> None:
@@ -295,6 +681,37 @@ def test_load_context_uses_site_solar_flow_state() -> None:
     )
 
     assert context.as_dict()["day_type"] == "weekend"
+    assert context.as_dict()["solar_flow_state"] == "high_surplus"
+
+
+def test_load_context_prefers_explicit_mains_site_solar_context() -> None:
+    now = datetime(2026, 6, 20, 14, tzinfo=UTC)
+    ev_config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    state = AnalyzerState(
+        solar_flow_status_by_circuit={
+            "solar_array": "no_generation",
+            "mains": "exporting",
+        },
+        solar_flow_evidence_by_circuit={
+            "solar_array": {"solar_surplus_status": "no_surplus"},
+            "mains": {"solar_surplus_status": "high_surplus"},
+        },
+    )
+
+    context = build_context_for_sample(
+        circuit_config=ev_config,
+        sample=_sample("ev", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="peak_demand_w",
+    )
+
     assert context.as_dict()["solar_flow_state"] == "high_surplus"
 
 

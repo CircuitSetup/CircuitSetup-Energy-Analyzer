@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.models import EventType
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
     assert_fixture_expectations,
@@ -45,6 +46,12 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
     [
         "normal_refrigerator_week",
         "refrigerator_energy_drift",
+        "normal_washer_cycle",
+        "normal_ev_charger_session",
+        "normal_dryer_heat_cycle",
+        "refrigerator_non_finite_power",
+        "refrigerator_stale_power",
+        "hvac_voltage_sag",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -79,6 +86,142 @@ def test_abnormal_fixture_detects_expected_alert_with_latency() -> None:
     assert metrics.detection_latency_seconds == 172800.0
     assert metrics.precision == 1.0
     assert metrics.recall == 1.0
+
+
+def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_washer_cycle.yaml")
+    pause_samples = [
+        sample
+        for sample in fixture.samples
+        if 60 < sample.t < 300
+        and float(sample.states.get("sensor.washer_power", 0.0)) < 8.0
+    ]
+
+    result = replay_fixture_processors(fixture)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "washer"
+    ]
+
+    assert pause_samples
+    assert event_types == [EventType.START, EventType.STOP]
+
+
+def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_ev_charger_session.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "ev_charger"
+    ]
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "ev_charger"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "ev_charger"
+    assert fixture.circuits[0].mode == "dual_phase"
+    assert event_types == [EventType.START, EventType.STOP]
+    assert event_offsets == [60, 3660]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_dryer_fixture_exercises_heat_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_dryer_heat_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "dryer"
+    ]
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "dryer"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "dryer"
+    assert fixture.circuits[0].mode == "dual_phase"
+    assert event_types == [EventType.START, EventType.STOP]
+    assert event_offsets == [60, 3660]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_non_finite_fixture_records_quality_issue_without_alerts() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "refrigerator_non_finite_power.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "refrigerator_non_finite"
+    ]
+
+    assert result.setup_issues == [
+        {
+            "timestamp": fixture.start_time.isoformat(),
+            "circuit_id": "refrigerator_non_finite",
+            "issue": "sensor.refrigerator_non_finite_power non_finite",
+        }
+    ]
+    assert event_offsets == [120, 240]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_stale_numeric_fixture_records_quality_issue_and_recovers() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_stale_power.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "refrigerator_stale"
+    ]
+
+    assert result.setup_issues == [
+        {
+            "timestamp": (
+                fixture.start_time + timedelta(seconds=60)
+            ).isoformat(),
+            "circuit_id": "refrigerator_stale",
+            "issue": "sensor.refrigerator_stale_power stale",
+        }
+    ]
+    assert event_offsets == [120, 240]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_voltage_sag_fixture_emits_power_quality_event_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "hvac_voltage_sag.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events = [event for event in result.events if event.circuit_id == "hvac"]
+
+    assert [event.event_type for event in events] == [
+        EventType.START,
+        EventType.VOLTAGE_SAG,
+        EventType.STOP,
+    ]
+    assert [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in events
+    ] == [60, 180, 300]
+    assert events[1].features["voltage"] == pytest.approx(220.0)
+    assert events[1].features["nominal_voltage"] == pytest.approx(240.0)
+    assert events[1].features["real_power_w"] == pytest.approx(3600.0)
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
 
 
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
@@ -122,9 +265,15 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 2 |" in report
+    assert "| Fixtures | 8 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
+    assert "normal_washer_cycle" in report
+    assert "normal_ev_charger_session" in report
+    assert "normal_dryer_heat_cycle" in report
+    assert "refrigerator_non_finite_power" in report
+    assert "refrigerator_stale_power" in report
+    assert "hvac_voltage_sag" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:

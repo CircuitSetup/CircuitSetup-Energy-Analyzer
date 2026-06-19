@@ -118,6 +118,8 @@ def _idle_seconds(summary: CircuitCycleSummary) -> float | None:
 
 
 def _day_start(summary: CircuitCycleSummary, reference: datetime) -> datetime:
+    if summary.day_start is not None:
+        return summary.day_start
     try:
         summary_date = datetime.fromisoformat(summary.date).date()
     except ValueError:

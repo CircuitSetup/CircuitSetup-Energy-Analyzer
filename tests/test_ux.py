@@ -364,6 +364,65 @@ def test_data_quality_checklist_bounds_large_quality_issue_attributes() -> None:
     assert checklist["source_data_fresh"] is False
 
 
+def test_data_quality_checklist_flags_non_finite_numeric_issue() -> None:
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        data_quality_checklist,
+    )
+
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_w", SensorRole.REAL_POWER),),
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        source_entity_ids=("sensor.fridge_w",),
+        quality_issues=("sensor.fridge_w non_finite",),
+    )
+
+    checklist = data_quality_checklist(config, sample)
+
+    assert checklist["numeric_states_valid"] is False
+    assert checklist["source_data_fresh"] is True
+
+
+def test_data_quality_checklist_flags_invalid_timestamp_as_not_fresh() -> None:
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        data_quality_checklist,
+    )
+
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_w", SensorRole.REAL_POWER),),
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        source_entity_ids=("sensor.fridge_w",),
+        quality_issues=(
+            "sensor.fridge_w future_timestamp",
+            "sensor.fridge_backup_w naive_timestamp",
+        ),
+    )
+
+    checklist = data_quality_checklist(config, sample)
+
+    assert checklist["numeric_states_valid"] is True
+    assert checklist["source_data_fresh"] is False
+
+
 def test_learning_progress_counts_age_cycles_and_baseline_confidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.models import BaselineStats
     from custom_components.circuitsetup_energy_analyzer.ux import learning_progress

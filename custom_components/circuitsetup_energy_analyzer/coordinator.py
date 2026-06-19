@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from inspect import isawaitable
 from statistics import median
 from typing import Any, Self
@@ -117,6 +117,7 @@ from .goals import EnergyGoalSettings
 from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 )
+from .local_time import local_date, local_day_time
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -729,17 +730,36 @@ def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     if not path:
         msg = "State update path must not be empty"
         raise ValueError(msg)
-    target = state
-    for segment in path[:-1]:
-        if isinstance(target, dict):
-            target = target.setdefault(segment, {})
-        else:
-            target = getattr(target, segment)
+    if len(path) < 2:
+        msg = "State update path must include a root and destination key"
+        raise ValueError(msg)
+
+    root = path[0]
+    if root not in getattr(type(state), "__dataclass_fields__", {}):
+        msg = f"State update path has unknown root: {root}"
+        raise ValueError(msg)
+
+    target = getattr(state, root)
+    if not isinstance(target, MutableMapping):
+        msg = f"State update root is not a mapping: {root}"
+        raise TypeError(msg)
+
+    target_segment = root
+    for segment in path[1:-1]:
+        if not isinstance(target, MutableMapping):
+            msg = f"State update target is not a mapping at: {target_segment}"
+            raise TypeError(msg)
+        if segment not in target:
+            msg = f"State update cannot create intermediate key: {segment}"
+            raise ValueError(msg)
+        target = target[segment]
+        target_segment = segment
+
+    if not isinstance(target, MutableMapping):
+        msg = f"State update target is not a mapping at: {target_segment}"
+        raise TypeError(msg)
     final_segment = path[-1]
-    if isinstance(target, dict):
-        target[final_segment] = value
-        return
-    setattr(target, final_segment, value)
+    target[final_segment] = value
 
 
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
@@ -1261,7 +1281,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             entry_data=self.entry_data,
             known_load_circuit_ids=self._known_load_circuit_ids,
             sensitivity=self._sensitivity,
+            time_zone=self._ha_time_zone(),
         )
+
+    def _ha_time_zone(self: Self) -> str | None:
+        """Return Home Assistant's configured timezone name when available."""
+        value = getattr(getattr(self.hass, "config", None), "time_zone", None)
+        return str(value) if value else None
 
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
@@ -2163,6 +2189,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=self._ha_time_zone(),
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -3457,6 +3484,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
+            time_zone=self._ha_time_zone(),
         )
         self.state.run_cycle_count_by_circuit[circuit_id] = (
             cycle_summary.start_count
@@ -3609,6 +3637,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 else "°F"
             ),
             observed_at=now,
+            time_zone=self._ha_time_zone(),
         )
         if outdoor_temperature_reading is not None:
             evidence["temperature_source_entity"] = outdoor_entity
@@ -3720,6 +3749,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         rain_active = self._binary_entity_active(rain_entity)
         rain_intensity = self._numeric_entity_value(rain_intensity_entity)
+        rain_intensity_unit = self._entity_unit_of_measurement(rain_intensity_entity)
         compressor_context = self._hvac_compressor_context()
         runtime_minutes = self._runtime_minutes_for_circuit(config.circuit_id)
         baseline = self._dry_weather_pump_baseline(config.circuit_id, now)
@@ -3730,8 +3760,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 pump_runtime_minutes=runtime_minutes,
                 dry_baseline_minutes=baseline["dry_baseline_minutes"],
                 comparable_window_count=baseline["comparable_window_count"],
-                rain_active=bool(rain_active),
+                rain_active=rain_active,
                 rain_intensity_per_hour=rain_intensity,
+                rain_intensity_unit=rain_intensity_unit,
                 compressor_runtime_minutes=compressor_context["runtime_minutes"],
                 compressor_duty_cycle_percent=compressor_context[
                     "duty_cycle_percent"
@@ -3748,6 +3779,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         evidence["rain_sensor_active"] = rain_active
         evidence["rain_intensity_entity"] = rain_intensity_entity
         evidence["rain_intensity_per_hour"] = rain_intensity
+        evidence["rain_intensity_unit"] = rain_intensity_unit
         evidence["rain_response_window_minutes"] = int(
             advanced_settings.get(
                 CONF_RAIN_RESPONSE_WINDOW_MINUTES,
@@ -3903,6 +3935,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         state = str(getattr(raw_state, "state", "")).strip()
         return _float_or_none(state)
 
+    def _entity_unit_of_measurement(self: Self, entity_id: str | None) -> str | None:
+        if not entity_id:
+            return None
+        raw_state = self._raw_state_for_entity(entity_id)
+        if raw_state is None:
+            return None
+        attributes = getattr(raw_state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            return None
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        return unit or None
+
     def _max_flow_active_minutes(
         self: Self,
         entity_ids: Iterable[str],
@@ -3998,9 +4042,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if not isinstance(sample, Mapping):
                 continue
             sample_time = _datetime_or_none(sample.get("timestamp"))
-            if sample_time is not None and sample_time.date() >= now.date():
+            if sample_time is not None and _ha_local_date(
+                sample_time,
+                self._ha_time_zone(),
+            ) >= _ha_local_date(now, self._ha_time_zone()):
                 continue
-            if sample.get("rain_active") is True:
+            if not _water_context_history_sample_is_dry(sample):
                 continue
             if _float_or_none(sample.get("compressor_runtime_minutes")) not in (
                 None,
@@ -4047,13 +4094,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 "hvac_compressor_runtime_minutes"
             ),
         }
+        for key in (
+            "rain_state",
+            "rain_intensity_mm_per_hour",
+            "rain_intensity_bin",
+            "rain_context_issues",
+        ):
+            if key in rain_evidence:
+                sample[key] = rain_evidence[key]
         history = self.store_data.water_context_history_by_circuit.setdefault(
             circuit_id,
             [],
         )
         for index in range(len(history) - 1, -1, -1):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
-            if existing_time is not None and existing_time.date() == now.date():
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                self._ha_time_zone(),
+            ) == _ha_local_date(now, self._ha_time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -4163,7 +4221,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if not isinstance(raw_sample, Mapping):
                 continue
             sample_time = _datetime_or_none(raw_sample.get("timestamp"))
-            if sample_time is None or sample_time.date() >= now.date():
+            if sample_time is None or _ha_local_date(
+                sample_time,
+                self._ha_time_zone(),
+            ) >= _ha_local_date(now, self._ha_time_zone()):
                 continue
             temperature = _float_or_none(raw_sample.get("temperature"))
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
@@ -4211,7 +4272,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         for index in range(len(history) - 1, -1, -1):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
-            if existing_time is not None and existing_time.date() == now.date():
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                self._ha_time_zone(),
+            ) == _ha_local_date(now, self._ha_time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -4981,7 +5045,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             return
 
         window_days = max(int(settings.window_days), 1)
-        today = now.date().isoformat()
+        today_date = _ha_local_date(now, self._ha_time_zone())
+        today = today_date.isoformat()
         history = self.store_data.energy_usage_by_circuit.setdefault(
             config.circuit_id,
             {},
@@ -5004,7 +5069,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_key = _demo_circuit_key(config)
         prior_usage = _demo_prior_usage(circuit_key, window_days)
         today_usage = _demo_today_usage(circuit_key, energy_kwh)
-        start_date = now.date() - timedelta(days=window_days)
+        start_date = today_date - timedelta(days=window_days)
         history["days"] = [
             {
                 "date": (start_date + timedelta(days=index)).isoformat(),
@@ -5044,7 +5109,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_temp = _float_or_none(sample.get("temperature"))
             if (
                 sample_time is not None
-                and sample_time.date() < now.date()
+                and _ha_local_date(sample_time, self._ha_time_zone())
+                < _ha_local_date(now, self._ha_time_zone())
                 and sample_temp is not None
                 and abs(sample_temp - outdoor_temperature) <= 3.0
             ):
@@ -5052,10 +5118,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if comparable_count >= 3:
             return
 
+        current_date = _ha_local_date(now, self._ha_time_zone())
         self.store_data.weather_context_history_by_circuit[config.circuit_id] = [
             {
-                "timestamp": (
-                    now - timedelta(days=7 - index, hours=2)
+                "timestamp": local_day_time(
+                    current_date - timedelta(days=7 - index),
+                    time(12, 0),
+                    self._ha_time_zone(),
                 ).isoformat(),
                 "temperature": round(float(outdoor_temperature) + offset, 3),
                 "runtime_minutes": runtime,
@@ -5984,7 +6053,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _prune_energy_usage(self: Self, now: datetime) -> None:
         for circuit_id, history in self.store_data.energy_usage_by_circuit.items():
             retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = (now.date() - RETENTION_WINDOWS[retention_mode]).isoformat()
+            cutoff = (
+                _ha_local_date(now, self._ha_time_zone())
+                - RETENTION_WINDOWS[retention_mode]
+            ).isoformat()
             days = history.get("days", [])
             if not isinstance(days, list):
                 continue
@@ -5998,7 +6070,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for circuit_id, history in self.store_data.demand_by_circuit.items():
             retention_mode = self._retention_mode_for_circuit(circuit_id)
             cutoff_datetime = now - RETENTION_WINDOWS[retention_mode]
-            cutoff = cutoff_datetime.date().isoformat()
+            cutoff = (
+                _ha_local_date(now, self._ha_time_zone())
+                - RETENTION_WINDOWS[retention_mode]
+            ).isoformat()
             capacity_samples = history.get("capacity_current_samples")
             if isinstance(capacity_samples, list):
                 history["capacity_current_samples"] = [
@@ -6625,6 +6700,27 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
+    if time_zone is None or value.tzinfo is None:
+        return value.date()
+    return local_date(value, time_zone)
+
+
+def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
+    raw_issues = sample.get("rain_context_issues")
+    if isinstance(raw_issues, str) and raw_issues.strip():
+        return False
+    if isinstance(raw_issues, (list, tuple, set)) and raw_issues:
+        return False
+    intensity = _float_or_none(sample.get("rain_intensity_mm_per_hour"))
+    if intensity is not None and intensity > 0.0:
+        return False
+    rain_state = str(sample.get("rain_state") or "").strip().lower()
+    if rain_state:
+        return rain_state == "dry"
+    return sample.get("rain_active") is False
 
 
 def _observation_within_cutoff(
