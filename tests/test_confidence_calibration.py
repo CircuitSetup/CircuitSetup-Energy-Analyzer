@@ -47,6 +47,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_refrigerator_week",
         "refrigerator_energy_drift",
         "normal_washer_cycle",
+        "normal_ev_charger_session",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -103,6 +104,29 @@ def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
     assert event_types == [EventType.START, EventType.STOP]
 
 
+def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_ev_charger_session.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "ev_charger"
+    ]
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "ev_charger"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "ev_charger"
+    assert fixture.circuits[0].mode == "dual_phase"
+    assert event_types == [EventType.START, EventType.STOP]
+    assert event_offsets == [60, 3660]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
     result = replay_fixture_processors(fixture)
@@ -144,10 +168,11 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 3 |" in report
+    assert "| Fixtures | 4 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
+    assert "normal_ev_charger_session" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:

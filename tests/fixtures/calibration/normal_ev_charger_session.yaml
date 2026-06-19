@@ -1,0 +1,102 @@
+schema_version: 1
+id: normal_ev_charger_session
+description: Normal EV charging session and steady daily energy use stays quiet.
+scenario_type: normal
+appliance_profile: ev_charger
+circuit_mode: dual_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: ev_charger
+    name: EV Charger
+    appliance_profile: ev_charger
+    circuit_mode: dual_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.ev_charger_power
+      energy: sensor.ev_charger_energy
+      current: sensor.ev_charger_current
+      voltage: sensor.ev_charger_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.ev_charger_power: 0
+      sensor.ev_charger_energy: 200.0
+      sensor.ev_charger_current: 0.0
+      sensor.ev_charger_voltage: 240.0
+  - t: 60
+    states:
+      sensor.ev_charger_power: 7200
+      sensor.ev_charger_energy: 200.0
+      sensor.ev_charger_current: 30.0
+      sensor.ev_charger_voltage: 240.2
+  - t: 120
+    states:
+      sensor.ev_charger_power: 7200
+      sensor.ev_charger_energy: 200.12
+      sensor.ev_charger_current: 30.0
+      sensor.ev_charger_voltage: 240.1
+  - t: 1800
+    states:
+      sensor.ev_charger_power: 6800
+      sensor.ev_charger_energy: 203.4
+      sensor.ev_charger_current: 28.3
+      sensor.ev_charger_voltage: 240.4
+  - t: 3600
+    states:
+      sensor.ev_charger_power: 6400
+      sensor.ev_charger_energy: 206.8
+      sensor.ev_charger_current: 26.7
+      sensor.ev_charger_voltage: 240.1
+  - t: 3660
+    states:
+      sensor.ev_charger_power: 0
+      sensor.ev_charger_energy: 206.9
+      sensor.ev_charger_current: 0.0
+      sensor.ev_charger_voltage: 240.0
+  - t: 3720
+    states:
+      sensor.ev_charger_power: 0
+      sensor.ev_charger_energy: 206.9
+      sensor.ev_charger_current: 0.0
+      sensor.ev_charger_voltage: 239.9
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 200.0
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 240.0
+    daily_usage_kwh: [12.0, 12.2, 11.9, 12.1, 12.0, 12.2, 11.9, 12.1, 12.0, 12.2]
+
+labels:
+  expected_events:
+    - circuit_id: ev_charger
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: ev_charger
+      event_type: stop
+      around_t: 3660
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: ev_charger
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null
