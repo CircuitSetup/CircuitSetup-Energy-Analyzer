@@ -1,0 +1,41 @@
+flowchart LR
+  SRC[ESPHome / compatible meter entities]
+  HA[Home Assistant Core]
+  BOOT[__init__.py bootstrap]
+  CFG[Config flow / discovery / mapping / profiles]
+  COORD[EnergyAnalyzerCoordinator]
+  NORM[Normalization + local/context building]
+  PROC[Feature processors]
+  FEATURES[Domain analytics modules]
+  ALERT[Alerting + feedback + settings advisor]
+  STORE[FeatureStoreData / HA .storage]
+  ENT[Sensor / binary sensor / button / select / number]
+  PANEL[Evidence API + custom panel]
+  DASH[Generated Lovelace dashboard]
+  REPAIR[Repairs + notifications]
+  REC[Recorder / statistics]
+  TEST[Unit + Home Assistant lifecycle tests]
+
+  HA --> BOOT
+  BOOT --> CFG
+  BOOT --> COORD
+  SRC --> COORD
+  COORD --> NORM
+  NORM --> PROC
+  PROC --> FEATURES
+  PROC --> ALERT
+  COORD --> ALERT
+  COORD <--> STORE
+  COORD --> ENT
+  COORD --> PANEL
+  PANEL --> ALERT
+  HA --> ENT
+  HA --> PANEL
+  HA --> DASH
+  COORD --> REPAIR
+  REC --> FEATURES
+  CFG --> DASH
+  TEST --> BOOT
+  TEST --> COORD
+  TEST --> PROC
+  TEST --> PANEL

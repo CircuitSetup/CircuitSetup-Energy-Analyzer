@@ -1,0 +1,2681 @@
+{
+  "schema_version": "1.0",
+  "graph_type": "curated_semantic_codegraph",
+  "repository": {
+    "url": "https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer",
+    "branch": "master",
+    "commit": "f0dee7a5a2104dcad4d099b97b9f3f2cc3d44780",
+    "short_commit": "f0dee7a",
+    "integration_version": "0.9.1",
+    "domain": "circuitsetup_energy_analyzer",
+    "generated_at": "2026-06-19T17:54:36.051209+00:00"
+  },
+  "scope": {
+    "primary_source_root": "custom_components/circuitsetup_energy_analyzer",
+    "includes": [
+      "Home Assistant integration modules",
+      "feature processor package",
+      "entity helper package",
+      "frontend panel and integration resources",
+      "test/repository areas at subsystem level"
+    ],
+    "edge_note": "contains edges are inventory-based; runtime edges are curated semantic relationships. Run generate_codegraph.py in a checkout for exact AST import/symbol edges."
+  },
+  "entrypoints": [
+    {
+      "symbol": "async_setup_entry",
+      "path": "custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "role": "Config-entry bootstrap"
+    },
+    {
+      "symbol": "async_unload_entry",
+      "path": "custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "role": "Platform/listener/service/panel cleanup"
+    },
+    {
+      "symbol": "async_migrate_entry",
+      "path": "custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "role": "Config-entry migration"
+    },
+    {
+      "symbol": "EnergyAnalyzerCoordinator",
+      "path": "custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "role": "Runtime orchestrator and shared state"
+    },
+    {
+      "symbol": "FeatureProcessor.process",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "role": "Per-feature processing contract"
+    },
+    {
+      "symbol": "OperatingStateMachine.process",
+      "path": "custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "role": "Profile-aware operating-state transition engine"
+    },
+    {
+      "symbol": "async_setup_services",
+      "path": "custom_components/circuitsetup_energy_analyzer/services.py",
+      "role": "Home Assistant service registration"
+    },
+    {
+      "symbol": "async_setup_panel",
+      "path": "custom_components/circuitsetup_energy_analyzer/panel.py",
+      "role": "Evidence API/panel registration"
+    }
+  ],
+  "runtime_flows": {
+    "setup": [
+      "Home Assistant calls __init__.async_setup_entry",
+      "FeatureStore loads FeatureStoreData",
+      "EnergyAnalyzerCoordinator is constructed",
+      "Shared services and custom panel are registered for the first entry",
+      "Source listeners start",
+      "sensor, binary_sensor, button, select and number platforms are forwarded"
+    ],
+    "sample_processing": [
+      "A configured Home Assistant source entity changes",
+      "Coordinator coalesces/receives the update",
+      "normalize builds a NormalizedCircuitSample",
+      "Coordinator builds local/contextual ProcessingContext",
+      "Feature processors return FeatureResult objects",
+      "Coordinator applies events, observations, alerts and state updates",
+      "Notifications/Repairs/evidence state are synchronized",
+      "Bounded FeatureStoreData is saved",
+      "Entities receive coordinator updates"
+    ],
+    "feedback": [
+      "User opens evidence panel or invokes a control",
+      "panel/services resolve circuit, alert, NILM signature or recommendation",
+      "Coordinator updates feedback/review/setting state",
+      "Alerting, NILM or settings-advisor logic uses the stored decision",
+      "Store persists the decision and UI refreshes"
+    ]
+  },
+  "change_impact": [
+    {
+      "change": "Add or modify a circuit-analysis feature",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/models.py",
+        "custom_components/circuitsetup_energy_analyzer/profiles.py",
+        "custom_components/circuitsetup_energy_analyzer/processors/base.py",
+        "custom_components/circuitsetup_energy_analyzer/coordinator.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/<feature>.py",
+        "custom_components/circuitsetup_energy_analyzer/processors/<feature>.py",
+        "custom_components/circuitsetup_energy_analyzer/sensor.py",
+        "custom_components/circuitsetup_energy_analyzer/strings.json",
+        "tests/test_processors.py"
+      ]
+    },
+    {
+      "change": "Change operating/running/cycle behavior",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+        "custom_components/circuitsetup_energy_analyzer/processors/events.py",
+        "custom_components/circuitsetup_energy_analyzer/cycles.py",
+        "custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+        "custom_components/circuitsetup_energy_analyzer/binary_sensor.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/config_flow.py",
+        "custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+        "custom_components/circuitsetup_energy_analyzer/storage.py",
+        "tests/test_operating_detection.py",
+        "tests/test_cycles.py"
+      ]
+    },
+    {
+      "change": "Change alerts or user feedback",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/alerting.py",
+        "custom_components/circuitsetup_energy_analyzer/coordinator.py",
+        "custom_components/circuitsetup_energy_analyzer/storage.py",
+        "custom_components/circuitsetup_energy_analyzer/panel.py",
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/notifications.py",
+        "custom_components/circuitsetup_energy_analyzer/services.py",
+        "tests/test_alerting.py",
+        "tests/test_panel.py",
+        "tests/test_services.py"
+      ]
+    },
+    {
+      "change": "Add persisted data or change its meaning",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/storage.py",
+        "custom_components/circuitsetup_energy_analyzer/const.py",
+        "custom_components/circuitsetup_energy_analyzer/models.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/coordinator.py",
+        "tests/test_storage.py",
+        "tests/fixtures/"
+      ],
+      "warning": "Add an explicit migration and old-version fixture; do not rely only on tolerant .get() reads."
+    },
+    {
+      "change": "Change Home Assistant entities or reduce entity count",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/entity.py",
+        "custom_components/circuitsetup_energy_analyzer/sensor.py",
+        "custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+        "custom_components/circuitsetup_energy_analyzer/entities/",
+        "custom_components/circuitsetup_energy_analyzer/config_flow.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/dashboard.py",
+        "custom_components/circuitsetup_energy_analyzer/strings.json",
+        "custom_components/circuitsetup_energy_analyzer/translations/en.json",
+        "tests/test_entities.py",
+        "tests/test_profiles.py"
+      ],
+      "warning": "Preserve unique IDs and migration behavior for existing dashboards/automations."
+    },
+    {
+      "change": "Change setup/source mapping",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/config_flow.py",
+        "custom_components/circuitsetup_energy_analyzer/discovery.py",
+        "custom_components/circuitsetup_energy_analyzer/mapping.py",
+        "custom_components/circuitsetup_energy_analyzer/profiles.py",
+        "custom_components/circuitsetup_energy_analyzer/normalize.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/__init__.py",
+        "custom_components/circuitsetup_energy_analyzer/repairs.py",
+        "custom_components/circuitsetup_energy_analyzer/entities/setup_health.py",
+        "tests/test_config_flow.py",
+        "tests_homeassistant/"
+      ]
+    },
+    {
+      "change": "Change evidence panel or UI actions",
+      "inspect_first": [
+        "custom_components/circuitsetup_energy_analyzer/panel.py",
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+        "custom_components/circuitsetup_energy_analyzer/services.py"
+      ],
+      "usually_touch": [
+        "custom_components/circuitsetup_energy_analyzer/coordinator.py",
+        "custom_components/circuitsetup_energy_analyzer/alerting.py",
+        "custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+        "tests/test_panel.py"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "external:home_assistant",
+      "kind": "external",
+      "label": "Home Assistant Core",
+      "description": "Runtime host, config entries, state machine, entity/device registries, services, Repairs and Store."
+    },
+    {
+      "id": "external:source_entities",
+      "kind": "external",
+      "label": "ESPHome / compatible meter entities",
+      "description": "Power, current, voltage, energy, frequency, VAR, VA and power-factor source states."
+    },
+    {
+      "id": "external:recorder",
+      "kind": "external",
+      "label": "Home Assistant Recorder/Statistics",
+      "description": "Historical state/statistics used by selected comparisons and dashboard readiness."
+    },
+    {
+      "id": "external:browser",
+      "kind": "external",
+      "label": "Home Assistant browser",
+      "description": "Loads the custom evidence panel and Lovelace dashboard."
+    },
+    {
+      "id": "external:filesystem_store",
+      "kind": "external",
+      "label": "Home Assistant .storage",
+      "description": "Persists FeatureStoreData and Lovelace dashboard storage."
+    },
+    {
+      "id": "subsystem:bootstrap",
+      "kind": "subsystem",
+      "label": "Bootstrap",
+      "layer": "bootstrap"
+    },
+    {
+      "id": "subsystem:configuration",
+      "kind": "subsystem",
+      "label": "Configuration",
+      "layer": "configuration"
+    },
+    {
+      "id": "subsystem:orchestration",
+      "kind": "subsystem",
+      "label": "Orchestration",
+      "layer": "orchestration"
+    },
+    {
+      "id": "subsystem:domain_model",
+      "kind": "subsystem",
+      "label": "Domain Model",
+      "layer": "domain_model"
+    },
+    {
+      "id": "subsystem:analytics",
+      "kind": "subsystem",
+      "label": "Analytics",
+      "layer": "analytics"
+    },
+    {
+      "id": "subsystem:processors",
+      "kind": "subsystem",
+      "label": "Processors",
+      "layer": "processors"
+    },
+    {
+      "id": "subsystem:persistence_feedback",
+      "kind": "subsystem",
+      "label": "Persistence Feedback",
+      "layer": "persistence_feedback"
+    },
+    {
+      "id": "subsystem:ha_surface",
+      "kind": "subsystem",
+      "label": "Ha Surface",
+      "layer": "ha_surface"
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "kind": "python_module",
+      "label": "__init__.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "layer": "bootstrap",
+      "description": "Home Assistant config-entry lifecycle; constructs coordinator, loads store, registers shared services/panel, starts source listeners, forwards platforms."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/activity_alerts.py",
+      "kind": "python_module",
+      "label": "activity_alerts.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/activity_alerts.py",
+      "layer": "analytics",
+      "description": "Activity-duration and inactivity evidence logic."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/activity_timeline.py",
+      "kind": "python_module",
+      "label": "activity_timeline.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/activity_timeline.py",
+      "layer": "analytics",
+      "description": "Recent activity timeline assembly."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/aggregation.py",
+      "kind": "python_module",
+      "label": "aggregation.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/aggregation.py",
+      "layer": "domain_model",
+      "description": "Cross-sensor/cross-circuit aggregation helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/alert_links.py",
+      "kind": "python_module",
+      "label": "alert_links.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/alert_links.py",
+      "layer": "persistence_feedback",
+      "description": "Builds evidence-panel navigation paths."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "kind": "python_module",
+      "label": "alerting.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "layer": "persistence_feedback",
+      "description": "Diagnostic observations, conservative repeated-evidence policy, alert fingerprints and user feedback effects."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/appliance_metadata.py",
+      "kind": "python_module",
+      "label": "appliance_metadata.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/appliance_metadata.py",
+      "layer": "configuration",
+      "description": "User-facing appliance labels and metadata."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/balance.py",
+      "kind": "python_module",
+      "label": "balance.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/balance.py",
+      "layer": "analytics",
+      "description": "Mains versus monitored-load balance calculations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/baseline.py",
+      "kind": "python_module",
+      "label": "baseline.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/baseline.py",
+      "layer": "domain_model",
+      "description": "Robust baseline statistics and deviation scoring."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/billing.py",
+      "kind": "python_module",
+      "label": "billing.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/billing.py",
+      "layer": "analytics",
+      "description": "Billing-cycle usage and forecast calculations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+      "kind": "python_module",
+      "label": "binary_sensor.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+      "layer": "ha_surface",
+      "description": "Binary-sensor platform, including appliance Running and diagnostic binary states."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/button.py",
+      "kind": "python_module",
+      "label": "button.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/button.py",
+      "layer": "ha_surface",
+      "description": "Per-circuit and integration-level action buttons."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/capacity.py",
+      "kind": "python_module",
+      "label": "capacity.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/capacity.py",
+      "layer": "analytics",
+      "description": "Current/capacity usage and limit evidence."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "kind": "python_module",
+      "label": "config_flow.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "layer": "configuration",
+      "description": "Initial and options flows: source discovery, circuit assignments, advanced settings, entity detail, dashboard creation and suggested settings."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/const.py",
+      "kind": "python_module",
+      "label": "const.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/const.py",
+      "layer": "bootstrap",
+      "description": "Domain, platform list, config keys, defaults, storage key/version, entity-detail and dashboard-layout constants."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/contextual_baseline.py",
+      "kind": "python_module",
+      "label": "contextual_baseline.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/contextual_baseline.py",
+      "layer": "domain_model",
+      "description": "Context fingerprints, context sample histories, fallback selection and contextual baseline building."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "kind": "python_module",
+      "label": "coordinator.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "layer": "orchestration",
+      "description": "Central runtime orchestration and AnalyzerState; receives source changes, builds context, runs processors, applies results, manages persistence and feedback."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/cost.py",
+      "kind": "python_module",
+      "label": "cost.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/cost.py",
+      "layer": "analytics",
+      "description": "Energy-cost and time-of-use calculations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "kind": "python_module",
+      "label": "cycles.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "layer": "domain_model",
+      "description": "Run-session construction, short-gap merging, runtime/duty-cycle summaries and cycle feature extraction."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "kind": "python_module",
+      "label": "dashboard.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "layer": "ha_surface",
+      "description": "Creates/updates a starter Lovelace dashboard using actual entity-registry IDs."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/demand.py",
+      "kind": "python_module",
+      "label": "demand.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/demand.py",
+      "layer": "analytics",
+      "description": "Rolling and monthly demand calculations and evidence."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/demo.py",
+      "kind": "python_module",
+      "label": "demo.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/demo.py",
+      "layer": "configuration",
+      "description": "Demo source bundle and sample setup support."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/diagnostics.py",
+      "kind": "python_module",
+      "label": "diagnostics.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/diagnostics.py",
+      "layer": "ha_surface",
+      "description": "Home Assistant diagnostics payload."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/discovery.py",
+      "kind": "python_module",
+      "label": "discovery.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/discovery.py",
+      "layer": "configuration",
+      "description": "Source-device/entity discovery and grouping."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/energy_dashboard.py",
+      "kind": "python_module",
+      "label": "energy_dashboard.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/energy_dashboard.py",
+      "layer": "analytics",
+      "description": "Home Assistant Energy Dashboard readiness checks."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entity.py",
+      "kind": "python_module",
+      "label": "entity.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entity.py",
+      "layer": "ha_surface",
+      "description": "Shared entity base, entity tiers, device metadata and entity-profile behavior."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/events.py",
+      "kind": "python_module",
+      "label": "events.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/events.py",
+      "layer": "domain_model",
+      "description": "Event compatibility/helpers around detected circuit activity."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/exporting.py",
+      "kind": "python_module",
+      "label": "exporting.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/exporting.py",
+      "layer": "ha_surface",
+      "description": "Diagnostic/history export helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/goals.py",
+      "kind": "python_module",
+      "label": "goals.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/goals.py",
+      "layer": "analytics",
+      "description": "Daily energy-goal tracking."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/load_shift.py",
+      "kind": "python_module",
+      "label": "load_shift.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/load_shift.py",
+      "layer": "analytics",
+      "description": "Flexible-load and solar load-shift analysis."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/local_time.py",
+      "kind": "python_module",
+      "label": "local_time.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/local_time.py",
+      "layer": "domain_model",
+      "description": "Home Assistant-local calendar/time conversion helpers used by daily and contextual analysis."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/mapping.py",
+      "kind": "python_module",
+      "label": "mapping.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/mapping.py",
+      "layer": "configuration",
+      "description": "Sensor-to-circuit role mapping and mapping validation."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/metric_consistency.py",
+      "kind": "python_module",
+      "label": "metric_consistency.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/metric_consistency.py",
+      "layer": "analytics",
+      "description": "W/VA/V/A/PF relationship checks."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "kind": "python_module",
+      "label": "models.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/models.py",
+      "layer": "domain_model",
+      "description": "Core immutable domain types: appliance profiles, circuit modes, sensor roles, configs, samples, events, baselines and alert evidence."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "kind": "python_module",
+      "label": "nilm.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "layer": "analytics",
+      "description": "Experimental mains edge detection, masking, clustering and signature logic."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "kind": "python_module",
+      "label": "normalize.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "layer": "domain_model",
+      "description": "Converts Home Assistant states into normalized single/dual-phase circuit samples with units, sign conventions and quality issues."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "kind": "python_module",
+      "label": "notifications.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "layer": "persistence_feedback",
+      "description": "Persistent alert and settings-recommendation notification construction."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/number.py",
+      "kind": "python_module",
+      "label": "number.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/number.py",
+      "layer": "ha_surface",
+      "description": "Numeric controls such as daily energy goals."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "kind": "python_module",
+      "label": "operating_detection.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "layer": "domain_model",
+      "description": "Profile-aware thresholds, dwell/hysteresis state machine, operating snapshots and START/STOP/voltage-sag event generation."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "kind": "python_module",
+      "label": "panel.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/panel.py",
+      "layer": "ha_surface",
+      "description": "Authenticated evidence API and custom panel registration/action endpoints."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/phase_balance.py",
+      "kind": "python_module",
+      "label": "phase_balance.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/phase_balance.py",
+      "layer": "analytics",
+      "description": "Dual-phase leg balance calculations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/power_quality.py",
+      "kind": "python_module",
+      "label": "power_quality.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/power_quality.py",
+      "layer": "analytics",
+      "description": "Power-quality feature observation and baseline comparison."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/profiles.py",
+      "kind": "python_module",
+      "label": "profiles.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/profiles.py",
+      "layer": "configuration",
+      "description": "Appliance-profile capabilities, required/recommended roles and feature applicability."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py",
+      "kind": "python_module",
+      "label": "recommendation_guidance.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py",
+      "layer": "persistence_feedback",
+      "description": "Human-readable guidance for setting recommendations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/repairs.py",
+      "kind": "python_module",
+      "label": "repairs.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/repairs.py",
+      "layer": "persistence_feedback",
+      "description": "Home Assistant Repairs issue synchronization for setup/data-quality problems."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/safety.py",
+      "kind": "python_module",
+      "label": "safety.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/safety.py",
+      "layer": "analytics",
+      "description": "Safety-adjacent wording/guardrails."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/select.py",
+      "kind": "python_module",
+      "label": "select.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/select.py",
+      "layer": "ha_surface",
+      "description": "Sensitivity, entity-detail and dashboard-layout select controls."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "kind": "python_module",
+      "label": "sensor.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "layer": "ha_surface",
+      "description": "Sensor platform and summary/diagnostic entity assembly."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/services.py",
+      "kind": "python_module",
+      "label": "services.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/services.py",
+      "layer": "ha_surface",
+      "description": "Service registration, target resolution, validation and dispatch to coordinator operations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "kind": "python_module",
+      "label": "settings_advisor.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "layer": "persistence_feedback",
+      "description": "Evidence-driven advanced-setting recommendations and apply/deny/dismiss decision handling."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/solar_flow.py",
+      "kind": "python_module",
+      "label": "solar_flow.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/solar_flow.py",
+      "layer": "analytics",
+      "description": "Solar generation, site load, import/export and surplus calculations."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/standby.py",
+      "kind": "python_module",
+      "label": "standby.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/standby.py",
+      "layer": "analytics",
+      "description": "Standby/Always-On estimation and status."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "kind": "python_module",
+      "label": "storage.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/storage.py",
+      "layer": "persistence_feedback",
+      "description": "Home Assistant Store-backed FeatureStoreData, migrations, serialization, pruning and retention caps."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/unknown_loads.py",
+      "kind": "python_module",
+      "label": "unknown_loads.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/unknown_loads.py",
+      "layer": "analytics",
+      "description": "NILM unknown-load inventory, review state and heuristic classification."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/usage.py",
+      "kind": "python_module",
+      "label": "usage.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/usage.py",
+      "layer": "analytics",
+      "description": "Cumulative-energy folding and daily usage/spike analysis."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/utility_comparison.py",
+      "kind": "python_module",
+      "label": "utility_comparison.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/utility_comparison.py",
+      "layer": "analytics",
+      "description": "Measured-versus-utility/Opower energy comparison."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/ux.py",
+      "kind": "python_module",
+      "label": "ux.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/ux.py",
+      "layer": "configuration",
+      "description": "User-facing status labels, sensitivity normalization and explanation helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/water_correlations.py",
+      "kind": "python_module",
+      "label": "water_correlations.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/water_correlations.py",
+      "layer": "analytics",
+      "description": "Rain, pump and water-flow correlation/mismatch evidence."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/weather_context.py",
+      "kind": "python_module",
+      "label": "weather_context.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/weather_context.py",
+      "layer": "analytics",
+      "description": "Outdoor-temperature-aware HVAC context and expected ranges."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/__init__.py",
+      "kind": "python_module",
+      "label": "processors/__init__.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/__init__.py",
+      "layer": "processors",
+      "description": "Processor package exports/registration."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "kind": "python_module",
+      "label": "processors/activity.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "layer": "processors",
+      "description": "Adapter that runs activity_alerts.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "kind": "python_module",
+      "label": "processors/base.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "layer": "orchestration",
+      "description": "Processor protocol and shared ProcessingContext, FeatureResult, Observation/alert/state-update contracts."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "kind": "python_module",
+      "label": "processors/billing.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "layer": "processors",
+      "description": "Adapter that runs billing.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "kind": "python_module",
+      "label": "processors/capacity.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "layer": "processors",
+      "description": "Adapter that runs capacity.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "kind": "python_module",
+      "label": "processors/cost.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "layer": "processors",
+      "description": "Adapter that runs cost.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "kind": "python_module",
+      "label": "processors/cycles.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "layer": "processors",
+      "description": "Adapter that runs cycles.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "kind": "python_module",
+      "label": "processors/demand.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "layer": "processors",
+      "description": "Adapter that runs demand.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "kind": "python_module",
+      "label": "processors/energy_goal.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "layer": "processors",
+      "description": "Adapter that runs goals.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "kind": "python_module",
+      "label": "processors/energy_usage.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "layer": "processors",
+      "description": "Adapter that runs usage.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "kind": "python_module",
+      "label": "processors/events.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "layer": "processors",
+      "description": "Adapter that runs operating_detection.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "kind": "python_module",
+      "label": "processors/leg_imbalance.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "layer": "processors",
+      "description": "Adapter that runs phase_balance.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "kind": "python_module",
+      "label": "processors/mains_balance.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "layer": "processors",
+      "description": "Adapter that runs balance.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "kind": "python_module",
+      "label": "processors/metric_consistency.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "layer": "processors",
+      "description": "Adapter that runs metric_consistency.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "kind": "python_module",
+      "label": "processors/nilm_sample.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "layer": "processors",
+      "description": "Adapter that runs nilm.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "kind": "python_module",
+      "label": "processors/nilm_topology.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "layer": "processors",
+      "description": "Adapter that runs nilm.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "kind": "python_module",
+      "label": "processors/power_quality.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "layer": "processors",
+      "description": "Adapter that runs power_quality.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "kind": "python_module",
+      "label": "processors/solar_flow.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "layer": "processors",
+      "description": "Adapter that runs solar_flow.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "kind": "python_module",
+      "label": "processors/standby.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "layer": "processors",
+      "description": "Adapter that runs standby.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "kind": "python_module",
+      "label": "processors/utility_comparison.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "layer": "processors",
+      "description": "Adapter that runs utility_comparison.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "kind": "python_module",
+      "label": "processors/water_context.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "layer": "processors",
+      "description": "Adapter that runs water_correlations.py analysis for one normalized circuit sample and returns FeatureResult."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entities/__init__.py",
+      "kind": "python_module",
+      "label": "entities/__init__.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entities/__init__.py",
+      "layer": "ha_surface",
+      "description": "Entity-description package exports."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entities/energy.py",
+      "kind": "python_module",
+      "label": "entities/energy.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entities/energy.py",
+      "layer": "ha_surface",
+      "description": "Energy-related entity descriptions/value/attribute helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entities/nilm.py",
+      "kind": "python_module",
+      "label": "entities/nilm.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entities/nilm.py",
+      "layer": "ha_surface",
+      "description": "Mains NILM entity descriptions/value/attribute helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py",
+      "kind": "python_module",
+      "label": "entities/settings_suggestions.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py",
+      "layer": "ha_surface",
+      "description": "Settings-suggestion count/status entity helpers."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/entities/setup_health.py",
+      "kind": "python_module",
+      "label": "entities/setup_health.py",
+      "path": "custom_components/circuitsetup_energy_analyzer/entities/setup_health.py",
+      "layer": "ha_surface",
+      "description": "Integration-wide Setup Health/Next Step aggregation entity."
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/manifest.json",
+      "kind": "resource",
+      "label": "manifest.json",
+      "path": "custom_components/circuitsetup_energy_analyzer/manifest.json",
+      "layer": "bootstrap"
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/services.yaml",
+      "kind": "resource",
+      "label": "services.yaml",
+      "path": "custom_components/circuitsetup_energy_analyzer/services.yaml",
+      "layer": "ha_surface"
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/strings.json",
+      "kind": "resource",
+      "label": "strings.json",
+      "path": "custom_components/circuitsetup_energy_analyzer/strings.json",
+      "layer": "ha_surface"
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/translations/en.json",
+      "kind": "resource",
+      "label": "translations/en.json",
+      "path": "custom_components/circuitsetup_energy_analyzer/translations/en.json",
+      "layer": "ha_surface"
+    },
+    {
+      "id": "file:custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "kind": "javascript_module",
+      "label": "frontend/energy-analyzer-panel.js",
+      "path": "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "layer": "ha_surface",
+      "description": "Browser-side evidence, NILM review and suggested-setting action interface."
+    },
+    {
+      "id": "repo:README.md",
+      "kind": "repository_area",
+      "label": "README.md",
+      "path": "README.md",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:AGENTS.md",
+      "kind": "repository_area",
+      "label": "AGENTS.md",
+      "path": "AGENTS.md",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:pyproject.toml",
+      "kind": "repository_area",
+      "label": "pyproject.toml",
+      "path": "pyproject.toml",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:hacs.json",
+      "kind": "repository_area",
+      "label": "hacs.json",
+      "path": "hacs.json",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:.github/",
+      "kind": "repository_area",
+      "label": ".github/",
+      "path": ".github/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:.codex/scripts/",
+      "kind": "repository_area",
+      "label": ".codex/scripts/",
+      "path": ".codex/scripts/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:blueprints/automation/circuitsetup_energy_analyzer/",
+      "kind": "repository_area",
+      "label": "blueprints/automation/circuitsetup_energy_analyzer/",
+      "path": "blueprints/automation/circuitsetup_energy_analyzer/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:docs/",
+      "kind": "repository_area",
+      "label": "docs/",
+      "path": "docs/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:scripts/",
+      "kind": "repository_area",
+      "label": "scripts/",
+      "path": "scripts/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:tests/",
+      "kind": "repository_area",
+      "label": "tests/",
+      "path": "tests/",
+      "layer": "repository"
+    },
+    {
+      "id": "repo:tests_homeassistant/",
+      "kind": "repository_area",
+      "label": "tests_homeassistant/",
+      "path": "tests_homeassistant/",
+      "layer": "repository"
+    }
+  ],
+  "edges": [
+    {
+      "source": "subsystem:bootstrap",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/activity_alerts.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/activity_timeline.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/aggregation.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alert_links.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/appliance_metadata.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/balance.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/baseline.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/billing.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/button.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/capacity.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:bootstrap",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/const.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/contextual_baseline.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:orchestration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/cost.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/demand.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/demo.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/diagnostics.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/discovery.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/energy_dashboard.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entity.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/events.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/exporting.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/goals.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/load_shift.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/local_time.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/mapping.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/metric_consistency.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/number.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:domain_model",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/phase_balance.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/power_quality.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/profiles.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/repairs.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/safety.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/select.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/services.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/solar_flow.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/standby.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:persistence_feedback",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/unknown_loads.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/usage.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/utility_comparison.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:configuration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/ux.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/water_correlations.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:analytics",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/weather_context.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/__init__.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:orchestration",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:processors",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/__init__.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/energy.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/nilm.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/setup_health.py",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:bootstrap",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/manifest.json",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/services.yaml",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/strings.json",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/translations/en.json",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "subsystem:ha_surface",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "relation": "contains",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "external:home_assistant",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "relation": "calls_entrypoint",
+      "confidence": "high",
+      "source_kind": "curated",
+      "description": "async_setup_entry / async_unload_entry / async_migrate_entry"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "relation": "loads",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "constructs",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/services.py",
+      "relation": "registers",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "relation": "registers",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "relation": "forwards_platform_setup",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+      "relation": "forwards_platform_setup",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/button.py",
+      "relation": "forwards_platform_setup",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/select.py",
+      "relation": "forwards_platform_setup",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/number.py",
+      "relation": "forwards_platform_setup",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "external:source_entities",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "emits_state_changes_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "relation": "normalizes_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "produces_domain_samples",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/local_time.py",
+      "relation": "builds_local_context_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/contextual_baseline.py",
+      "relation": "builds_context_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "uses_contract",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "relation": "dispatches_to",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "relation": "returns_feature_result",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/activity.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/activity_alerts.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/billing.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/billing.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/capacity.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/capacity.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/cost.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/cost.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/cycles.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/demand.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/demand.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/goals.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/usage.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/phase_balance.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/balance.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/metric_consistency.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/power_quality.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/power_quality.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/solar_flow.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/standby.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/standby.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/utility_comparison.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/water_context.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/water_correlations.py",
+      "relation": "adapts_feature_logic",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/events.py",
+      "relation": "emits_events",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/events.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "relation": "supports_cycle_history",
+      "confidence": "medium",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "uses",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "relation": "consumes",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/cycles.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "consumes_events",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/baseline.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "produces_baseline_stats",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/contextual_baseline.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/baseline.py",
+      "relation": "builds_robust_baselines_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "produces_alert_evidence",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "relation": "carries_observations_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "carries_events_and_alerts",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/processors/base.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/normalize.py",
+      "relation": "accepts_samples_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "relation": "qualifies_observations_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "relation": "reads_writes",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "relation": "sends_alerts_through",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/repairs.py",
+      "relation": "syncs_setup_issues_through",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "relation": "generates_recommendations_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "target": "external:filesystem_store",
+      "relation": "persists_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "target": "external:filesystem_store",
+      "relation": "writes_lovelace_storage",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/diagnostics.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "reads_state_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/exporting.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/storage.py",
+      "relation": "exports_history_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/services.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "dispatches_actions_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/button.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "invokes_actions_on",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/select.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "updates_options_or_state_on",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/number.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "updates_settings_on",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "reads_state_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/binary_sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "reads_state_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/entity.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "subscribes_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/energy.py",
+      "relation": "uses_entity_descriptions_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/nilm.py",
+      "relation": "uses_entity_descriptions_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py",
+      "relation": "uses_entity_descriptions_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/entities/setup_health.py",
+      "relation": "uses_entity_descriptions_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "relation": "serves",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "external:browser",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "relation": "loads",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "relation": "calls_authenticated_api",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "reads_and_mutates",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alerting.py",
+      "relation": "presents_feedback_for",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "relation": "presents_recommendations_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/unknown_loads.py",
+      "relation": "presents_nilm_inventory_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/alert_links.py",
+      "relation": "builds_evidence_links_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/notifications.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/models.py",
+      "relation": "renders_alert_evidence",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/discovery.py",
+      "relation": "discovers_sources_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/mapping.py",
+      "relation": "maps_sources_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/profiles.py",
+      "relation": "validates_profile_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/appliance_metadata.py",
+      "relation": "renders_appliance_options_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/demo.py",
+      "relation": "supports_demo_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "relation": "invokes_dashboard_creation",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "relation": "reviews_suggestions_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "relation": "configures_detection_settings",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py",
+      "relation": "renders_guidance_with",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/settings_advisor.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/operating_detection.py",
+      "relation": "recommends_detection_settings_for",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/nilm.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/unknown_loads.py",
+      "relation": "feeds_signatures_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/solar_flow.py",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/load_shift.py",
+      "relation": "feeds_surplus_to",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/energy_dashboard.py",
+      "target": "external:recorder",
+      "relation": "checks_statistics_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/utility_comparison.py",
+      "target": "external:recorder",
+      "relation": "reads_statistics_from",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/dashboard.py",
+      "target": "external:home_assistant",
+      "relation": "uses_entity_and_lovelace_registries",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/entity.py",
+      "target": "external:home_assistant",
+      "relation": "implements_entities_for",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/repairs.py",
+      "target": "external:home_assistant",
+      "relation": "creates_repairs_in",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/services.py",
+      "target": "external:home_assistant",
+      "relation": "registers_services_in",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "target": "external:home_assistant",
+      "relation": "registers_http_panel_in",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:tests/",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/coordinator.py",
+      "relation": "tests",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:tests_homeassistant/",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/__init__.py",
+      "relation": "tests_runtime_contract",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:tests_homeassistant/",
+      "target": "external:home_assistant",
+      "relation": "runs_against",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:README.md",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/config_flow.py",
+      "relation": "documents",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:README.md",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/sensor.py",
+      "relation": "documents",
+      "confidence": "high",
+      "source_kind": "curated"
+    },
+    {
+      "source": "repo:README.md",
+      "target": "file:custom_components/circuitsetup_energy_analyzer/panel.py",
+      "relation": "documents",
+      "confidence": "high",
+      "source_kind": "curated"
+    }
+  ]
+}

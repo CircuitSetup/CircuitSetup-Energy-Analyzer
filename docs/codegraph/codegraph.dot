@@ -1,0 +1,22 @@
+digraph CircuitSetupEnergyAnalyzer {
+  rankdir=LR;
+  node [shape=box, fontname="Arial"];
+  "Source entities" -> "EnergyAnalyzerCoordinator";
+  "Home Assistant Core" -> "__init__.py bootstrap";
+  "__init__.py bootstrap" -> "EnergyAnalyzerCoordinator";
+  "__init__.py bootstrap" -> "HA platforms";
+  "Config flow / discovery / mapping" -> "EnergyAnalyzerCoordinator";
+  "EnergyAnalyzerCoordinator" -> "Normalize + context";
+  "Normalize + context" -> "Feature processors";
+  "Feature processors" -> "Domain analytics";
+  "Feature processors" -> "Alerting + feedback";
+  "EnergyAnalyzerCoordinator" -> "FeatureStoreData";
+  "FeatureStoreData" -> "HA .storage";
+  "EnergyAnalyzerCoordinator" -> "HA platforms";
+  "EnergyAnalyzerCoordinator" -> "Evidence API / panel";
+  "Evidence API / panel" -> "Alerting + feedback";
+  "EnergyAnalyzerCoordinator" -> "Repairs / notifications";
+  "Recorder / statistics" -> "Domain analytics";
+  "Tests" -> "EnergyAnalyzerCoordinator";
+  "Tests" -> "Feature processors";
+}
