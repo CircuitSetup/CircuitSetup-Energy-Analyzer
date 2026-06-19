@@ -27,6 +27,28 @@
 - Regenerate with `.codex/scripts/update-codegraph.ps1`, which writes to `docs/codegraph/generated`.
 - Include generated graph changes in the same commit/PR as the structural code changes that required regeneration.
 
+## Structural Search
+
+- Use `rg` or `rtk grep` for plain-text search, file discovery, logs, and exact string checks.
+- Use ast-grep via `sg` when matching Python or JavaScript syntax, validating structural refactors, finding call/class/function shapes, or checking patterns where comments/strings should not count.
+- Example Python search: `sg run --lang python --pattern 'class $CLASS: $$$BODY' custom_components tests`.
+- Example JavaScript search: `sg run --lang javascript --pattern 'async function $NAME($$$ARGS) { $$$BODY }' custom_components/circuitsetup_energy_analyzer/frontend`.
+- For large structural changes, combine codegraph impact review with `sg` searches before editing and rerun relevant tests afterward.
+
+## JSON Workflow
+
+- Use `jq` for reading, filtering, validating, and compactly transforming JSON files or JSON command output.
+- Prefer `jq -r` for extracting scalar values for shell logic, and keep JSON transformations in `jq` instead of ad hoc string parsing.
+- In PowerShell, pass literal strings with `--arg` to avoid quote-stripping surprises, for example: `jq -r --arg key version '.[$key]' file.json`.
+- Use `jq empty file.json` as a quick JSON validity check.
+
+## YAML Workflow
+
+- Use `yq` for reading, filtering, validating, and searching YAML files; use `rg` only for plain text around YAML when structure does not matter.
+- Prefer `yq e '<expression>' file.yaml` for scalar extraction and structural searches instead of ad hoc string parsing.
+- `yq` can also inspect TOML and JSON when useful, but keep JSON-first workflows on `jq`.
+- Use `yq e '.' file.yaml` as a quick YAML validity check.
+
 ## Verification
 
 - Normal PR verification:
