@@ -42,6 +42,13 @@
 - In PowerShell, pass literal strings with `--arg` to avoid quote-stripping surprises, for example: `jq -r --arg key version '.[$key]' file.json`.
 - Use `jq empty file.json` as a quick JSON validity check.
 
+## YAML Workflow
+
+- Use `yq` for reading, filtering, validating, and searching YAML files; use `rg` only for plain text around YAML when structure does not matter.
+- Prefer `yq e '<expression>' file.yaml` for scalar extraction and structural searches instead of ad hoc string parsing.
+- `yq` can also inspect TOML and JSON when useful, but keep JSON-first workflows on `jq`.
+- Use `yq e '.' file.yaml` as a quick YAML validity check.
+
 ## Verification
 
 - Normal PR verification:

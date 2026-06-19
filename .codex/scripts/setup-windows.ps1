@@ -46,6 +46,8 @@ Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\a
 sg --version
 Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe")
 jq --version
+Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\MikeFarah.yq_Microsoft.Winget.Source_8wekyb3d8bbwe")
+yq --version
 
 $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {

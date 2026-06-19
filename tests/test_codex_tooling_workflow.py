@@ -32,3 +32,19 @@ def test_jq_is_wired_into_json_workflow() -> None:
 
     assert "jq --version" in setup_script
     assert "jqlang.jq" in setup_script
+
+
+def test_yq_is_wired_into_yaml_workflow() -> None:
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    setup_script = (ROOT / ".codex" / "scripts" / "setup-windows.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## YAML Workflow" in agents
+    assert "yq" in agents
+    assert "yq e" in agents
+    assert "rg" in agents
+    assert "ad hoc string parsing" in agents
+
+    assert "yq --version" in setup_script
+    assert "MikeFarah.yq" in setup_script
