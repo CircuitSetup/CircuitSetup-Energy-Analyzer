@@ -10,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -26,6 +27,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
+    ENTITY_DETAIL_EXPERT,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
     AnalyzerState,
@@ -8955,6 +8957,64 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
     await reloaded._notify_settings_recommendations_if_needed()
 
     assert notifications == [{"entry_id": "entry-1", "total_pending": 110}]
+
+
+@pytest.mark.asyncio
+async def test_set_entity_detail_level_persists_options_and_reloads_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer import entity as entity_module
+
+    apply_calls: list[tuple[str, str]] = []
+
+    def fake_apply(*_args, entity_domain: str, detail_level: str, **_kwargs):
+        apply_calls.append((entity_domain, detail_level))
+        return {}
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.updated_options: list[dict[str, Any]] = []
+            self.reloaded: list[str] = []
+
+        def async_update_entry(self, entry, *, options):
+            self.updated_options.append(options)
+            entry.options = MappingProxyType(options)
+            return True
+
+        async def async_reload(self, entry_id: str) -> None:
+            self.reloaded.append(entry_id)
+
+    monkeypatch.setattr(
+        entity_module,
+        "apply_entity_profile_to_registry",
+        fake_apply,
+    )
+
+    entry = SimpleNamespace(entry_id="entry-1", data={}, options=MappingProxyType({}))
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=lambda entity_id: None),
+        data={},
+        config_entries=FakeConfigEntries(),
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry.entry_id,
+        entry_data=entry.data,
+        options=entry.options,
+        config_entry=entry,
+    )
+
+    await coordinator.async_set_entity_detail_level(ENTITY_DETAIL_EXPERT)
+
+    assert hass.config_entries.updated_options == [
+        {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT}
+    ]
+    assert coordinator.options[CONF_ENTITY_DETAIL_LEVEL] == ENTITY_DETAIL_EXPERT
+    assert hass.config_entries.reloaded == ["entry-1"]
+    assert apply_calls == []
 
 
 @pytest.mark.asyncio

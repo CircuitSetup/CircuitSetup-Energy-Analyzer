@@ -231,10 +231,10 @@ def test_electrical_cycle_rules_are_marked_for_phase_three_creation() -> None:
     assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "reactive_power_drift")],
     )
-    assert not compact_sensor_rule_is_setup_managed(
+    assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "leg_imbalance")],
     )
-    assert not compact_sensor_rule_is_setup_managed(
+    assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "always_on_power")],
     )
 
@@ -263,10 +263,10 @@ def test_billing_standby_weather_rules_are_marked_for_phase_four_creation() -> N
     assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "cost_cycle_forecast")],
     )
-    assert not compact_sensor_rule_is_setup_managed(
+    assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "billing_cycle_usage")],
     )
-    assert not compact_sensor_rule_is_setup_managed(
+    assert compact_sensor_rule_is_setup_managed(
         rules[("sensor", "cost_cycle")],
     )
 
@@ -287,7 +287,19 @@ def test_maintenance_button_rules_are_marked_for_phase_five_creation() -> None:
     }
     assert compact_rule_is_setup_managed(rules[("button", "start_maintenance")])
     assert compact_rule_is_setup_managed(rules[("button", "end_maintenance")])
-    assert not compact_rule_is_setup_managed(rules[("button", "relearn_baseline")])
+    assert compact_rule_is_setup_managed(rules[("button", "relearn_baseline")])
+
+
+def test_phase_six_manages_creation_for_every_catalog_rule() -> None:
+    rules = compact_creation_rules_by_key()
+
+    unmanaged = {
+        (domain, key)
+        for (domain, key), rule in rules.items()
+        if not compact_rule_is_setup_managed(rule)
+    }
+
+    assert unmanaged == set()
 
 
 def test_compact_creation_catalog_covers_every_current_entity_description() -> None:

@@ -154,12 +154,8 @@ def compact_sensor_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
 
 def compact_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
     """Return whether current compact phases manage this entity's creation."""
-    if rule.removal_phase in _SETUP_MANAGED_REMOVAL_PHASES:
-        return True
-    return (
-        rule.exposure is EntityExposure.GRAPH
-        and rule.group in _SETUP_MANAGED_GRAPH_GROUPS
-    )
+    del rule
+    return True
 
 
 def desired_compact_entity_rules(

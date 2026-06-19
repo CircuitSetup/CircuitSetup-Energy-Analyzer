@@ -533,6 +533,26 @@ async def test_switch_setup_entry_adds_maintenance_switch(
 
 
 @pytest.mark.asyncio
+async def test_switch_setup_entry_filters_controls_through_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import switch
+
+    _disable_registry_pruning(monkeypatch, switch)
+    monkeypatch.setattr(switch, "should_create_entity", lambda **_kwargs: False)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await switch.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
+
+
+@pytest.mark.asyncio
 async def test_maintenance_switch_turns_on_and_off_idempotently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -652,6 +672,29 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
         ("async_set_entity_detail_level", ("expert",)),
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_select_setup_entry_filters_circuit_controls_through_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import select
+
+    _disable_registry_pruning(monkeypatch, select)
+    monkeypatch.setattr(select, "should_create_entity", lambda **_kwargs: False)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await select.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert {entity.unique_id for entity in added_entities} == {
+        "entry-1_dashboard_layout",
+        "entry-1_entity_detail_level",
+    }
 
 
 @pytest.mark.asyncio
@@ -812,6 +855,26 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     assert coordinator.calls == [
         ("async_set_energy_goal_settings", ("fridge", 6.25, None))
     ]
+
+
+@pytest.mark.asyncio
+async def test_number_setup_entry_filters_controls_through_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import number
+
+    _disable_registry_pruning(monkeypatch, number)
+    monkeypatch.setattr(number, "should_create_entity", lambda **_kwargs: False)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await number.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert added_entities == []
 
 
 @pytest.mark.asyncio

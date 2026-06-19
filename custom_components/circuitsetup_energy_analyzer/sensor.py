@@ -60,18 +60,15 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    enable_summary_registry_entries,
     entity_detail_level_for_coordinator,
     entity_enabled_default_for_tier,
     hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     sync_entity_registry_categories,
-    sync_entity_registry_visibility,
 )
 from .entity_catalog import (
     compact_creation_rule_for_entity,
-    compact_sensor_rule_is_setup_managed,
     legacy_compatibility_keys_for_coordinator,
     selected_entity_groups_for_coordinator,
     should_create_entity,
@@ -2678,9 +2675,6 @@ def _compact_sensor_descriptions_for_setup(
     compact_descriptions: list[DiagnosticSensorDescription] = []
     for description in descriptions:
         rule = compact_creation_rule_for_entity("sensor", description.key)
-        if not compact_sensor_rule_is_setup_managed(rule):
-            compact_descriptions.append(description)
-            continue
         if not should_create_entity(
             rule=rule,
             circuit=circuit,
@@ -3229,17 +3223,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
-    enable_summary_registry_entries(
-        hass,
-        entry_id=entry_id,
-        entity_domain="sensor",
-        tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
-    )
-    hidden_sensor_suffixes = {
-        description.key
-        for description in SENSOR_DESCRIPTIONS
-        if description.entity_registry_visible_default is False
-    }
     hidden_demo_source_suffixes = {
         unique_id.removeprefix(f"{entry_id}_")
         for unique_id in {
@@ -3255,13 +3238,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
-    sync_entity_registry_visibility(
-        hass,
-        entry_id=entry_id,
-        entity_domain="sensor",
-        hidden_unique_id_suffixes=hidden_sensor_suffixes,
-        detail_level=entity_detail_level_for_coordinator(coordinator),
-    )
     hide_entity_registry_entries(
         hass,
         entry_id=entry_id,

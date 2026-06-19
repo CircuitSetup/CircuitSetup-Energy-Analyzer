@@ -3902,17 +3902,11 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Edit entity detail level and optionally apply it to existing entities."""
+        """Edit the entity detail level used for desired entity creation."""
         if user_input is not None:
             detail_level = normalize_entity_detail_level(
                 user_input.get(CONF_ENTITY_DETAIL_LEVEL)
             )
-            if bool(user_input.get(FIELD_APPLY_ENTITY_DETAIL_PROFILE, False)):
-                _apply_entity_detail_profile_to_existing_entities(
-                    getattr(self, "hass", None),
-                    self._config_entry,
-                    detail_level,
-                )
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
@@ -4017,16 +4011,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         if hasattr(result, "__await__"):
                             await result
                         layout_was_changed = layout != current_layout
-                    detail_profile_was_changed = False
-                    if matching_detail_level is not None:
-                        _apply_entity_detail_profile_to_existing_entities(
-                            getattr(self, "hass", None),
-                            self._config_entry,
-                            matching_detail_level,
-                        )
-                        detail_profile_was_changed = (
-                            matching_detail_level != current_detail_level
-                        )
                     create_dashboard = getattr(
                         coordinator,
                         "async_create_dashboard",
@@ -4040,12 +4024,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                             dashboard_result,
                             coordinator,
                         ):
-                            if detail_profile_was_changed:
-                                _apply_entity_detail_profile_to_existing_entities(
-                                    getattr(self, "hass", None),
-                                    self._config_entry,
-                                    current_detail_level,
-                                )
                             if callable(set_layout) and layout_was_changed:
                                 rollback = set_layout(current_layout)
                                 if hasattr(rollback, "__await__"):
@@ -4612,10 +4590,6 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
                 CONF_ENTITY_DETAIL_LEVEL,
                 default=detail_level,
             ): _select_selector(entity_detail_level_options()),
-            vol.Optional(
-                FIELD_APPLY_ENTITY_DETAIL_PROFILE,
-                default=False,
-            ): bool,
         }
     )
 

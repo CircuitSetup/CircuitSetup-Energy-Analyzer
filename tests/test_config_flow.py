@@ -1322,7 +1322,7 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_options_entity_detail_step_saves_profile_and_can_apply(
+async def test_options_entity_detail_step_saves_profile_without_registry_apply(
     monkeypatch,
 ) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
@@ -1357,7 +1357,7 @@ async def test_options_entity_detail_step_saves_profile_and_can_apply(
         result,
         {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
     )
-    assert calls == [(hass, entry, ENTITY_DETAIL_EXPERT)]
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -2119,7 +2119,7 @@ async def test_options_flow_dashboard_warns_when_layout_exceeds_entity_detail(
 
 
 @pytest.mark.asyncio
-async def test_options_flow_dashboard_can_match_entity_detail_to_layout(
+async def test_options_flow_dashboard_matches_detail_without_registry_apply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
@@ -2176,7 +2176,7 @@ async def test_options_flow_dashboard_can_match_entity_detail_to_layout(
             CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
         },
     )
-    assert calls == [(hass, entry, ENTITY_DETAIL_STANDARD)]
+    assert calls == []
     assert coordinator.calls == [
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
         ("async_create_dashboard", ()),
@@ -2233,7 +2233,7 @@ async def test_options_flow_dashboard_allows_expert_layout_with_standard_detail(
 
 
 @pytest.mark.asyncio
-async def test_options_flow_dashboard_rolls_back_detail_profile_on_create_failure(
+async def test_options_flow_dashboard_create_failure_does_not_apply_registry_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
@@ -2290,10 +2290,7 @@ async def test_options_flow_dashboard_rolls_back_detail_profile_on_create_failur
     assert result["type"] == "form"
     assert result["step_id"] == "dashboard"
     assert result["errors"] == {"base": "dashboard_creation_unavailable"}
-    assert calls == [
-        (hass, entry, ENTITY_DETAIL_STANDARD),
-        (hass, entry, ENTITY_DETAIL_SIMPLE),
-    ]
+    assert calls == []
     assert coordinator.calls == [
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_STANDARD,)),
         ("async_create_dashboard", ()),

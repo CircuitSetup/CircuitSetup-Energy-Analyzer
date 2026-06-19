@@ -21,6 +21,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
     ENTITY_DETAIL_EXPERT,
+    ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -39,8 +40,18 @@ DOMAIN_PATH = Path(__file__).parents[1] / "custom_components" / DOMAIN
 
 
 def _use_expert_entity_detail(coordinator: SimpleNamespace) -> SimpleNamespace:
+    return _use_entity_detail(coordinator, ENTITY_DETAIL_EXPERT)
+
+
+def _use_entity_detail(
+    coordinator: SimpleNamespace,
+    detail_level: str,
+    selected_groups: tuple[str, ...] = (),
+) -> SimpleNamespace:
     options = dict(getattr(coordinator, "options", {}) or {})
-    options[CONF_ENTITY_DETAIL_LEVEL] = ENTITY_DETAIL_EXPERT
+    options[CONF_ENTITY_DETAIL_LEVEL] = detail_level
+    if selected_groups:
+        options[CONF_SELECTED_ENTITY_GROUPS] = list(selected_groups)
     coordinator.options = options
     return coordinator
 
@@ -623,7 +634,7 @@ def _register_default_hidden_entities(
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_unhides_new_expert_entities_after_registration(
+async def test_sensor_setup_does_not_unhide_registry_entries_after_registration(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import sensor
@@ -661,12 +672,15 @@ async def test_sensor_setup_unhides_new_expert_entities_after_registration(
         for entry in fake_registry.entities.values()
         if entry.hidden_by == "integration"
     ]
-    assert hidden_entries == []
-    assert fake_registry.updated
+    assert {entry.entity_id for entry in hidden_entries} == {
+        "sensor.fridge_always_on_power",
+        "sensor.fridge_standby_status",
+    }
+    assert fake_registry.updated == []
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_unhides_new_expert_entities_after_registration(
+async def test_binary_sensor_setup_does_not_unhide_registry_entries_after_registration(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor
@@ -705,11 +719,11 @@ async def test_binary_sensor_setup_unhides_new_expert_entities_after_registratio
         if entry.hidden_by == "integration"
     ]
     assert hidden_entries == []
-    assert fake_registry.updated
+    assert fake_registry.updated == []
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
+async def test_binary_sensor_setup_preserves_disabled_registry_entries(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor
@@ -765,8 +779,11 @@ async def test_binary_sensor_setup_enables_integration_disabled_summary_entries(
 
     await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
 
-    assert ("binary_sensor.fridge_running", None) in fake_registry.disabled_updates
-    assert fake_registry.entities["binary_sensor.fridge_running"].disabled_by is None
+    assert fake_registry.disabled_updates == []
+    assert (
+        fake_registry.entities["binary_sensor.fridge_running"].disabled_by
+        == "integration"
+    )
     assert (
         fake_registry.entities["binary_sensor.fridge_running"].entity_category
         is None
@@ -4062,19 +4079,11 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_setup_health",
-        "entry-1_fridge_anomaly_score",
         "entry-1_fridge_health_summary",
         "entry-1_fridge_activity_summary",
         "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
-        "entry-1_fridge_energy_dashboard_status",
-        "entry-1_fridge_recent_activity",
-        "entry-1_fridge_settings_suggestions",
-        "entry-1_fridge_circuit_mode",
-        "entry-1_fridge_power_flow",
         "entry-1_fridge_daily_energy_usage",
-        "entry-1_fridge_energy_usage_share",
-        "entry-1_fridge_energy_usage_status",
     ]
     setup_health = added_entities[0]
     assert setup_health.name == "CircuitSetup Energy Analyzer Setup Health"
@@ -4123,7 +4132,6 @@ async def test_sensor_setup_entry_omits_core_duplicate_legacy_sensors() -> None:
         "entry-1_fridge_activity_summary",
         "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
-        "entry-1_fridge_recent_activity",
     } <= unique_ids
     assert {
         "entry-1_fridge_sensitivity",
@@ -4210,12 +4218,16 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
             SensorRef("sensor.hvac_pf", SensorRole.POWER_FACTOR),
         ),
     )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        store_data=FeatureStoreData(
-            capacity_settings_by_circuit={"hvac": {"breaker_amps": 40.0}},
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(circuit,),
+            store_data=FeatureStoreData(
+                capacity_settings_by_circuit={"hvac": {"breaker_amps": 40.0}},
+            ),
         ),
+        ENTITY_DETAIL_EXPERT,
+        ("demand_capacity",),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
@@ -4339,10 +4351,13 @@ async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities
             SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
         ),
     )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature"},
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(circuit,),
+            options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature"},
+        ),
+        ENTITY_DETAIL_STANDARD,
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
@@ -4499,14 +4514,18 @@ async def test_sensor_setup_entry_adds_car_charger_specific_diagnostics() -> Non
             SensorRef("sensor.car_charger_energy", SensorRole.ENERGY),
         ),
     )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        store_data=FeatureStoreData(
-            capacity_settings_by_circuit={
-                "car_charger": {"breaker_amps": 40.0, "warning_ratio": 0.8}
-            },
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(circuit,),
+            store_data=FeatureStoreData(
+                capacity_settings_by_circuit={
+                    "car_charger": {"breaker_amps": 40.0, "warning_ratio": 0.8}
+                },
+            ),
         ),
+        ENTITY_DETAIL_EXPERT,
+        ("demand_capacity",),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
@@ -4553,7 +4572,11 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
             SensorRef("sensor.pool_pf", SensorRole.POWER_FACTOR),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("demand_capacity",),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -4591,7 +4614,11 @@ async def test_sensor_setup_entry_does_not_create_leg_imbalance_for_mains_nilm()
             SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="b"),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar"),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -4615,10 +4642,14 @@ async def test_sensor_setup_entry_uses_entry_data_for_solar_flow_applicability()
 ):
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(),
-        entry_data={},
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(),
+            entry_data={},
+        ),
+        ENTITY_DETAIL_EXPERT,
+        ("mains_solar",),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(
@@ -4674,15 +4705,19 @@ async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
             SensorRef("sensor.mains_energy", SensorRole.ENERGY),
         ),
     )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        store_data=FeatureStoreData(),
-        options={
-            CONF_UTILITY_COMPARISON_SETTINGS: {
-                "mains": {"utility_energy_entity": "sensor.utility_kwh"}
-            }
-        },
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(circuit,),
+            store_data=FeatureStoreData(),
+            options={
+                CONF_UTILITY_COMPARISON_SETTINGS: {
+                    "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+                }
+            },
+        ),
+        ENTITY_DETAIL_EXPERT,
+        ("mains_solar",),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
@@ -4737,7 +4772,11 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
             ),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar", "demand_capacity"),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -5089,7 +5128,11 @@ async def test_sensor_setup_entry_hides_existing_demo_source_entities(
             ),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar", "demand_capacity"),
+    )
     hass = SimpleNamespace(
         data={DOMAIN: {"entry-1": coordinator}},
         entity_registry=fake_registry,
@@ -5233,7 +5276,11 @@ async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> Non
             ),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar", "demand_capacity"),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -5304,7 +5351,11 @@ async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
             SensorRef("sensor.mains_l2_power", SensorRole.REAL_POWER, leg="b"),
         ),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar", "demand_capacity"),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -5380,7 +5431,11 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
     )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,))
+    coordinator = _use_entity_detail(
+        SimpleNamespace(data=AnalyzerState(), circuit_configs=(circuit,)),
+        ENTITY_DETAIL_EXPERT,
+        ("nilm", "mains_solar", "demand_capacity"),
+    )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})
     added_entities = []
@@ -5396,7 +5451,7 @@ async def test_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
+async def test_binary_sensor_setup_omits_unselected_diagnostics_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         async_setup_entry,
     )
@@ -5412,20 +5467,11 @@ async def test_binary_sensor_setup_entry_adds_diagnostic_entities_without_ha() -
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert [entity.name for entity in added_entities] == [
-        "Well Pump Learning",
-        "Well Pump Data Quality Problem",
-        "Well Pump Maintenance",
-    ]
-    assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_well_pump_learning",
-        "entry-1_well_pump_data_quality_problem",
-        "entry-1_well_pump_maintenance",
-    ]
+    assert added_entities == []
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_entry_unhides_expert_diagnostics(
+async def test_binary_sensor_setup_selected_expert_diagnostics_preserve_visibility(
     monkeypatch,
 ) -> None:
     import sys
@@ -5489,7 +5535,14 @@ async def test_binary_sensor_setup_entry_unhides_expert_diagnostics(
         "circuit_id": "well_pump",
         "name": "Well Pump",
     }
-    coordinator = _use_expert_entity_detail(SimpleNamespace(data=AnalyzerState()))
+    coordinator = _use_expert_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            options={
+                CONF_SELECTED_ENTITY_GROUPS: ["developer_diagnostics"],
+            },
+        )
+    )
     hass = SimpleNamespace(
         data={DOMAIN: {"entry-1": coordinator}},
         entity_registry=fake_registry,
@@ -5499,7 +5552,16 @@ async def test_binary_sensor_setup_entry_unhides_expert_diagnostics(
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert fake_registry.updated == [("binary_sensor.well_pump_learning", None)]
+    assert {entity.unique_id for entity in added_entities} == {
+        "entry-1_well_pump_learning",
+        "entry-1_well_pump_data_quality_problem",
+        "entry-1_well_pump_maintenance",
+    }
+    assert fake_registry.updated == []
+    assert (
+        fake_registry.entities["binary_sensor.well_pump_learning"].hidden_by
+        == "integration"
+    )
     assert (
         fake_registry.entities[
             "binary_sensor.well_pump_data_quality_problem"
@@ -5627,11 +5689,7 @@ async def test_binary_sensor_setup_entry_uses_runtime_synthetic_mains() -> None:
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    assert [entity.circuit_id for entity in added_entities] == [
-        "mains",
-        "mains",
-        "mains",
-    ]
+    assert added_entities == []
 
 
 @pytest.mark.asyncio
@@ -5664,7 +5722,10 @@ async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch(
         SimpleNamespace(
             data=AnalyzerState(),
             circuit_configs=(washer,),
-            options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"]},
+            options={
+                CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+                CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            },
             entry_data={},
         ),
     )
@@ -5673,6 +5734,7 @@ async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch(
             data=AnalyzerState(),
             circuit_configs=(washer,),
             options={
+                CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
                 CONF_ADVANCED_SETTINGS: {
                     "washer": {
                         CONF_LINKED_FLOW_SENSOR_ENTITIES: [
@@ -5699,7 +5761,10 @@ async def test_binary_sensor_setup_entry_applies_to_dict_circuits() -> None:
     coordinator = SimpleNamespace(
         data=AnalyzerState(),
         circuit_configs=(),
-        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"]},
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+        },
         entry_data={},
     )
     entry = SimpleNamespace(
@@ -5742,19 +5807,23 @@ async def test_sensor_setup_entry_uses_linked_water_flow_sources() -> None:
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
     )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(washer,),
-        options={
-            CONF_ADVANCED_SETTINGS: {
-                "washer": {
-                    CONF_LINKED_FLOW_SENSOR_ENTITIES: [
-                        "binary_sensor.washer_water_flow"
-                    ]
+    coordinator = _use_entity_detail(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(washer,),
+            options={
+                CONF_ADVANCED_SETTINGS: {
+                    "washer": {
+                        CONF_LINKED_FLOW_SENSOR_ENTITIES: [
+                            "binary_sensor.washer_water_flow"
+                        ]
+                    }
                 }
-            }
-        },
-        entry_data={},
+            },
+            entry_data={},
+        ),
+        ENTITY_DETAIL_EXPERT,
+        ("water",),
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
     entry = SimpleNamespace(entry_id="entry-1", data={})

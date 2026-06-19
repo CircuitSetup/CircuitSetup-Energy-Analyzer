@@ -11,8 +11,15 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    entity_detail_level_for_coordinator,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
+)
+from .entity_catalog import (
+    compact_creation_rule_for_entity,
+    legacy_compatibility_keys_for_coordinator,
+    selected_entity_groups_for_coordinator,
+    should_create_entity,
 )
 from .models import SensorRole
 
@@ -160,6 +167,16 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         if circuit is None:
             continue
         circuit_device_identifiers.add((DOMAIN, f"{entry_id}_{circuit.circuit_id}"))
+        descriptions = tuple(
+            description
+            for description in CIRCUIT_NUMBER_DESCRIPTIONS
+            if number_description_applies(description, raw_circuit, coordinator)
+        )
+        descriptions = _compact_number_descriptions_for_setup(
+            descriptions,
+            raw_circuit,
+            coordinator,
+        )
         entities.extend(
             CircuitDailyEnergyGoalNumber(
                 coordinator,
@@ -167,8 +184,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 circuit=circuit,
                 description=description,
             )
-            for description in CIRCUIT_NUMBER_DESCRIPTIONS
-            if number_description_applies(description, raw_circuit, coordinator)
+            for description in descriptions
         )
 
     prune_stale_entity_registry_entries(
@@ -185,6 +201,30 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         ),
     )
     async_add_entities(entities)
+
+
+def _compact_number_descriptions_for_setup(
+    descriptions: tuple[CircuitNumberDescription, ...],
+    circuit: Any,
+    coordinator: Any,
+) -> tuple[CircuitNumberDescription, ...]:
+    compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
+    detail_level = entity_detail_level_for_coordinator(coordinator)
+    compact_descriptions: list[CircuitNumberDescription] = []
+    for description in descriptions:
+        rule = compact_creation_rule_for_entity("number", description.key)
+        if not should_create_entity(
+            rule=rule,
+            circuit=circuit,
+            coordinator=coordinator,
+            detail_level=detail_level,
+            selected_groups=selected_groups,
+            legacy_compatibility_keys=compatibility_keys,
+        ):
+            continue
+        compact_descriptions.append(description)
+    return tuple(compact_descriptions)
 
 
 def _daily_energy_goal_value(coordinator: Any, circuit_id: str) -> float:

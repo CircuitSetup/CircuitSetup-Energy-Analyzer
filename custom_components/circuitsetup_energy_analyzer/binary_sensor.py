@@ -17,13 +17,17 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    enable_summary_registry_entries,
     entity_detail_level_for_coordinator,
     entity_enabled_default_for_tier,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     sync_entity_registry_categories,
-    sync_entity_registry_visibility,
+)
+from .entity_catalog import (
+    compact_creation_rule_for_entity,
+    legacy_compatibility_keys_for_coordinator,
+    selected_entity_groups_for_coordinator,
+    should_create_entity,
 )
 from .models import ApplianceProfile, SensorRole
 from .operating_detection import (
@@ -340,6 +344,30 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
         )
 
 
+def _compact_binary_sensor_descriptions_for_setup(
+    descriptions: tuple[DiagnosticBinarySensorDescription, ...],
+    circuit: Any,
+    coordinator: Any,
+) -> tuple[DiagnosticBinarySensorDescription, ...]:
+    compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
+    detail_level = entity_detail_level_for_coordinator(coordinator)
+    compact_descriptions: list[DiagnosticBinarySensorDescription] = []
+    for description in descriptions:
+        rule = compact_creation_rule_for_entity("binary_sensor", description.key)
+        if not should_create_entity(
+            rule=rule,
+            circuit=circuit,
+            coordinator=coordinator,
+            detail_level=detail_level,
+            selected_groups=selected_groups,
+            legacy_compatibility_keys=compatibility_keys,
+        ):
+            continue
+        compact_descriptions.append(description)
+    return tuple(compact_descriptions)
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up diagnostic binary sensor entities for configured circuits."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -350,6 +378,16 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        descriptions = tuple(
+            description
+            for description in BINARY_SENSOR_DESCRIPTIONS
+            if binary_sensor_description_applies(description, circuit, coordinator)
+        )
+        descriptions = _compact_binary_sensor_descriptions_for_setup(
+            descriptions,
+            raw_circuit,
+            coordinator,
+        )
         entities.extend(
             CircuitAnalyzerBinarySensor(
                 coordinator,
@@ -357,8 +395,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 circuit=circuit,
                 description=description,
             )
-            for description in BINARY_SENSOR_DESCRIPTIONS
-            if binary_sensor_description_applies(description, circuit, coordinator)
+            for description in descriptions
         )
 
     prune_stale_entity_registry_entries(
@@ -367,29 +404,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         entity_domain="binary_sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
-    enable_summary_registry_entries(
-        hass,
-        entry_id=entry_id,
-        entity_domain="binary_sensor",
-        tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
-    )
     prune_stale_device_registry_entries(
         hass,
         entry_id=entry_id,
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
-    sync_entity_registry_visibility(
-        hass,
-        entry_id=entry_id,
-        entity_domain="binary_sensor",
-        hidden_unique_id_suffixes={
-            description.key
-            for description in BINARY_SENSOR_DESCRIPTIONS
-            if description.entity_registry_visible_default is False
-        },
-        detail_level=entity_detail_level_for_coordinator(coordinator),
-    )
     sync_entity_registry_categories(
         hass,
         entry_id=entry_id,

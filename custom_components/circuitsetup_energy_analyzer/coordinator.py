@@ -1511,34 +1511,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self._async_save_store(now)
 
     async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
-        """Persist and apply the default entity detail profile."""
-        from .binary_sensor import BINARY_SENSOR_ENTITY_TIER_BY_KEY
-        from .entity import (
-            apply_entity_profile_to_registry,
-            normalize_entity_detail_level,
-        )
-        from .sensor import SENSOR_ENTITY_TIER_BY_KEY
+        """Persist the entity detail level and reload desired entities."""
+        from .entity import normalize_entity_detail_level
 
         level = normalize_entity_detail_level(detail_level)
         self.options[CONF_ENTITY_DETAIL_LEVEL] = level
         await self._async_persist_config_entry_options()
-        self.last_entity_detail_profile_plan = {
-            "sensor": apply_entity_profile_to_registry(
-                self.hass,
-                entry_id=self.entry_id,
-                entity_domain="sensor",
-                tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
-                detail_level=level,
-            ),
-            "binary_sensor": apply_entity_profile_to_registry(
-                self.hass,
-                entry_id=self.entry_id,
-                entity_domain="binary_sensor",
-                tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
-                detail_level=level,
-            ),
-        }
         self.async_set_updated_data(self.state)
+        await self._async_reload_config_entry()
 
     async def async_replace_advanced_settings(
         self: Self,
@@ -1907,6 +1887,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if isawaitable(result):
             await result
         self.options = _mutable_copy(options)
+
+    async def _async_reload_config_entry(self: Self) -> None:
+        if self._config_entry is None:
+            return
+        config_entries = getattr(self.hass, "config_entries", None)
+        reload_entry = getattr(config_entries, "async_reload", None)
+        if reload_entry is None:
+            return
+
+        result = reload_entry(self.entry_id)
+        if isawaitable(result):
+            await result
 
     async def _async_record_setting_recommendation_decision(
         self: Self,
