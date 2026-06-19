@@ -10,7 +10,13 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 CONF_CIRCUITS = "circuits"
+CONF_ENABLE_EXPERIMENTAL_NILM = "enable_experimental_nilm"
+CONF_MAINS_SOURCE_ENTITIES = "mains_source_entities"
+CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
+CONF_RAIN_INTENSITY_ENTITY = "rain_intensity_entity"
+CONF_RAIN_SENSOR_ENTITY = "rain_sensor_entity"
 CONF_SOURCE_ENTITIES = "source_entities"
+CONF_WATER_FLOW_SENSOR_ENTITIES = "water_flow_sensor_entities"
 DOMAIN = "circuitsetup_energy_analyzer"
 PANEL_SETUP_KEY = "_panel_setup"
 PANEL_REGISTERED_VALUE = "registered"
@@ -20,6 +26,21 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
         "binary_sensor",
         "button",
         "number",
+        "select",
+        "sensor",
+    }
+)
+EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
+    {
+        "binary_sensor",
+        "button",
+        "select",
+        "sensor",
+    }
+)
+EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS = frozenset(
+    {
+        "button",
         "select",
         "sensor",
     }
@@ -52,13 +73,7 @@ async def test_config_entry_setup_reload_unload_lifecycle(
 
     caplog.set_level(logging.WARNING)
 
-    import custom_components
-
-    monkeypatch.setattr(
-        custom_components,
-        "__path__",
-        [str(Path(__file__).parents[1] / "custom_components")],
-    )
+    _point_custom_components_at_worktree(monkeypatch)
     hass.states.async_set(
         "sensor.fridge_power",
         "84",
@@ -148,6 +163,367 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
     assert _unexpected_lifecycle_log_messages(caplog.records) == []
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_config_entry_setup_supports_multi_workflow_sources(
+    hass: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
+) -> None:
+    """Exercise richer real-setup workflows from one config entry."""
+
+    caplog.set_level(logging.WARNING)
+
+    _point_custom_components_at_worktree(monkeypatch)
+    _set_source_state(hass, "sensor.fridge_power", "84", "W", "power")
+    _set_source_state(hass, "sensor.fridge_energy", "120.5", "kWh", "energy")
+    _set_source_state(hass, "sensor.dryer_l1_power", "1300", "W", "power")
+    _set_source_state(hass, "sensor.dryer_l2_power", "1280", "W", "power")
+    _set_source_state(hass, "sensor.dryer_energy", "42.0", "kWh", "energy")
+    _set_source_state(hass, "sensor.hvac_power", "640", "W", "power")
+    _set_source_state(hass, "sensor.mixed_power", "210", "W", "power")
+    _set_source_state(hass, "sensor.panel_mains_l1_active_power", "2200", "W")
+    _set_source_state(hass, "sensor.panel_mains_l2_active_power", "2100", "W")
+    _set_source_state(hass, "sensor.solar_power", "-1400", "W", "power")
+    _set_source_state(hass, "sensor.solar_energy", "980.0", "kWh", "energy")
+    _set_source_state(hass, "sensor.outdoor_temperature", "72", "F")
+    _set_source_state(hass, "sensor.rain_intensity", "0.2", "in/h")
+    _set_source_state(hass, "binary_sensor.rain", "on")
+    _set_source_state(hass, "binary_sensor.water_flow", "on")
+
+    source_entities = [
+        "sensor.fridge_power",
+        "sensor.fridge_energy",
+        "sensor.dryer_l1_power",
+        "sensor.dryer_l2_power",
+        "sensor.dryer_energy",
+        "sensor.hvac_power",
+        "sensor.mixed_power",
+        "sensor.panel_mains_l1_active_power",
+        "sensor.panel_mains_l2_active_power",
+        "sensor.solar_power",
+        "sensor.solar_energy",
+    ]
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="workflow-entry",
+        title="Workflow Gate",
+        data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_SOURCE_ENTITIES: source_entities,
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.panel_mains_l1_active_power",
+                "sensor.panel_mains_l2_active_power",
+            ],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+            CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain",
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.rain_intensity",
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "dryer",
+                    "name": "Laundry Dryer",
+                    "mode": "dual_phase",
+                    "appliance_profile": "dryer",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.dryer_l1_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.dryer_l2_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                        {"entity_id": "sensor.dryer_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "mixed_load",
+                    "name": "Mixed Load",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {"entity_id": "sensor.mixed_power", "role": "real_power"},
+                    ],
+                },
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "power_flow": "mains_net",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_mains_l1_active_power",
+                            "role": "real_power",
+                            "leg": "a",
+                        },
+                        {
+                            "entity_id": "sensor.panel_mains_l2_active_power",
+                            "role": "real_power",
+                            "leg": "b",
+                        },
+                    ],
+                },
+                {
+                    "circuit_id": "solar",
+                    "name": "Solar",
+                    "mode": "single_phase",
+                    "appliance_profile": "solar_inverter",
+                    "power_flow": "generation",
+                    "sensors": [
+                        {"entity_id": "sensor.solar_power", "role": "real_power"},
+                        {"entity_id": "sensor.solar_energy", "role": "energy"},
+                    ],
+                },
+            ],
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    configs = {config.circuit_id: config for config in coordinator.circuit_configs}
+    assert set(configs) == {
+        "dryer",
+        "fridge",
+        "hvac",
+        "mains",
+        "mixed_load",
+        "solar",
+    }
+    assert configs["dryer"].mode.value == "dual_phase"
+    assert configs["mixed_load"].mode.value == "mixed"
+    assert configs["mains"].mode.value == "mains_nilm"
+    assert configs["solar"].power_flow.value == "generation"
+    assert set(coordinator.source_entities) == {
+        *source_entities,
+        "sensor.outdoor_temperature",
+        "binary_sensor.rain",
+        "sensor.rain_intensity",
+        "binary_sensor.water_flow",
+    }
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_PLATFORM_DOMAINS
+    )
+
+    assert await hass.config_entries.async_unload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_config_entry_setup_supports_extra_entity_only_source_output(
+    hass: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
+) -> None:
+    """Exercise setup data produced by an extra-entity-only source selection."""
+
+    caplog.set_level(logging.WARNING)
+
+    _point_custom_components_at_worktree(monkeypatch)
+    _set_source_state(hass, "sensor.extra_refrigerator_power", "92", "W", "power")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="extra-entity-entry",
+        title="Extra Entity Gate",
+        data={CONF_SOURCE_ENTITIES: ["sensor.extra_refrigerator_power"]},
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert [config.circuit_id for config in coordinator.circuit_configs] == [
+        "extra_refrigerator",
+    ]
+    config = coordinator.circuit_configs[0]
+    assert config.mode.value == "single_phase"
+    assert config.appliance_profile.value == "refrigerator"
+    assert coordinator.source_entities == ("sensor.extra_refrigerator_power",)
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS
+    )
+
+    assert await hass.config_entries.async_unload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_config_entry_setup_supports_rain_intensity_only_source(
+    hass: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
+) -> None:
+    """Exercise setup when rain context comes only from an intensity source."""
+
+    caplog.set_level(logging.WARNING)
+
+    _point_custom_components_at_worktree(monkeypatch)
+    _set_source_state(hass, "sensor.sump_pump_power", "15", "W", "power")
+    _set_source_state(hass, "sensor.rain_intensity", "0.3", "in/h")
+    _set_source_state(hass, "binary_sensor.water_flow", "off")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="rain-intensity-entry",
+        title="Rain Intensity Gate",
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.sump_pump_power"],
+            CONF_RAIN_INTENSITY_ENTITY: "sensor.rain_intensity",
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert [config.circuit_id for config in coordinator.circuit_configs] == [
+        "sump_pump",
+    ]
+    assert coordinator.circuit_configs[0].appliance_profile.value == "sump_pump"
+    assert coordinator.source_entities == (
+        "sensor.sump_pump_power",
+        "sensor.rain_intensity",
+        "binary_sensor.water_flow",
+    )
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS
+    )
+
+    assert await hass.config_entries.async_unload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
+    hass: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
+) -> None:
+    """Exercise auto mains/NILM setup without a hand-written mains circuit."""
+
+    caplog.set_level(logging.WARNING)
+
+    _point_custom_components_at_worktree(monkeypatch)
+    mains_entities = [
+        "sensor.panel_mains_l1_active_power",
+        "sensor.panel_mains_l2_active_power",
+    ]
+    _set_source_state(hass, mains_entities[0], "2200", "W", "power")
+    _set_source_state(hass, mains_entities[1], "2100", "W", "power")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="auto-mains-entry",
+        title="Auto Mains Gate",
+        data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: mains_entities,
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert [config.circuit_id for config in coordinator.circuit_configs] == ["mains"]
+    config = coordinator.circuit_configs[0]
+    assert config.mode.value == "mains_nilm"
+    assert config.appliance_profile.value == "mains_nilm"
+    assert config.power_flow.value == "mains_net"
+    assert coordinator.source_entities == tuple(mains_entities)
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS
+    )
+
+    assert await hass.config_entries.async_unload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+def _point_custom_components_at_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components
+
+    monkeypatch.setattr(
+        custom_components,
+        "__path__",
+        [str(Path(__file__).parents[1] / "custom_components")],
+    )
+
+
+def _set_source_state(
+    hass: Any,
+    entity_id: str,
+    state: str,
+    unit: str | None = None,
+    device_class: str | None = None,
+) -> None:
+    attributes = {}
+    if unit is not None:
+        attributes["unit_of_measurement"] = unit
+    if device_class is not None:
+        attributes["device_class"] = device_class
+    hass.states.async_set(entity_id, state, attributes)
 
 
 def _registered_platform_domains(hass: Any, entry_id: str) -> set[str]:
