@@ -1128,6 +1128,44 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "${this._escape(item.entity_id)}" not in asset
     assert "this._escape(signature.signature_id)}</strong>" not in asset
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
+    assert "deny_setting_recommendation" not in asset
+    assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
+
+
+def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions() -> (
+    None
+):
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "_shouldHideUnavailableRecommendationAction(actionKey, action)" in asset
+    assert 'if (!action) {\n      return "";' in asset
+    assert (
+        "action.enabled === false"
+        " && this._shouldHideUnavailableRecommendationAction(actionKey, action)"
+    ) in asset
+
+
+def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "_recommendationsByStatus(recommendations)" in asset
+    assert "_renderRecommendationSection(" in asset
+    assert '"Suggested Settings", grouped.pending' in asset
+    assert '"Applied Suggested Settings", grouped.applied' in asset
+    assert 'status === "applied"' in asset
+    assert "originalIndex" in asset
 
 
 def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:

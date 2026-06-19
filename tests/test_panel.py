@@ -350,10 +350,66 @@ def test_alert_evidence_payload_includes_setting_recommendation_actions() -> Non
             "entry_id": "entry-1",
         },
     }
+    assert "deny_setting_recommendation" not in payload["actions"]
     assert payload["actions"]["dismiss_setting_recommendation"]["data"] == {
         "recommendation_id": "hvac:daily_spike_ratio:v1",
         "entry_id": "entry-1",
     }
+
+
+def test_alert_evidence_payload_advertises_only_pending_recommendation_actions() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    coordinator = _coordinator(alert)
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:already_applied:v1",
+                "title": "Already applied",
+                "status": "applied",
+            },
+            {
+                "recommendation_id": "hvac:pending:v1",
+                "title": "Pending suggestion",
+                "status": "pending",
+            },
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["actions"]["apply_setting_recommendation"]["data"] == {
+        "recommendation_id": "hvac:pending:v1",
+        "entry_id": "entry-1",
+    }
+
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:already_applied:v1",
+                "title": "Already applied",
+                "status": "applied",
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert "apply_setting_recommendation" not in payload["actions"]
+    assert "deny_setting_recommendation" not in payload["actions"]
+    assert "dismiss_setting_recommendation" not in payload["actions"]
 
 
 def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
@@ -388,9 +444,7 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
         "recommendation_id": "hvac:daily_spike_ratio:v1",
         "entry_id": "entry-1",
     }
-    assert payload["setting_recommendations"][0]["actions"]["deny"]["service"] == (
-        "deny_setting_recommendation"
-    )
+    assert "deny" not in payload["setting_recommendations"][0]["actions"]
     assert payload["setting_recommendations"][0]["actions"]["dismiss"]["service"] == (
         "dismiss_setting_recommendation"
     )
@@ -444,7 +498,7 @@ def test_alert_evidence_payload_enables_undo_for_applied_recommendations() -> No
 
     actions = payload["setting_recommendations"][0]["actions"]
     assert actions["apply"]["enabled"] is False
-    assert actions["deny"]["enabled"] is False
+    assert "deny" not in actions
     assert actions["dismiss"]["enabled"] is False
     assert actions["undo"]["enabled"] is True
     assert actions["undo"]["data"] == {

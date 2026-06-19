@@ -546,7 +546,6 @@ _UTILITY_STATISTIC_PERIOD_OPTIONS = (
 )
 _RECOMMENDATION_ACTION_OPTIONS = (
     {"value": RECOMMENDATION_ACTION_APPLY, "label": "Apply Suggestion"},
-    {"value": RECOMMENDATION_ACTION_DENY, "label": "Deny Suggestion"},
     {"value": RECOMMENDATION_ACTION_DISMISS, "label": "Dismiss For Now"},
 )
 _CIRCUIT_MODE_LABELS = {
