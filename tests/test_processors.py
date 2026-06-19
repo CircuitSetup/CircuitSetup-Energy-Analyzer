@@ -2242,6 +2242,43 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
     )
 
 
+def test_demand_monthly_peak_message_names_cutoff_not_baseline_change() -> None:
+    from custom_components.circuitsetup_energy_analyzer.demand import (
+        DemandPeakEvidence,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        demand_monthly_peak_message,
+    )
+
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    evidence = DemandPeakEvidence(
+        circuit_id="water_heater",
+        date="2026-06-19",
+        current_demand_w=4100.0,
+        monthly_peak_rank=3,
+        monthly_peak_cutoff_w=4100.0,
+        monthly_peak_usage_percent=100.0,
+        peak_rank_count=3,
+        peak_warning_ratio=0.9,
+        window_minutes=15,
+        features={},
+    )
+
+    message = demand_monthly_peak_message(config, evidence)
+
+    assert message == (
+        "Possible issue: Water Heater demand averaged 4100 W over 15 minutes, "
+        "matching this month's #3 demand window cutoff of 4100 W."
+    )
+    assert "Baseline" not in message
+    assert "Observed" not in message
+
+
 def test_demand_processor_context_uses_rollup_timestamp() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (

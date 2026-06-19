@@ -225,10 +225,22 @@ def demand_monthly_peak_message(
     return (
         f"Possible issue: {config.name} demand averaged "
         f"{_format_w(evidence.current_demand_w)} W over "
-        f"{evidence.window_minutes} minutes, near this month's top "
-        f"{evidence.peak_rank_count} demand windows. It is "
-        f"{_format_percent(evidence.monthly_peak_usage_percent)}% of the "
-        f"{_format_w(evidence.monthly_peak_cutoff_w)} W cutoff."
+        f"{evidence.window_minutes} minutes, "
+        f"{_monthly_peak_comparison_phrase(evidence)}"
+    )
+
+
+def _monthly_peak_comparison_phrase(evidence: DemandPeakEvidence) -> str:
+    cutoff = f"{_format_w(evidence.monthly_peak_cutoff_w)} W"
+    if evidence.current_demand_w >= evidence.monthly_peak_cutoff_w:
+        return (
+            f"matching this month's #{evidence.peak_rank_count} "
+            f"demand window cutoff of {cutoff}."
+        )
+    return (
+        f"within {_format_percent(evidence.monthly_peak_usage_percent)}% "
+        f"of this month's #{evidence.peak_rank_count} demand window "
+        f"cutoff of {cutoff}."
     )
 
 

@@ -33,11 +33,10 @@ def alert_notification_message(
     """Return Markdown body text for an alert persistent notification."""
     from .alert_links import alert_evidence_path
 
-    lines = [
-        alert.message,
-    ]
+    lines = []
     if config is not None and config.name:
-        lines.extend(["", f"## {config.name}"])
+        lines.extend([f"**{config.name}**", ""])
+    lines.append(alert.message)
     lines.extend(
         [
             "",
@@ -45,7 +44,7 @@ def alert_notification_message(
         f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
         "",
         f"- Observed value: {alert.observed_value}",
-        f"- Baseline value: {alert.baseline_value}",
+        f"- {_comparison_value_label(alert)}: {alert.baseline_value}",
         f"- Repeated observations: {alert.repeated_count}",
         ]
     )
@@ -79,7 +78,7 @@ async def async_create_alert_notification(
     create(
         hass,
         alert_notification_message(alert, config=config, dashboard_path=dashboard_path),
-        title="CircuitSetup Energy Analyzer alert",
+        title="Energy Analyzer Alert",
         notification_id=notification_id_for_alert(alert),
     )
 
@@ -121,6 +120,12 @@ def _settings_recommendation_message(total_pending: int) -> str:
         "to review via CircuitSetup Energy Analyzer > "
         "Configure > Review Suggested Settings."
     )
+
+
+def _comparison_value_label(alert: AlertEvidence) -> str:
+    if alert.feature in {"demand_limit", "demand_monthly_peak"}:
+        return "Comparison value"
+    return "Baseline value"
 
 
 def _tuple_id(prefix: str, *components: str) -> str:
