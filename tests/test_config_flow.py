@@ -722,7 +722,6 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
     )["select"]["options"]
     assert action_options == [
         {"value": "apply", "label": "Apply Suggestion"},
-        {"value": "deny", "label": "Deny Suggestion"},
         {"value": "dismiss", "label": "Dismiss For Now"},
     ]
     summary = result["description_placeholders"]["recommendations"]

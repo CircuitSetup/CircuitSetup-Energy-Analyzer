@@ -13,7 +13,6 @@ const ACTION_SERVICE_NAMES = {
   end_maintenance: "end_maintenance",
   relearn_baseline: "relearn_baseline",
   apply_setting_recommendation: "apply_setting_recommendation",
-  deny_setting_recommendation: "deny_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
   undo_setting_recommendation: "undo_setting_recommendation",
   reset_setting_recommendation: "reset_setting_recommendation",
@@ -393,7 +392,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _recommendationActionMessage(actionKey) {
     const messages = {
       apply: "Recommendation applied.",
-      deny: "Recommendation denied.",
       dismiss: "Recommendation dismissed.",
       undo: "Recommendation change undone.",
       reset: "Recommendation setting reset to default.",
@@ -781,11 +779,35 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!recommendations || !recommendations.length) {
       return "";
     }
+    const grouped = this._recommendationsByStatus(recommendations);
+    return `
+      ${this._renderRecommendationSection("Suggested Settings", grouped.pending)}
+      ${this._renderRecommendationSection("Applied Suggested Settings", grouped.applied)}
+    `;
+  }
+
+  _recommendationsByStatus(recommendations) {
+    return recommendations.reduce((grouped, recommendation, originalIndex) => {
+      const status = String((recommendation && recommendation.status) || "pending");
+      const item = { recommendation, originalIndex };
+      if (status === "applied") {
+        grouped.applied.push(item);
+      } else if (status === "pending") {
+        grouped.pending.push(item);
+      }
+      return grouped;
+    }, { pending: [], applied: [] });
+  }
+
+  _renderRecommendationSection(title, recommendationItems) {
+    if (!recommendationItems.length) {
+      return "";
+    }
     return `
       <section class="panel">
-        <h2>Suggested Settings</h2>
+        <h2>${this._escape(title)}</h2>
         <div class="entity-list">
-          ${recommendations.map((recommendation, index) => `
+          ${recommendationItems.map(({ recommendation, originalIndex }) => `
             <div class="metric">
               <span>${this._escape(recommendation.feature || "Suggested setting")}</span>
               <strong>${this._escape(recommendation.display_label || recommendation.title || "Suggested setting")}</strong>
@@ -799,12 +821,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
                 <div class="actions">
-                 ${this._recommendationActionButton(recommendation, index, "apply", "Apply")}
-                 ${this._recommendationActionButton(recommendation, index, "deny", "Deny", true)}
-                 ${this._recommendationActionButton(recommendation, index, "dismiss", "Dismiss", true)}
-                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, index, "undo", "Undo", true) : ""}
-                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, index, "reset", "Reset default", true) : ""}
-                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, index, "preview", "Preview evidence", true) : ""}
+                 ${this._recommendationActionButton(recommendation, originalIndex, "apply", "Apply")}
+                 ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", "Dismiss", true)}
+                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, originalIndex, "undo", "Undo", true) : ""}
+                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, originalIndex, "reset", "Reset default", true) : ""}
+                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", "Preview evidence", true) : ""}
                 </div>
             </div>
           `).join("")}
@@ -1073,10 +1094,24 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _recommendationActionButton(recommendation, index, actionKey, label, secondary = false) {
     const busyKey = `recommendation_${index}_${actionKey}`;
     const action = recommendation && recommendation.actions && recommendation.actions[actionKey];
+    if (!action) {
+      return "";
+    }
+    if (action.enabled === false && this._shouldHideUnavailableRecommendationAction(actionKey, action)) {
+      return "";
+    }
     const disabled = this._busyAction === busyKey || (action && action.enabled === false) ? "disabled" : "";
     const reason = action && (action.unavailable_label || action.unavailable_reason);
     const title = reason ? ` title="${this._escape(reason)}"` : "";
     return `<button data-recommendation-index="${index}" data-recommendation-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${disabled}>${this._escape(label)}</button>`;
+  }
+
+  _shouldHideUnavailableRecommendationAction(actionKey, action) {
+    if (!action || !action.unavailable_reason) {
+      return false;
+    }
+    return ["apply", "dismiss", "undo"].includes(actionKey)
+      && ["not_pending", "not_applied"].includes(action.unavailable_reason);
   }
 
   _changeSummary(alert) {

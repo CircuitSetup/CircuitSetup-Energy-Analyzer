@@ -24,7 +24,6 @@ from .services import (
     ATTR_SIGNATURE_ID,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
-    SERVICE_DENY_SETTING_RECOMMENDATION,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
     SERVICE_IGNORE_NILM_SIGNATURE,
@@ -65,7 +64,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260618-feedback-actions"
+PANEL_MODULE_VERSION = "20260619-suggested-settings-actions-v3"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -398,7 +397,7 @@ def _actions_for_context(
         coordinator,
         circuit_id,
     )
-    recommendation_id = _first_recommendation_id(recommendations)
+    recommendation_id = _first_pending_recommendation_id(recommendations)
     if recommendation_id:
         recommendation_data: dict[str, Any] = {
             ATTR_RECOMMENDATION_ID: recommendation_id
@@ -409,11 +408,6 @@ def _actions_for_context(
         actions["apply_setting_recommendation"] = {
             "domain": DOMAIN,
             "service": SERVICE_APPLY_SETTING_RECOMMENDATION,
-            "data": recommendation_data,
-        }
-        actions["deny_setting_recommendation"] = {
-            "domain": DOMAIN,
-            "service": SERVICE_DENY_SETTING_RECOMMENDATION,
             "data": recommendation_data,
         }
         actions["dismiss_setting_recommendation"] = {
@@ -560,14 +554,6 @@ def _recommendation_actions(
             "unavailable_reason": "not_pending",
             "unavailable_label": "This recommendation is no longer pending.",
         },
-        "deny": {
-            "domain": DOMAIN,
-            "service": SERVICE_DENY_SETTING_RECOMMENDATION,
-            "data": dict(data),
-            "enabled": is_pending,
-            "unavailable_reason": "not_pending",
-            "unavailable_label": "This recommendation is no longer pending.",
-        },
         "dismiss": {
             "domain": DOMAIN,
             "service": SERVICE_DISMISS_SETTING_RECOMMENDATION,
@@ -653,8 +639,12 @@ def _recommendation_evidence_path(
     return f"/{PANEL_URL_PATH}?{query}"
 
 
-def _first_recommendation_id(recommendations: list[dict[str, Any]]) -> str | None:
+def _first_pending_recommendation_id(
+    recommendations: list[dict[str, Any]],
+) -> str | None:
     for recommendation in recommendations:
+        if str(recommendation.get("status") or "pending") != "pending":
+            continue
         recommendation_id = recommendation.get(ATTR_RECOMMENDATION_ID)
         if isinstance(recommendation_id, str) and recommendation_id:
             return recommendation_id
