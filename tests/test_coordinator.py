@@ -27,6 +27,10 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
 )
+from custom_components.circuitsetup_energy_analyzer.coordinator import (
+    AnalyzerState,
+    _apply_state_update,
+)
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
@@ -42,6 +46,58 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+def test_apply_state_update_rejects_unknown_root_path() -> None:
+    state = AnalyzerState()
+
+    with pytest.raises(ValueError, match="unknown root"):
+        _apply_state_update(state, ("surprise_by_circuit", "fridge"), 1.0)
+
+    assert not hasattr(state, "surprise_by_circuit")
+
+
+def test_apply_state_update_rejects_non_dict_intermediate_path() -> None:
+    state = AnalyzerState()
+    state.learning_by_circuit["fridge"] = True
+
+    with pytest.raises(TypeError, match="not a mapping"):
+        _apply_state_update(
+            state,
+            ("learning_by_circuit", "fridge", "nested"),
+            False,
+        )
+
+    assert state.learning_by_circuit == {"fridge": True}
+
+
+def test_apply_state_update_names_bad_intermediate_segment() -> None:
+    state = AnalyzerState()
+    state.learning_by_circuit["fridge"] = True
+
+    with pytest.raises(TypeError, match="fridge"):
+        _apply_state_update(
+            state,
+            ("learning_by_circuit", "fridge", "nested", "leaf"),
+            False,
+        )
+
+
+def test_apply_state_update_rejects_root_replacement() -> None:
+    state = AnalyzerState()
+
+    with pytest.raises(ValueError, match="destination key"):
+        _apply_state_update(state, ("learning_by_circuit",), {"fridge": True})
+
+    assert state.learning_by_circuit == {}
+
+
+def test_apply_state_update_allows_known_state_dictionary_root() -> None:
+    state = AnalyzerState()
+
+    _apply_state_update(state, ("learning_by_circuit", "fridge"), True)
+
+    assert state.learning_by_circuit == {"fridge": True}
 
 
 def _settings_recommendation(advisor: Any, **overrides: Any) -> Any:
