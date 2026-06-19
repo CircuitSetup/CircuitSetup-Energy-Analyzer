@@ -51,6 +51,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
         "refrigerator_stale_power",
+        "hvac_voltage_sag",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -201,6 +202,28 @@ def test_stale_numeric_fixture_records_quality_issue_and_recovers() -> None:
     assert metrics.false_positive_alerts == 0
 
 
+def test_voltage_sag_fixture_emits_power_quality_event_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "hvac_voltage_sag.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events = [event for event in result.events if event.circuit_id == "hvac"]
+
+    assert [event.event_type for event in events] == [
+        EventType.START,
+        EventType.VOLTAGE_SAG,
+        EventType.STOP,
+    ]
+    assert [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in events
+    ] == [60, 180, 300]
+    assert events[1].features["voltage"] == pytest.approx(220.0)
+    assert events[1].features["nominal_voltage"] == pytest.approx(240.0)
+    assert events[1].features["real_power_w"] == pytest.approx(3600.0)
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
     result = replay_fixture_processors(fixture)
@@ -242,7 +265,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 7 |" in report
+    assert "| Fixtures | 8 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
@@ -250,6 +273,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report
     assert "refrigerator_stale_power" in report
+    assert "hvac_voltage_sag" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:
