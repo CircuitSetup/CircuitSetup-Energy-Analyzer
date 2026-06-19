@@ -941,6 +941,80 @@ async def test_circuit_services_accept_renamed_registry_entity_target(
 
 
 @pytest.mark.asyncio
+async def test_maintenance_service_accepts_switch_entity_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.services as services
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_START_MAINTENANCE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeEntityRegistry:
+        def async_get(self, entity_id: str):
+            if entity_id == "switch.kitchen_fridge_maintenance":
+                return SimpleNamespace(
+                    platform=DOMAIN,
+                    unique_id="entry-1_fridge_maintenance",
+                )
+            return None
+
+    class FakeEntityRegistryModule:
+        @staticmethod
+        def async_get(hass):
+            return FakeEntityRegistry()
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_start_maintenance(
+            self,
+            circuit_id: str,
+            note: str,
+            duration: object,
+            relearn_on_end: bool,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_start_maintenance",
+                    (circuit_id, note, duration, relearn_on_end),
+                )
+            )
+
+    monkeypatch.setattr(services, "er", FakeEntityRegistryModule)
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
+        SimpleNamespace(data={"entity_id": "switch.kitchen_fridge_maintenance"})
+    )
+
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False))
+    ]
+
+
+@pytest.mark.asyncio
 async def test_circuit_services_reject_conflicting_circuit_and_entity_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_RELEARN_BASELINE,

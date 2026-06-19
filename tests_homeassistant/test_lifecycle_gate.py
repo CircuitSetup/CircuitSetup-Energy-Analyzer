@@ -30,6 +30,7 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
         "number",
         "select",
         "sensor",
+        "switch",
     }
 )
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
@@ -38,6 +39,7 @@ EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
         "button",
         "select",
         "sensor",
+        "switch",
     }
 )
 EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS = frozenset(

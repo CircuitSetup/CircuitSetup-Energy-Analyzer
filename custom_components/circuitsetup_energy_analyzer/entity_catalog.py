@@ -19,6 +19,7 @@ ELECTRICAL_CYCLE_CONDENSATION_PHASE = "electrical_cycle_condensation"
 BILLING_STANDBY_WEATHER_CONDENSATION_PHASE = (
     "billing_standby_weather_condensation"
 )
+MAINTENANCE_SWITCH_CONDENSATION_PHASE = "maintenance_switch_condensation"
 
 
 class EntityExposure(StrEnum):
@@ -148,6 +149,11 @@ def selected_entity_groups_for_coordinator(coordinator: Any) -> set[EntityGroup]
 
 def compact_sensor_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
     """Return whether current compact phases manage this sensor's creation."""
+    return compact_rule_is_setup_managed(rule)
+
+
+def compact_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
+    """Return whether current compact phases manage this entity's creation."""
     if rule.removal_phase in _SETUP_MANAGED_REMOVAL_PHASES:
         return True
     return (
@@ -286,6 +292,7 @@ _SETUP_MANAGED_REMOVAL_PHASES = frozenset(
         CORE_DUPLICATE_REMOVAL_PHASE,
         ELECTRICAL_CYCLE_CONDENSATION_PHASE,
         BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
+        MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     },
 )
 _SETUP_MANAGED_GRAPH_GROUPS = frozenset(
@@ -782,6 +789,7 @@ _RULES: tuple[EntityCreationRule, ...] = (
         ENTITY_DETAIL_EXPERT,
         replacement="switch.<circuit>_maintenance",
         legacy=True,
+        removal_phase=MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     ),
     _rule(
         "button",
@@ -791,6 +799,7 @@ _RULES: tuple[EntityCreationRule, ...] = (
         ENTITY_DETAIL_EXPERT,
         replacement="switch.<circuit>_maintenance",
         legacy=True,
+        removal_phase=MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     ),
 )
 

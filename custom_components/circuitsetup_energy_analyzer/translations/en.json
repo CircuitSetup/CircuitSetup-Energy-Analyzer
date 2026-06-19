@@ -754,6 +754,11 @@
       "water_flow_mismatch": {
         "name": "Water flow mismatch"
       }
+    },
+    "switch": {
+      "maintenance": {
+        "name": "Maintenance"
+      }
     }
   },
   "issues": {

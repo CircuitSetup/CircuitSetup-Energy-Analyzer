@@ -1269,7 +1269,14 @@ def test_daily_action_services_document_entity_targets() -> None:
         assert "analyzer entity" in fields["entity_id"]["description"]
         assert fields["entity_id"]["selector"] == {
             "entity": {
-                "domain": ["sensor", "binary_sensor", "button", "select", "number"]
+                "domain": [
+                    "sensor",
+                    "binary_sensor",
+                    "button",
+                    "select",
+                    "number",
+                    "switch",
+                ]
             }
         }
 

@@ -3,17 +3,17 @@
   "graph_type": "ast_static_codegraph",
   "repository": {
     "root": "C:\\Users\\John\\Documents\\CS_energy_analyzer\\.worktrees\\compact-entity-model",
-    "commit": "aef9b1ae963c3ed30586e2c1346bf0332ae61d58",
+    "commit": "447749af21c19b9291fdc05352acdece5026dbc0",
     "branch": "feature/compact-entity-model",
     "dirty": true,
-    "generated_at": "2026-06-19T20:33:45.112438+00:00"
+    "generated_at": "2026-06-19T21:06:40.431149+00:00"
   },
   "scope": {
     "source_root": "custom_components/circuitsetup_energy_analyzer",
     "tests_included": true,
-    "file_count": 165,
-    "python_module_count": 151,
-    "symbol_count": 3234
+    "file_count": 166,
+    "python_module_count": 152,
+    "symbol_count": 3260
   },
   "limitations": [
     "Does not import or execute project code.",
@@ -311,7 +311,7 @@
       "kind": "python_module",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
       "language": "python",
-      "loc": 448,
+      "loc": 543,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -337,6 +337,9 @@
         "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.async_press",
         "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
         "custom_components.circuitsetup_energy_analyzer.button.button_description_applies",
+        "custom_components.circuitsetup_energy_analyzer.button._button_description_should_create",
+        "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+        "custom_components.circuitsetup_energy_analyzer.button._entity_registry_for_hass",
         "custom_components.circuitsetup_energy_analyzer.button._button_availability_reason",
         "custom_components.circuitsetup_energy_analyzer.button._availability_reason_label",
         "custom_components.circuitsetup_energy_analyzer.button._availability_attributes",
@@ -348,7 +351,7 @@
       ],
       "centrality": {
         "internal_import_indegree": 0,
-        "internal_import_outdegree": 2
+        "internal_import_outdegree": 3
       }
     },
     {
@@ -634,13 +637,13 @@
       "kind": "python_module",
       "path": "custom_components/circuitsetup_energy_analyzer/const.py",
       "language": "python",
-      "loc": 83,
+      "loc": 85,
       "doc": "",
       "metadata": {},
       "parse_error": null,
       "symbols": [],
       "centrality": {
-        "internal_import_indegree": 34,
+        "internal_import_indegree": 35,
         "internal_import_outdegree": 0
       }
     },
@@ -1554,7 +1557,7 @@
         "custom_components.circuitsetup_energy_analyzer.entity.CircuitAnalyzerEntity.coordinator_state"
       ],
       "centrality": {
-        "internal_import_indegree": 7,
+        "internal_import_indegree": 8,
         "internal_import_outdegree": 3
       }
     },
@@ -1563,7 +1566,7 @@
       "kind": "python_module",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
       "language": "python",
-      "loc": 799,
+      "loc": 808,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -1578,6 +1581,7 @@
         "custom_components.circuitsetup_energy_analyzer.entity_catalog.legacy_compatibility_keys_for_coordinator",
         "custom_components.circuitsetup_energy_analyzer.entity_catalog.selected_entity_groups_for_coordinator",
         "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_sensor_rule_is_setup_managed",
+        "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_rule_is_setup_managed",
         "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
         "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_entity_count_preview",
         "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_detail_level",
@@ -1591,7 +1595,7 @@
         "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_binary"
       ],
       "centrality": {
-        "internal_import_indegree": 2,
+        "internal_import_indegree": 3,
         "internal_import_outdegree": 1
       }
     },
@@ -3045,7 +3049,7 @@
       "kind": "python_module",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
       "language": "python",
-      "loc": 1417,
+      "loc": 1419,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -3101,7 +3105,7 @@
       "kind": "resource",
       "path": "custom_components/circuitsetup_energy_analyzer/services.yaml",
       "language": "yaml",
-      "loc": 1288,
+      "loc": 1294,
       "doc": "",
       "metadata": {
         "service_names": [
@@ -3319,7 +3323,7 @@
       "kind": "resource",
       "path": "custom_components/circuitsetup_energy_analyzer/strings.json",
       "language": "json",
-      "loc": 829,
+      "loc": 834,
       "doc": "",
       "metadata": {
         "top_level_keys": [
@@ -3338,11 +3342,43 @@
       }
     },
     {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch",
+      "kind": "python_module",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "language": "python",
+      "loc": 227,
+      "doc": "",
+      "metadata": {},
+      "parse_error": null,
+      "symbols": [
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitSwitchDescription",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.__init__",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.suggested_object_id",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.icon",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.is_on",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.available",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.extra_state_attributes",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_on",
+        "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_off",
+        "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+        "custom_components.circuitsetup_energy_analyzer.switch.switch_description_applies",
+        "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+        "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+        "custom_components.circuitsetup_energy_analyzer.switch._maintenance_actions_available",
+        "custom_components.circuitsetup_energy_analyzer.switch._call_or_raise"
+      ],
+      "centrality": {
+        "internal_import_indegree": 0,
+        "internal_import_outdegree": 2
+      }
+    },
+    {
       "id": "custom_components/circuitsetup_energy_analyzer/translations/en.json",
       "kind": "resource",
       "path": "custom_components/circuitsetup_energy_analyzer/translations/en.json",
       "language": "json",
-      "loc": 829,
+      "loc": 834,
       "doc": "",
       "metadata": {
         "top_level_keys": [
@@ -4270,7 +4306,7 @@
       "kind": "python_module",
       "path": "tests/test_control_entities.py",
       "language": "python",
-      "loc": 865,
+      "loc": 1022,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -4302,9 +4338,13 @@
         "tests.test_control_entities.test_button_setup_entry_adds_circuit_and_global_controls",
         "tests.test_control_entities.test_button_setup_skips_inapplicable_controls_and_keeps_single_globals",
         "tests.test_control_entities.test_unavailable_global_buttons_explain_missing_action",
-        "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+        "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
+        "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
         "tests.test_control_entities.test_pause_alerts_button_requires_active_unpaused_alert",
         "tests.test_control_entities.test_unavailable_maintenance_button_press_raises_clear_error",
+        "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+        "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+        "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
         "tests.test_control_entities.test_select_setup_entry_adds_sensitivity_and_detail_level_controls",
         "tests.test_control_entities.test_select_setup_keeps_mains_sensitivity_control",
         "tests.test_control_entities.test_select_controls_reject_invalid_options_without_side_effects",
@@ -4809,7 +4849,7 @@
       "kind": "python_module",
       "path": "tests/test_entity_catalog.py",
       "language": "python",
-      "loc": 350,
+      "loc": 376,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -4822,6 +4862,7 @@
         "tests.test_entity_catalog.test_core_duplicate_rules_are_marked_for_phase_two_removal",
         "tests.test_entity_catalog.test_electrical_cycle_rules_are_marked_for_phase_three_creation",
         "tests.test_entity_catalog.test_billing_standby_weather_rules_are_marked_for_phase_four_creation",
+        "tests.test_entity_catalog.test_maintenance_button_rules_are_marked_for_phase_five_creation",
         "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
         "tests.test_entity_catalog.test_desired_compact_rules_preview_uses_current_applicability"
       ],
@@ -5458,7 +5499,7 @@
       "kind": "python_module",
       "path": "tests/test_services.py",
       "language": "python",
-      "loc": 2859,
+      "loc": 2933,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -5484,6 +5525,7 @@
         "tests.test_services.test_circuit_services_fail_fast_for_unknown_circuit_id",
         "tests.test_services.test_circuit_services_accept_analyzer_entity_target",
         "tests.test_services.test_circuit_services_accept_renamed_registry_entity_target",
+        "tests.test_services.test_maintenance_service_accepts_switch_entity_target",
         "tests.test_services.test_circuit_services_reject_conflicting_circuit_and_entity_targets",
         "tests.test_services.test_circuit_services_reject_ambiguous_renamed_entity_targets",
         "tests.test_services.test_circuit_services_fail_fast_for_unknown_entity_target",
@@ -5689,7 +5731,7 @@
       "kind": "python_module",
       "path": "tests/test_user_facing_text.py",
       "language": "python",
-      "loc": 1678,
+      "loc": 1685,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -5898,7 +5940,7 @@
       "kind": "python_module",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
       "language": "python",
-      "loc": 732,
+      "loc": 734,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -5929,7 +5971,7 @@
       "kind": "python_module",
       "path": "tests_homeassistant/test_runtime_contract.py",
       "language": "python",
-      "loc": 121,
+      "loc": 123,
       "doc": "",
       "metadata": {},
       "parse_error": null,
@@ -8266,8 +8308,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitButtonDescription",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 32,
-      "end_lineno": 46,
+      "lineno": 40,
+      "end_lineno": 54,
       "decorators": [
         "dataclass"
       ],
@@ -8283,8 +8325,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalButtonDescription",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 50,
-      "end_lineno": 64,
+      "lineno": 58,
+      "end_lineno": 72,
       "decorators": [
         "dataclass"
       ],
@@ -8300,8 +8342,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 116,
-      "end_lineno": 192,
+      "lineno": 131,
+      "end_lineno": 207,
       "decorators": [],
       "bases": [
         "CircuitAnalyzerEntity",
@@ -8318,8 +8360,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.__init__",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 121,
-      "end_lineno": 138,
+      "lineno": 136,
+      "end_lineno": 153,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8336,8 +8378,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.suggested_object_id",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 141,
-      "end_lineno": 143,
+      "lineno": 156,
+      "end_lineno": 158,
       "decorators": [
         "property"
       ],
@@ -8353,8 +8395,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.icon",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 146,
-      "end_lineno": 148,
+      "lineno": 161,
+      "end_lineno": 163,
       "decorators": [
         "property"
       ],
@@ -8370,8 +8412,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.available",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 151,
-      "end_lineno": 158,
+      "lineno": 166,
+      "end_lineno": 173,
       "decorators": [
         "property"
       ],
@@ -8389,8 +8431,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.extra_state_attributes",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 161,
-      "end_lineno": 171,
+      "lineno": 176,
+      "end_lineno": 186,
       "decorators": [
         "property"
       ],
@@ -8409,8 +8451,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.CircuitAnalyzerButton.async_press",
       "kind": "async_method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 173,
-      "end_lineno": 192,
+      "lineno": 188,
+      "end_lineno": 207,
       "decorators": [],
       "bases": [],
       "doc": "Run the circuit action.",
@@ -8433,8 +8475,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 195,
-      "end_lineno": 284,
+      "lineno": 210,
+      "end_lineno": 299,
       "decorators": [],
       "bases": [
         "ButtonEntity"
@@ -8450,8 +8492,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.__init__",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 201,
-      "end_lineno": 216,
+      "lineno": 216,
+      "end_lineno": 231,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8465,8 +8507,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.name",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 219,
-      "end_lineno": 221,
+      "lineno": 234,
+      "end_lineno": 236,
       "decorators": [
         "property"
       ],
@@ -8482,8 +8524,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.unique_id",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 224,
-      "end_lineno": 226,
+      "lineno": 239,
+      "end_lineno": 241,
       "decorators": [
         "property"
       ],
@@ -8499,8 +8541,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.suggested_object_id",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 229,
-      "end_lineno": 231,
+      "lineno": 244,
+      "end_lineno": 246,
       "decorators": [
         "property"
       ],
@@ -8516,8 +8558,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.icon",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 234,
-      "end_lineno": 236,
+      "lineno": 249,
+      "end_lineno": 251,
       "decorators": [
         "property"
       ],
@@ -8533,8 +8575,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.available",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 239,
-      "end_lineno": 243,
+      "lineno": 254,
+      "end_lineno": 258,
       "decorators": [
         "property"
       ],
@@ -8553,8 +8595,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.device_info",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 246,
-      "end_lineno": 252,
+      "lineno": 261,
+      "end_lineno": 267,
       "decorators": [
         "property"
       ],
@@ -8570,8 +8612,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.extra_state_attributes",
       "kind": "method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 255,
-      "end_lineno": 275,
+      "lineno": 270,
+      "end_lineno": 290,
       "decorators": [
         "property"
       ],
@@ -8595,8 +8637,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.GlobalAnalyzerButton.async_press",
       "kind": "async_method",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 277,
-      "end_lineno": 284,
+      "lineno": 292,
+      "end_lineno": 299,
       "decorators": [],
       "bases": [],
       "doc": "Run the integration-wide action.",
@@ -8612,23 +8654,28 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
       "kind": "async_function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 287,
-      "end_lineno": 328,
+      "lineno": 302,
+      "end_lineno": 357,
       "decorators": [],
       "bases": [],
       "doc": "Set up action button entities for configured circuits.",
       "calls": [
         "CircuitAnalyzerButton",
         "GlobalAnalyzerButton",
+        "_button_description_should_create",
+        "_existing_legacy_button_unique_ids",
         "async_add_entities",
         "button_description_applies",
         "circuit_info_from_config",
         "circuits_for_entities",
         "device_identifiers_for_entities",
         "entities.extend",
+        "entity_detail_level_for_coordinator",
         "getattr",
+        "legacy_compatibility_keys_for_coordinator",
         "prune_stale_device_registry_entries",
-        "prune_stale_entity_registry_entries"
+        "prune_stale_entity_registry_entries",
+        "selected_entity_groups_for_coordinator"
       ],
       "entrypoint_reason": "Home Assistant lifecycle/API entrypoint"
     },
@@ -8639,13 +8686,77 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.button_description_applies",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 331,
-      "end_lineno": 345,
+      "lineno": 360,
+      "end_lineno": 374,
       "decorators": [],
       "bases": [],
       "doc": "Return whether a daily button is useful for this circuit.",
       "calls": [
         "supports_daily_circuit_controls"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.button._button_description_should_create",
+      "module": "custom_components.circuitsetup_energy_analyzer.button",
+      "name": "_button_description_should_create",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._button_description_should_create",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/button.py",
+      "lineno": 377,
+      "end_lineno": 404,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "compact_creation_rule_for_entity",
+        "compact_rule_is_setup_managed",
+        "should_create_entity"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+      "module": "custom_components.circuitsetup_energy_analyzer.button",
+      "name": "_existing_legacy_button_unique_ids",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/button.py",
+      "lineno": 407,
+      "end_lineno": 429,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "_entity_registry_for_hass",
+        "any",
+        "entity_id.startswith",
+        "entries.values",
+        "getattr",
+        "hasattr",
+        "legacy_unique_ids.add",
+        "set",
+        "str",
+        "unique_id.endswith",
+        "unique_id.startswith"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.button._entity_registry_for_hass",
+      "module": "custom_components.circuitsetup_energy_analyzer.button",
+      "name": "_entity_registry_for_hass",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._entity_registry_for_hass",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/button.py",
+      "lineno": 432,
+      "end_lineno": 440,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "er.async_get",
+        "getattr"
       ],
       "entrypoint_reason": null
     },
@@ -8656,8 +8767,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._button_availability_reason",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 348,
-      "end_lineno": 376,
+      "lineno": 443,
+      "end_lineno": 471,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8678,8 +8789,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._availability_reason_label",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 379,
-      "end_lineno": 386,
+      "lineno": 474,
+      "end_lineno": 481,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8696,8 +8807,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._availability_attributes",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 389,
-      "end_lineno": 394,
+      "lineno": 484,
+      "end_lineno": 489,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8714,8 +8825,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._availability_next_step",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 397,
-      "end_lineno": 406,
+      "lineno": 492,
+      "end_lineno": 501,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8731,8 +8842,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._maintenance_active",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 409,
-      "end_lineno": 411,
+      "lineno": 504,
+      "end_lineno": 506,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8751,8 +8862,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._alerts_paused",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 414,
-      "end_lineno": 416,
+      "lineno": 509,
+      "end_lineno": 511,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8769,8 +8880,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._has_active_alert",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 419,
-      "end_lineno": 431,
+      "lineno": 514,
+      "end_lineno": 526,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -8790,8 +8901,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button._call_or_raise",
       "kind": "async_function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 434,
-      "end_lineno": 448,
+      "lineno": 529,
+      "end_lineno": 543,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27528,8 +27639,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityExposure",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 24,
-      "end_lineno": 31,
+      "lineno": 25,
+      "end_lineno": 32,
       "decorators": [],
       "bases": [
         "StrEnum"
@@ -27545,8 +27656,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityGroup",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 34,
-      "end_lineno": 50,
+      "lineno": 35,
+      "end_lineno": 51,
       "decorators": [],
       "bases": [
         "StrEnum"
@@ -27562,8 +27673,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityCreationRule",
       "kind": "class",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 54,
-      "end_lineno": 67,
+      "lineno": 55,
+      "end_lineno": 68,
       "decorators": [
         "dataclass"
       ],
@@ -27579,8 +27690,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.should_create_entity",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 77,
-      "end_lineno": 105,
+      "lineno": 78,
+      "end_lineno": 106,
       "decorators": [],
       "bases": [],
       "doc": "Return whether the compact model should create a described entity.",
@@ -27599,8 +27710,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.rule_key",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 108,
-      "end_lineno": 110,
+      "lineno": 109,
+      "end_lineno": 111,
       "decorators": [],
       "bases": [],
       "doc": "Return the stable compatibility key for a rule.",
@@ -27614,8 +27725,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rule_for_entity",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 113,
-      "end_lineno": 115,
+      "lineno": 114,
+      "end_lineno": 116,
       "decorators": [],
       "bases": [],
       "doc": "Return compact-model creation metadata for a current entity key.",
@@ -27629,8 +27740,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rules_by_key",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 118,
-      "end_lineno": 120,
+      "lineno": 119,
+      "end_lineno": 121,
       "decorators": [],
       "bases": [],
       "doc": "Return all known compact-model creation rules.",
@@ -27644,8 +27755,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.legacy_compatibility_keys_for_coordinator",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 123,
-      "end_lineno": 132,
+      "lineno": 124,
+      "end_lineno": 133,
       "decorators": [],
       "bases": [],
       "doc": "Return legacy entity keys explicitly preserved for this config entry.",
@@ -27666,8 +27777,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.selected_entity_groups_for_coordinator",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 135,
-      "end_lineno": 146,
+      "lineno": 136,
+      "end_lineno": 147,
       "decorators": [],
       "bases": [],
       "doc": "Return compact expert groups selected for this config entry.",
@@ -27688,11 +27799,28 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_sensor_rule_is_setup_managed",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 149,
-      "end_lineno": 156,
+      "lineno": 150,
+      "end_lineno": 152,
       "decorators": [],
       "bases": [],
       "doc": "Return whether current compact phases manage this sensor's creation.",
+      "calls": [
+        "compact_rule_is_setup_managed"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_rule_is_setup_managed",
+      "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+      "name": "compact_rule_is_setup_managed",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_rule_is_setup_managed",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+      "lineno": 155,
+      "end_lineno": 162,
+      "decorators": [],
+      "bases": [],
+      "doc": "Return whether current compact phases manage this entity's creation.",
       "calls": [],
       "entrypoint_reason": null
     },
@@ -27703,8 +27831,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 159,
-      "end_lineno": 184,
+      "lineno": 165,
+      "end_lineno": 190,
       "decorators": [],
       "bases": [],
       "doc": "Return compact rules for currently applicable entity keys.",
@@ -27723,8 +27851,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_entity_count_preview",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 187,
-      "end_lineno": 209,
+      "lineno": 193,
+      "end_lineno": 215,
       "decorators": [],
       "bases": [],
       "doc": "Return desired compact entity counts by Home Assistant domain.",
@@ -27743,8 +27871,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_detail_level",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 212,
-      "end_lineno": 216,
+      "lineno": 218,
+      "end_lineno": 222,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27762,8 +27890,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_groups",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 219,
-      "end_lineno": 229,
+      "lineno": 225,
+      "end_lineno": 235,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27783,8 +27911,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_legacy_compatibility_keys",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 232,
-      "end_lineno": 239,
+      "lineno": 238,
+      "end_lineno": 245,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27804,8 +27932,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_groups_from_value",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 242,
-      "end_lineno": 251,
+      "lineno": 248,
+      "end_lineno": 257,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27823,8 +27951,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._rule",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 254,
-      "end_lineno": 280,
+      "lineno": 260,
+      "end_lineno": 286,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27840,8 +27968,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._legacy_sensor",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 301,
-      "end_lineno": 317,
+      "lineno": 308,
+      "end_lineno": 324,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27857,8 +27985,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._graph_sensor",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 320,
-      "end_lineno": 333,
+      "lineno": 327,
+      "end_lineno": 340,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27874,8 +28002,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_sensor",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 336,
-      "end_lineno": 349,
+      "lineno": 343,
+      "end_lineno": 356,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -27891,8 +28019,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_binary",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
-      "lineno": 352,
-      "end_lineno": 365,
+      "lineno": 359,
+      "end_lineno": 372,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41672,7 +41800,7 @@
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
       "lineno": 900,
-      "end_lineno": 913,
+      "end_lineno": 915,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41686,8 +41814,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._target_coordinators",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 916,
-      "end_lineno": 935,
+      "lineno": 918,
+      "end_lineno": 937,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41711,8 +41839,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._unknown_circuit_message",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 938,
-      "end_lineno": 951,
+      "lineno": 940,
+      "end_lineno": 953,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41730,8 +41858,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._known_circuit_ids",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 954,
-      "end_lineno": 990,
+      "lineno": 956,
+      "end_lineno": 992,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41753,8 +41881,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._loaded_coordinators",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 993,
-      "end_lineno": 1001,
+      "lineno": 995,
+      "end_lineno": 1003,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41774,8 +41902,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._dispatch_alert_id_action",
       "kind": "async_function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1004,
-      "end_lineno": 1031,
+      "lineno": 1006,
+      "end_lineno": 1033,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41799,8 +41927,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._single_active_alert_id_for_circuit",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1034,
-      "end_lineno": 1055,
+      "lineno": 1036,
+      "end_lineno": 1057,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41820,8 +41948,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._active_alert_ids_for_circuit",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1058,
-      "end_lineno": 1072,
+      "lineno": 1060,
+      "end_lineno": 1074,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41842,8 +41970,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._alert_id_from_alert",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1075,
-      "end_lineno": 1086,
+      "lineno": 1077,
+      "end_lineno": 1088,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41863,8 +41991,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._service_recommendation_id",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1089,
-      "end_lineno": 1119,
+      "lineno": 1091,
+      "end_lineno": 1121,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41889,8 +42017,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._target_recommendation_coordinators",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1122,
-      "end_lineno": 1156,
+      "lineno": 1124,
+      "end_lineno": 1158,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41914,8 +42042,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._target_nilm_signature_coordinators",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1159,
-      "end_lineno": 1210,
+      "lineno": 1161,
+      "end_lineno": 1212,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41940,8 +42068,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._unknown_nilm_signature_message",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1213,
-      "end_lineno": 1233,
+      "lineno": 1215,
+      "end_lineno": 1235,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41959,8 +42087,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._known_nilm_signature_ids",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1236,
-      "end_lineno": 1255,
+      "lineno": 1238,
+      "end_lineno": 1257,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -41981,8 +42109,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._collect_signature_ids",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1258,
-      "end_lineno": 1278,
+      "lineno": 1260,
+      "end_lineno": 1280,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42004,8 +42132,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._coordinator_has_recommendation",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1281,
-      "end_lineno": 1305,
+      "lineno": 1283,
+      "end_lineno": 1307,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42025,8 +42153,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._recommendation_ids_for_circuit",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1308,
-      "end_lineno": 1329,
+      "lineno": 1310,
+      "end_lineno": 1331,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42051,8 +42179,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._collect_recommendation_ids",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1332,
-      "end_lineno": 1349,
+      "lineno": 1334,
+      "end_lineno": 1351,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42074,8 +42202,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._recommendation_matches_circuit",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1352,
-      "end_lineno": 1366,
+      "lineno": 1354,
+      "end_lineno": 1368,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42094,8 +42222,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._recommendation_is_pending",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1369,
-      "end_lineno": 1397,
+      "lineno": 1371,
+      "end_lineno": 1399,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42120,8 +42248,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._iter_items",
       "kind": "function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1400,
-      "end_lineno": 1407,
+      "lineno": 1402,
+      "end_lineno": 1409,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -42138,8 +42266,8 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.services._call_if_present",
       "kind": "async_function",
       "path": "custom_components/circuitsetup_energy_analyzer/services.py",
-      "lineno": 1410,
-      "end_lineno": 1417,
+      "lineno": 1412,
+      "end_lineno": 1419,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -44225,6 +44353,307 @@
         "datetime.fromisoformat",
         "isinstance",
         "stats.get"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitSwitchDescription",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "CircuitSwitchDescription",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitSwitchDescription",
+      "kind": "class",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 32,
+      "end_lineno": 44,
+      "decorators": [
+        "dataclass"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "CircuitMaintenanceSwitch",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch",
+      "kind": "class",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 58,
+      "end_lineno": 142,
+      "decorators": [],
+      "bases": [
+        "CircuitAnalyzerEntity",
+        "SwitchEntity"
+      ],
+      "doc": "Switch entity exposing a circuit's maintenance state.",
+      "calls": [],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.__init__",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "__init__",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.__init__",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 63,
+      "end_lineno": 83,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "super",
+        "super.__init__"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.suggested_object_id",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "suggested_object_id",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.suggested_object_id",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 86,
+      "end_lineno": 88,
+      "decorators": [
+        "property"
+      ],
+      "bases": [],
+      "doc": "Return the stable object ID for fallback tests.",
+      "calls": [],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.icon",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "icon",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.icon",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 91,
+      "end_lineno": 93,
+      "decorators": [
+        "property"
+      ],
+      "bases": [],
+      "doc": "Return the purpose-specific icon for fallback tests.",
+      "calls": [],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.is_on",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "is_on",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.is_on",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 96,
+      "end_lineno": 98,
+      "decorators": [
+        "property"
+      ],
+      "bases": [],
+      "doc": "Return whether maintenance is active for this circuit.",
+      "calls": [
+        "_maintenance_active"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.available",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "available",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.available",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 101,
+      "end_lineno": 103,
+      "decorators": [
+        "property"
+      ],
+      "bases": [],
+      "doc": "Return whether both maintenance actions can currently run.",
+      "calls": [
+        "_maintenance_actions_available"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.extra_state_attributes",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "extra_state_attributes",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.extra_state_attributes",
+      "kind": "method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 106,
+      "end_lineno": 114,
+      "decorators": [
+        "property"
+      ],
+      "bases": [],
+      "doc": "Expose bounded maintenance metadata for this circuit.",
+      "calls": [
+        "_maintenance_details"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_on",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "async_turn_on",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_on",
+      "kind": "async_method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 116,
+      "end_lineno": 129,
+      "decorators": [],
+      "bases": [],
+      "doc": "Start maintenance for this circuit.",
+      "calls": [
+        "_call_or_raise"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_off",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "async_turn_off",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_off",
+      "kind": "async_method",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 131,
+      "end_lineno": 142,
+      "decorators": [],
+      "bases": [],
+      "doc": "End maintenance for this circuit.",
+      "calls": [
+        "_call_or_raise"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "async_setup_entry",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "kind": "async_function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 145,
+      "end_lineno": 181,
+      "decorators": [],
+      "bases": [],
+      "doc": "Set up switch entities for daily circuit controls.",
+      "calls": [
+        "CircuitMaintenanceSwitch",
+        "async_add_entities",
+        "circuit_device_identifiers.add",
+        "circuit_info_from_config",
+        "circuits_for_entities",
+        "device_identifiers_for_entities",
+        "entities.extend",
+        "getattr",
+        "prune_stale_device_registry_entries",
+        "prune_stale_entity_registry_entries",
+        "set",
+        "switch_description_applies"
+      ],
+      "entrypoint_reason": "Home Assistant lifecycle/API entrypoint"
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.switch_description_applies",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "switch_description_applies",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.switch_description_applies",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 184,
+      "end_lineno": 193,
+      "decorators": [],
+      "bases": [],
+      "doc": "Return whether a switch control is useful for this circuit.",
+      "calls": [
+        "supports_daily_circuit_controls"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "_maintenance_details",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 196,
+      "end_lineno": 200,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "getattr",
+        "getattr.get",
+        "isinstance"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "_maintenance_active",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 203,
+      "end_lineno": 204,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "_maintenance_details",
+        "_maintenance_details.get"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_actions_available",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "_maintenance_actions_available",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_actions_available",
+      "kind": "function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 207,
+      "end_lineno": 210,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "callable",
+        "getattr"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch._call_or_raise",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "_call_or_raise",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch._call_or_raise",
+      "kind": "async_function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 213,
+      "end_lineno": 227,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "HomeAssistantError",
+        "action_label.strip",
+        "action_label.strip.lower",
+        "callable",
+        "getattr",
+        "inspect.isawaitable",
+        "method"
       ],
       "entrypoint_reason": null
     },
@@ -51906,8 +52335,8 @@
       "qualified_name": "tests.test_control_entities._platform_value",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 24,
-      "end_lineno": 25,
+      "lineno": 25,
+      "end_lineno": 26,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -51924,8 +52353,8 @@
       "qualified_name": "tests.test_control_entities._assert_base_description_defaults",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 28,
-      "end_lineno": 37,
+      "lineno": 29,
+      "end_lineno": 38,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -51939,8 +52368,8 @@
       "qualified_name": "tests.test_control_entities._disable_registry_pruning",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 40,
-      "end_lineno": 50,
+      "lineno": 41,
+      "end_lineno": 51,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -51956,8 +52385,8 @@
       "qualified_name": "tests.test_control_entities._circuit",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 53,
-      "end_lineno": 63,
+      "lineno": 54,
+      "end_lineno": 64,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -51974,8 +52403,8 @@
       "qualified_name": "tests.test_control_entities._power_only_circuit",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 66,
-      "end_lineno": 73,
+      "lineno": 67,
+      "end_lineno": 74,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -51992,8 +52421,8 @@
       "qualified_name": "tests.test_control_entities._misclassified_energy_circuit",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 76,
-      "end_lineno": 86,
+      "lineno": 77,
+      "end_lineno": 87,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52010,8 +52439,8 @@
       "qualified_name": "tests.test_control_entities._dict_energy_circuit",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 89,
-      "end_lineno": 99,
+      "lineno": 90,
+      "end_lineno": 100,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52025,8 +52454,8 @@
       "qualified_name": "tests.test_control_entities._mains_circuit",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 102,
-      "end_lineno": 112,
+      "lineno": 103,
+      "end_lineno": 113,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52043,8 +52472,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator",
       "kind": "class",
       "path": "tests/test_control_entities.py",
-      "lineno": 115,
-      "end_lineno": 198,
+      "lineno": 116,
+      "end_lineno": 199,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52058,8 +52487,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.__init__",
       "kind": "method",
       "path": "tests/test_control_entities.py",
-      "lineno": 116,
-      "end_lineno": 132,
+      "lineno": 117,
+      "end_lineno": 133,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52077,8 +52506,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_relearn_baseline",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 134,
-      "end_lineno": 135,
+      "lineno": 135,
+      "end_lineno": 136,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52094,8 +52523,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_start_maintenance",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 137,
-      "end_lineno": 146,
+      "lineno": 138,
+      "end_lineno": 147,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52111,8 +52540,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_end_maintenance",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 148,
-      "end_lineno": 153,
+      "lineno": 149,
+      "end_lineno": 154,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52128,8 +52557,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_pause_alerts",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 155,
-      "end_lineno": 160,
+      "lineno": 156,
+      "end_lineno": 161,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52145,8 +52574,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_run_mapping_checks",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 162,
-      "end_lineno": 163,
+      "lineno": 163,
+      "end_lineno": 164,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52162,8 +52591,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_recalculate_setting_recommendations",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 165,
-      "end_lineno": 169,
+      "lineno": 166,
+      "end_lineno": 170,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52179,8 +52608,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_create_dashboard",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 171,
-      "end_lineno": 172,
+      "lineno": 172,
+      "end_lineno": 173,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52196,8 +52625,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_remove_dashboard",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 174,
-      "end_lineno": 175,
+      "lineno": 175,
+      "end_lineno": 176,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52213,8 +52642,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_set_dashboard_layout",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 177,
-      "end_lineno": 178,
+      "lineno": 178,
+      "end_lineno": 179,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52230,8 +52659,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_set_circuit_sensitivity",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 180,
-      "end_lineno": 185,
+      "lineno": 181,
+      "end_lineno": 186,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52247,8 +52676,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_set_entity_detail_level",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 187,
-      "end_lineno": 188,
+      "lineno": 188,
+      "end_lineno": 189,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52264,8 +52693,8 @@
       "qualified_name": "tests.test_control_entities._FakeCoordinator.async_set_energy_goal_settings",
       "kind": "async_method",
       "path": "tests/test_control_entities.py",
-      "lineno": 190,
-      "end_lineno": 198,
+      "lineno": 191,
+      "end_lineno": 199,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52281,8 +52710,8 @@
       "qualified_name": "tests.test_control_entities._hass_with",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 201,
-      "end_lineno": 202,
+      "lineno": 202,
+      "end_lineno": 203,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52298,8 +52727,8 @@
       "qualified_name": "tests.test_control_entities.test_platforms_include_daily_control_entities",
       "kind": "function",
       "path": "tests/test_control_entities.py",
-      "lineno": 205,
-      "end_lineno": 212,
+      "lineno": 206,
+      "end_lineno": 214,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -52315,8 +52744,8 @@
       "qualified_name": "tests.test_control_entities.test_button_setup_entry_adds_circuit_and_global_controls",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 216,
-      "end_lineno": 283,
+      "lineno": 218,
+      "end_lineno": 274,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52342,8 +52771,8 @@
       "qualified_name": "tests.test_control_entities.test_button_setup_skips_inapplicable_controls_and_keeps_single_globals",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 287,
-      "end_lineno": 314,
+      "lineno": 278,
+      "end_lineno": 305,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52369,8 +52798,8 @@
       "qualified_name": "tests.test_control_entities.test_unavailable_global_buttons_explain_missing_action",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 318,
-      "end_lineno": 347,
+      "lineno": 309,
+      "end_lineno": 338,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52386,14 +52815,14 @@
       "entrypoint_reason": null
     },
     {
-      "id": "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+      "id": "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
       "module": "tests.test_control_entities",
-      "name": "test_button_availability_tracks_maintenance_state",
-      "qualified_name": "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+      "name": "test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
+      "qualified_name": "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 351,
-      "end_lineno": 373,
+      "lineno": 342,
+      "end_lineno": 368,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52410,14 +52839,37 @@
       "entrypoint_reason": null
     },
     {
+      "id": "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
+      "module": "tests.test_control_entities",
+      "name": "test_existing_legacy_maintenance_button_registry_row_preserves_button",
+      "qualified_name": "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
+      "kind": "async_function",
+      "path": "tests/test_control_entities.py",
+      "lineno": 372,
+      "end_lineno": 400,
+      "decorators": [
+        "pytest.mark.asyncio"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "SimpleNamespace",
+        "_FakeCoordinator",
+        "_disable_registry_pruning",
+        "_hass_with",
+        "button.async_setup_entry"
+      ],
+      "entrypoint_reason": null
+    },
+    {
       "id": "tests.test_control_entities.test_pause_alerts_button_requires_active_unpaused_alert",
       "module": "tests.test_control_entities",
       "name": "test_pause_alerts_button_requires_active_unpaused_alert",
       "qualified_name": "tests.test_control_entities.test_pause_alerts_button_requires_active_unpaused_alert",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 377,
-      "end_lineno": 417,
+      "lineno": 404,
+      "end_lineno": 444,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52442,8 +52894,8 @@
       "qualified_name": "tests.test_control_entities.test_unavailable_maintenance_button_press_raises_clear_error",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 421,
-      "end_lineno": 449,
+      "lineno": 448,
+      "end_lineno": 480,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52461,14 +52913,90 @@
       "entrypoint_reason": null
     },
     {
+      "id": "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+      "module": "tests.test_control_entities",
+      "name": "test_switch_setup_entry_adds_maintenance_switch",
+      "qualified_name": "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+      "kind": "async_function",
+      "path": "tests/test_control_entities.py",
+      "lineno": 484,
+      "end_lineno": 532,
+      "decorators": [
+        "pytest.mark.asyncio"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "AnalyzerState",
+        "SimpleNamespace",
+        "_FakeCoordinator",
+        "_disable_registry_pruning",
+        "_hass_with",
+        "getattr",
+        "len",
+        "switch.async_setup_entry"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+      "module": "tests.test_control_entities",
+      "name": "test_maintenance_switch_turns_on_and_off_idempotently",
+      "qualified_name": "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+      "kind": "async_function",
+      "path": "tests/test_control_entities.py",
+      "lineno": 536,
+      "end_lineno": 579,
+      "decorators": [
+        "pytest.mark.asyncio"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "SimpleNamespace",
+        "_FakeCoordinator",
+        "_disable_registry_pruning",
+        "_hass_with",
+        "maintenance.async_turn_off",
+        "maintenance.async_turn_on",
+        "switch.async_setup_entry"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "module": "tests.test_control_entities",
+      "name": "test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "qualified_name": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "kind": "async_function",
+      "path": "tests/test_control_entities.py",
+      "lineno": 583,
+      "end_lineno": 600,
+      "decorators": [
+        "pytest.mark.asyncio"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "SimpleNamespace",
+        "_FakeCoordinator",
+        "_circuit",
+        "_disable_registry_pruning",
+        "_hass_with",
+        "_mains_circuit",
+        "switch.async_setup_entry"
+      ],
+      "entrypoint_reason": null
+    },
+    {
       "id": "tests.test_control_entities.test_select_setup_entry_adds_sensitivity_and_detail_level_controls",
       "module": "tests.test_control_entities",
       "name": "test_select_setup_entry_adds_sensitivity_and_detail_level_controls",
       "qualified_name": "tests.test_control_entities.test_select_setup_entry_adds_sensitivity_and_detail_level_controls",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 453,
-      "end_lineno": 503,
+      "lineno": 604,
+      "end_lineno": 654,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52495,8 +53023,8 @@
       "qualified_name": "tests.test_control_entities.test_select_setup_keeps_mains_sensitivity_control",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 507,
-      "end_lineno": 527,
+      "lineno": 658,
+      "end_lineno": 678,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52521,8 +53049,8 @@
       "qualified_name": "tests.test_control_entities.test_select_controls_reject_invalid_options_without_side_effects",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 531,
-      "end_lineno": 559,
+      "lineno": 682,
+      "end_lineno": 710,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52546,8 +53074,8 @@
       "qualified_name": "tests.test_control_entities.test_unavailable_selects_explain_missing_actions",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 563,
-      "end_lineno": 602,
+      "lineno": 714,
+      "end_lineno": 753,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52572,8 +53100,8 @@
       "qualified_name": "tests.test_control_entities.test_circuit_select_preserves_coordinator_update_availability",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 606,
-      "end_lineno": 626,
+      "lineno": 757,
+      "end_lineno": 777,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52595,8 +53123,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_entry_adds_daily_energy_goal_control",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 630,
-      "end_lineno": 663,
+      "lineno": 781,
+      "end_lineno": 814,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52621,8 +53149,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_skips_daily_energy_goal_without_energy_source",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 667,
-      "end_lineno": 683,
+      "lineno": 818,
+      "end_lineno": 834,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52645,8 +53173,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_unit",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 687,
-      "end_lineno": 703,
+      "lineno": 838,
+      "end_lineno": 854,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52669,8 +53197,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_skips_stale_daily_goal_without_energy_source",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 707,
-      "end_lineno": 732,
+      "lineno": 858,
+      "end_lineno": 883,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52693,8 +53221,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 736,
-      "end_lineno": 771,
+      "lineno": 887,
+      "end_lineno": 922,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52719,8 +53247,8 @@
       "qualified_name": "tests.test_control_entities.test_number_setup_keeps_goal_when_runtime_energy_evidence_exists",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 775,
-      "end_lineno": 794,
+      "lineno": 926,
+      "end_lineno": 945,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52743,8 +53271,8 @@
       "qualified_name": "tests.test_control_entities.test_control_entities_apply_to_dict_circuits_from_entry_data",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 798,
-      "end_lineno": 835,
+      "lineno": 949,
+      "end_lineno": 992,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -52757,7 +53285,8 @@
         "_disable_registry_pruning",
         "_hass_with",
         "button.async_setup_entry",
-        "number.async_setup_entry"
+        "number.async_setup_entry",
+        "switch.async_setup_entry"
       ],
       "entrypoint_reason": null
     },
@@ -52768,8 +53297,8 @@
       "qualified_name": "tests.test_control_entities.test_button_press_raises_clear_error_when_coordinator_method_missing",
       "kind": "async_function",
       "path": "tests/test_control_entities.py",
-      "lineno": 839,
-      "end_lineno": 865,
+      "lineno": 996,
+      "end_lineno": 1022,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -60562,8 +61091,8 @@
       "qualified_name": "tests.test_entity_catalog.test_should_create_entity_respects_detail_levels_and_selected_groups",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 34,
-      "end_lineno": 101,
+      "lineno": 37,
+      "end_lineno": 104,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60580,8 +61109,8 @@
       "qualified_name": "tests.test_entity_catalog.test_selected_entity_groups_options_override_entry_data",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 104,
-      "end_lineno": 118,
+      "lineno": 107,
+      "end_lineno": 121,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60599,8 +61128,8 @@
       "qualified_name": "tests.test_entity_catalog.test_should_create_entity_defaults_invalid_detail_levels_to_simple",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 121,
-      "end_lineno": 140,
+      "lineno": 124,
+      "end_lineno": 143,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60617,8 +61146,8 @@
       "qualified_name": "tests.test_entity_catalog.test_should_create_entity_preserves_legacy_compatibility_keys",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 143,
-      "end_lineno": 169,
+      "lineno": 146,
+      "end_lineno": 172,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60635,8 +61164,8 @@
       "qualified_name": "tests.test_entity_catalog.test_compact_creation_rule_documents_requested_replacements",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 172,
-      "end_lineno": 183,
+      "lineno": 175,
+      "end_lineno": 186,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60652,8 +61181,8 @@
       "qualified_name": "tests.test_entity_catalog.test_core_duplicate_rules_are_marked_for_phase_two_removal",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 186,
-      "end_lineno": 206,
+      "lineno": 189,
+      "end_lineno": 209,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60670,8 +61199,8 @@
       "qualified_name": "tests.test_entity_catalog.test_electrical_cycle_rules_are_marked_for_phase_three_creation",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 209,
-      "end_lineno": 236,
+      "lineno": 212,
+      "end_lineno": 239,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60689,8 +61218,8 @@
       "qualified_name": "tests.test_entity_catalog.test_billing_standby_weather_rules_are_marked_for_phase_four_creation",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 239,
-      "end_lineno": 268,
+      "lineno": 242,
+      "end_lineno": 271,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60702,14 +61231,33 @@
       "entrypoint_reason": null
     },
     {
+      "id": "tests.test_entity_catalog.test_maintenance_button_rules_are_marked_for_phase_five_creation",
+      "module": "tests.test_entity_catalog",
+      "name": "test_maintenance_button_rules_are_marked_for_phase_five_creation",
+      "qualified_name": "tests.test_entity_catalog.test_maintenance_button_rules_are_marked_for_phase_five_creation",
+      "kind": "function",
+      "path": "tests/test_entity_catalog.py",
+      "lineno": 274,
+      "end_lineno": 290,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "compact_creation_rules_by_key",
+        "compact_rule_is_setup_managed",
+        "rules.items"
+      ],
+      "entrypoint_reason": null
+    },
+    {
       "id": "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
       "module": "tests.test_entity_catalog",
       "name": "test_compact_creation_catalog_covers_every_current_entity_description",
       "qualified_name": "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 271,
-      "end_lineno": 297,
+      "lineno": 293,
+      "end_lineno": 323,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -60726,8 +61274,8 @@
       "qualified_name": "tests.test_entity_catalog.test_desired_compact_rules_preview_uses_current_applicability",
       "kind": "function",
       "path": "tests/test_entity_catalog.py",
-      "lineno": 300,
-      "end_lineno": 350,
+      "lineno": 326,
+      "end_lineno": 376,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -68076,14 +68624,40 @@
       "entrypoint_reason": null
     },
     {
+      "id": "tests.test_services.test_maintenance_service_accepts_switch_entity_target",
+      "module": "tests.test_services",
+      "name": "test_maintenance_service_accepts_switch_entity_target",
+      "qualified_name": "tests.test_services.test_maintenance_service_accepts_switch_entity_target",
+      "kind": "async_function",
+      "path": "tests/test_services.py",
+      "lineno": 944,
+      "end_lineno": 1014,
+      "decorators": [
+        "pytest.mark.asyncio"
+      ],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "FakeCoordinator",
+        "FakeEntityRegistry",
+        "FakeServices",
+        "SimpleNamespace",
+        "async_setup_services",
+        "hass.services.registered",
+        "monkeypatch.setattr",
+        "self.calls.append"
+      ],
+      "entrypoint_reason": null
+    },
+    {
       "id": "tests.test_services.test_circuit_services_reject_conflicting_circuit_and_entity_targets",
       "module": "tests.test_services",
       "name": "test_circuit_services_reject_conflicting_circuit_and_entity_targets",
       "qualified_name": "tests.test_services.test_circuit_services_reject_conflicting_circuit_and_entity_targets",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 944,
-      "end_lineno": 992,
+      "lineno": 1018,
+      "end_lineno": 1066,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68107,8 +68681,8 @@
       "qualified_name": "tests.test_services.test_circuit_services_reject_ambiguous_renamed_entity_targets",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 996,
-      "end_lineno": 1062,
+      "lineno": 1070,
+      "end_lineno": 1136,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68134,8 +68708,8 @@
       "qualified_name": "tests.test_services.test_circuit_services_fail_fast_for_unknown_entity_target",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1066,
-      "end_lineno": 1116,
+      "lineno": 1140,
+      "end_lineno": 1190,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68159,8 +68733,8 @@
       "qualified_name": "tests.test_services.test_recalculate_recommendations_all_target_remains_explicit",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1120,
-      "end_lineno": 1170,
+      "lineno": 1194,
+      "end_lineno": 1244,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68183,8 +68757,8 @@
       "qualified_name": "tests.test_services.test_setting_recommendation_services_require_unique_or_explicit_entry",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1174,
-      "end_lineno": 1254,
+      "lineno": 1248,
+      "end_lineno": 1328,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68209,8 +68783,8 @@
       "qualified_name": "tests.test_services.test_setting_recommendation_services_accept_single_entity_target",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1258,
-      "end_lineno": 1345,
+      "lineno": 1332,
+      "end_lineno": 1419,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68234,8 +68808,8 @@
       "qualified_name": "tests.test_services.test_setting_recommendation_entity_target_ignores_stored_history",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1349,
-      "end_lineno": 1447,
+      "lineno": 1423,
+      "end_lineno": 1521,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68262,8 +68836,8 @@
       "qualified_name": "tests.test_services.test_setting_recommendation_entity_target_ignores_state_history",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1451,
-      "end_lineno": 1537,
+      "lineno": 1525,
+      "end_lineno": 1611,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68287,8 +68861,8 @@
       "qualified_name": "tests.test_services.test_setting_recommendation_entity_target_rejects_ambiguous_recommendations",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1541,
-      "end_lineno": 1604,
+      "lineno": 1615,
+      "end_lineno": 1678,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68313,8 +68887,8 @@
       "qualified_name": "tests.test_services.test_nilm_signature_services_fail_fast_for_unknown_signature_id",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1608,
-      "end_lineno": 1702,
+      "lineno": 1682,
+      "end_lineno": 1776,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68338,8 +68912,8 @@
       "qualified_name": "tests.test_services.test_nilm_signature_services_accept_analyzer_entity_target",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1706,
-      "end_lineno": 1761,
+      "lineno": 1780,
+      "end_lineno": 1835,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68362,8 +68936,8 @@
       "qualified_name": "tests.test_services.test_nilm_signature_services_reject_self_merge",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1765,
-      "end_lineno": 1819,
+      "lineno": 1839,
+      "end_lineno": 1893,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68387,8 +68961,8 @@
       "qualified_name": "tests.test_services.test_alert_feedback_services_reject_unknown_alert_ids",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1823,
-      "end_lineno": 1868,
+      "lineno": 1897,
+      "end_lineno": 1942,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68411,8 +68985,8 @@
       "qualified_name": "tests.test_services.test_alert_feedback_services_accept_single_alert_entity_target",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1872,
-      "end_lineno": 1949,
+      "lineno": 1946,
+      "end_lineno": 2023,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68438,8 +69012,8 @@
       "qualified_name": "tests.test_services.test_alert_feedback_services_reject_ambiguous_entity_target",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 1953,
-      "end_lineno": 2003,
+      "lineno": 2027,
+      "end_lineno": 2077,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68463,8 +69037,8 @@
       "qualified_name": "tests.test_services.test_user_experience_services_dispatch_to_loaded_coordinators",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2007,
-      "end_lineno": 2554,
+      "lineno": 2081,
+      "end_lineno": 2628,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68487,8 +69061,8 @@
       "qualified_name": "tests.test_services.test_set_circuit_sensitivity_service_normalizes_legacy_presets",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2558,
-      "end_lineno": 2605,
+      "lineno": 2632,
+      "end_lineno": 2679,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68511,8 +69085,8 @@
       "qualified_name": "tests.test_services.test_set_circuit_sensitivity_service_rejects_unknown_preset",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2609,
-      "end_lineno": 2654,
+      "lineno": 2683,
+      "end_lineno": 2728,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68536,8 +69110,8 @@
       "qualified_name": "tests.test_services.test_service_handlers_mutate_loaded_coordinator_state",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2658,
-      "end_lineno": 2765,
+      "lineno": 2732,
+      "end_lineno": 2839,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68564,8 +69138,8 @@
       "qualified_name": "tests.test_services.test_setup_entry_rolls_back_services_when_platform_forwarding_fails",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2769,
-      "end_lineno": 2804,
+      "lineno": 2843,
+      "end_lineno": 2878,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -68590,8 +69164,8 @@
       "qualified_name": "tests.test_services.test_setup_entry_rolls_back_services_when_coordinator_start_fails",
       "kind": "async_function",
       "path": "tests/test_services.py",
-      "lineno": 2808,
-      "end_lineno": 2859,
+      "lineno": 2882,
+      "end_lineno": 2933,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -70928,7 +71502,7 @@
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
       "lineno": 1253,
-      "end_lineno": 1274,
+      "end_lineno": 1281,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -70945,8 +71519,8 @@
       "qualified_name": "tests.test_user_facing_text.test_advanced_circuit_services_document_entity_targets",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1277,
-      "end_lineno": 1303,
+      "lineno": 1284,
+      "end_lineno": 1310,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -70963,8 +71537,8 @@
       "qualified_name": "tests.test_user_facing_text.test_nilm_signature_services_document_entity_targets",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1306,
-      "end_lineno": 1320,
+      "lineno": 1313,
+      "end_lineno": 1327,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -70981,8 +71555,8 @@
       "qualified_name": "tests.test_user_facing_text.test_alert_feedback_services_document_entity_targets",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1323,
-      "end_lineno": 1337,
+      "lineno": 1330,
+      "end_lineno": 1344,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -70999,8 +71573,8 @@
       "qualified_name": "tests.test_user_facing_text.test_recommendation_action_services_document_entity_targets",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1340,
-      "end_lineno": 1358,
+      "lineno": 1347,
+      "end_lineno": 1365,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71017,8 +71591,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_includes_status_glossary_for_machine_values",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1361,
-      "end_lineno": 1378,
+      "lineno": 1368,
+      "end_lineno": 1385,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71034,8 +71608,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_describes_appliance_drilldown_pattern",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1381,
-      "end_lineno": 1393,
+      "lineno": 1388,
+      "end_lineno": 1400,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71051,8 +71625,8 @@
       "qualified_name": "tests.test_user_facing_text.test_setup_health_repairs_descriptions_include_circuit_next_step",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1396,
-      "end_lineno": 1419,
+      "lineno": 1403,
+      "end_lineno": 1426,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71069,8 +71643,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_includes_practical_usage_guide",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1422,
-      "end_lineno": 1458,
+      "lineno": 1429,
+      "end_lineno": 1465,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71088,8 +71662,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_explains_notification_evidence_graph_links",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1461,
-      "end_lineno": 1478,
+      "lineno": 1468,
+      "end_lineno": 1485,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71108,8 +71682,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_explains_core_dashboard_sensors_and_zero_kwh",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1481,
-      "end_lineno": 1489,
+      "lineno": 1488,
+      "end_lineno": 1496,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71125,8 +71699,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_explains_generated_dashboard_controls",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1492,
-      "end_lineno": 1505,
+      "lineno": 1499,
+      "end_lineno": 1512,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71142,8 +71716,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_sensor_reference_is_table_with_friendly_names_first",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1508,
-      "end_lineno": 1530,
+      "lineno": 1515,
+      "end_lineno": 1537,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71159,8 +71733,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_describes_bounded_settings_suggestion_attributes",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1533,
-      "end_lineno": 1543,
+      "lineno": 1540,
+      "end_lineno": 1550,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71176,8 +71750,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_explains_compatible_meter_support_and_links_product",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1546,
-      "end_lineno": 1559,
+      "lineno": 1553,
+      "end_lineno": 1566,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71193,8 +71767,8 @@
       "qualified_name": "tests.test_user_facing_text.test_readme_screenshot_references_exist_and_are_cropped",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1562,
-      "end_lineno": 1595,
+      "lineno": 1569,
+      "end_lineno": 1602,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71215,8 +71789,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_cards",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1598,
-      "end_lineno": 1608,
+      "lineno": 1605,
+      "end_lineno": 1615,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71237,8 +71811,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_views",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1611,
-      "end_lineno": 1617,
+      "lineno": 1618,
+      "end_lineno": 1624,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71255,8 +71829,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_sections",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1620,
-      "end_lineno": 1628,
+      "lineno": 1627,
+      "end_lineno": 1635,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71275,8 +71849,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_section",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1631,
-      "end_lineno": 1636,
+      "lineno": 1638,
+      "end_lineno": 1643,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71294,8 +71868,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_entity_refs",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1639,
-      "end_lineno": 1643,
+      "lineno": 1646,
+      "end_lineno": 1650,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71312,8 +71886,8 @@
       "qualified_name": "tests.test_user_facing_text._dashboard_entity_refs_with_conditional_context",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1646,
-      "end_lineno": 1672,
+      "lineno": 1653,
+      "end_lineno": 1679,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -71334,8 +71908,8 @@
       "qualified_name": "tests.test_user_facing_text._png_dimensions",
       "kind": "function",
       "path": "tests/test_user_facing_text.py",
-      "lineno": 1675,
-      "end_lineno": 1678,
+      "lineno": 1682,
+      "end_lineno": 1685,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72124,8 +72698,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_setup_reload_unload_lifecycle",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 68,
-      "end_lineno": 167,
+      "lineno": 70,
+      "end_lineno": 169,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72161,8 +72735,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_setup_supports_multi_workflow_sources",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 172,
-      "end_lineno": 345,
+      "lineno": 174,
+      "end_lineno": 347,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72193,8 +72767,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_setup_supports_extra_entity_only_source_output",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 350,
-      "end_lineno": 392,
+      "lineno": 352,
+      "end_lineno": 394,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72224,8 +72798,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_setup_supports_rain_intensity_only_source",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 397,
-      "end_lineno": 447,
+      "lineno": 399,
+      "end_lineno": 449,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72255,8 +72829,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_setup_builds_mains_nilm_from_mains_sources",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 452,
-      "end_lineno": 501,
+      "lineno": 454,
+      "end_lineno": 503,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72287,8 +72861,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate.test_config_entry_runtime_source_changes_update_analyzer_state",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 506,
-      "end_lineno": 633,
+      "lineno": 508,
+      "end_lineno": 635,
       "decorators": [
         "pytest.mark.usefixtures",
         "pytest.mark.asyncio"
@@ -72319,8 +72893,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._point_custom_components_at_worktree",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 636,
-      "end_lineno": 645,
+      "lineno": 638,
+      "end_lineno": 647,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72338,8 +72912,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._set_source_state",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 648,
-      "end_lineno": 660,
+      "lineno": 650,
+      "end_lineno": 662,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72355,8 +72929,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._set_source_state_and_wait",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 663,
-      "end_lineno": 673,
+      "lineno": 665,
+      "end_lineno": 675,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72373,8 +72947,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._wait_for_runtime_update",
       "kind": "async_function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 676,
-      "end_lineno": 687,
+      "lineno": 678,
+      "end_lineno": 689,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72392,8 +72966,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._registered_platform_domains",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 690,
-      "end_lineno": 696,
+      "lineno": 692,
+      "end_lineno": 698,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72410,8 +72984,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._unexpected_lifecycle_log_messages",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 699,
-      "end_lineno": 711,
+      "lineno": 701,
+      "end_lineno": 713,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72429,8 +73003,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._unexpected_lifecycle_warning_messages",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 714,
-      "end_lineno": 720,
+      "lineno": 716,
+      "end_lineno": 722,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72448,8 +73022,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._contains_lifecycle_hazard",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 723,
-      "end_lineno": 728,
+      "lineno": 725,
+      "end_lineno": 730,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72466,8 +73040,8 @@
       "qualified_name": "tests_homeassistant.test_lifecycle_gate._normalize_lifecycle_hazard_text",
       "kind": "function",
       "path": "tests_homeassistant/test_lifecycle_gate.py",
-      "lineno": 731,
-      "end_lineno": 732,
+      "lineno": 733,
+      "end_lineno": 734,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72486,8 +73060,8 @@
       "qualified_name": "tests_homeassistant.test_runtime_contract._circuit",
       "kind": "function",
       "path": "tests_homeassistant/test_runtime_contract.py",
-      "lineno": 35,
-      "end_lineno": 45,
+      "lineno": 36,
+      "end_lineno": 46,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72504,8 +73078,8 @@
       "qualified_name": "tests_homeassistant.test_runtime_contract._RuntimeCoordinator",
       "kind": "class",
       "path": "tests_homeassistant/test_runtime_contract.py",
-      "lineno": 48,
-      "end_lineno": 67,
+      "lineno": 49,
+      "end_lineno": 68,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72519,8 +73093,8 @@
       "qualified_name": "tests_homeassistant.test_runtime_contract._RuntimeCoordinator.__init__",
       "kind": "method",
       "path": "tests_homeassistant/test_runtime_contract.py",
-      "lineno": 49,
-      "end_lineno": 67,
+      "lineno": 50,
+      "end_lineno": 68,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -72538,8 +73112,8 @@
       "qualified_name": "tests_homeassistant.test_runtime_contract.test_platform_setup_uses_home_assistant_runtime_registries",
       "kind": "async_function",
       "path": "tests_homeassistant/test_runtime_contract.py",
-      "lineno": 71,
-      "end_lineno": 121,
+      "lineno": 72,
+      "end_lineno": 123,
       "decorators": [
         "pytest.mark.asyncio"
       ],
@@ -73155,7 +73729,15 @@
       "relation": "imports",
       "internal": true,
       "lineno": 9,
-      "raw": ".entity:CircuitAnalyzerEntity,circuit_info_from_config,circuits_for_entities,device_identifiers_for_entities,prune_stale_device_registry_entries,prune_stale_entity_registry_entries,supports_daily_circuit_controls"
+      "raw": ".entity:CircuitAnalyzerEntity,circuit_info_from_config,circuits_for_entities,device_identifiers_for_entities,entity_detail_level_for_coordinator,prune_stale_device_registry_entries,prune_stale_entity_registry_entries,supports_daily_circuit_controls"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button",
+      "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+      "relation": "imports",
+      "internal": true,
+      "lineno": 19,
+      "raw": ".entity_catalog:compact_creation_rule_for_entity,compact_rule_is_setup_managed,legacy_compatibility_keys_for_coordinator,selected_entity_groups_for_coordinator,should_create_entity"
     },
     {
       "source": "custom_components.circuitsetup_energy_analyzer.capacity",
@@ -77526,6 +78108,62 @@
       "raw": ".ux:normalize_sensitivity"
     },
     {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "external:stdlib:__future__",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 1,
+      "raw": "__future__:annotations"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "external:stdlib:inspect",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 3,
+      "raw": "inspect"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "external:stdlib:collections",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 4,
+      "raw": "collections.abc:Mapping"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "external:stdlib:dataclasses",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 5,
+      "raw": "dataclasses:dataclass"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "external:stdlib:typing",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 6,
+      "raw": "typing:Any"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.const",
+      "relation": "imports",
+      "internal": true,
+      "lineno": 8,
+      "raw": ".const:DOMAIN"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.entity",
+      "relation": "imports",
+      "internal": true,
+      "lineno": 9,
+      "raw": ".entity:CircuitAnalyzerEntity,circuit_info_from_config,circuits_for_entities,device_identifiers_for_entities,prune_stale_device_registry_entries,prune_stale_entity_registry_entries,supports_daily_circuit_controls"
+    },
+    {
       "source": "custom_components.circuitsetup_energy_analyzer.unknown_loads",
       "target": "external:stdlib:__future__",
       "relation": "imports",
@@ -78459,14 +79097,14 @@
       "relation": "imports",
       "internal": true,
       "lineno": 7,
-      "raw": "custom_components.circuitsetup_energy_analyzer.const:CONF_ADVANCED_SETTINGS,CONF_ENTITY_DETAIL_LEVEL,DASHBOARD_LAYOUT_EXPERT,DOMAIN,PLATFORMS"
+      "raw": "custom_components.circuitsetup_energy_analyzer.const:CONF_ADVANCED_SETTINGS,CONF_ENTITY_DETAIL_LEVEL,CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,DASHBOARD_LAYOUT_EXPERT,DOMAIN,PLATFORMS"
     },
     {
       "source": "tests.test_control_entities",
       "target": "custom_components.circuitsetup_energy_analyzer.coordinator",
       "relation": "imports",
       "internal": true,
-      "lineno": 14,
+      "lineno": 15,
       "raw": "custom_components.circuitsetup_energy_analyzer.coordinator:AnalyzerState"
     },
     {
@@ -78474,7 +79112,7 @@
       "target": "custom_components.circuitsetup_energy_analyzer.models",
       "relation": "imports",
       "internal": true,
-      "lineno": 15,
+      "lineno": 16,
       "raw": "custom_components.circuitsetup_energy_analyzer.models:ApplianceProfile,CircuitConfig,CircuitMode,SensorRef,SensorRole"
     },
     {
@@ -78883,14 +79521,14 @@
       "relation": "imports",
       "internal": true,
       "lineno": 5,
-      "raw": "custom_components.circuitsetup_energy_analyzer:binary_sensor,button,number,select,sensor"
+      "raw": "custom_components.circuitsetup_energy_analyzer:binary_sensor,button,number,select,sensor,switch"
     },
     {
       "source": "tests.test_entity_catalog",
       "target": "custom_components.circuitsetup_energy_analyzer.const",
       "relation": "imports",
       "internal": true,
-      "lineno": 12,
+      "lineno": 13,
       "raw": "custom_components.circuitsetup_energy_analyzer.const:CONF_SELECTED_ENTITY_GROUPS,ENTITY_DETAIL_EXPERT,ENTITY_DETAIL_SIMPLE,ENTITY_DETAIL_STANDARD"
     },
     {
@@ -78898,8 +79536,8 @@
       "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
       "relation": "imports",
       "internal": true,
-      "lineno": 18,
-      "raw": "custom_components.circuitsetup_energy_analyzer.entity_catalog:CORE_DUPLICATE_REMOVAL_PHASE,ELECTRICAL_CYCLE_CONDENSATION_PHASE,EntityCreationRule,EntityExposure,EntityGroup,compact_creation_rule_for_entity,compact_creation_rules_by_key,compact_entity_count_preview,compact_sensor_rule_is_setup_managed,desired_compact_entity_rules,selected_entity_groups_for_coordinator,should_create_entity"
+      "lineno": 19,
+      "raw": "custom_components.circuitsetup_energy_analyzer.entity_catalog:CORE_DUPLICATE_REMOVAL_PHASE,ELECTRICAL_CYCLE_CONDENSATION_PHASE,MAINTENANCE_SWITCH_CONDENSATION_PHASE,EntityCreationRule,EntityExposure,EntityGroup,compact_creation_rule_for_entity,compact_creation_rules_by_key,compact_entity_count_preview,compact_rule_is_setup_managed,compact_sensor_rule_is_setup_managed,desired_compact_entity_rules,selected_entity_groups_for_coordinator,should_create_entity"
     },
     {
       "source": "tests.test_entity_inventory_report",
@@ -80099,14 +80737,14 @@
       "relation": "imports",
       "internal": true,
       "lineno": 11,
-      "raw": "custom_components.circuitsetup_energy_analyzer:binary_sensor,button,number,select,sensor"
+      "raw": "custom_components.circuitsetup_energy_analyzer:binary_sensor,button,number,select,sensor,switch"
     },
     {
       "source": "tests_homeassistant.test_runtime_contract",
       "target": "custom_components.circuitsetup_energy_analyzer.const",
       "relation": "imports",
       "internal": true,
-      "lineno": 18,
+      "lineno": 19,
       "raw": "custom_components.circuitsetup_energy_analyzer.const:CONF_DASHBOARD_LAYOUT,CONF_ENTITY_DETAIL_LEVEL,DASHBOARD_LAYOUT_EXPERT,DOMAIN,ENTITY_DETAIL_STANDARD"
     },
     {
@@ -80114,7 +80752,7 @@
       "target": "custom_components.circuitsetup_energy_analyzer.coordinator",
       "relation": "imports",
       "internal": true,
-      "lineno": 25,
+      "lineno": 26,
       "raw": "custom_components.circuitsetup_energy_analyzer.coordinator:AnalyzerState"
     },
     {
@@ -80122,7 +80760,7 @@
       "target": "custom_components.circuitsetup_energy_analyzer.models",
       "relation": "imports",
       "internal": true,
-      "lineno": 26,
+      "lineno": 27,
       "raw": "custom_components.circuitsetup_energy_analyzer.models:ApplianceProfile,CircuitConfig,CircuitMode,SensorRef,SensorRole"
     },
     {
@@ -80620,7 +81258,28 @@
     },
     {
       "source": "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._button_description_should_create",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
       "target": "custom_components.circuitsetup_energy_analyzer.button.button_description_applies",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._entity_registry_for_hass",
       "relation": "calls_local",
       "internal": true,
       "confidence": "best_effort"
@@ -86268,6 +86927,13 @@
       "confidence": "best_effort"
     },
     {
+      "source": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_sensor_rule_is_setup_managed",
+      "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_rule_is_setup_managed",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
       "source": "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
       "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rule_for_entity",
       "relation": "calls_local",
@@ -90013,6 +90679,27 @@
       "confidence": "best_effort"
     },
     {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.switch_description_applies",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
       "source": "custom_components.circuitsetup_energy_analyzer.unknown_loads.estimate_unknown_load",
       "target": "custom_components.circuitsetup_energy_analyzer.unknown_loads._display_name",
       "relation": "calls_local",
@@ -91938,14 +92625,28 @@
       "confidence": "best_effort"
     },
     {
-      "source": "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+      "source": "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
       "target": "tests.test_control_entities._disable_registry_pruning",
       "relation": "calls_local",
       "internal": true,
       "confidence": "best_effort"
     },
     {
-      "source": "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+      "source": "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
+      "target": "tests.test_control_entities._hass_with",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
+      "target": "tests.test_control_entities._disable_registry_pruning",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
       "target": "tests.test_control_entities._hass_with",
       "relation": "calls_local",
       "internal": true,
@@ -91975,6 +92676,62 @@
     {
       "source": "tests.test_control_entities.test_unavailable_maintenance_button_press_raises_clear_error",
       "target": "tests.test_control_entities._hass_with",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+      "target": "tests.test_control_entities._disable_registry_pruning",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+      "target": "tests.test_control_entities._hass_with",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+      "target": "tests.test_control_entities._disable_registry_pruning",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+      "target": "tests.test_control_entities._hass_with",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "target": "tests.test_control_entities._circuit",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "target": "tests.test_control_entities._disable_registry_pruning",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "target": "tests.test_control_entities._hass_with",
+      "relation": "calls_local",
+      "internal": true,
+      "confidence": "best_effort"
+    },
+    {
+      "source": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
+      "target": "tests.test_control_entities._mains_circuit",
       "relation": "calls_local",
       "internal": true,
       "confidence": "best_effort"
@@ -95844,6 +96601,24 @@
     {
       "source": "custom_components.circuitsetup_energy_analyzer.button",
       "target": "custom_components.circuitsetup_energy_analyzer.button.button_description_applies",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._button_description_should_create",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._existing_legacy_button_unique_ids",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.button",
+      "target": "custom_components.circuitsetup_energy_analyzer.button._entity_registry_for_hass",
       "relation": "defines",
       "internal": true
     },
@@ -101387,6 +102162,12 @@
     },
     {
       "source": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+      "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_rule_is_setup_managed",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
       "target": "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
       "relation": "defines",
       "internal": true
@@ -106516,6 +107297,102 @@
       "internal": true
     },
     {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitSwitchDescription",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.__init__",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.suggested_object_id",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.icon",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.is_on",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.available",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.extra_state_attributes",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_on",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.CircuitMaintenanceSwitch.async_turn_off",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch.switch_description_applies",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_details",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_active",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._maintenance_actions_available",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "custom_components.circuitsetup_energy_analyzer.switch",
+      "target": "custom_components.circuitsetup_energy_analyzer.switch._call_or_raise",
+      "relation": "defines",
+      "internal": true
+    },
+    {
       "source": "custom_components.circuitsetup_energy_analyzer.unknown_loads",
       "target": "custom_components.circuitsetup_energy_analyzer.unknown_loads.estimate_unknown_load",
       "relation": "defines",
@@ -108959,7 +109836,13 @@
     },
     {
       "source": "tests.test_control_entities",
-      "target": "tests.test_control_entities.test_button_availability_tracks_maintenance_state",
+      "target": "tests.test_control_entities.test_legacy_maintenance_buttons_follow_compatibility_keys_and_state",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_control_entities",
+      "target": "tests.test_control_entities.test_existing_legacy_maintenance_button_registry_row_preserves_button",
       "relation": "defines",
       "internal": true
     },
@@ -108972,6 +109855,24 @@
     {
       "source": "tests.test_control_entities",
       "target": "tests.test_control_entities.test_unavailable_maintenance_button_press_raises_clear_error",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_control_entities",
+      "target": "tests.test_control_entities.test_switch_setup_entry_adds_maintenance_switch",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_control_entities",
+      "target": "tests.test_control_entities.test_maintenance_switch_turns_on_and_off_idempotently",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_control_entities",
+      "target": "tests.test_control_entities.test_maintenance_switch_skips_inapplicable_daily_control_circuits",
       "relation": "defines",
       "internal": true
     },
@@ -111119,6 +112020,12 @@
     },
     {
       "source": "tests.test_entity_catalog",
+      "target": "tests.test_entity_catalog.test_maintenance_button_rules_are_marked_for_phase_five_creation",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_entity_catalog",
       "target": "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
       "relation": "defines",
       "internal": true
@@ -113171,6 +114078,12 @@
     },
     {
       "source": "tests.test_services",
+      "target": "tests.test_services.test_maintenance_service_accepts_switch_entity_target",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_services",
       "target": "tests.test_services.test_circuit_services_reject_conflicting_circuit_and_entity_targets",
       "relation": "defines",
       "internal": true
@@ -114592,23 +115505,28 @@
       "qualified_name": "custom_components.circuitsetup_energy_analyzer.button.async_setup_entry",
       "kind": "async_function",
       "path": "custom_components/circuitsetup_energy_analyzer/button.py",
-      "lineno": 287,
-      "end_lineno": 328,
+      "lineno": 302,
+      "end_lineno": 357,
       "decorators": [],
       "bases": [],
       "doc": "Set up action button entities for configured circuits.",
       "calls": [
         "CircuitAnalyzerButton",
         "GlobalAnalyzerButton",
+        "_button_description_should_create",
+        "_existing_legacy_button_unique_ids",
         "async_add_entities",
         "button_description_applies",
         "circuit_info_from_config",
         "circuits_for_entities",
         "device_identifiers_for_entities",
         "entities.extend",
+        "entity_detail_level_for_coordinator",
         "getattr",
+        "legacy_compatibility_keys_for_coordinator",
         "prune_stale_device_registry_entries",
-        "prune_stale_entity_registry_entries"
+        "prune_stale_entity_registry_entries",
+        "selected_entity_groups_for_coordinator"
       ],
       "entrypoint_reason": "Home Assistant lifecycle/API entrypoint"
     },
@@ -115184,6 +116102,34 @@
         "getattr.get",
         "isinstance",
         "remove"
+      ],
+      "entrypoint_reason": "Home Assistant lifecycle/API entrypoint"
+    },
+    {
+      "id": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "module": "custom_components.circuitsetup_energy_analyzer.switch",
+      "name": "async_setup_entry",
+      "qualified_name": "custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry",
+      "kind": "async_function",
+      "path": "custom_components/circuitsetup_energy_analyzer/switch.py",
+      "lineno": 145,
+      "end_lineno": 181,
+      "decorators": [],
+      "bases": [],
+      "doc": "Set up switch entities for daily circuit controls.",
+      "calls": [
+        "CircuitMaintenanceSwitch",
+        "async_add_entities",
+        "circuit_device_identifiers.add",
+        "circuit_info_from_config",
+        "circuits_for_entities",
+        "device_identifiers_for_entities",
+        "entities.extend",
+        "getattr",
+        "prune_stale_device_registry_entries",
+        "prune_stale_entity_registry_entries",
+        "set",
+        "switch_description_applies"
       ],
       "entrypoint_reason": "Home Assistant lifecycle/API entrypoint"
     }

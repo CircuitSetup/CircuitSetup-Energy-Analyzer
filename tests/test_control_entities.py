@@ -7,6 +7,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     DASHBOARD_LAYOUT_EXPERT,
     DOMAIN,
     PLATFORMS,
@@ -209,6 +210,7 @@ def test_platforms_include_daily_control_entities() -> None:
         "button",
         "select",
         "number",
+        "switch",
     }
 
 
@@ -233,8 +235,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     by_unique_id = {entity.unique_id: entity for entity in added_entities}
     assert set(by_unique_id) == {
         "entry-1_fridge_relearn_baseline",
-        "entry-1_fridge_start_maintenance",
-        "entry-1_fridge_end_maintenance",
         "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
@@ -260,23 +260,14 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
 
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
-        "entry-1_fridge_start_maintenance",
         "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
     ):
         await by_unique_id[unique_id].async_press()
 
-    assert by_unique_id["entry-1_fridge_end_maintenance"].available is False
-    assert by_unique_id["entry-1_fridge_end_maintenance"].extra_state_attributes == {
-        "availability_reason": "maintenance_inactive",
-        "availability_label": "Maintenance is not active for this circuit.",
-        "next_step": "Use Start Maintenance before ending maintenance.",
-    }
-
     assert coordinator.calls == [
         ("async_relearn_baseline", ("fridge",)),
-        ("async_start_maintenance", ("fridge", "", None, False)),
         ("async_pause_alerts", ("fridge", None)),
         ("async_run_mapping_checks", ()),
         ("async_recalculate_setting_recommendations", (None,)),
@@ -348,7 +339,7 @@ async def test_unavailable_global_buttons_explain_missing_action(
 
 
 @pytest.mark.asyncio
-async def test_button_availability_tracks_maintenance_state(
+async def test_legacy_maintenance_buttons_follow_compatibility_keys_and_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import button
@@ -359,6 +350,10 @@ async def test_button_availability_tracks_maintenance_state(
         sensitivity_by_circuit={"fridge": "quiet"},
     )
     coordinator = _FakeCoordinator(state=state)
+    coordinator.options[CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS] = [
+        "button:start_maintenance",
+        "button:end_maintenance",
+    ]
     added_entities = []
 
     await button.async_setup_entry(
@@ -371,6 +366,38 @@ async def test_button_availability_tracks_maintenance_state(
 
     assert by_unique_id["entry-1_fridge_start_maintenance"].available is False
     assert by_unique_id["entry-1_fridge_end_maintenance"].available is True
+
+
+@pytest.mark.asyncio
+async def test_existing_legacy_maintenance_button_registry_row_preserves_button(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator()
+    hass = _hass_with(coordinator)
+    hass.entity_registry = SimpleNamespace(
+        entities={
+            "button.kitchen_fridge_start": SimpleNamespace(
+                entity_id="button.kitchen_fridge_start",
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+                unique_id="entry-1_fridge_start_maintenance",
+            )
+        }
+    )
+    added_entities = []
+
+    await button.async_setup_entry(
+        hass,
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    assert "entry-1_fridge_start_maintenance" in by_unique_id
+    assert "entry-1_fridge_end_maintenance" not in by_unique_id
 
 
 @pytest.mark.asyncio
@@ -425,6 +452,10 @@ async def test_unavailable_maintenance_button_press_raises_clear_error(
 
     _disable_registry_pruning(monkeypatch, button)
     coordinator = _FakeCoordinator()
+    coordinator.options[CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS] = [
+        "button:start_maintenance",
+        "button:end_maintenance",
+    ]
     added_entities = []
 
     await button.async_setup_entry(
@@ -447,6 +478,126 @@ async def test_unavailable_maintenance_button_press_raises_clear_error(
         await end_maintenance.async_press()
 
     assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_switch_setup_entry_adds_maintenance_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import switch
+
+    _disable_registry_pruning(monkeypatch, switch)
+    state = AnalyzerState(
+        maintenance_by_circuit={
+            "fridge": {
+                "active": True,
+                "started_at": "2026-06-19T08:00:00-04:00",
+                "expires_at": "2026-06-19T10:00:00-04:00",
+                "note": "Cleaned coils",
+                "relearn_on_end": True,
+                "ended_at": "not exposed",
+                "duration": "not exposed",
+            }
+        },
+        sensitivity_by_circuit={"fridge": "quiet"},
+    )
+    coordinator = _FakeCoordinator(state=state)
+    added_entities = []
+
+    await switch.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert len(added_entities) == 1
+    maintenance = added_entities[0]
+    assert maintenance.unique_id == "entry-1_fridge_maintenance"
+    assert maintenance.name is None
+    assert maintenance.suggested_object_id == "fridge_maintenance"
+    assert maintenance.icon == "mdi:wrench-clock"
+    assert maintenance.entity_description.has_entity_name is True
+    assert maintenance.entity_description.translation_key == "maintenance"
+    assert maintenance._attr_has_entity_name is True
+    assert maintenance._attr_translation_key == "maintenance"
+    assert maintenance.is_on is True
+    assert maintenance.extra_state_attributes == {
+        "started_at": "2026-06-19T08:00:00-04:00",
+        "expires_at": "2026-06-19T10:00:00-04:00",
+        "note": "Cleaned coils",
+        "relearn_on_end": True,
+    }
+    assert maintenance.entity_description.entity_category is None
+    assert maintenance.entity_description.entity_registry_enabled_default is True
+    assert maintenance.entity_description.entity_registry_visible_default is True
+
+
+@pytest.mark.asyncio
+async def test_maintenance_switch_turns_on_and_off_idempotently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import switch
+
+    _disable_registry_pruning(monkeypatch, switch)
+    coordinator = _FakeCoordinator()
+    added_entities = []
+
+    await switch.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    maintenance = added_entities[0]
+
+    assert maintenance.is_on is False
+    await maintenance.async_turn_off()
+    assert coordinator.calls == []
+
+    await maintenance.async_turn_on()
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False)),
+    ]
+
+    coordinator.data.maintenance_by_circuit["fridge"] = {"active": True}
+    await maintenance.async_turn_on()
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False)),
+    ]
+
+    await maintenance.async_turn_off()
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False)),
+        ("async_end_maintenance", ("fridge", False)),
+    ]
+
+    coordinator.data.maintenance_by_circuit["fridge"] = {"active": False}
+    await maintenance.async_turn_off()
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False)),
+        ("async_end_maintenance", ("fridge", False)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_switch_skips_inapplicable_daily_control_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import switch
+
+    _disable_registry_pruning(monkeypatch, switch)
+    coordinator = _FakeCoordinator(circuits=(_circuit(), _mains_circuit()))
+    added_entities = []
+
+    await switch.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    assert {entity.unique_id for entity in added_entities} == {
+        "entry-1_fridge_maintenance",
+    }
 
 
 @pytest.mark.asyncio
@@ -798,10 +949,11 @@ async def test_number_setup_keeps_goal_when_runtime_energy_evidence_exists(
 async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import button, number
+    from custom_components.circuitsetup_energy_analyzer import button, number, switch
 
     _disable_registry_pruning(monkeypatch, button)
     _disable_registry_pruning(monkeypatch, number)
+    _disable_registry_pruning(monkeypatch, switch)
     coordinator = SimpleNamespace(
         data=AnalyzerState(),
         options={CONF_ADVANCED_SETTINGS: {"dishwasher": {"daily_goal_kwh": 3.25}}},
@@ -815,6 +967,7 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     )
     button_entities = []
     number_entities = []
+    switch_entities = []
 
     await button.async_setup_entry(
         _hass_with(coordinator), entry, button_entities.extend
@@ -822,15 +975,19 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     await number.async_setup_entry(
         _hass_with(coordinator), entry, number_entities.extend
     )
+    await switch.async_setup_entry(
+        _hass_with(coordinator), entry, switch_entities.extend
+    )
 
     assert {entity.unique_id for entity in button_entities} >= {
         "entry-1_dishwasher_relearn_baseline",
-        "entry-1_dishwasher_start_maintenance",
-        "entry-1_dishwasher_end_maintenance",
         "entry-1_dishwasher_pause_alerts",
     }
     assert [entity.unique_id for entity in number_entities] == [
         "entry-1_dishwasher_daily_energy_goal"
+    ]
+    assert [entity.unique_id for entity in switch_entities] == [
+        "entry-1_dishwasher_maintenance"
     ]
     assert number_entities[0].native_value == 3.25
 

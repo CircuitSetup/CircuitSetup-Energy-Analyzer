@@ -8,6 +8,7 @@ from custom_components.circuitsetup_energy_analyzer import (
     number,
     select,
     sensor,
+    switch,
 )
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SELECTED_ENTITY_GROUPS,
@@ -18,12 +19,14 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
     CORE_DUPLICATE_REMOVAL_PHASE,
     ELECTRICAL_CYCLE_CONDENSATION_PHASE,
+    MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     EntityCreationRule,
     EntityExposure,
     EntityGroup,
     compact_creation_rule_for_entity,
     compact_creation_rules_by_key,
     compact_entity_count_preview,
+    compact_rule_is_setup_managed,
     compact_sensor_rule_is_setup_managed,
     desired_compact_entity_rules,
     selected_entity_groups_for_coordinator,
@@ -268,6 +271,25 @@ def test_billing_standby_weather_rules_are_marked_for_phase_four_creation() -> N
     )
 
 
+def test_maintenance_button_rules_are_marked_for_phase_five_creation() -> None:
+    rules = compact_creation_rules_by_key()
+
+    phase_five_button_keys = {
+        key
+        for (domain, key), rule in rules.items()
+        if domain == "button"
+        and rule.removal_phase == MAINTENANCE_SWITCH_CONDENSATION_PHASE
+    }
+
+    assert phase_five_button_keys == {
+        "start_maintenance",
+        "end_maintenance",
+    }
+    assert compact_rule_is_setup_managed(rules[("button", "start_maintenance")])
+    assert compact_rule_is_setup_managed(rules[("button", "end_maintenance")])
+    assert not compact_rule_is_setup_managed(rules[("button", "relearn_baseline")])
+
+
 def test_compact_creation_catalog_covers_every_current_entity_description() -> None:
     current_description_keys = {
         *(
@@ -289,6 +311,10 @@ def test_compact_creation_catalog_covers_every_current_entity_description() -> N
         *(
             ("number", description.key)
             for description in number.CIRCUIT_NUMBER_DESCRIPTIONS
+        ),
+        *(
+            ("switch", description.key)
+            for description in switch.CIRCUIT_SWITCH_DESCRIPTIONS
         ),
     }
 
