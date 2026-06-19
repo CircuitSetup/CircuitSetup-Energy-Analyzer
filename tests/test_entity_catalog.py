@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from custom_components.circuitsetup_energy_analyzer import (
+    binary_sensor,
+    button,
+    number,
+    select,
+    sensor,
+)
+from custom_components.circuitsetup_energy_analyzer.const import (
+    ENTITY_DETAIL_EXPERT,
+    ENTITY_DETAIL_SIMPLE,
+    ENTITY_DETAIL_STANDARD,
+)
+from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
+    EntityCreationRule,
+    EntityExposure,
+    EntityGroup,
+    compact_creation_rule_for_entity,
+    compact_creation_rules_by_key,
+    compact_entity_count_preview,
+    desired_compact_entity_rules,
+    should_create_entity,
+)
+
+
+def test_should_create_entity_respects_detail_levels_and_selected_groups() -> None:
+    core = EntityCreationRule(
+        key="health_summary",
+        domain="sensor",
+        exposure=EntityExposure.CORE,
+        group=EntityGroup.CORE,
+        minimum_detail_level=ENTITY_DETAIL_SIMPLE,
+        create_in_simple=True,
+        create_in_standard=True,
+        create_in_expert=True,
+    )
+    feature = EntityCreationRule(
+        key="billing_cycle_usage",
+        domain="sensor",
+        exposure=EntityExposure.FEATURE,
+        group=EntityGroup.BILLING_COST,
+        minimum_detail_level=ENTITY_DETAIL_STANDARD,
+        create_in_standard=True,
+        create_in_expert=True,
+    )
+    graph = EntityCreationRule(
+        key="run_cycle_runtime",
+        domain="sensor",
+        exposure=EntityExposure.GRAPH,
+        group=EntityGroup.CYCLE_METRICS,
+        minimum_detail_level=ENTITY_DETAIL_EXPERT,
+    )
+
+    assert should_create_entity(
+        rule=core,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert not should_create_entity(
+        rule=feature,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert should_create_entity(
+        rule=feature,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_STANDARD,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert not should_create_entity(
+        rule=graph,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert should_create_entity(
+        rule=graph,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups={EntityGroup.CYCLE_METRICS},
+        legacy_compatibility_keys=(),
+    )
+
+
+def test_should_create_entity_defaults_invalid_detail_levels_to_simple() -> None:
+    feature = EntityCreationRule(
+        key="billing_cycle_usage",
+        domain="sensor",
+        exposure=EntityExposure.FEATURE,
+        group=EntityGroup.BILLING_COST,
+        minimum_detail_level=ENTITY_DETAIL_STANDARD,
+        create_in_standard=True,
+        create_in_expert=True,
+    )
+
+    for detail_level in (None, "", "bogus"):
+        assert not should_create_entity(
+            rule=feature,
+            circuit=None,
+            coordinator=None,
+            detail_level=detail_level,
+            selected_groups=(),
+            legacy_compatibility_keys=(),
+        )
+
+
+def test_should_create_entity_preserves_legacy_compatibility_keys() -> None:
+    rule = EntityCreationRule(
+        key="sensitivity",
+        domain="sensor",
+        exposure=EntityExposure.LEGACY,
+        group=EntityGroup.DEVELOPER_DIAGNOSTICS,
+        minimum_detail_level=ENTITY_DETAIL_EXPERT,
+        replacement="select.<circuit>_alert_sensitivity",
+        legacy=True,
+    )
+
+    assert not should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups={EntityGroup.DEVELOPER_DIAGNOSTICS},
+        legacy_compatibility_keys=(),
+    )
+    assert should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys={"sensor:sensitivity"},
+    )
+
+
+def test_compact_creation_rule_documents_requested_replacements() -> None:
+    sensitivity = compact_creation_rule_for_entity("sensor", "sensitivity")
+    run_cycle_status = compact_creation_rule_for_entity("sensor", "run_cycle_status")
+    maintenance_start = compact_creation_rule_for_entity("button", "start_maintenance")
+
+    assert sensitivity.legacy
+    assert sensitivity.replacement == "select.<circuit>_alert_sensitivity"
+    assert run_cycle_status.legacy
+    assert run_cycle_status.group is EntityGroup.CYCLE_METRICS
+    assert run_cycle_status.replacement == "sensor.<circuit>_activity_summary"
+    assert maintenance_start.legacy
+    assert maintenance_start.replacement == "switch.<circuit>_maintenance"
+
+
+def test_compact_creation_catalog_covers_every_current_entity_description() -> None:
+    current_description_keys = {
+        *(
+            ("sensor", description.key)
+            for description in sensor.SENSOR_DESCRIPTIONS
+        ),
+        *(
+            ("binary_sensor", description.key)
+            for description in binary_sensor.BINARY_SENSOR_DESCRIPTIONS
+        ),
+        *(
+            ("button", description.key)
+            for description in button.CIRCUIT_BUTTON_DESCRIPTIONS
+        ),
+        *(
+            ("select", description.key)
+            for description in select.CIRCUIT_SELECT_DESCRIPTIONS
+        ),
+        *(
+            ("number", description.key)
+            for description in number.CIRCUIT_NUMBER_DESCRIPTIONS
+        ),
+    }
+
+    missing = current_description_keys - set(compact_creation_rules_by_key())
+
+    assert missing == set()
+
+
+def test_desired_compact_rules_preview_uses_current_applicability() -> None:
+    current_entities = {
+        ("sensor", "health_summary"),
+        ("sensor", "activity_summary"),
+        ("sensor", "billing_cycle_usage"),
+        ("sensor", "run_cycle_runtime"),
+        ("sensor", "sensitivity"),
+        ("binary_sensor", "running"),
+        ("select", "alert_sensitivity"),
+    }
+
+    simple_rules = desired_compact_entity_rules(
+        current_entities=current_entities,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    expert_rules = desired_compact_entity_rules(
+        current_entities=current_entities,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups={EntityGroup.CYCLE_METRICS},
+        legacy_compatibility_keys={"sensor:sensitivity"},
+    )
+
+    assert {(rule.domain, rule.key) for rule in simple_rules} == {
+        ("sensor", "health_summary"),
+        ("sensor", "activity_summary"),
+        ("binary_sensor", "running"),
+        ("select", "alert_sensitivity"),
+    }
+    assert {(rule.domain, rule.key) for rule in expert_rules} == current_entities
+    assert compact_entity_count_preview(
+        current_entities=current_entities,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    ) == {
+        "sensor": 2,
+        "binary_sensor": 1,
+        "button": 0,
+        "select": 1,
+        "number": 0,
+        "switch": 0,
+        "total": 4,
+    }

@@ -21365,6 +21365,287 @@
     "entrypoint_reason": null
   },
   {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityExposure",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "EntityExposure",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityExposure",
+    "kind": "class",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 16,
+    "end_lineno": 23,
+    "decorators": [],
+    "bases": [
+      "StrEnum"
+    ],
+    "doc": "Compact entity-model exposure class.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityGroup",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "EntityGroup",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityGroup",
+    "kind": "class",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 26,
+    "end_lineno": 42,
+    "decorators": [],
+    "bases": [
+      "StrEnum"
+    ],
+    "doc": "Compact entity-model opt-in group.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityCreationRule",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "EntityCreationRule",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.EntityCreationRule",
+    "kind": "class",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 46,
+    "end_lineno": 58,
+    "decorators": [
+      "dataclass"
+    ],
+    "bases": [],
+    "doc": "Declarative compact-model creation policy for one entity key.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.should_create_entity",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "should_create_entity",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.should_create_entity",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 68,
+    "end_lineno": 96,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return whether the compact model should create a described entity.",
+    "calls": [
+      "_normalize_detail_level",
+      "_normalize_groups",
+      "rule_key",
+      "str"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.rule_key",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "rule_key",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.rule_key",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 99,
+    "end_lineno": 101,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return the stable compatibility key for a rule.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rule_for_entity",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "compact_creation_rule_for_entity",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rule_for_entity",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 104,
+    "end_lineno": 106,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return compact-model creation metadata for a current entity key.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rules_by_key",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "compact_creation_rules_by_key",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_creation_rules_by_key",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 109,
+    "end_lineno": 111,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return all known compact-model creation rules.",
+    "calls": [],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "desired_compact_entity_rules",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.desired_compact_entity_rules",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 114,
+    "end_lineno": 139,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return compact rules for currently applicable entity keys.",
+    "calls": [
+      "compact_creation_rule_for_entity",
+      "should_create_entity",
+      "sorted",
+      "tuple"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_entity_count_preview",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "compact_entity_count_preview",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog.compact_entity_count_preview",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 142,
+    "end_lineno": 164,
+    "decorators": [],
+    "bases": [],
+    "doc": "Return desired compact entity counts by Home Assistant domain.",
+    "calls": [
+      "counts.get",
+      "counts.values",
+      "desired_compact_entity_rules",
+      "sum"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_detail_level",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_normalize_detail_level",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_detail_level",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 167,
+    "end_lineno": 171,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "str",
+      "str.strip",
+      "str.strip.lower"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_groups",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_normalize_groups",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._normalize_groups",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 174,
+    "end_lineno": 184,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "EntityGroup",
+      "isinstance",
+      "normalized.add",
+      "set",
+      "str"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._rule",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_rule",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._rule",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 187,
+    "end_lineno": 211,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "EntityCreationRule"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._legacy_sensor",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_legacy_sensor",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._legacy_sensor",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 217,
+    "end_lineno": 230,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "_rule"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._graph_sensor",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_graph_sensor",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._graph_sensor",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 233,
+    "end_lineno": 246,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "_rule"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_sensor",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_diagnostic_sensor",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_sensor",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 249,
+    "end_lineno": 262,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "_rule"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_binary",
+    "module": "custom_components.circuitsetup_energy_analyzer.entity_catalog",
+    "name": "_diagnostic_binary",
+    "qualified_name": "custom_components.circuitsetup_energy_analyzer.entity_catalog._diagnostic_binary",
+    "kind": "function",
+    "path": "custom_components/circuitsetup_energy_analyzer/entity_catalog.py",
+    "lineno": 265,
+    "end_lineno": 278,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "_rule"
+    ],
+    "entrypoint_reason": null
+  },
+  {
     "id": "custom_components.circuitsetup_energy_analyzer.events.CircuitEventDetector",
     "module": "custom_components.circuitsetup_energy_analyzer.events",
     "name": "CircuitEventDetector",
@@ -53845,6 +54126,185 @@
       "SensorRef",
       "SimpleNamespace",
       "async_setup_entry"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_should_create_entity_respects_detail_levels_and_selected_groups",
+    "module": "tests.test_entity_catalog",
+    "name": "test_should_create_entity_respects_detail_levels_and_selected_groups",
+    "qualified_name": "tests.test_entity_catalog.test_should_create_entity_respects_detail_levels_and_selected_groups",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 27,
+    "end_lineno": 94,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "EntityCreationRule",
+      "should_create_entity"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_should_create_entity_defaults_invalid_detail_levels_to_simple",
+    "module": "tests.test_entity_catalog",
+    "name": "test_should_create_entity_defaults_invalid_detail_levels_to_simple",
+    "qualified_name": "tests.test_entity_catalog.test_should_create_entity_defaults_invalid_detail_levels_to_simple",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 97,
+    "end_lineno": 116,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "EntityCreationRule",
+      "should_create_entity"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_should_create_entity_preserves_legacy_compatibility_keys",
+    "module": "tests.test_entity_catalog",
+    "name": "test_should_create_entity_preserves_legacy_compatibility_keys",
+    "qualified_name": "tests.test_entity_catalog.test_should_create_entity_preserves_legacy_compatibility_keys",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 119,
+    "end_lineno": 145,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "EntityCreationRule",
+      "should_create_entity"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_compact_creation_rule_documents_requested_replacements",
+    "module": "tests.test_entity_catalog",
+    "name": "test_compact_creation_rule_documents_requested_replacements",
+    "qualified_name": "tests.test_entity_catalog.test_compact_creation_rule_documents_requested_replacements",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 148,
+    "end_lineno": 159,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "compact_creation_rule_for_entity"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
+    "module": "tests.test_entity_catalog",
+    "name": "test_compact_creation_catalog_covers_every_current_entity_description",
+    "qualified_name": "tests.test_entity_catalog.test_compact_creation_catalog_covers_every_current_entity_description",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 162,
+    "end_lineno": 188,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "compact_creation_rules_by_key",
+      "set"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_catalog.test_desired_compact_rules_preview_uses_current_applicability",
+    "module": "tests.test_entity_catalog",
+    "name": "test_desired_compact_rules_preview_uses_current_applicability",
+    "qualified_name": "tests.test_entity_catalog.test_desired_compact_rules_preview_uses_current_applicability",
+    "kind": "function",
+    "path": "tests/test_entity_catalog.py",
+    "lineno": 191,
+    "end_lineno": 241,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "compact_entity_count_preview",
+      "desired_compact_entity_rules"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_inventory_report.test_inventory_report_covers_representative_before_count_scenarios",
+    "module": "tests.test_entity_inventory_report",
+    "name": "test_inventory_report_covers_representative_before_count_scenarios",
+    "qualified_name": "tests.test_entity_inventory_report.test_inventory_report_covers_representative_before_count_scenarios",
+    "kind": "function",
+    "path": "tests/test_entity_inventory_report.py",
+    "lineno": 14,
+    "end_lineno": 31,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "build_inventory_report",
+      "set"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_inventory_report.test_inventory_report_pins_current_entity_count_baseline",
+    "module": "tests.test_entity_inventory_report",
+    "name": "test_inventory_report_pins_current_entity_count_baseline",
+    "qualified_name": "tests.test_entity_inventory_report.test_inventory_report_pins_current_entity_count_baseline",
+    "kind": "function",
+    "path": "tests/test_entity_inventory_report.py",
+    "lineno": 34,
+    "end_lineno": 57,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "build_inventory_report"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_inventory_report.test_inventory_variants_keep_optional_settings_separate",
+    "module": "tests.test_entity_inventory_report",
+    "name": "test_inventory_variants_keep_optional_settings_separate",
+    "qualified_name": "tests.test_entity_inventory_report.test_inventory_variants_keep_optional_settings_separate",
+    "kind": "function",
+    "path": "tests/test_entity_inventory_report.py",
+    "lineno": 60,
+    "end_lineno": 87,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "build_inventory_report",
+      "next",
+      "set"
+    ],
+    "entrypoint_reason": null
+  },
+  {
+    "id": "tests.test_entity_inventory_report.test_inventory_report_distinguishes_created_enabled_disabled_and_hidden",
+    "module": "tests.test_entity_inventory_report",
+    "name": "test_inventory_report_distinguishes_created_enabled_disabled_and_hidden",
+    "qualified_name": "tests.test_entity_inventory_report.test_inventory_report_distinguishes_created_enabled_disabled_and_hidden",
+    "kind": "function",
+    "path": "tests/test_entity_inventory_report.py",
+    "lineno": 90,
+    "end_lineno": 118,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "build_inventory_report",
+      "next"
     ],
     "entrypoint_reason": null
   },

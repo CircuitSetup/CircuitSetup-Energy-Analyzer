@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `0e80f8d9009e56d84c30f24569bd6592a4652522`
-**Branch:** `master`
-**Generated:** `2026-06-19T18:44:42.744545+00:00`
+**Commit:** `d407f8af4e3be796822b8a1fce2996b0d24d8e13`
+**Branch:** `feature/compact-entity-model`
+**Generated:** `2026-06-19T19:29:43.709750+00:00`
 **Tests included:** `True`
 
 ## Scope
 
-- Files: **162**
-- Python modules: **148**
-- Symbols: **3188**
-- Internal import edges: **439**
-- External import edges: **490**
+- Files: **165**
+- Python modules: **151**
+- Symbols: **3214**
+- Internal import edges: **444**
+- External import edges: **498**
 
 ## Entrypoints
 
@@ -61,7 +61,7 @@
 |---|---:|---:|---:|---|
 | `custom_components.circuitsetup_energy_analyzer.models` | 82 | 82 | 0 | `custom_components/circuitsetup_energy_analyzer/models.py` |
 | `custom_components.circuitsetup_energy_analyzer.coordinator` | 52 | 7 | 45 | `custom_components/circuitsetup_energy_analyzer/coordinator.py` |
-| `custom_components.circuitsetup_energy_analyzer.const` | 31 | 31 | 0 | `custom_components/circuitsetup_energy_analyzer/const.py` |
+| `custom_components.circuitsetup_energy_analyzer.const` | 34 | 34 | 0 | `custom_components/circuitsetup_energy_analyzer/const.py` |
 | `custom_components.circuitsetup_energy_analyzer.normalize` | 29 | 28 | 1 | `custom_components/circuitsetup_energy_analyzer/normalize.py` |
 | `custom_components.circuitsetup_energy_analyzer.processors.base` | 24 | 21 | 3 | `custom_components/circuitsetup_energy_analyzer/processors/base.py` |
 | `custom_components.circuitsetup_energy_analyzer.alerting` | 23 | 21 | 2 | `custom_components/circuitsetup_energy_analyzer/alerting.py` |
