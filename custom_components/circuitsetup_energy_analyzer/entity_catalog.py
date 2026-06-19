@@ -16,6 +16,9 @@ from .const import (
 
 CORE_DUPLICATE_REMOVAL_PHASE = "core_duplicate_condensation"
 ELECTRICAL_CYCLE_CONDENSATION_PHASE = "electrical_cycle_condensation"
+BILLING_STANDBY_WEATHER_CONDENSATION_PHASE = (
+    "billing_standby_weather_condensation"
+)
 
 
 class EntityExposure(StrEnum):
@@ -149,7 +152,7 @@ def compact_sensor_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
         return True
     return (
         rule.exposure is EntityExposure.GRAPH
-        and rule.group in _PHASE_THREE_GRAPH_GROUPS
+        and rule.group in _SETUP_MANAGED_GRAPH_GROUPS
     )
 
 
@@ -282,10 +285,12 @@ _SETUP_MANAGED_REMOVAL_PHASES = frozenset(
     {
         CORE_DUPLICATE_REMOVAL_PHASE,
         ELECTRICAL_CYCLE_CONDENSATION_PHASE,
+        BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     },
 )
-_PHASE_THREE_GRAPH_GROUPS = frozenset(
+_SETUP_MANAGED_GRAPH_GROUPS = frozenset(
     {
+        EntityGroup.BILLING_FORECASTS,
         EntityGroup.CYCLE_METRICS,
         EntityGroup.ELECTRICAL_SCORES,
         EntityGroup.POWER_QUALITY_DRIFT,
@@ -583,12 +588,32 @@ _RULES: tuple[EntityCreationRule, ...] = (
     _diagnostic_sensor("demand_status", EntityGroup.DEMAND_CAPACITY),
     _diagnostic_sensor("demand_peak_status", EntityGroup.DEMAND_CAPACITY),
     _diagnostic_sensor("capacity_status", EntityGroup.DEMAND_CAPACITY),
-    _graph_sensor("billing_cycle_budget_usage", EntityGroup.BILLING_COST),
+    _legacy_sensor(
+        "billing_cycle_budget_usage",
+        "sensor.<circuit>_billing_cycle_usage",
+        EntityGroup.BILLING_COST,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
+    ),
     _graph_sensor("billing_cycle_forecast", EntityGroup.BILLING_FORECASTS),
-    _diagnostic_sensor("billing_cycle_status", EntityGroup.BILLING_COST),
-    _graph_sensor("cost_current_rate", EntityGroup.BILLING_COST),
+    _legacy_sensor(
+        "billing_cycle_status",
+        "sensor.<circuit>_billing_cycle_usage",
+        EntityGroup.BILLING_COST,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
+    ),
+    _legacy_sensor(
+        "cost_current_rate",
+        "sensor.<circuit>_cost_cycle",
+        EntityGroup.BILLING_COST,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
+    ),
     _graph_sensor("cost_cycle_forecast", EntityGroup.BILLING_FORECASTS),
-    _diagnostic_sensor("cost_status", EntityGroup.BILLING_COST),
+    _legacy_sensor(
+        "cost_status",
+        "sensor.<circuit>_cost_cycle",
+        EntityGroup.BILLING_COST,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
+    ),
     _graph_sensor("always_on_limit_usage", EntityGroup.STANDBY),
     _graph_sensor("monitored_power", EntityGroup.MAINS_SOLAR),
     _graph_sensor("balance_power", EntityGroup.MAINS_SOLAR),
@@ -741,11 +766,13 @@ _RULES: tuple[EntityCreationRule, ...] = (
         "standby_threshold",
         "Advanced Circuit Settings",
         EntityGroup.STANDBY,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "outdoor_temperature",
         "Configured outdoor temperature source entity",
         EntityGroup.WEATHER,
+        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _rule(
         "button",

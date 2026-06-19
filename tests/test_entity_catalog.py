@@ -202,8 +202,8 @@ def test_core_duplicate_rules_are_marked_for_phase_two_removal() -> None:
         "recent_activity_count",
     }
     assert rules[("sensor", "recent_activity")].removal_phase is None
-    assert rules[("sensor", "standby_threshold")].removal_phase is None
-    assert rules[("sensor", "outdoor_temperature")].removal_phase is None
+    assert rules[("sensor", "always_on_power")].removal_phase is None
+    assert rules[("sensor", "weather_context")].removal_phase is None
 
 
 def test_electrical_cycle_rules_are_marked_for_phase_three_creation() -> None:
@@ -232,7 +232,39 @@ def test_electrical_cycle_rules_are_marked_for_phase_three_creation() -> None:
         rules[("sensor", "leg_imbalance")],
     )
     assert not compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "standby_threshold")],
+        rules[("sensor", "always_on_power")],
+    )
+
+
+def test_billing_standby_weather_rules_are_marked_for_phase_four_creation() -> None:
+    rules = compact_creation_rules_by_key()
+
+    phase_four_sensor_keys = {
+        key
+        for (domain, key), rule in rules.items()
+        if domain == "sensor"
+        and rule.removal_phase == "billing_standby_weather_condensation"
+    }
+
+    assert phase_four_sensor_keys == {
+        "billing_cycle_budget_usage",
+        "billing_cycle_status",
+        "cost_current_rate",
+        "cost_status",
+        "standby_threshold",
+        "outdoor_temperature",
+    }
+    assert compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "billing_cycle_forecast")],
+    )
+    assert compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "cost_cycle_forecast")],
+    )
+    assert not compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "billing_cycle_usage")],
+    )
+    assert not compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "cost_cycle")],
     )
 
 

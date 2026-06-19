@@ -47,7 +47,6 @@ UTILITY_COMPARISON_ENTITY_SPECS = (
 )
 HVAC_WEATHER_ENTITY_SPECS = (
     ("sensor", "daily_energy_usage", "Daily Energy Usage"),
-    ("sensor", "outdoor_temperature", "Outdoor Temperature"),
 )
 WATER_FLOW_PROFILES = {
     "sump_pump",
@@ -78,6 +77,7 @@ def build_recommended_dashboard(
     *,
     hass: Any | None = None,
     entry_id: str | None = None,
+    outdoor_temperature_entity: str | None = None,
 ) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
     normalized_layout = normalize_dashboard_layout(layout)
@@ -132,6 +132,7 @@ def build_recommended_dashboard(
                 registry_lookup=registry_lookup,
                 hass=hass,
                 entry_id=entry_id,
+                outdoor_temperature_entity=outdoor_temperature_entity,
             )
         )
     if include_expert_links:
@@ -159,6 +160,7 @@ def dashboard_storage_payload(
     *,
     hass: Any | None = None,
     entry_id: str | None = None,
+    outdoor_temperature_entity: str | None = None,
 ) -> dict[str, Any]:
     """Return the payload used to create/update a Home Assistant dashboard."""
     return {
@@ -173,6 +175,7 @@ def dashboard_storage_payload(
             layout,
             hass=hass,
             entry_id=entry_id,
+            outdoor_temperature_entity=outdoor_temperature_entity,
         ),
     }
 
@@ -449,6 +452,7 @@ def _hvac_weather_section(
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
+    outdoor_temperature_entity: str | None,
 ) -> dict[str, Any]:
     circuit_id = _circuit_id(circuit)
     weather_rows, weather_notes = _resolved_entity_rows(
@@ -468,6 +472,13 @@ def _hvac_weather_section(
     cards: list[dict[str, Any]] = []
     if weather_notes:
         cards.append(_markdown_card(_note_content("HVAC weather note", weather_notes)))
+    temperature_row = _source_entity_row(
+        outdoor_temperature_entity,
+        "Outdoor Temperature",
+        include_name=True,
+    )
+    if temperature_row is not None:
+        weather_rows.append(temperature_row)
     if weather_rows:
         weather_entities = [row["entity"] for row in weather_rows]
         cards.append(
@@ -756,6 +767,18 @@ def _entity_row(
     if include_name:
         row["name"] = name
     return row
+
+
+def _source_entity_row(
+    entity_id: Any,
+    name: str,
+    *,
+    include_name: bool,
+) -> dict[str, str] | None:
+    normalized = str(entity_id or "").strip()
+    if "." not in normalized:
+        return None
+    return _entity_row(normalized, name, include_name=include_name)
 
 
 def _dedupe_entity_rows(

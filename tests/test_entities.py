@@ -4320,6 +4320,165 @@ async def test_sensor_setup_entry_adds_selected_cycle_and_electrical_graph_group
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        billing_cycle_budget_kwh=400.0,
+        default_rate_per_kwh=0.15,
+        standby_threshold_w=12.0,
+        sensors=(
+            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature"},
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_hvac_billing_cycle_usage",
+        "entry-1_hvac_cost_cycle",
+        "entry-1_hvac_always_on_power",
+        "entry-1_hvac_standby_status",
+        "entry-1_hvac_weather_context",
+    } <= unique_ids
+    assert not {
+        "entry-1_hvac_billing_cycle_forecast",
+        "entry-1_hvac_billing_cycle_budget_usage",
+        "entry-1_hvac_billing_cycle_status",
+        "entry-1_hvac_cost_current_rate",
+        "entry-1_hvac_cost_cycle_forecast",
+        "entry-1_hvac_cost_status",
+        "entry-1_hvac_standby_threshold",
+        "entry-1_hvac_outdoor_temperature",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_adds_selected_billing_forecast_group_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
+        EntityGroup,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        billing_cycle_budget_kwh=400.0,
+        default_rate_per_kwh=0.15,
+        standby_threshold_w=12.0,
+        sensors=(
+            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature",
+            CONF_SELECTED_ENTITY_GROUPS: [EntityGroup.BILLING_FORECASTS.value],
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_hvac_billing_cycle_usage",
+        "entry-1_hvac_cost_cycle",
+        "entry-1_hvac_billing_cycle_forecast",
+        "entry-1_hvac_cost_cycle_forecast",
+    } <= unique_ids
+    assert not {
+        "entry-1_hvac_billing_cycle_budget_usage",
+        "entry-1_hvac_billing_cycle_status",
+        "entry-1_hvac_cost_current_rate",
+        "entry-1_hvac_cost_status",
+        "entry-1_hvac_standby_threshold",
+        "entry-1_hvac_outdoor_temperature",
+    } & unique_ids
+
+
+@pytest.mark.parametrize(
+    ("compatibility_key", "expected_unique_id"),
+    (
+        ("sensor:cost_status", "entry-1_hvac_cost_status"),
+        ("standby_threshold", "entry-1_hvac_standby_threshold"),
+        ("sensor:outdoor_temperature", "entry-1_hvac_outdoor_temperature"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_preserves_phase_four_legacy_sensor_keys(
+    compatibility_key: str,
+    expected_unique_id: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        billing_cycle_budget_kwh=400.0,
+        default_rate_per_kwh=0.15,
+        standby_threshold_w=12.0,
+        sensors=(
+            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        options={
+            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [compatibility_key],
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature",
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert expected_unique_id in unique_ids
+    assert not {
+        "entry-1_hvac_billing_cycle_budget_usage",
+        "entry-1_hvac_billing_cycle_status",
+        "entry-1_hvac_cost_current_rate",
+        "entry-1_hvac_cost_status",
+        "entry-1_hvac_standby_threshold",
+        "entry-1_hvac_outdoor_temperature",
+    }.difference({expected_unique_id}) & unique_ids
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_car_charger_specific_diagnostics() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 

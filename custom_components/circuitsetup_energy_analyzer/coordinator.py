@@ -3100,6 +3100,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             layout,
             hass=self.hass,
             entry_id=self.entry_id,
+            outdoor_temperature_entity=self._outdoor_temperature_entity(),
         )
         action, reason = await self._async_create_or_update_lovelace_dashboard(
             dashboard_payload

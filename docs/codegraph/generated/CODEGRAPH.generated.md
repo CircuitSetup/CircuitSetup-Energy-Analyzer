@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `efd107b45028ae86e54893c707e829648088494c`
+**Commit:** `aef9b1ae963c3ed30586e2c1346bf0332ae61d58`
 **Branch:** `feature/compact-entity-model`
-**Generated:** `2026-06-19T20:10:33.125646+00:00`
+**Generated:** `2026-06-19T20:33:45.112438+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **165**
 - Python modules: **151**
-- Symbols: **3226**
+- Symbols: **3234**
 - Internal import edges: **445**
 - External import edges: **499**
 
