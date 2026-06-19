@@ -50,6 +50,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
+        "refrigerator_stale_power",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -176,6 +177,30 @@ def test_non_finite_fixture_records_quality_issue_without_alerts() -> None:
     assert metrics.false_positive_alerts == 0
 
 
+def test_stale_numeric_fixture_records_quality_issue_and_recovers() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_stale_power.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "refrigerator_stale"
+    ]
+
+    assert result.setup_issues == [
+        {
+            "timestamp": (
+                fixture.start_time + timedelta(seconds=60)
+            ).isoformat(),
+            "circuit_id": "refrigerator_stale",
+            "issue": "sensor.refrigerator_stale_power stale",
+        }
+    ]
+    assert event_offsets == [120, 240]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
     result = replay_fixture_processors(fixture)
@@ -217,13 +242,14 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 6 |" in report
+    assert "| Fixtures | 7 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report
+    assert "refrigerator_stale_power" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:
