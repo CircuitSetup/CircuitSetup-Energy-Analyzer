@@ -44,6 +44,8 @@ rtk --version
 rg --version | Select-Object -First 1
 Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\ast-grep.ast-grep_Microsoft.Winget.Source_8wekyb3d8bbwe")
 sg --version
+Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe")
+jq --version
 
 $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {

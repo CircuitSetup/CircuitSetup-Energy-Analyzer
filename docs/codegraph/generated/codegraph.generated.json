@@ -3,17 +3,17 @@
   "graph_type": "ast_static_codegraph",
   "repository": {
     "root": "C:\\Users\\John\\Documents\\CS_energy_analyzer",
-    "commit": "d407f8af4e3be796822b8a1fce2996b0d24d8e13",
+    "commit": "2fddcd776e0272f2b3d9b8f4a3fe16a0e8b1a506",
     "branch": "master",
     "dirty": true,
-    "generated_at": "2026-06-19T20:40:44.128419+00:00"
+    "generated_at": "2026-06-19T20:49:43.633752+00:00"
   },
   "scope": {
     "source_root": "custom_components/circuitsetup_energy_analyzer",
     "tests_included": true,
     "file_count": 163,
     "python_module_count": 149,
-    "symbol_count": 3189
+    "symbol_count": 3190
   },
   "limitations": [
     "Does not import or execute project code.",
@@ -4019,12 +4019,13 @@
       "kind": "python_module",
       "path": "tests/test_codex_tooling_workflow.py",
       "language": "python",
-      "loc": 18,
+      "loc": 34,
       "doc": "",
       "metadata": {},
       "parse_error": null,
       "symbols": [
-        "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow"
+        "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+        "tests.test_codex_tooling_workflow.test_jq_is_wired_into_json_workflow"
       ],
       "centrality": {
         "internal_import_indegree": 0,
@@ -47954,6 +47955,24 @@
       "path": "tests/test_codex_tooling_workflow.py",
       "lineno": 6,
       "end_lineno": 18,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "ROOT / '.codex' / 'scripts' / 'setup-windows.ps1'.read_text",
+        "ROOT / 'AGENTS.md'.read_text"
+      ],
+      "entrypoint_reason": null
+    },
+    {
+      "id": "tests.test_codex_tooling_workflow.test_jq_is_wired_into_json_workflow",
+      "module": "tests.test_codex_tooling_workflow",
+      "name": "test_jq_is_wired_into_json_workflow",
+      "qualified_name": "tests.test_codex_tooling_workflow.test_jq_is_wired_into_json_workflow",
+      "kind": "function",
+      "path": "tests/test_codex_tooling_workflow.py",
+      "lineno": 21,
+      "end_lineno": 34,
       "decorators": [],
       "bases": [],
       "doc": "",
@@ -106479,6 +106498,12 @@
     {
       "source": "tests.test_codex_tooling_workflow",
       "target": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_codex_tooling_workflow",
+      "target": "tests.test_codex_tooling_workflow.test_jq_is_wired_into_json_workflow",
       "relation": "defines",
       "internal": true
     },

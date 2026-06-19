@@ -35,6 +35,13 @@
 - Example JavaScript search: `sg run --lang javascript --pattern 'async function $NAME($$$ARGS) { $$$BODY }' custom_components/circuitsetup_energy_analyzer/frontend`.
 - For large structural changes, combine codegraph impact review with `sg` searches before editing and rerun relevant tests afterward.
 
+## JSON Workflow
+
+- Use `jq` for reading, filtering, validating, and compactly transforming JSON files or JSON command output.
+- Prefer `jq -r` for extracting scalar values for shell logic, and keep JSON transformations in `jq` instead of ad hoc string parsing.
+- In PowerShell, pass literal strings with `--arg` to avoid quote-stripping surprises, for example: `jq -r --arg key version '.[$key]' file.json`.
+- Use `jq empty file.json` as a quick JSON validity check.
+
 ## Verification
 
 - Normal PR verification:
