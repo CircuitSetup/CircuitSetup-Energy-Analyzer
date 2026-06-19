@@ -63,7 +63,7 @@ LIFECYCLE_LOG_BLOCKLIST = (
 )
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_reload_unload_lifecycle(
     hass: Any,
@@ -167,7 +167,7 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_supports_multi_workflow_sources(
     hass: Any,
@@ -345,7 +345,7 @@ async def test_config_entry_setup_supports_multi_workflow_sources(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_supports_extra_entity_only_source_output(
     hass: Any,
@@ -392,7 +392,7 @@ async def test_config_entry_setup_supports_extra_entity_only_source_output(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_supports_rain_intensity_only_source(
     hass: Any,
@@ -447,7 +447,7 @@ async def test_config_entry_setup_supports_rain_intensity_only_source(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
     hass: Any,
@@ -501,7 +501,7 @@ async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_runtime_source_changes_update_analyzer_state(
     hass: Any,
