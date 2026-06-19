@@ -48,6 +48,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "refrigerator_energy_drift",
         "normal_washer_cycle",
         "normal_ev_charger_session",
+        "normal_dryer_heat_cycle",
     ],
 )
 def test_calibration_fixture_replay_meets_expectations(fixture_name: str) -> None:
@@ -127,6 +128,29 @@ def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
     assert metrics.false_positive_alerts == 0
 
 
+def test_dryer_fixture_exercises_heat_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_dryer_heat_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_types = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "dryer"
+    ]
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "dryer"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "dryer"
+    assert fixture.circuits[0].mode == "dual_phase"
+    assert event_types == [EventType.START, EventType.STOP]
+    assert event_offsets == [60, 3660]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
 def test_duplicate_expected_feature_alert_counts_as_false_positive() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "refrigerator_energy_drift.yaml")
     result = replay_fixture_processors(fixture)
@@ -168,11 +192,12 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 4 |" in report
+    assert "| Fixtures | 5 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
     assert "normal_ev_charger_session" in report
+    assert "normal_dryer_heat_cycle" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:
