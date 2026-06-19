@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from custom_components.circuitsetup_energy_analyzer import (
     binary_sensor,
     button,
@@ -8,19 +10,23 @@ from custom_components.circuitsetup_energy_analyzer import (
     sensor,
 )
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_SELECTED_ENTITY_GROUPS,
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
     CORE_DUPLICATE_REMOVAL_PHASE,
+    ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     EntityCreationRule,
     EntityExposure,
     EntityGroup,
     compact_creation_rule_for_entity,
     compact_creation_rules_by_key,
     compact_entity_count_preview,
+    compact_sensor_rule_is_setup_managed,
     desired_compact_entity_rules,
+    selected_entity_groups_for_coordinator,
     should_create_entity,
 )
 
@@ -93,6 +99,23 @@ def test_should_create_entity_respects_detail_levels_and_selected_groups() -> No
         selected_groups={EntityGroup.CYCLE_METRICS},
         legacy_compatibility_keys=(),
     )
+
+
+def test_selected_entity_groups_options_override_entry_data() -> None:
+    coordinator = SimpleNamespace(
+        options={CONF_SELECTED_ENTITY_GROUPS: []},
+        entry_data={CONF_SELECTED_ENTITY_GROUPS: [EntityGroup.CYCLE_METRICS.value]},
+    )
+
+    assert selected_entity_groups_for_coordinator(coordinator) == set()
+    assert selected_entity_groups_for_coordinator(
+        SimpleNamespace(
+            options={},
+            entry_data={
+                CONF_SELECTED_ENTITY_GROUPS: [EntityGroup.POWER_QUALITY_DRIFT.value],
+            },
+        )
+    ) == {EntityGroup.POWER_QUALITY_DRIFT}
 
 
 def test_should_create_entity_defaults_invalid_detail_levels_to_simple() -> None:
@@ -179,8 +202,38 @@ def test_core_duplicate_rules_are_marked_for_phase_two_removal() -> None:
         "recent_activity_count",
     }
     assert rules[("sensor", "recent_activity")].removal_phase is None
-    assert rules[("sensor", "run_cycle_status")].removal_phase is None
-    assert rules[("sensor", "power_quality_evidence")].removal_phase is None
+    assert rules[("sensor", "standby_threshold")].removal_phase is None
+    assert rules[("sensor", "outdoor_temperature")].removal_phase is None
+
+
+def test_electrical_cycle_rules_are_marked_for_phase_three_creation() -> None:
+    rules = compact_creation_rules_by_key()
+
+    phase_three_legacy_sensor_keys = {
+        key
+        for (domain, key), rule in rules.items()
+        if domain == "sensor"
+        and rule.removal_phase == ELECTRICAL_CYCLE_CONDENSATION_PHASE
+    }
+
+    assert phase_three_legacy_sensor_keys == {
+        "power_quality_evidence",
+        "metric_consistency_status",
+        "leg_imbalance_status",
+        "run_cycle_status",
+    }
+    assert compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "run_cycle_count")],
+    )
+    assert compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "reactive_power_drift")],
+    )
+    assert not compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "leg_imbalance")],
+    )
+    assert not compact_sensor_rule_is_setup_managed(
+        rules[("sensor", "standby_threshold")],
+    )
 
 
 def test_compact_creation_catalog_covers_every_current_entity_description() -> None:

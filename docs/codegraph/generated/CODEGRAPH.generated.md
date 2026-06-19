@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `04a3e8d92c94fcb13a606702c244924ce5326f99`
+**Commit:** `efd107b45028ae86e54893c707e829648088494c`
 **Branch:** `feature/compact-entity-model`
-**Generated:** `2026-06-19T19:44:32.708086+00:00`
+**Generated:** `2026-06-19T20:10:33.125646+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **165**
 - Python modules: **151**
-- Symbols: **3220**
+- Symbols: **3226**
 - Internal import edges: **445**
-- External import edges: **498**
+- External import edges: **499**
 
 ## Entrypoints
 
@@ -51,7 +51,7 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.utility_comparison.UtilityComparisonProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py:53` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.water_context.WaterContextAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py:33` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.select.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/select.py:366` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3177` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3187` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:364` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:381` | Home Assistant lifecycle/API entrypoint |
 

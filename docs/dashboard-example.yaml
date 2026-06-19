@@ -298,19 +298,6 @@ views:
               entity: sensor.hvac_weather_context
               name: Outdoor Weather Context
               vertical: false
-          - type: conditional
-            conditions:
-              - entity: sensor.hvac_weather_context
-                state_not: unavailable
-              - entity: sensor.hvac_weather_context
-                state_not: unknown
-            card:
-              type: history-graph
-              title: Runtime and duty cycle
-              hours_to_show: 72
-              entities:
-                - entity: sensor.hvac_run_cycle_runtime
-                - entity: sensor.hvac_run_cycle_duty_cycle
           - type: markdown
             title: Alert Philosophy
             content: >

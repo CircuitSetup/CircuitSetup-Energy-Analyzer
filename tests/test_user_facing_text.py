@@ -616,8 +616,6 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
     intentional_feature_panel_refs = {
-        "sensor.hvac_run_cycle_duty_cycle",
-        "sensor.hvac_run_cycle_runtime",
         "sensor.hvac_outdoor_temperature",
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
@@ -885,8 +883,6 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.hvac_daily_energy_usage",
         "sensor.hvac_weather_context",
         "sensor.hvac_outdoor_temperature",
-        "sensor.hvac_run_cycle_runtime",
-        "sensor.hvac_run_cycle_duty_cycle",
         "sensor.water_heater_activity_summary",
         "sensor.water_heater_electrical_health",
         "sensor.water_heater_energy_summary",
@@ -924,6 +920,8 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.washer_water_flow_correlation",
     }
     assert expected_entities <= refs
+    assert "sensor.hvac_run_cycle_runtime" not in refs
+    assert "sensor.hvac_run_cycle_duty_cycle" not in refs
     assert not any(ref.endswith("_health_summary") for ref in refs)
     assert not any(ref.startswith("binary_sensor.") for ref in refs)
     assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text

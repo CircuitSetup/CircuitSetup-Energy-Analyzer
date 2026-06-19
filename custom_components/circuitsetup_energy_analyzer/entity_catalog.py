@@ -7,6 +7,7 @@ from typing import Any
 
 from .const import (
     CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
+    CONF_SELECTED_ENTITY_GROUPS,
     DEFAULT_ENTITY_DETAIL_LEVEL,
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
@@ -14,6 +15,7 @@ from .const import (
 )
 
 CORE_DUPLICATE_REMOVAL_PHASE = "core_duplicate_condensation"
+ELECTRICAL_CYCLE_CONDENSATION_PHASE = "electrical_cycle_condensation"
 
 
 class EntityExposure(StrEnum):
@@ -127,6 +129,30 @@ def legacy_compatibility_keys_for_coordinator(coordinator: Any) -> set[str]:
     return keys
 
 
+def selected_entity_groups_for_coordinator(coordinator: Any) -> set[EntityGroup]:
+    """Return compact expert groups selected for this config entry."""
+    options = getattr(coordinator, "options", {})
+    if isinstance(options, Mapping) and CONF_SELECTED_ENTITY_GROUPS in options:
+        return _normalize_groups_from_value(options.get(CONF_SELECTED_ENTITY_GROUPS))
+
+    entry_data = getattr(coordinator, "entry_data", {})
+    if isinstance(entry_data, Mapping):
+        return _normalize_groups_from_value(
+            entry_data.get(CONF_SELECTED_ENTITY_GROUPS)
+        )
+    return set()
+
+
+def compact_sensor_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
+    """Return whether current compact phases manage this sensor's creation."""
+    if rule.removal_phase in _SETUP_MANAGED_REMOVAL_PHASES:
+        return True
+    return (
+        rule.exposure is EntityExposure.GRAPH
+        and rule.group in _PHASE_THREE_GRAPH_GROUPS
+    )
+
+
 def desired_compact_entity_rules(
     *,
     current_entities: Collection[tuple[str, str]],
@@ -210,6 +236,18 @@ def _normalize_legacy_compatibility_keys(value: Any) -> set[str]:
     return set()
 
 
+def _normalize_groups_from_value(value: Any) -> set[EntityGroup]:
+    if value is None:
+        return set()
+    if isinstance(value, EntityGroup):
+        return {value}
+    if isinstance(value, str):
+        return _normalize_groups((value,))
+    if isinstance(value, Collection):
+        return _normalize_groups(value)
+    return set()
+
+
 def _rule(
     domain: str,
     key: str,
@@ -240,6 +278,19 @@ def _rule(
 
 
 _COUNT_DOMAINS = ("sensor", "binary_sensor", "button", "select", "number", "switch")
+_SETUP_MANAGED_REMOVAL_PHASES = frozenset(
+    {
+        CORE_DUPLICATE_REMOVAL_PHASE,
+        ELECTRICAL_CYCLE_CONDENSATION_PHASE,
+    },
+)
+_PHASE_THREE_GRAPH_GROUPS = frozenset(
+    {
+        EntityGroup.CYCLE_METRICS,
+        EntityGroup.ELECTRICAL_SCORES,
+        EntityGroup.POWER_QUALITY_DRIFT,
+    },
+)
 
 
 def _legacy_sensor(
@@ -666,21 +717,25 @@ _RULES: tuple[EntityCreationRule, ...] = (
         "power_quality_evidence",
         "sensor.<circuit>_electrical_health",
         EntityGroup.POWER_QUALITY_DRIFT,
+        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "metric_consistency_status",
         "sensor.<circuit>_electrical_health",
         EntityGroup.ELECTRICAL_SCORES,
+        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "leg_imbalance_status",
         "sensor.<circuit>_electrical_health",
         EntityGroup.ELECTRICAL_SCORES,
+        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "run_cycle_status",
         "sensor.<circuit>_activity_summary",
         EntityGroup.CYCLE_METRICS,
+        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "standby_threshold",

@@ -362,10 +362,12 @@ def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
     )
     hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
     refs = _entity_refs(hvac_section)
+    dashboard_refs = _entity_refs(dashboard)
 
+    assert "sensor.compressor_activity_summary" in dashboard_refs
     assert "sensor.compressor_weather_context" in refs
-    assert "sensor.compressor_run_cycle_runtime" in refs
-    assert "sensor.compressor_run_cycle_duty_cycle" in refs
+    assert "sensor.compressor_run_cycle_runtime" not in refs
+    assert "sensor.compressor_run_cycle_duty_cycle" not in refs
 
 
 def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() -> None:

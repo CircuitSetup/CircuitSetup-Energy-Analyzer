@@ -70,10 +70,11 @@ from .entity import (
     sync_entity_registry_visibility,
 )
 from .entity_catalog import (
-    CORE_DUPLICATE_REMOVAL_PHASE,
     compact_creation_rule_for_entity,
+    compact_sensor_rule_is_setup_managed,
     legacy_compatibility_keys_for_coordinator,
-    rule_key,
+    selected_entity_groups_for_coordinator,
+    should_create_entity,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .operating_detection import operating_state_is_running
@@ -2668,16 +2669,25 @@ def _applicable_sensor_descriptions(
 
 def _compact_sensor_descriptions_for_setup(
     descriptions: Iterable[DiagnosticSensorDescription],
+    circuit: Any,
     coordinator: Any,
 ) -> tuple[DiagnosticSensorDescription, ...]:
     compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
+    detail_level = entity_detail_level_for_coordinator(coordinator)
     compact_descriptions: list[DiagnosticSensorDescription] = []
     for description in descriptions:
         rule = compact_creation_rule_for_entity("sensor", description.key)
-        if (
-            rule.removal_phase == CORE_DUPLICATE_REMOVAL_PHASE
-            and rule_key(rule) not in compatibility_keys
-            and rule.key not in compatibility_keys
+        if not compact_sensor_rule_is_setup_managed(rule):
+            compact_descriptions.append(description)
+            continue
+        if not should_create_entity(
+            rule=rule,
+            circuit=circuit,
+            coordinator=coordinator,
+            detail_level=detail_level,
+            selected_groups=selected_groups,
+            legacy_compatibility_keys=compatibility_keys,
         ):
             continue
         compact_descriptions.append(description)
@@ -3194,6 +3204,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         )
         descriptions = _compact_sensor_descriptions_for_setup(
             descriptions,
+            raw_circuit,
             coordinator,
         )
         entities.extend(

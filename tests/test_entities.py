@@ -15,6 +15,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_SELECTED_ENTITY_GROUPS,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -4224,15 +4225,11 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
 
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
-        "entry-1_hvac_power_quality_score",
-        "entry-1_hvac_reactive_power_drift",
-        "entry-1_hvac_apparent_power_drift",
-        "entry-1_hvac_power_factor_drift",
-        "entry-1_hvac_run_cycle_count",
+        "entry-1_hvac_activity_summary",
+        "entry-1_hvac_electrical_health",
         "entry-1_hvac_current_demand",
         "entry-1_hvac_capacity_usage",
         "entry-1_hvac_leg_imbalance",
-        "entry-1_hvac_metric_consistency_score",
     } <= unique_ids
     assert not {
         "entry-1_hvac_nilm_signature_count",
@@ -4241,6 +4238,84 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
         "entry-1_hvac_utility_comparison_difference",
         "entry-1_hvac_billing_cycle_usage",
         "entry-1_hvac_cost_cycle",
+        "entry-1_hvac_power_quality_score",
+        "entry-1_hvac_power_quality_evidence",
+        "entry-1_hvac_reactive_power_drift",
+        "entry-1_hvac_apparent_power_drift",
+        "entry-1_hvac_power_factor_drift",
+        "entry-1_hvac_metric_consistency_score",
+        "entry-1_hvac_metric_consistency_status",
+        "entry-1_hvac_leg_imbalance_status",
+        "entry-1_hvac_run_cycle_count",
+        "entry-1_hvac_run_cycle_runtime",
+        "entry-1_hvac_run_cycle_duty_cycle",
+        "entry-1_hvac_run_cycle_status",
+    } & unique_ids
+
+
+@pytest.mark.asyncio
+async def test_sensor_setup_entry_adds_selected_cycle_and_electrical_graph_groups() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
+        EntityGroup,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    circuit = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
+            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
+            SensorRef("sensor.hvac_current", SensorRole.CURRENT),
+            SensorRef("sensor.hvac_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.hvac_reactive", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.hvac_apparent", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.hvac_pf", SensorRole.POWER_FACTOR),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: [
+                EntityGroup.CYCLE_METRICS.value,
+                EntityGroup.ELECTRICAL_SCORES.value,
+                EntityGroup.POWER_QUALITY_DRIFT.value,
+            ],
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "entry-1_hvac_run_cycle_count",
+        "entry-1_hvac_run_cycle_runtime",
+        "entry-1_hvac_run_cycle_duty_cycle",
+        "entry-1_hvac_power_quality_score",
+        "entry-1_hvac_metric_consistency_score",
+        "entry-1_hvac_reactive_power_drift",
+        "entry-1_hvac_apparent_power_drift",
+        "entry-1_hvac_power_factor_drift",
+    } <= unique_ids
+    assert {
+        "entry-1_hvac_activity_summary",
+        "entry-1_hvac_electrical_health",
+        "entry-1_hvac_leg_imbalance",
+    } <= unique_ids
+    assert not {
+        "entry-1_hvac_run_cycle_status",
+        "entry-1_hvac_power_quality_evidence",
+        "entry-1_hvac_metric_consistency_status",
+        "entry-1_hvac_leg_imbalance_status",
     } & unique_ids
 
 
@@ -4286,15 +4361,15 @@ async def test_sensor_setup_entry_adds_car_charger_specific_diagnostics() -> Non
         "entry-1_car_charger_demand_peak_status",
         "entry-1_car_charger_capacity_usage",
         "entry-1_car_charger_leg_imbalance",
-        "entry-1_car_charger_leg_imbalance_status",
-        "entry-1_car_charger_metric_consistency_score",
-        "entry-1_car_charger_metric_consistency_status",
         "entry-1_car_charger_daily_energy_usage",
-        "entry-1_car_charger_power_factor_drift",
     } <= unique_ids
     assert not {
         "entry-1_car_charger_run_cycle_count",
         "entry-1_car_charger_run_cycle_status",
+        "entry-1_car_charger_leg_imbalance_status",
+        "entry-1_car_charger_metric_consistency_score",
+        "entry-1_car_charger_metric_consistency_status",
+        "entry-1_car_charger_power_factor_drift",
         "entry-1_car_charger_standby_status",
         "entry-1_car_charger_nilm_signature_count",
         "entry-1_car_charger_balance_power",
@@ -4328,10 +4403,12 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
 
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
-        "entry-1_pool_pump_metric_consistency_score",
-        "entry-1_pool_pump_metric_consistency_status",
+        "entry-1_pool_pump_electrical_health",
+        "entry-1_pool_pump_current_demand",
     } <= unique_ids
     assert not {
+        "entry-1_pool_pump_metric_consistency_score",
+        "entry-1_pool_pump_metric_consistency_status",
         "entry-1_pool_pump_leg_imbalance",
         "entry-1_pool_pump_leg_imbalance_status",
     } & unique_ids
