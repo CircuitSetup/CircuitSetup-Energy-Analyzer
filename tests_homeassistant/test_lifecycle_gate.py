@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 CONF_CIRCUITS = "circuits"
+CONF_ADVANCED_SETTINGS = "advanced_settings"
 CONF_ENABLE_EXPERIMENTAL_NILM = "enable_experimental_nilm"
 CONF_MAINS_SOURCE_ENTITIES = "mains_source_entities"
 CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
@@ -499,6 +501,138 @@ async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_config_entry_runtime_source_changes_update_analyzer_state(
+    hass: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: Any,
+) -> None:
+    """Exercise source updates through the real Home Assistant listener path."""
+
+    caplog.set_level(logging.WARNING)
+
+    from custom_components.circuitsetup_energy_analyzer import coordinator as coord
+
+    monkeypatch.setattr(coord, "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS", 0.0)
+    _point_custom_components_at_worktree(monkeypatch)
+    _set_source_state(hass, "sensor.fridge_power", "0", "W", "power")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="runtime-listener-entry",
+        title="Runtime Listener Gate",
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {
+                    "operating_on_threshold_w": 25.0,
+                    "operating_off_threshold_w": 10.0,
+                    "operating_on_dwell_seconds": 0.0,
+                    "operating_off_dwell_seconds": 0.0,
+                }
+            },
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                    ],
+                }
+            ],
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "5",
+        "W",
+        "power",
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 5.0
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "off"
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "84",
+        "W",
+        "power",
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 84.0
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "pending_on"
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "85",
+        "W",
+        "power",
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 85.0
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "NaN",
+        "W",
+        "power",
+    )
+
+    assert "fridge" not in coordinator.state.latest_real_power_w_by_circuit
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "0",
+        "W",
+        "power",
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 0.0
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "pending_off"
+
+    await _set_source_state_and_wait(
+        hass,
+        coordinator,
+        "sensor.fridge_power",
+        "1",
+        "W",
+        "power",
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 1.0
+    assert coordinator.state.operating_state_by_circuit["fridge"] == "off"
+
+    assert await hass.config_entries.async_unload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+    assert _unexpected_lifecycle_log_messages(caplog.records) == []
+    assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
 def _point_custom_components_at_worktree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -524,6 +658,33 @@ def _set_source_state(
     if device_class is not None:
         attributes["device_class"] = device_class
     hass.states.async_set(entity_id, state, attributes)
+
+
+async def _set_source_state_and_wait(
+    hass: Any,
+    coordinator: Any,
+    entity_id: str,
+    state: str,
+    unit: str | None = None,
+    device_class: str | None = None,
+) -> None:
+    coordinator.last_source_update_entities = ()
+    _set_source_state(hass, entity_id, state, unit, device_class)
+    await _wait_for_runtime_update(hass, coordinator, (entity_id,))
+
+
+async def _wait_for_runtime_update(
+    hass: Any,
+    coordinator: Any,
+    changed_entities: tuple[str, ...],
+) -> None:
+    for _ in range(5):
+        await hass.async_block_till_done()
+        await asyncio.sleep(0)
+        await hass.async_block_till_done()
+        if coordinator.last_source_update_entities == changed_entities:
+            return
+    assert coordinator.last_source_update_entities == changed_entities
 
 
 def _registered_platform_domains(hass: Any, entry_id: str) -> set[str]:
