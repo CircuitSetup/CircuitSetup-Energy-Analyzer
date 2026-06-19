@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .baseline import build_baseline
@@ -220,8 +220,21 @@ def _distinct_local_date_count(
     for sample in samples:
         if sample.timestamp is None:
             continue
-        dates.add(local_date(sample.timestamp, time_zone))
+        dates.add(_sample_calendar_date(sample.timestamp, time_zone))
     return len(dates)
+
+
+def _sample_calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or _is_naive_datetime(timestamp):
+        return timestamp.date()
+    return local_date(timestamp, time_zone)
+
+
+def _is_naive_datetime(timestamp: datetime) -> bool:
+    return (
+        timestamp.tzinfo is None
+        or timestamp.tzinfo.utcoffset(timestamp) is None
+    )
 
 
 def _baseline_confidence(distinct_date_count: int, fallback_level: str) -> float:

@@ -575,6 +575,35 @@ def test_upsert_contextual_sample_replaces_same_ha_local_date() -> None:
     assert samples[0]["value"] == 9.0
 
 
+def test_upsert_contextual_sample_tolerates_legacy_naive_timestamp() -> None:
+    context = ContextKey.from_mapping({"season": "summer"})
+    samples: list[dict[str, object]] = [
+        {
+            "timestamp": "2026-06-01T03:30:00",
+            "feature": "daily_energy_kwh",
+            "value": 7.0,
+            "context": {"season": "summer"},
+            "source": "processor",
+        }
+    ]
+
+    upsert_contextual_sample(
+        samples,
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 1, 14, 0, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=8.0,
+            context=context,
+        ),
+        time_zone="America/New_York",
+    )
+
+    assert len(samples) == 1
+    assert samples[0]["timestamp"] == "2026-06-01T14:00:00+00:00"
+    assert samples[0]["value"] == 8.0
+
+
 def test_build_context_for_water_and_solar_state() -> None:
     now = datetime(2026, 6, 17, 21, tzinfo=UTC)
     water_config = CircuitConfig(

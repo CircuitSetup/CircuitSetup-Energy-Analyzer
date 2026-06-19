@@ -96,6 +96,33 @@ def test_weather_context_learns_until_similar_temperature_history_exists() -> No
     assert "learning" in result["explanation"].lower()
 
 
+def test_weather_context_tolerates_legacy_naive_history_timestamps() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=91.0,
+        current_runtime_minutes=180.0,
+        current_duty_cycle_percent=45.0,
+        history=[
+            WeatherContextSample(
+                timestamp=datetime(2026, 6, day),
+                temperature=temperature,
+                runtime_minutes=runtime,
+                duty_cycle_percent=duty,
+            )
+            for day, temperature, runtime, duty in (
+                (1, 90.0, 170.0, 44.0),
+                (2, 92.0, 190.0, 48.0),
+                (3, 89.0, 160.0, 42.0),
+            )
+        ],
+        mode="cooling",
+        observed_at=datetime(2026, 6, 4, 12),
+        time_zone="America/New_York",
+    )
+
+    assert result["status"] == "weather_correlated"
+    assert result["baseline_sample_count"] == 3
+
+
 def test_weather_context_requires_distinct_local_dates_for_baseline() -> None:
     result = evaluate_weather_context(
         outdoor_temperature=94.0,
