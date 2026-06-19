@@ -120,6 +120,107 @@ def test_policy_supports_adjusted_min_repeated_requirement() -> None:
     assert alert.last_seen == now + timedelta(hours=4)
 
 
+def test_policy_does_not_combine_expired_observations() -> None:
+    policy = ConservativeAlertPolicy(
+        min_repeated=3,
+        min_baseline_confidence=0.6,
+        max_observation_age=timedelta(hours=1),
+    )
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+
+    assert (
+        policy.observe(Observation("fridge", "cycle_duration", 2.0, 0.8, now))
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(minutes=30),
+            )
+        )
+        is None
+    )
+
+    alert = policy.observe(
+        Observation(
+            "fridge",
+            "cycle_duration",
+            2.0,
+            0.8,
+            now + timedelta(hours=2),
+        )
+    )
+
+    assert alert is None
+
+
+def test_policy_starts_new_episode_after_large_observation_gap() -> None:
+    policy = ConservativeAlertPolicy(
+        min_repeated=3,
+        min_baseline_confidence=0.6,
+        max_episode_gap=timedelta(hours=1),
+    )
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+
+    assert (
+        policy.observe(Observation("fridge", "cycle_duration", 2.0, 0.8, now))
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(minutes=30),
+            )
+        )
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(hours=2),
+            )
+        )
+        is None
+    )
+    assert (
+        policy.observe(
+            Observation(
+                "fridge",
+                "cycle_duration",
+                2.0,
+                0.8,
+                now + timedelta(hours=2, minutes=30),
+            )
+        )
+        is None
+    )
+    alert = policy.observe(
+        Observation(
+            "fridge",
+            "cycle_duration",
+            2.0,
+            0.8,
+            now + timedelta(hours=3),
+        )
+    )
+
+    assert alert is not None
+    assert alert.repeated_count == 3
+    assert alert.first_seen == now + timedelta(hours=2)
+
+
 def test_alert_evidence_features_are_readable_but_immutable() -> None:
     features = {"cycle_duration": 1.8}
     alert = AlertEvidence(
@@ -249,12 +350,104 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
 
     fingerprint = alert_feedback_fingerprint(alert, config=config)
 
-    assert fingerprint.startswith("fridge|daily_energy_spike|")
+    assert fingerprint.startswith("alert:v2|fridge|daily_energy_spike|")
     assert "sources=energy+real_power" in fingerprint
+    assert "source_map=energy:sensor.fridge_energy+real_power:sensor.fridge_power" in (
+        fingerprint
+    )
     assert "profile=refrigerator" in fingerprint
     assert "mode=single_phase" in fingerprint
     assert "power_flow=load" in fingerprint
     assert "observed=2.5-3.0" in fingerprint
     assert "ratio=25-50pct" in fingerprint
+    assert "direction=increase" in fingerprint
     assert "temp=90-95f" in fingerprint
     assert fingerprint != alert_feedback_fingerprint(cooler_context, config=config)
+
+
+def test_alert_feedback_fingerprint_changes_when_sources_are_remapped() -> None:
+    first_config = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+    remapped_config = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+        sensors=(
+            SensorRef("sensor.new_fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.new_fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+
+    assert alert_feedback_fingerprint(
+        alert,
+        config=first_config,
+    ) != alert_feedback_fingerprint(alert, config=remapped_config)
+
+
+def test_alert_feedback_fingerprint_preserves_change_direction() -> None:
+    increased = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=3.0,
+        baseline_value=2.0,
+        change_ratio=0.5,
+    )
+    decreased = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="daily_energy_spike",
+        observed_value=1.0,
+        baseline_value=2.0,
+        change_ratio=-0.5,
+    )
+
+    increase_fingerprint = alert_feedback_fingerprint(increased)
+    decrease_fingerprint = alert_feedback_fingerprint(decreased)
+
+    assert "direction=increase" in increase_fingerprint
+    assert "direction=decrease" in decrease_fingerprint
+    assert increase_fingerprint != decrease_fingerprint
+
+
+def test_alert_feedback_fingerprint_represents_zero_baseline() -> None:
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="pump",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="unexpected_runtime",
+        observed_value=12.0,
+        baseline_value=0.0,
+        change_ratio=0.0,
+    )
+
+    fingerprint = alert_feedback_fingerprint(alert)
+
+    assert "baseline=zero" in fingerprint
+    assert "ratio=zero_baseline_increase" in fingerprint

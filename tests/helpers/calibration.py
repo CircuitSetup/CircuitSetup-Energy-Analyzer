@@ -610,13 +610,28 @@ def _source_states_for_sample(
     for sensor in circuit_config.sensors:
         if sensor.entity_id not in sample.states:
             continue
+        raw_state = sample.states[sensor.entity_id]
+        state_value, last_updated = _fixture_source_state(raw_state, sample.timestamp)
         states[sensor.entity_id] = SourceState(
             entity_id=sensor.entity_id,
-            state=str(sample.states[sensor.entity_id]),
+            state=str(state_value),
             unit=sensor.unit or _unit_for_role(sensor.role),
-            last_updated=sample.timestamp,
+            last_updated=last_updated,
         )
     return states
+
+
+def _fixture_source_state(
+    raw_state: Any,
+    sample_timestamp: datetime,
+) -> tuple[Any, datetime]:
+    if not isinstance(raw_state, Mapping):
+        return raw_state, sample_timestamp
+    state_value = raw_state.get("state", raw_state.get("value", ""))
+    offset = raw_state.get("last_updated_offset_seconds")
+    if offset is None:
+        return state_value, sample_timestamp
+    return state_value, sample_timestamp + timedelta(seconds=float(offset))
 
 
 def _apply_feature_result(

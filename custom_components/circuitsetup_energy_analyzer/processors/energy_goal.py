@@ -11,6 +11,7 @@ from ..goals import (
     EnergyGoalSettings,
     evaluate_daily_energy_goal,
 )
+from ..local_time import local_date
 from ..models import AlertEvidence, CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from .base import FeatureResult, ProcessingContext, StateUpdate
@@ -57,7 +58,7 @@ class EnergyGoalProcessor:
         )
         if not isinstance(usage_evidence, dict):
             return FeatureResult()
-        if usage_evidence.get("date") != context.now.date().isoformat():
+        if usage_evidence.get("date") != _context_date(context):
             return FeatureResult()
         return self.refresh_state(
             circuit_config.circuit_id,
@@ -82,7 +83,7 @@ class EnergyGoalProcessor:
         date = (
             str(usage_evidence.get("date"))
             if isinstance(usage_evidence, dict) and usage_evidence.get("date")
-            else context.now.date().isoformat()
+            else _context_date(context)
         )
         result = evaluate_daily_energy_goal(
             circuit_id=circuit_id,
@@ -166,3 +167,9 @@ def energy_goal_evidence_payload(result: Any) -> dict[str, Any]:
 
 def _format_kwh(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _context_date(context: ProcessingContext) -> str:
+    if context.time_zone is None or context.now.tzinfo is None:
+        return context.now.date().isoformat()
+    return local_date(context.now, context.time_zone).isoformat()

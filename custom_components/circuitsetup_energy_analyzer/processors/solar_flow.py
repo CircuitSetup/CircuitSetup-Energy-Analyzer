@@ -8,6 +8,7 @@ from typing import Any
 from ..contextual_baseline import (
     ContextKey,
     ContextualBaselineSample,
+    context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -252,24 +253,27 @@ def _solar_contextual_evidence(
         )[contextual_stats_storage_key(selected)] = contextual_stats_to_dict(selected)
         store_dirty = True
 
-    samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
-        config.circuit_id,
-        [],
-    )
-    before = [dict(sample) for sample in samples]
-    for feature, value in _solar_context_values(result).items():
-        upsert_contextual_sample(
-            samples,
-            ContextualBaselineSample(
-                timestamp=context.now,
-                circuit_id=config.circuit_id,
-                feature=feature,
-                value=value,
-                context=context_key,
-                source="solar_flow",
-            ),
+    if context_allows_baseline_learning(context_key):
+        samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+            config.circuit_id,
+            [],
         )
-    return evidence, store_dirty or before != samples
+        before = [dict(sample) for sample in samples]
+        for feature, value in _solar_context_values(result).items():
+            upsert_contextual_sample(
+                samples,
+                ContextualBaselineSample(
+                    timestamp=context.now,
+                    circuit_id=config.circuit_id,
+                    feature=feature,
+                    value=value,
+                    context=context_key,
+                    source="solar_flow",
+                ),
+                time_zone=context.time_zone,
+            )
+        return evidence, store_dirty or before != samples
+    return evidence, store_dirty
 
 
 def _solar_context_key(
@@ -277,19 +281,21 @@ def _solar_context_key(
     result: SolarFlowResult,
     context: ProcessingContext,
 ) -> ContextKey:
-    return ContextKey.from_mapping(
-        {
-            "appliance_profile": config.appliance_profile.value,
-            "circuit_mode": config.mode.value,
-            "power_flow_mode": config.power_flow.value,
-            "season": season_for_datetime(context.now),
-            "solar_flow_state": solar_flow_state(
-                result.status,
-                result.solar_surplus_status,
-            ),
-            "time_of_day": time_of_day_bucket(context.now),
-        }
-    )
+    values = {
+        "appliance_profile": config.appliance_profile.value,
+        "circuit_mode": config.mode.value,
+        "power_flow_mode": config.power_flow.value,
+        "season": season_for_datetime(context.now, time_zone=context.time_zone),
+        "solar_flow_state": solar_flow_state(
+            result.status,
+            result.solar_surplus_status,
+        ),
+        "time_of_day": time_of_day_bucket(context.now, time_zone=context.time_zone),
+    }
+    maintenance = context.store_data.maintenance_by_circuit.get(config.circuit_id, {})
+    if isinstance(maintenance, Mapping) and maintenance.get("active") is True:
+        values["maintenance_state"] = "active"
+    return ContextKey.from_mapping(values)
 
 
 def _solar_context_values(result: SolarFlowResult) -> dict[str, float]:

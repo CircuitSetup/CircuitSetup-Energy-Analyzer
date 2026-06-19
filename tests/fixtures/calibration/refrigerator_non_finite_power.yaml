@@ -1,0 +1,96 @@
+schema_version: 1
+id: refrigerator_non_finite_power
+description: Refrigerator ignores a non-finite power sample and recovers without alerts.
+scenario_type: normal
+appliance_profile: refrigerator
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: refrigerator_non_finite
+    name: Refrigerator Non-Finite Input
+    appliance_profile: refrigerator
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.refrigerator_non_finite_power
+      energy: sensor.refrigerator_non_finite_energy
+      current: sensor.refrigerator_non_finite_current
+      voltage: sensor.refrigerator_non_finite_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.refrigerator_non_finite_power: "nan"
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 0.1
+      sensor.refrigerator_non_finite_voltage: 121.0
+  - t: 60
+    states:
+      sensor.refrigerator_non_finite_power: 8
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 0.1
+      sensor.refrigerator_non_finite_voltage: 121.0
+  - t: 120
+    states:
+      sensor.refrigerator_non_finite_power: 145
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 1.2
+      sensor.refrigerator_non_finite_voltage: 121.1
+  - t: 180
+    states:
+      sensor.refrigerator_non_finite_power: 145
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 1.2
+      sensor.refrigerator_non_finite_voltage: 121.1
+  - t: 240
+    states:
+      sensor.refrigerator_non_finite_power: 8
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 0.1
+      sensor.refrigerator_non_finite_voltage: 121.0
+  - t: 300
+    states:
+      sensor.refrigerator_non_finite_power: 8
+      sensor.refrigerator_non_finite_energy: 10.0
+      sensor.refrigerator_non_finite_current: 0.1
+      sensor.refrigerator_non_finite_voltage: 121.0
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 10.0
+    power_w: 8
+    current_a: 0.1
+    voltage_v: 121.0
+    daily_usage_kwh: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+labels:
+  expected_events:
+    - circuit_id: refrigerator_non_finite
+      event_type: start
+      around_t: 120
+      tolerance_seconds: 60
+    - circuit_id: refrigerator_non_finite
+      event_type: stop
+      around_t: 240
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: refrigerator_non_finite
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

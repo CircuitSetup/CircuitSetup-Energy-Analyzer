@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from math import isfinite
 from typing import Any
 
 from .baseline import build_baseline
+from .local_time import TimeZone, as_ha_local, local_date
 from .models import ApplianceProfile, CircuitConfig, PowerFlowMode
 from .normalize import NormalizedCircuitSample
 
@@ -20,6 +22,12 @@ FALLBACK_SPECIFICITY_WEIGHT = {
 }
 
 DAILY_ENERGY_FEATURE = "daily_energy_kwh"
+CONTEXT_FINGERPRINT_SCHEMA_VERSION = "context:v2"
+DEFAULT_RAIN_INTENSITY_UNIT = "mm/h"
+RAIN_ACTIVITY_CONFLICT = "rain_activity_conflict"
+RAIN_INTENSITY_UNIT_MISSING = "rain_intensity_unit_missing"
+RAIN_INTENSITY_UNIT_UNSUPPORTED = "rain_intensity_unit_unsupported"
+RAIN_INTENSITY_INVALID = "rain_intensity_invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,10 +74,13 @@ class ContextKey:
         )
 
     def fingerprint(self) -> str:
-        return "|".join(
+        dimensions = "|".join(
             f"{dimension.name}={dimension.value}"
             for dimension in self.dimensions
         )
+        if not dimensions:
+            return CONTEXT_FINGERPRINT_SCHEMA_VERSION
+        return f"{CONTEXT_FINGERPRINT_SCHEMA_VERSION}|{dimensions}"
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -103,7 +114,7 @@ class ContextualBaselineStats:
     feature: str
     context_fingerprint: str
     context: dict[str, str]
-    sample_count: int
+    sample_count: int | float
     median: float
     mad: float
     p10: float
@@ -114,9 +125,26 @@ class ContextualBaselineStats:
     fallback_level: str = "exact_context"
 
 
-def season_for_datetime(dt: datetime) -> str:
+@dataclass(frozen=True, slots=True)
+class RainContext:
+    state: str
+    intensity_bin: str
+    intensity_mm_per_hour: float | None
+    issues: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _WeightedContextualStats:
+    sample_count: int | float
+    median: float
+    mad: float
+    p10: float
+    p90: float
+
+
+def season_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
     """Return Northern Hemisphere meteorological season."""
-    month = dt.month
+    month = _calendar_datetime(dt, time_zone).month
     if month in {12, 1, 2}:
         return "winter"
     if month in {3, 4, 5}:
@@ -126,16 +154,17 @@ def season_for_datetime(dt: datetime) -> str:
     return "fall"
 
 
-def month_for_datetime(dt: datetime) -> str:
-    return f"{dt.month:02d}"
+def month_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    return f"{_calendar_datetime(dt, time_zone).month:02d}"
 
 
-def day_type_for_datetime(dt: datetime) -> str:
-    return "weekend" if dt.weekday() >= 5 else "weekday"
+def day_type_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    calendar_dt = _calendar_datetime(dt, time_zone)
+    return "weekend" if calendar_dt.weekday() >= 5 else "weekday"
 
 
-def time_of_day_bucket(dt: datetime) -> str:
-    hour = dt.hour
+def time_of_day_bucket(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    hour = _calendar_datetime(dt, time_zone).hour
     if hour < 6:
         return "night"
     if hour < 12:
@@ -175,7 +204,102 @@ def weather_mode_for_temperature(temperature_f: float | None) -> str:
     return "neutral"
 
 
-def rain_intensity_bin(intensity_per_hour: float | None) -> str:
+def normalize_rain_intensity_per_hour(
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> tuple[float | None, tuple[str, ...]]:
+    if intensity_per_hour is None:
+        return None, ()
+    intensity = _float_or_none(intensity_per_hour)
+    if intensity is None or not isfinite(intensity):
+        return None, (RAIN_INTENSITY_INVALID,)
+    intensity = max(float(intensity), 0.0)
+    if intensity == 0.0:
+        return 0.0, ()
+    normalized_unit = _normalize_rain_intensity_unit(unit)
+    if normalized_unit is None:
+        return None, (RAIN_INTENSITY_UNIT_MISSING,)
+    if normalized_unit == DEFAULT_RAIN_INTENSITY_UNIT:
+        return intensity, ()
+    if normalized_unit == "in/h":
+        return intensity * 25.4, ()
+    return None, (RAIN_INTENSITY_UNIT_UNSUPPORTED,)
+
+
+def rain_intensity_bin(
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> str:
+    intensity, _issues = normalize_rain_intensity_per_hour(
+        intensity_per_hour,
+        unit=unit,
+    )
+    return _rain_intensity_bin_from_mm(intensity)
+
+
+def rain_state(
+    active: bool | None,
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> str:
+    return rain_context(active, intensity_per_hour, unit=unit).state
+
+
+def rain_context(
+    active: bool | None,
+    intensity_per_hour: float | None,
+    *,
+    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
+) -> RainContext:
+    intensity, issues = normalize_rain_intensity_per_hour(
+        intensity_per_hour,
+        unit=unit,
+    )
+    raw_intensity = _float_or_none(intensity_per_hour)
+    raw_positive = (
+        raw_intensity is not None
+        and isfinite(raw_intensity)
+        and float(raw_intensity) > 0.0
+    )
+    active_state = _bool_or_none(active)
+    intensity_bin = _rain_intensity_bin_from_mm(intensity)
+    context_issues = list(issues)
+
+    if active_state is None:
+        if intensity is None:
+            state = "unknown" if raw_positive or raw_intensity is None else "dry"
+        elif intensity > 0.0:
+            state = _rain_state_from_intensity_bin(intensity_bin)
+        else:
+            state = "dry"
+    elif active_state is False:
+        if raw_positive:
+            context_issues.append(RAIN_ACTIVITY_CONFLICT)
+            state = (
+                "ambiguous"
+                if intensity is not None and intensity > 0.0
+                else "unknown"
+            )
+        else:
+            state = "dry"
+    elif intensity is not None and intensity == 0.0:
+        context_issues.append(RAIN_ACTIVITY_CONFLICT)
+        state = "raining"
+    else:
+        state = _rain_state_from_intensity_bin(intensity_bin)
+
+    return RainContext(
+        state=state,
+        intensity_bin=intensity_bin,
+        intensity_mm_per_hour=intensity,
+        issues=_unique_issue_tuple(context_issues),
+    )
+
+
+def _rain_intensity_bin_from_mm(intensity_per_hour: float | None) -> str:
     if intensity_per_hour is None:
         return "unknown"
     intensity = max(float(intensity_per_hour), 0.0)
@@ -188,14 +312,8 @@ def rain_intensity_bin(intensity_per_hour: float | None) -> str:
     return "heavy"
 
 
-def rain_state(active: bool | None, intensity_per_hour: float | None) -> str:
-    if active is None and intensity_per_hour is None:
-        return "unknown"
-    if not active:
-        return "dry"
-    if rain_intensity_bin(intensity_per_hour) == "heavy":
-        return "heavy_rain"
-    return "raining"
+def _rain_state_from_intensity_bin(intensity_bin: str) -> str:
+    return "heavy_rain" if intensity_bin == "heavy" else "raining"
 
 
 def water_flow_state(active: bool | None, active_minutes: float | None) -> str:
@@ -239,14 +357,17 @@ def build_contextual_baseline(
         for sample in samples
         if sample.circuit_id == circuit_id
         and sample.feature == feature
+        and context_allows_baseline_learning(sample.context)
+        and _sample_weight(sample) > 0.0
         and _context_matches_fallback(sample.context, context, fallback_level)
     ]
-    if len(matching) < required_samples:
+    effective_sample_count = sum(_sample_weight(sample) for sample in matching)
+    if effective_sample_count < required_samples:
         return None
 
-    baseline = build_baseline(feature, [sample.value for sample in matching])
+    baseline = _build_weighted_contextual_stats(feature, matching)
     timestamps = sorted(sample.timestamp for sample in matching)
-    sample_confidence = min(1.0, len(matching) / max(required_samples, 1))
+    sample_confidence = min(1.0, effective_sample_count / max(required_samples, 1))
     specificity = FALLBACK_SPECIFICITY_WEIGHT.get(fallback_level, 0.65)
     confidence = round(sample_confidence * specificity, 3)
     return ContextualBaselineStats(
@@ -254,7 +375,7 @@ def build_contextual_baseline(
         feature=feature,
         context_fingerprint=context.fingerprint(),
         context=context.as_dict(),
-        sample_count=len(matching),
+        sample_count=baseline.sample_count,
         median=baseline.median,
         mad=baseline.mad,
         p10=baseline.p10,
@@ -344,16 +465,19 @@ def build_context_for_sample(
     store_data: Any,
     now: datetime,
     feature: str,
+    time_zone: TimeZone = None,
+    calendar_timestamp: datetime | None = None,
 ) -> ContextKey:
     """Build stable contextual dimensions from existing analyzer state."""
-    del sample, feature
+    del feature
     circuit_id = circuit_config.circuit_id
+    context_timestamp = calendar_timestamp or sample.timestamp
     values: dict[str, str] = {
         "appliance_profile": circuit_config.appliance_profile.value,
         "circuit_mode": circuit_config.mode.value,
-        "day_type": day_type_for_datetime(now),
-        "season": season_for_datetime(now),
-        "time_of_day": time_of_day_bucket(now),
+        "day_type": day_type_for_datetime(context_timestamp, time_zone=time_zone),
+        "season": season_for_datetime(context_timestamp, time_zone=time_zone),
+        "time_of_day": time_of_day_bucket(context_timestamp, time_zone=time_zone),
     }
     if circuit_config.power_flow is not PowerFlowMode.LOAD:
         values["power_flow_mode"] = circuit_config.power_flow.value
@@ -375,10 +499,15 @@ def build_context_for_sample(
         circuit_id,
     )
     rain_active = _bool_or_none(rain.get("rain_sensor_active"))
-    rain_intensity = _float_or_none(rain.get("rain_intensity_per_hour"))
-    if rain_active is not None or rain_intensity is not None:
-        values["rain_state"] = rain_state(rain_active, rain_intensity)
-        values["rain_intensity_bin"] = rain_intensity_bin(rain_intensity)
+    rain_intensity, rain_unit = _rain_intensity_for_context(rain)
+    rain_issues = _rain_issues_for_context(rain)
+    if rain_active is not None or rain_intensity is not None or rain_issues:
+        rain_info = rain_context(rain_active, rain_intensity, unit=rain_unit)
+        issues = _unique_issue_tuple((*rain_issues, *rain_info.issues))
+        values["rain_state"] = rain_info.state
+        values["rain_intensity_bin"] = rain_info.intensity_bin
+        if issues:
+            values["rain_context_issue"] = _primary_rain_issue(issues)
 
     water = _mapping_for(
         getattr(state, "water_flow_context_by_circuit", {}),
@@ -426,13 +555,17 @@ def build_context_for_sample(
 
 
 def contextual_sample_to_dict(sample: ContextualBaselineSample) -> dict[str, Any]:
-    return {
+    payload = {
         "timestamp": sample.timestamp.isoformat(),
         "feature": sample.feature,
         "value": float(sample.value),
         "context": sample.context.as_dict(),
         "source": sample.source,
     }
+    weight = _sample_weight(sample)
+    if weight != 1.0:
+        payload["weight"] = weight
+    return payload
 
 
 def contextual_sample_from_dict(
@@ -495,23 +628,126 @@ def stored_contextual_samples(
 def upsert_contextual_sample(
     samples: list[dict[str, Any]],
     sample: ContextualBaselineSample,
+    *,
+    time_zone: TimeZone = None,
 ) -> None:
     """Insert or replace one feature sample for the same local date/context."""
     payload = contextual_sample_to_dict(sample)
     fingerprint = sample.context.fingerprint()
-    sample_date = sample.timestamp.date()
+    sample_date = _sample_calendar_date(sample.timestamp, time_zone)
     for index, existing in enumerate(samples):
         existing_sample = contextual_sample_from_dict(sample.circuit_id, existing)
         if existing_sample is None:
             continue
         if (
             existing_sample.feature == sample.feature
-            and existing_sample.timestamp.date() == sample_date
+            and _sample_calendar_date(existing_sample.timestamp, time_zone)
+            == sample_date
             and existing_sample.context.fingerprint() == fingerprint
         ):
             samples[index] = payload
             return
     samples.append(payload)
+
+
+def context_allows_baseline_learning(context: ContextKey) -> bool:
+    return context.as_dict().get("maintenance_state") != "active"
+
+
+def _build_weighted_contextual_stats(
+    feature: str,
+    samples: Sequence[ContextualBaselineSample],
+) -> _WeightedContextualStats:
+    weighted_values = [
+        (float(sample.value), _sample_weight(sample))
+        for sample in samples
+        if _sample_weight(sample) > 0.0
+    ]
+    if not weighted_values:
+        raise ValueError(f"{feature} baseline requires positive sample weight")
+    if all(weight.is_integer() for _value, weight in weighted_values):
+        expanded_values = [
+            value
+            for value, weight in weighted_values
+            for _index in range(int(weight))
+        ]
+        baseline = build_baseline(
+            feature,
+            expanded_values,
+        )
+        return _WeightedContextualStats(
+            sample_count=baseline.sample_count,
+            median=baseline.median,
+            mad=baseline.mad,
+            p10=baseline.p10,
+            p90=baseline.p90,
+        )
+    weighted_values.sort(key=lambda item: item[0])
+    median_value = _weighted_median(weighted_values)
+    weighted_deviations = sorted(
+        (
+            (abs(value - median_value), weight)
+            for value, weight in weighted_values
+        ),
+        key=lambda item: item[0],
+    )
+    return _WeightedContextualStats(
+        sample_count=_effective_weighted_sample_count(weighted_values),
+        median=median_value,
+        mad=_continuous_weighted_percentile(weighted_deviations, 0.50),
+        p10=_continuous_weighted_percentile(weighted_values, 0.10),
+        p90=_continuous_weighted_percentile(weighted_values, 0.90),
+    )
+
+
+def _effective_weighted_sample_count(
+    weighted_values: Sequence[tuple[float, float]],
+) -> int | float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight.is_integer():
+        return int(total_weight)
+    return round(total_weight, 3)
+
+
+def _weighted_median(weighted_values: Sequence[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight <= 0.0:
+        raise ValueError("weighted median requires positive total weight")
+    return _continuous_weighted_percentile(weighted_values, 0.50)
+
+
+def _continuous_weighted_percentile(
+    weighted_values: Sequence[tuple[float, float]],
+    percentile: float,
+) -> float:
+    total_weight = sum(weight for _value, weight in weighted_values)
+    if total_weight <= 0.0:
+        raise ValueError("weighted percentile requires positive total weight")
+    target = total_weight * min(max(percentile, 0.0), 1.0)
+    centers: list[tuple[float, float]] = []
+    cumulative = 0.0
+    for value, weight in weighted_values:
+        centers.append((cumulative + weight / 2.0, value))
+        cumulative += weight
+    if target <= centers[0][0]:
+        return float(centers[0][1])
+    for index in range(1, len(centers)):
+        left_position, left_value = centers[index - 1]
+        right_position, right_value = centers[index]
+        if target <= right_position:
+            if right_position == left_position:
+                return float(right_value)
+            ratio = (target - left_position) / (right_position - left_position)
+            return float(left_value + (right_value - left_value) * ratio)
+    return float(centers[-1][1])
+
+
+def _sample_weight(sample: ContextualBaselineSample) -> float:
+    try:
+        weight = float(sample.weight)
+    except (TypeError, ValueError):
+        return 0.0
+    return weight if isfinite(weight) and weight > 0.0 else 0.0
 
 
 def _context_matches_fallback(
@@ -548,7 +784,14 @@ def _filter_context_for_profile(
         ApplianceProfile.WATER_PUMP,
         ApplianceProfile.WELL_PUMP,
     }:
-        allowed.update({"rain_intensity_bin", "rain_state", "water_flow_state"})
+        allowed.update(
+            {
+                "rain_context_issue",
+                "rain_intensity_bin",
+                "rain_state",
+                "water_flow_state",
+            }
+        )
     elif profile is ApplianceProfile.WATER_HEATER:
         allowed.update({"day_type", "time_of_day", "water_flow_state"})
     elif profile in {ApplianceProfile.EV_CHARGER, ApplianceProfile.POOL_PUMP}:
@@ -576,6 +819,28 @@ def _solar_context_circuit_id(
     if circuit_id in solar_evidence_by_circuit:
         return circuit_id
 
+    site_candidates = [
+        candidate
+        for candidate in _solar_context_candidate_ids(
+            solar_status_by_circuit,
+            solar_evidence_by_circuit,
+        )
+        if _is_site_solar_context_candidate(candidate)
+    ]
+    if site_candidates:
+        return site_candidates[0]
+
+    candidate_ids = _solar_context_candidate_ids(
+        solar_status_by_circuit,
+        solar_evidence_by_circuit,
+    )
+    return candidate_ids[0] if candidate_ids else circuit_id
+
+
+def _solar_context_candidate_ids(
+    solar_status_by_circuit: Mapping[Any, Any],
+    solar_evidence_by_circuit: Mapping[Any, Any],
+) -> list[str]:
     candidate_ids: list[str] = []
     candidate_ids.extend(str(key) for key in solar_status_by_circuit)
     candidate_ids.extend(
@@ -583,7 +848,12 @@ def _solar_context_circuit_id(
         for key in solar_evidence_by_circuit
         if str(key) not in candidate_ids
     )
-    return candidate_ids[0] if candidate_ids else circuit_id
+    return candidate_ids
+
+
+def _is_site_solar_context_candidate(candidate_id: str) -> bool:
+    normalized = _normalize_token(candidate_id)
+    return normalized in {"mains", "main", "site", "grid", "whole_home"}
 
 
 def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:
@@ -593,11 +863,93 @@ def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:
     return item if isinstance(item, Mapping) else {}
 
 
+def _calendar_datetime(dt: datetime, time_zone: TimeZone) -> datetime:
+    if time_zone is None or _is_naive_datetime(dt):
+        return dt
+    return as_ha_local(dt, time_zone)
+
+
+def _sample_calendar_date(dt: datetime, time_zone: TimeZone) -> date:
+    if time_zone is None or _is_naive_datetime(dt):
+        return dt.date()
+    return local_date(dt, time_zone)
+
+
+def _is_naive_datetime(dt: datetime) -> bool:
+    return dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None
+
+
 def _normalize_weather_mode(value: Any, temperature: float | None) -> str:
     normalized = _normalize_token(value or "")
     if normalized in {"heating", "cooling", "neutral"}:
         return normalized
     return weather_mode_for_temperature(temperature)
+
+
+def _rain_intensity_for_context(
+    rain: Mapping[str, Any],
+) -> tuple[float | None, str | None]:
+    normalized_intensity = _float_or_none(rain.get("rain_intensity_mm_per_hour"))
+    if normalized_intensity is not None:
+        return normalized_intensity, DEFAULT_RAIN_INTENSITY_UNIT
+    return _float_or_none(rain.get("rain_intensity_per_hour")), rain.get(
+        "rain_intensity_unit",
+        DEFAULT_RAIN_INTENSITY_UNIT,
+    )
+
+
+def _rain_issues_for_context(rain: Mapping[str, Any]) -> tuple[str, ...]:
+    raw_issues = rain.get("rain_context_issues")
+    if isinstance(raw_issues, str):
+        return _unique_issue_tuple([raw_issues])
+    if not isinstance(raw_issues, Sequence):
+        return ()
+    return _unique_issue_tuple(str(issue) for issue in raw_issues if issue)
+
+
+def _normalize_rain_intensity_unit(unit: str | None) -> str | None:
+    if unit is None:
+        return None
+    normalized = str(unit).strip().lower()
+    if not normalized:
+        return None
+    compact = normalized.replace(" ", "")
+    if compact in {
+        "mm/h",
+        "mm/hr",
+        "mmperhour",
+        "millimeter/hour",
+        "millimeters/hour",
+        "millimeterperhour",
+        "millimetersperhour",
+    }:
+        return DEFAULT_RAIN_INTENSITY_UNIT
+    if compact in {
+        "in/h",
+        "in/hr",
+        "inperhour",
+        "inch/hour",
+        "inches/hour",
+        "inchperhour",
+        "inchesperhour",
+    }:
+        return "in/h"
+    return compact
+
+
+def _unique_issue_tuple(issues: Iterable[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    for issue in issues:
+        normalized = _normalize_token(issue)
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return tuple(values)
+
+
+def _primary_rain_issue(issues: Sequence[str]) -> str:
+    if RAIN_ACTIVITY_CONFLICT in issues:
+        return RAIN_ACTIVITY_CONFLICT
+    return str(issues[0])
 
 
 def _normalize_token(value: Any) -> str:

@@ -86,6 +86,36 @@ def test_record_energy_usage_marks_first_sample_waiting_for_delta() -> None:
     assert result.status_reason == "first_cumulative_sample"
 
 
+def test_record_energy_usage_uses_ha_local_date_for_daily_bucket() -> None:
+    history = {
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-06-01T02:30:00+00:00",
+        "days": [
+            {"date": "2026-05-24", "usage_kwh": 6.0},
+            {"date": "2026-05-25", "usage_kwh": 6.5},
+            {"date": "2026-05-26", "usage_kwh": 7.0},
+            {"date": "2026-05-27", "usage_kwh": 7.5},
+            {"date": "2026-05-28", "usage_kwh": 8.0},
+            {"date": "2026-05-29", "usage_kwh": 8.5},
+            {"date": "2026-05-30", "usage_kwh": 9.0},
+        ],
+    }
+
+    result = record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 6, 1, 3, 30, tzinfo=UTC),
+        energy_kwh=104.25,
+        settings=EnergyUsageSettings(),
+        time_zone="America/New_York",
+    )
+
+    assert result is not None
+    assert result.date == "2026-05-31"
+    assert result.daily_usage_kwh == 4.25
+    assert history["days"][-1] == {"date": "2026-05-31", "usage_kwh": 4.25}
+
+
 def test_record_energy_usage_keeps_waiting_until_positive_delta() -> None:
     history = {}
 

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contextual_baseline import (
-    rain_intensity_bin,
-    rain_state,
+    RainContext,
+    rain_context,
     water_flow_state,
 )
 
@@ -27,10 +27,11 @@ class RainPumpCorrelationInput:
     pump_runtime_minutes: float
     dry_baseline_minutes: float | None
     comparable_window_count: int
-    rain_active: bool
+    rain_active: bool | None
     rain_intensity_per_hour: float | None
     compressor_runtime_minutes: float
     compressor_duty_cycle_percent: float
+    rain_intensity_unit: str | None = "mm/h"
     sensitivity_delta_threshold_pct: float = RAIN_THRESHOLD_PCT
 
 
@@ -72,12 +73,17 @@ def evaluate_rain_pump_correlation(inputs: RainPumpCorrelationInput) -> dict[str
             comparable_window_count=comparable_window_count,
         )
 
+    rain_info = rain_context(
+        inputs.rain_active,
+        inputs.rain_intensity_per_hour,
+        unit=inputs.rain_intensity_unit,
+    )
     rain_adjustment = 0.0
     contributing_factors: list[str] = [f"baseline:{dry_baseline:.1f}"]
-    if inputs.rain_active:
+    if rain_info.state in {"raining", "heavy_rain"}:
         rain_adjustment = dry_baseline * 2.0
-        if inputs.rain_intensity_per_hour is not None:
-            rain_adjustment += max(float(inputs.rain_intensity_per_hour), 0.0) * 10.0
+        if rain_info.intensity_mm_per_hour is not None:
+            rain_adjustment += rain_info.intensity_mm_per_hour * 10.0
             contributing_factors.append("rain_intensity")
         contributing_factors.append("rain")
 
@@ -112,7 +118,7 @@ def evaluate_rain_pump_correlation(inputs: RainPumpCorrelationInput) -> dict[str
     confidence = _rain_confidence(
         comparable_window_count=comparable_window_count,
         status=status,
-        rain_active=inputs.rain_active,
+        rain_active=inputs.rain_active is True,
         compressor_adjustment=compressor_adjustment,
     )
     return _rain_result(
@@ -321,16 +327,23 @@ def _rain_context_attributes(
     inputs: RainPumpCorrelationInput,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    state = rain_state(inputs.rain_active, inputs.rain_intensity_per_hour)
-    intensity = rain_intensity_bin(inputs.rain_intensity_per_hour)
+    rain_info = _rain_context_for_input(inputs)
+    state = rain_info.state
+    intensity = rain_info.intensity_bin
     context_parts = [state]
-    if state in {"raining", "heavy_rain"} and intensity not in {"unknown", "none"}:
+    if state in {"ambiguous", "raining", "heavy_rain"} and intensity not in {
+        "unknown",
+        "none",
+    }:
         context_parts.append(intensity)
-    fallback_level = (
-        "rain_adjusted_context"
-        if state in {"raining", "heavy_rain"}
-        else "dry_context"
-    )
+    if state in {"raining", "heavy_rain"}:
+        fallback_level = "rain_adjusted_context"
+    elif state == "ambiguous":
+        fallback_level = "ambiguous_rain_context"
+    elif state == "unknown":
+        fallback_level = "unknown_rain_context"
+    else:
+        fallback_level = "dry_context"
     expected_runtime = _round_minutes(result.get("expected_runtime_minutes", 0.0))
     return {
         "baseline_context": ", ".join(context_parts),
@@ -340,7 +353,19 @@ def _rain_context_attributes(
         "contextual_baseline_confidence": result.get("confidence", 0.0),
         "dry_baseline_minutes": result.get("dry_baseline_minutes"),
         "rain_adjusted_baseline_minutes": expected_runtime,
+        "rain_context_issues": list(rain_info.issues),
+        "rain_intensity_bin": intensity,
+        "rain_intensity_mm_per_hour": rain_info.intensity_mm_per_hour,
+        "rain_state": state,
     }
+
+
+def _rain_context_for_input(inputs: RainPumpCorrelationInput) -> RainContext:
+    return rain_context(
+        inputs.rain_active,
+        inputs.rain_intensity_per_hour,
+        unit=inputs.rain_intensity_unit,
+    )
 
 
 def _flow_context_attributes(
@@ -379,8 +404,6 @@ def _rain_confidence(
         confidence += 0.1
     if compressor_adjustment > 0.0:
         confidence += 0.05
-    if status in {"possible_excess_pump_activity", "weather_explained"}:
-        confidence += 0.1
     return min(confidence, 0.95)
 
 
@@ -397,12 +420,6 @@ def _flow_confidence(
     if recent_flow_explains_activity:
         confidence += 0.1
     if mapped_appliance_count > 0:
-        confidence += 0.05
-    if status in {
-        "possible_flow_without_load",
-        "possible_load_without_flow",
-        "possible_sensor_problem",
-    }:
         confidence += 0.05
     return min(confidence, 0.92)
 

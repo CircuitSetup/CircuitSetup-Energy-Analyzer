@@ -42,6 +42,7 @@ class ProcessingContext:
     entry_data: Mapping[str, Any]
     known_load_circuit_ids: frozenset[str]
     sensitivity: str
+    time_zone: str | None = None
 
 
 @dataclass(slots=True)

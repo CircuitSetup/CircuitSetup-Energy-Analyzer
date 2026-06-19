@@ -1,0 +1,106 @@
+schema_version: 1
+id: hvac_voltage_sag
+description: HVAC running session records a voltage sag event without alert noise.
+scenario_type: normal
+appliance_profile: hvac
+circuit_mode: dual_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: hvac
+    name: HVAC
+    appliance_profile: hvac
+    circuit_mode: dual_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.25
+    sources:
+      power: sensor.hvac_power
+      energy: sensor.hvac_energy
+      current: sensor.hvac_current
+      voltage: sensor.hvac_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.hvac_power: 0
+      sensor.hvac_energy: 400.0
+      sensor.hvac_current: 0.0
+      sensor.hvac_voltage: 240.0
+  - t: 60
+    states:
+      sensor.hvac_power: 3600
+      sensor.hvac_energy: 400.0
+      sensor.hvac_current: 15.0
+      sensor.hvac_voltage: 240.0
+  - t: 120
+    states:
+      sensor.hvac_power: 3600
+      sensor.hvac_energy: 400.06
+      sensor.hvac_current: 15.0
+      sensor.hvac_voltage: 239.5
+  - t: 180
+    states:
+      sensor.hvac_power: 3600
+      sensor.hvac_energy: 400.12
+      sensor.hvac_current: 15.0
+      sensor.hvac_voltage: 220.0
+  - t: 240
+    states:
+      sensor.hvac_power: 3600
+      sensor.hvac_energy: 400.18
+      sensor.hvac_current: 15.0
+      sensor.hvac_voltage: 239.8
+  - t: 300
+    states:
+      sensor.hvac_power: 0
+      sensor.hvac_energy: 400.2
+      sensor.hvac_current: 0.0
+      sensor.hvac_voltage: 240.0
+  - t: 360
+    states:
+      sensor.hvac_power: 0
+      sensor.hvac_energy: 400.2
+      sensor.hvac_current: 0.0
+      sensor.hvac_voltage: 240.0
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 400.2
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 240.0
+    daily_usage_kwh: [24.0, 24.5, 23.8, 24.2, 24.0, 24.5, 23.8, 24.2, 24.0, 24.5]
+
+labels:
+  expected_events:
+    - circuit_id: hvac
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: hvac
+      event_type: voltage_sag
+      around_t: 180
+      tolerance_seconds: 0
+    - circuit_id: hvac
+      event_type: stop
+      around_t: 300
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: hvac
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null
