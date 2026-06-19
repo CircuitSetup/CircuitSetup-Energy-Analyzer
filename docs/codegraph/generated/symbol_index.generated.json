@@ -41873,6 +41873,26 @@
     "entrypoint_reason": null
   },
   {
+    "id": "tests.test_codegraph_workflow.test_codegraph_is_wired_into_codex_workflow",
+    "module": "tests.test_codegraph_workflow",
+    "name": "test_codegraph_is_wired_into_codex_workflow",
+    "qualified_name": "tests.test_codegraph_workflow.test_codegraph_is_wired_into_codex_workflow",
+    "kind": "function",
+    "path": "tests/test_codegraph_workflow.py",
+    "lineno": 6,
+    "end_lineno": 25,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "ROOT / 'AGENTS.md'.read_text",
+      "ROOT / 'docs' / 'codegraph' / 'CODEX_README.md'.read_text",
+      "update_script.exists",
+      "update_script.read_text"
+    ],
+    "entrypoint_reason": null
+  },
+  {
     "id": "tests.test_confidence_calibration.test_calibration_fixture_loader_expands_compact_segments",
     "module": "tests.test_confidence_calibration",
     "name": "test_calibration_fixture_loader_expands_compact_segments",

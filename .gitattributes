@@ -1,0 +1,5 @@
+.codex/scripts/*.ps1 text eol=lf
+.gitattributes text eol=lf
+AGENTS.md text eol=lf
+docs/codegraph/** text eol=lf
+tests/test_codegraph_workflow.py text eol=lf

@@ -51,6 +51,11 @@ HA_ENTRYPOINT_NAMES = {
 PLATFORM_MODULE_NAMES = {"sensor", "binary_sensor", "button", "select", "number"}
 
 
+def write_lf_text(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
 @dataclass(slots=True)
 class Symbol:
     id: str
@@ -758,17 +763,17 @@ def generate(repo_root: Path, source_root: Path, output_dir: Path, *, include_te
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "codegraph.generated.json").write_text(
+    write_lf_text(
+        output_dir / "codegraph.generated.json",
         json.dumps(graph, indent=2, sort_keys=False),
-        encoding="utf-8",
     )
-    (output_dir / "symbol_index.generated.json").write_text(
+    write_lf_text(
+        output_dir / "symbol_index.generated.json",
         json.dumps([asdict(symbol) for symbol in symbols], indent=2),
-        encoding="utf-8",
     )
 
     mermaid = render_mermaid(modules, edges, max_mermaid_nodes)
-    (output_dir / "import_graph.generated.mmd").write_text(mermaid, encoding="utf-8")
+    write_lf_text(output_dir / "import_graph.generated.mmd", mermaid)
 
     central_modules = sorted(
         (
@@ -814,9 +819,9 @@ def generate(repo_root: Path, source_root: Path, output_dir: Path, *, include_te
 
     markdown = f"""# Generated Codegraph
 
-**Commit:** `{commit or 'unknown'}`  
-**Branch:** `{branch or 'unknown'}`  
-**Generated:** `{generated_at}`  
+**Commit:** `{commit or 'unknown'}`
+**Branch:** `{branch or 'unknown'}`
+**Generated:** `{generated_at}`
 **Tests included:** `{include_tests}`
 
 ## Scope
@@ -861,7 +866,7 @@ def generate(repo_root: Path, source_root: Path, output_dir: Path, *, include_te
 - Read the curated `CODEGRAPH.md` for semantic/runtime relationships.
 - Re-run this generator after structural changes.
 """
-    (output_dir / "CODEGRAPH.generated.md").write_text(markdown, encoding="utf-8")
+    write_lf_text(output_dir / "CODEGRAPH.generated.md", markdown)
 
     print(f"Wrote codegraph to {output_dir}")
     print(

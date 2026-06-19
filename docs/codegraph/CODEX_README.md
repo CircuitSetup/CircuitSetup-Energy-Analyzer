@@ -2,9 +2,9 @@
 
 1. Read `CODEGRAPH.md`.
 2. Confirm the repository checkout contains `f0dee7a` or a newer descendant.
-3. Copy/run `generate_codegraph.py` from the repository root:
+3. Run the installed generator from the repository root:
    ```bash
-   python generate_codegraph.py . --output-dir docs/codegraph/generated
+   python docs/codegraph/generate_codegraph.py . --output-dir docs/codegraph/generated
    ```
 4. Before editing a module:
    - inspect its node in `codegraph.json`;

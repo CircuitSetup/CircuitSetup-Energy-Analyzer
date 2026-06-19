@@ -18,6 +18,15 @@
 - Use `.codex/scripts/verify-pr.ps1 -HomeAssistant` when entity, config-flow, or Home Assistant platform behavior changes.
 - Use `.codex/scripts/verify-release.ps1` before tagging or publishing releases.
 
+## Codegraph
+
+- Read `docs/codegraph/CODEGRAPH.md` before cross-cutting changes or unfamiliar module work.
+- Before editing a module, inspect its node in `docs/codegraph/codegraph.json`, inspect inbound and outbound imports in `docs/codegraph/generated/codegraph.generated.json`, and identify related tests in `tests/` and `tests_homeassistant/`.
+- Use `docs/codegraph/CODEGRAPH.md` for semantic ownership and `docs/codegraph/generated/CODEGRAPH.generated.md` for exact AST-derived imports, definitions, entrypoints, and import cycles.
+- Regenerate the checked-out graph after adding, removing, or moving modules; changing imports, entrypoints, processor registration, platform surfaces, panel API endpoints, storage ownership, or coordinator pipeline structure.
+- Regenerate with `.codex/scripts/update-codegraph.ps1`, which writes to `docs/codegraph/generated`.
+- Include generated graph changes in the same commit/PR as the structural code changes that required regeneration.
+
 ## Verification
 
 - Normal PR verification:

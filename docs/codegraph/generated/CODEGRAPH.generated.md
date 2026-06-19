@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `f0dee7a5a2104dcad4d099b97b9f3f2cc3d44780`  
-**Branch:** `chore/install-codegraph`  
-**Generated:** `2026-06-19T18:27:56.337326+00:00`  
+**Commit:** `0e80f8d9009e56d84c30f24569bd6592a4652522`
+**Branch:** `master`
+**Generated:** `2026-06-19T18:44:42.744545+00:00`
 **Tests included:** `True`
 
 ## Scope
 
-- Files: **161**
-- Python modules: **147**
-- Symbols: **3187**
+- Files: **162**
+- Python modules: **148**
+- Symbols: **3188**
 - Internal import edges: **439**
-- External import edges: **489**
+- External import edges: **490**
 
 ## Entrypoints
 
