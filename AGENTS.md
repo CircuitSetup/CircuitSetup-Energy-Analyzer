@@ -27,6 +27,14 @@
 - Regenerate with `.codex/scripts/update-codegraph.ps1`, which writes to `docs/codegraph/generated`.
 - Include generated graph changes in the same commit/PR as the structural code changes that required regeneration.
 
+## Structural Search
+
+- Use `rg` or `rtk grep` for plain-text search, file discovery, logs, and exact string checks.
+- Use ast-grep via `sg` when matching Python or JavaScript syntax, validating structural refactors, finding call/class/function shapes, or checking patterns where comments/strings should not count.
+- Example Python search: `sg run --lang python --pattern 'class $CLASS: $$$BODY' custom_components tests`.
+- Example JavaScript search: `sg run --lang javascript --pattern 'async function $NAME($$$ARGS) { $$$BODY }' custom_components/circuitsetup_energy_analyzer/frontend`.
+- For large structural changes, combine codegraph impact review with `sg` searches before editing and rerun relevant tests afterward.
+
 ## Verification
 
 - Normal PR verification:

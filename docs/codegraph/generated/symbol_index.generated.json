@@ -41893,6 +41893,24 @@
     "entrypoint_reason": null
   },
   {
+    "id": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+    "module": "tests.test_codex_tooling_workflow",
+    "name": "test_ast_grep_is_wired_into_codex_workflow",
+    "qualified_name": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+    "kind": "function",
+    "path": "tests/test_codex_tooling_workflow.py",
+    "lineno": 6,
+    "end_lineno": 18,
+    "decorators": [],
+    "bases": [],
+    "doc": "",
+    "calls": [
+      "ROOT / '.codex' / 'scripts' / 'setup-windows.ps1'.read_text",
+      "ROOT / 'AGENTS.md'.read_text"
+    ],
+    "entrypoint_reason": null
+  },
+  {
     "id": "tests.test_confidence_calibration.test_calibration_fixture_loader_expands_compact_segments",
     "module": "tests.test_confidence_calibration",
     "name": "test_calibration_fixture_loader_expands_compact_segments",

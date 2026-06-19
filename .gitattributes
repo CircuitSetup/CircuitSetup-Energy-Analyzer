@@ -3,3 +3,4 @@
 AGENTS.md text eol=lf
 docs/codegraph/** text eol=lf
 tests/test_codegraph_workflow.py text eol=lf
+tests/test_codex_tooling_workflow.py text eol=lf

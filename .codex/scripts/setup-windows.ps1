@@ -17,6 +17,17 @@ function Invoke-Optional {
     }
 }
 
+function Add-PathIfExists {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    if ((Test-Path -LiteralPath $Path) -and (($env:Path -split ";") -notcontains $Path)) {
+        $env:Path = "$Path;$env:Path"
+    }
+}
+
 $repoRoot = (& git rev-parse --show-toplevel).Trim()
 if (-not $repoRoot) {
     throw "This script must run inside a git checkout."
@@ -31,6 +42,8 @@ Write-Host "Setting up CircuitSetup Energy Analyzer at $repoRoot"
 
 rtk --version
 rg --version | Select-Object -First 1
+Add-PathIfExists -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\ast-grep.ast-grep_Microsoft.Winget.Source_8wekyb3d8bbwe")
+sg --version
 
 $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {

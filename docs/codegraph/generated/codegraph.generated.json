@@ -3,17 +3,17 @@
   "graph_type": "ast_static_codegraph",
   "repository": {
     "root": "C:\\Users\\John\\Documents\\CS_energy_analyzer",
-    "commit": "0e80f8d9009e56d84c30f24569bd6592a4652522",
+    "commit": "d407f8af4e3be796822b8a1fce2996b0d24d8e13",
     "branch": "master",
     "dirty": true,
-    "generated_at": "2026-06-19T18:44:42.744545+00:00"
+    "generated_at": "2026-06-19T20:40:44.128419+00:00"
   },
   "scope": {
     "source_root": "custom_components/circuitsetup_energy_analyzer",
     "tests_included": true,
-    "file_count": 162,
-    "python_module_count": 148,
-    "symbol_count": 3188
+    "file_count": 163,
+    "python_module_count": 149,
+    "symbol_count": 3189
   },
   "limitations": [
     "Does not import or execute project code.",
@@ -4008,6 +4008,23 @@
       "parse_error": null,
       "symbols": [
         "tests.test_codegraph_workflow.test_codegraph_is_wired_into_codex_workflow"
+      ],
+      "centrality": {
+        "internal_import_indegree": 0,
+        "internal_import_outdegree": 0
+      }
+    },
+    {
+      "id": "tests.test_codex_tooling_workflow",
+      "kind": "python_module",
+      "path": "tests/test_codex_tooling_workflow.py",
+      "language": "python",
+      "loc": 18,
+      "doc": "",
+      "metadata": {},
+      "parse_error": null,
+      "symbols": [
+        "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow"
       ],
       "centrality": {
         "internal_import_indegree": 0,
@@ -47929,6 +47946,24 @@
       "entrypoint_reason": null
     },
     {
+      "id": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+      "module": "tests.test_codex_tooling_workflow",
+      "name": "test_ast_grep_is_wired_into_codex_workflow",
+      "qualified_name": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
+      "kind": "function",
+      "path": "tests/test_codex_tooling_workflow.py",
+      "lineno": 6,
+      "end_lineno": 18,
+      "decorators": [],
+      "bases": [],
+      "doc": "",
+      "calls": [
+        "ROOT / '.codex' / 'scripts' / 'setup-windows.ps1'.read_text",
+        "ROOT / 'AGENTS.md'.read_text"
+      ],
+      "entrypoint_reason": null
+    },
+    {
       "id": "tests.test_confidence_calibration.test_calibration_fixture_loader_expands_compact_segments",
       "module": "tests.test_confidence_calibration",
       "name": "test_calibration_fixture_loader_expands_compact_segments",
@@ -77186,6 +77221,14 @@
       "raw": "pathlib:Path"
     },
     {
+      "source": "tests.test_codex_tooling_workflow",
+      "target": "external:stdlib:pathlib",
+      "relation": "imports",
+      "internal": false,
+      "lineno": 1,
+      "raw": "pathlib:Path"
+    },
+    {
       "source": "tests.test_confidence_calibration",
       "target": "external:stdlib:__future__",
       "relation": "imports",
@@ -106430,6 +106473,12 @@
     {
       "source": "tests.test_codegraph_workflow",
       "target": "tests.test_codegraph_workflow.test_codegraph_is_wired_into_codex_workflow",
+      "relation": "defines",
+      "internal": true
+    },
+    {
+      "source": "tests.test_codex_tooling_workflow",
+      "target": "tests.test_codex_tooling_workflow.test_ast_grep_is_wired_into_codex_workflow",
       "relation": "defines",
       "internal": true
     },

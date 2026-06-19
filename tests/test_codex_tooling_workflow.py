@@ -1,0 +1,18 @@
+from pathlib import Path
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_ast_grep_is_wired_into_codex_workflow() -> None:
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    setup_script = (ROOT / ".codex" / "scripts" / "setup-windows.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## Structural Search" in agents
+    assert "ast-grep" in agents
+    assert "sg run --lang python" in agents
+    assert "rg" in agents
+
+    assert "sg --version" in setup_script
+    assert "ast-grep" in setup_script
