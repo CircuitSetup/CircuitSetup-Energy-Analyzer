@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 CONF_CIRCUITS = "circuits"
@@ -14,6 +15,15 @@ DOMAIN = "circuitsetup_energy_analyzer"
 PANEL_SETUP_KEY = "_panel_setup"
 PANEL_REGISTERED_VALUE = "registered"
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
+EXPECTED_PLATFORM_DOMAINS = frozenset(
+    {
+        "binary_sensor",
+        "button",
+        "number",
+        "select",
+        "sensor",
+    }
+)
 LIFECYCLE_LOG_BLOCKLIST = (
     "traceback",
     "duplicate entity",
@@ -102,6 +112,10 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     )
     assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
     assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_PLATFORM_DOMAINS
+    )
 
     assert await hass.config_entries.async_reload(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -113,6 +127,10 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert reloaded_coordinator.source_entities == coordinator.source_entities
     assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
     assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
+    assert (
+        _registered_platform_domains(hass, entry.entry_id)
+        == EXPECTED_PLATFORM_DOMAINS
+    )
 
     assert await hass.config_entries.async_unload(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -130,6 +148,15 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
     assert _unexpected_lifecycle_log_messages(caplog.records) == []
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+def _registered_platform_domains(hass: Any, entry_id: str) -> set[str]:
+    registry = er.async_get(hass)
+    return {
+        entity_entry.domain
+        for entity_entry in er.async_entries_for_config_entry(registry, entry_id)
+        if entity_entry.platform == DOMAIN
+    }
 
 
 def _unexpected_lifecycle_log_messages(
