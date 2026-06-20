@@ -3584,19 +3584,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
         if user_input is None:
+            menu_options = [
+                "sources",
+                "mains",
+                "assign",
+                "utility",
+                "dashboard",
+                "entity_detail",
+            ]
+            if _compact_migration_has_legacy_entities(self):
+                menu_options.append("compact_migration")
+            menu_options.extend(["recommendations", "advanced"])
             return self.async_show_menu(
                 step_id="init",
-                menu_options=[
-                    "sources",
-                    "mains",
-                    "assign",
-                    "utility",
-                    "dashboard",
-                    "entity_detail",
-                    "compact_migration",
-                    "recommendations",
-                    "advanced",
-                ],
+                menu_options=menu_options,
             )
 
         return await self.async_step_sources(user_input)
@@ -4733,6 +4734,14 @@ def _compact_migration_form(
         errors=errors or {},
         description_placeholders=_compact_migration_placeholders(flow),
     )
+
+
+def _compact_migration_has_legacy_entities(flow: Any) -> bool:
+    preview = compact_migration_preview_for_hass(
+        getattr(flow, "hass", None),
+        entry_id=getattr(getattr(flow, "_config_entry", None), "entry_id", ""),
+    )
+    return int(preview.get("remove_count", 0) or 0) > 0
 
 
 def _compact_migration_placeholders(flow: Any) -> dict[str, str]:

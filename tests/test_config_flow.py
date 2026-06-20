@@ -675,7 +675,6 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "utility",
         "dashboard",
         "entity_detail",
-        "compact_migration",
         "recommendations",
         "advanced",
     ]
@@ -1635,6 +1634,69 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
     assert config_entries.updates == [(entry, {"options": result["data"]})]
     assert config_entries.reloads == ["entry-1"]
     assert entry.options == result["data"]
+
+
+@pytest.mark.asyncio
+async def test_options_flow_init_hides_compact_migration_without_legacy_entities(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "select.fridge_alert_sensitivity": SimpleNamespace(
+                    entity_id="select.fridge_alert_sensitivity",
+                    unique_id="entry-1_fridge_alert_sensitivity",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by=None,
+                )
+            }
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(entity_registry=FakeRegistry())
+
+    menu = await flow.async_step_init()
+
+    assert menu["type"] == "menu"
+    assert menu["menu_options"] == [
+        "sources",
+        "mains",
+        "assign",
+        "utility",
+        "dashboard",
+        "entity_detail",
+        "recommendations",
+        "advanced",
+    ]
 
 
 @pytest.mark.asyncio
