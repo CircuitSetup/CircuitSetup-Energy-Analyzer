@@ -3,10 +3,10 @@
   "graph_type": "ast_static_codegraph",
   "repository": {
     "root": "C:\\Users\\John\\Documents\\CS_energy_analyzer",
-    "commit": "8ec45462304b574a3f665bd838369a5d3acddd64",
-    "branch": "fix/mains-activity-alert",
-    "dirty": false,
-    "generated_at": "2026-06-20T15:58:04.839511+00:00"
+    "commit": "902b8dbe4fd1639d2e8f45578abbc3076b34dbb2",
+    "branch": "release/v0.9.3",
+    "dirty": true,
+    "generated_at": "2026-06-20T21:50:41.578511+00:00"
   },
   "scope": {
     "source_root": "custom_components/circuitsetup_energy_analyzer",
@@ -1785,7 +1785,7 @@
       "metadata": {
         "domain": "circuitsetup_energy_analyzer",
         "name": "CircuitSetup Energy Analyzer",
-        "version": "0.9.2",
+        "version": "0.9.3",
         "dependencies": [
           "frontend",
           "http",
