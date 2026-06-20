@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from ..activity_alerts import ActivityAlertSettings, evaluate_activity_alert
 from ..alerting import Observation
 from ..cycles import summarize_circuit_cycles
-from ..models import AlertEvidence, CircuitConfig
+from ..models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_state_is_running,
@@ -78,6 +78,7 @@ class ActivityAlertProcessor:
                 circuit_config,
                 circuit_config.circuit_id,
             ),
+            suppress_active_duration_alert=_is_mains_nilm(circuit_config),
         )
         if evidence is None:
             return FeatureResult()
@@ -124,3 +125,10 @@ def _operating_state_is_unavailable(
         return False
     snapshot = snapshots.get(circuit_id)
     return snapshot is not None and operating_state_is_running(snapshot) is None
+
+
+def _is_mains_nilm(config: CircuitConfig) -> bool:
+    return (
+        config.mode is CircuitMode.MAINS_NILM
+        or config.appliance_profile is ApplianceProfile.MAINS_NILM
+    )

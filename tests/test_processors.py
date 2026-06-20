@@ -1526,6 +1526,57 @@ def test_activity_alert_processor_returns_left_on_alert() -> None:
     assert "Dryer has been active for 45 minutes" in result.alerts[0].message
 
 
+def test_activity_alert_processor_skips_left_on_for_mains_nilm_config() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=45),
+                circuit_id="main_panel",
+                event_type=EventType.START,
+            )
+        ]
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="main_panel",
+        name="Main Panel",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+    assert policy.observations == []
+
+
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState

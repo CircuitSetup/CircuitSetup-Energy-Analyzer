@@ -45,14 +45,14 @@ def test_activity_alert_flags_active_run_over_configured_duration() -> None:
     }
 
 
-def test_activity_alert_skips_active_duration_for_mains() -> None:
+def test_activity_alert_skips_active_duration_when_suppressed() -> None:
     from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
         ActivityAlertSettings,
         evaluate_activity_alert,
     )
 
     summary = CircuitCycleSummary(
-        circuit_id="mains",
+        circuit_id="main_panel",
         date="2026-06-16",
         status="running",
         start_count=1,
@@ -67,10 +67,11 @@ def test_activity_alert_skips_active_duration_for_mains() -> None:
 
     assert (
         evaluate_activity_alert(
-            circuit_id="mains",
-            circuit_name="Mains",
+            circuit_id="main_panel",
+            circuit_name="Main Panel",
             summary=summary,
             settings=ActivityAlertSettings(max_active_minutes=66.0),
+            suppress_active_duration_alert=True,
         )
         is None
     )
