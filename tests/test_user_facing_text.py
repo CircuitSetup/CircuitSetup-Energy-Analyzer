@@ -1183,6 +1183,58 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
     assert "originalIndex" in asset
 
 
+def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "_recommendationValueRows(recommendation)" in asset
+    assert 'String((recommendation && recommendation.status) || "pending")' in asset
+    assert (
+        "const currentValue = applied && recommendation.suggested_value !== "
+        "undefined ? recommendation.suggested_value : recommendation.current_value;"
+    ) in asset
+    assert (
+        "const suggestedValue = applied ? undefined : recommendation.suggested_value;"
+        in asset
+    )
+    assert '${this._escape(recommendation.feature || "Suggested setting")}' not in asset
+
+
+def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "_renderSelectedRecommendationEvidence()" in asset
+    assert "selected_recommendation" in asset
+    assert "Recommendation Evidence" in asset
+    assert "Previewing evidence for" in asset
+
+
+def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:
+    asset_path = (
+        INTEGRATION_DIR
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+
+    asset = asset_path.read_text(encoding="utf-8")
+
+    assert "_renderAndScrollToTop()" in asset
+    assert "_scrollToTop()" in asset
+    assert "requestAnimationFrame" in asset
+    assert "window.scrollTo({ top: 0" in asset
+
+
 def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
     asset_path = (
         INTEGRATION_DIR

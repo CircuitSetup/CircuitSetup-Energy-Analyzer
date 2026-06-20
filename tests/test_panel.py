@@ -558,6 +558,49 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     }
 
 
+def test_alert_evidence_payload_selects_requested_recommendation_preview() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="ev_charger", feature="capacity_warning_ratio")
+    coordinator = _coordinator(alert, config=_config("ev_charger"))
+    coordinator.entry_id = "entry-1"
+    recommendation_id = "ev_charger:warning_ratio:v1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "ev_charger": [
+            {
+                "recommendation_id": recommendation_id,
+                "circuit_id": "ev_charger",
+                "setting_key": "warning_ratio",
+                "setting_label": "Capacity Warning Ratio",
+                "current_value": 0.9,
+                "suggested_value": 0.75,
+                "reason": "Observed sustained high-current samples.",
+                "evidence": {
+                    "observed_samples": 8,
+                    "p95_current_amps": 36.4,
+                    "source_entities": ["sensor.ev_charger_current"],
+                },
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        circuit_id="ev_charger",
+        recommendation_id=recommendation_id,
+    )
+
+    assert payload["requested_recommendation_id"] == recommendation_id
+    selected = payload["selected_recommendation"]
+    assert selected["recommendation_id"] == recommendation_id
+    assert selected["display_label"] == "Capacity Warning Ratio"
+    assert selected["evidence_preview"] == (
+        "Observed Samples: 8; P95 Current Amps: 36.4"
+    )
+
+
 def test_alert_evidence_payload_guides_always_on_recommendations() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

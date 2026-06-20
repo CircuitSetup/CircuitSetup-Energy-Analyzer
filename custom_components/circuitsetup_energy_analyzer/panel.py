@@ -64,7 +64,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260619-suggested-settings-actions-v3"
+PANEL_MODULE_VERSION = "20260620-appliance-evidence-panels-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 
 _PANEL_SETUP_KEY = "_panel_setup"
@@ -104,6 +104,7 @@ class AlertEvidenceView(HomeAssistantView):
             alert_id=request.query.get("alert_id"),
             circuit_id=request.query.get("circuit_id"),
             feature=request.query.get("feature"),
+            recommendation_id=request.query.get(ATTR_RECOMMENDATION_ID),
             include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
         )
         return web.json_response(payload)
@@ -146,12 +147,14 @@ def alert_evidence_payload(
     alert_id: str | None = None,
     circuit_id: str | None = None,
     feature: str | None = None,
+    recommendation_id: str | None = None,
     include_all_nilm: bool = False,
 ) -> dict[str, Any]:
     """Return the dynamic panel payload for an alert or circuit fallback."""
     requested_alert_id = alert_id or None
     requested_circuit_id = circuit_id or None
     requested_feature = str(feature or "").strip() or None
+    requested_recommendation_id = str(recommendation_id or "").strip() or None
     coordinators = tuple(coordinators)
 
     if requested_alert_id:
@@ -165,6 +168,7 @@ def alert_evidence_payload(
                         requested_alert_id=requested_alert_id,
                         requested_circuit_id=requested_circuit_id,
                         requested_feature=requested_feature,
+                        requested_recommendation_id=requested_recommendation_id,
                         include_all_nilm=include_all_nilm,
                     )
 
@@ -183,6 +187,7 @@ def alert_evidence_payload(
                     requested_alert_id=requested_alert_id,
                     requested_circuit_id=requested_circuit_id,
                     requested_feature=requested_feature,
+                    requested_recommendation_id=requested_recommendation_id,
                     include_all_nilm=include_all_nilm,
                 )
             if detail := _state_alert_detail(
@@ -217,6 +222,7 @@ def alert_evidence_payload(
                         ),
                     },
                     requested_feature,
+                    requested_recommendation_id=requested_recommendation_id,
                 )
             config = _config_for_circuit(coordinator, requested_circuit_id)
             if config is not None and fallback_circuit is None:
@@ -256,6 +262,7 @@ def alert_evidence_payload(
                 ),
             },
             requested_feature,
+            requested_recommendation_id=requested_recommendation_id,
         )
 
     return _with_requested_feature(
@@ -274,6 +281,7 @@ def alert_evidence_payload(
             ),
         },
         requested_feature,
+        requested_recommendation_id=requested_recommendation_id,
     )
 
 
@@ -285,6 +293,7 @@ def _payload_for_alert(
     requested_alert_id: str | None,
     requested_circuit_id: str | None,
     requested_feature: str | None,
+    requested_recommendation_id: str | None,
     include_all_nilm: bool,
 ) -> dict[str, Any]:
     config = _config_for_circuit(coordinator, alert.circuit_id)
@@ -313,16 +322,39 @@ def _payload_for_alert(
             ),
         },
         requested_feature,
+        requested_recommendation_id=requested_recommendation_id,
     )
 
 
 def _with_requested_feature(
     payload: dict[str, Any],
     requested_feature: str | None,
+    *,
+    requested_recommendation_id: str | None = None,
 ) -> dict[str, Any]:
     if requested_feature:
         payload["requested_feature"] = requested_feature
+    if requested_recommendation_id:
+        payload["requested_recommendation_id"] = requested_recommendation_id
+        selected = _selected_recommendation(
+            payload.get("setting_recommendations"),
+            requested_recommendation_id,
+        )
+        if selected is not None:
+            payload["selected_recommendation"] = selected
     return payload
+
+
+def _selected_recommendation(
+    recommendations: Any,
+    recommendation_id: str,
+) -> dict[str, Any] | None:
+    for recommendation in _iter_items(recommendations):
+        if not isinstance(recommendation, Mapping):
+            continue
+        if recommendation.get(ATTR_RECOMMENDATION_ID) == recommendation_id:
+            return dict(recommendation)
+    return None
 
 
 def _actions_for_context(
