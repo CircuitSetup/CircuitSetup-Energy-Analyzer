@@ -111,6 +111,7 @@
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
           "entity_detail": "👁️ Entity Detail Level",
+          "compact_migration": "🧹 Migrate To Compact Entity Model",
           "recommendations": "💡 Review Suggested Settings",
           "advanced": "🛠️ Advanced Circuit Settings"
         }
@@ -197,6 +198,16 @@
         },
         "data_description": {
           "entity_detail_level": "Simple creates summary entities only. Standard also creates configured feature status entities. Expert creates selected detailed diagnostic entities for troubleshooting and custom dashboards."
+        }
+      },
+      "compact_migration": {
+        "title": "Migrate To Compact Entity Model",
+        "description": "Review the compact entity model migration preview before removing legacy analyzer entities.\n\nRemove:\n{will_remove}\n\nRemain:\n{will_remain}\n\nNew maintenance switch:\n{new_maintenance_switch}\n\nExpected count: {before_count} before, {after_count} after. Customized row warning: {warning}",
+        "data": {
+          "confirm_compact_migration": "Remove Legacy Entities"
+        },
+        "data_description": {
+          "confirm_compact_migration": "Confirm that the listed legacy entities can be removed now. Re-enabled optional entities may return later with default IDs."
         }
       },
       "dashboard": {
@@ -496,7 +507,8 @@
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
-      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
+      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
+      "confirm_required": "Check Remove Legacy Entities to confirm this compact entity model migration."
     }
   },
   "entity": {
@@ -827,6 +839,10 @@
     "low_nilm_confidence": {
       "title": "Energy Analyzer NILM confidence is low",
       "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications. Suggested fix: {fix}"
+    },
+    "compact_entity_model_available": {
+      "title": "Compact entity model available",
+      "description": "This integration entry has {legacy_count} legacy analyzer entities that can be migrated to the compact entity model. Next step: {recommended_action}"
     }
   }
 }

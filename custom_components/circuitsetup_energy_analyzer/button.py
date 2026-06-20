@@ -19,7 +19,7 @@ from .entity import (
 from .entity_catalog import (
     compact_creation_rule_for_entity,
     compact_rule_is_setup_managed,
-    legacy_compatibility_keys_for_coordinator,
+    legacy_compatibility_keys_for_setup,
     selected_entity_groups_for_coordinator,
     should_create_entity,
 )
@@ -119,14 +119,6 @@ GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
         icon="mdi:tune-variant",
     ),
 )
-
-_LEGACY_MAINTENANCE_BUTTON_KEYS = frozenset(
-    {
-        "start_maintenance",
-        "end_maintenance",
-    }
-)
-
 
 class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
     """Button entity exposing a daily circuit action."""
@@ -304,10 +296,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[ButtonEntity] = []
-    compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    compatibility_keys = legacy_compatibility_keys_for_setup(
+        hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
     detail_level = entity_detail_level_for_coordinator(coordinator)
     selected_groups = selected_entity_groups_for_coordinator(coordinator)
-    existing_legacy_unique_ids = _existing_legacy_button_unique_ids(hass, entry_id)
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
@@ -326,11 +321,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 description,
                 circuit,
                 coordinator,
-                entry_id=entry_id,
                 detail_level=detail_level,
                 selected_groups=selected_groups,
                 legacy_compatibility_keys=compatibility_keys,
-                existing_legacy_unique_ids=existing_legacy_unique_ids,
             )
         )
 
@@ -379,20 +372,12 @@ def _button_description_should_create(
     circuit: Any,
     coordinator: Any,
     *,
-    entry_id: str,
     detail_level: str,
     selected_groups: set[Any],
     legacy_compatibility_keys: set[str],
-    existing_legacy_unique_ids: set[str],
 ) -> bool:
     rule = compact_creation_rule_for_entity("button", description.key)
     if not compact_rule_is_setup_managed(rule):
-        return True
-    if (
-        rule.legacy
-        and f"{entry_id}_{circuit.circuit_id}_{description.key}"
-        in existing_legacy_unique_ids
-    ):
         return True
     return should_create_entity(
         rule=rule,
@@ -402,42 +387,6 @@ def _button_description_should_create(
         selected_groups=selected_groups,
         legacy_compatibility_keys=legacy_compatibility_keys,
     )
-
-
-def _existing_legacy_button_unique_ids(hass: Any, entry_id: str) -> set[str]:
-    registry = _entity_registry_for_hass(hass)
-    if registry is None:
-        return set()
-    entries = getattr(registry, "entities", {})
-    values = entries.values() if hasattr(entries, "values") else entries
-    legacy_unique_ids: set[str] = set()
-    for entry in values:
-        entity_id = str(getattr(entry, "entity_id", ""))
-        unique_id = str(getattr(entry, "unique_id", ""))
-        if (
-            getattr(entry, "config_entry_id", None) != entry_id
-            or getattr(entry, "platform", None) != DOMAIN
-            or not entity_id.startswith("button.")
-            or not unique_id.startswith(f"{entry_id}_")
-        ):
-            continue
-        if any(
-            unique_id.endswith(f"_{button_key}")
-            for button_key in _LEGACY_MAINTENANCE_BUTTON_KEYS
-        ):
-            legacy_unique_ids.add(unique_id)
-    return legacy_unique_ids
-
-
-def _entity_registry_for_hass(hass: Any) -> Any | None:
-    try:
-        from homeassistant.helpers import entity_registry as er
-    except ImportError:
-        return getattr(hass, "entity_registry", None)
-    try:
-        return er.async_get(hass)
-    except (AttributeError, TypeError):
-        return getattr(hass, "entity_registry", None)
 
 
 def _button_availability_reason(

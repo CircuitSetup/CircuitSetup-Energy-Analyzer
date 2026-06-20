@@ -9,6 +9,7 @@ from .const import (
     CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_SELECTED_ENTITY_GROUPS,
     DEFAULT_ENTITY_DETAIL_LEVEL,
+    DOMAIN,
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
@@ -20,6 +21,33 @@ BILLING_STANDBY_WEATHER_CONDENSATION_PHASE = (
     "billing_standby_weather_condensation"
 )
 MAINTENANCE_SWITCH_CONDENSATION_PHASE = "maintenance_switch_condensation"
+
+LEGACY_ENTITY_REPLACEMENTS: Mapping[str, str] = {
+    "sensitivity": "select:alert_sensitivity",
+    "readiness": "sensor:health_summary#readiness",
+    "learning_progress": "sensor:health_summary#learning_progress",
+    "data_quality_checklist": "sensor:health_summary / setup_health / repairs",
+    "alert_evidence": "evidence_panel",
+    "last_event": "evidence_panel / recent_activity",
+    "recent_activity_count": "recent_activity#count",
+    "power_quality_evidence": "sensor:electrical_health / evidence_panel",
+    "reactive_power_drift": "expert_group:power_quality_drift",
+    "apparent_power_drift": "expert_group:power_quality_drift",
+    "power_factor_drift": "expert_group:power_quality_drift",
+    "metric_consistency_status": "sensor:electrical_health",
+    "leg_imbalance_status": "sensor:electrical_health",
+    "run_cycle_status": "sensor:activity_summary / binary_sensor:running",
+    "billing_cycle_forecast": "billing_cycle_usage#forecast_kwh",
+    "billing_cycle_budget_usage": "billing_cycle_usage#budget_usage_percent",
+    "billing_cycle_status": "billing_cycle_usage#status",
+    "cost_current_rate": "cost_cycle#current_rate_per_kwh",
+    "cost_cycle_forecast": "cost_cycle#forecast_cost",
+    "cost_status": "cost_cycle#status",
+    "standby_threshold": "Advanced Circuit Settings / standby_status attribute",
+    "outdoor_temperature": "configured source entity / weather_context attribute",
+    "start_maintenance": "switch:maintenance",
+    "end_maintenance": "switch:maintenance",
+}
 
 
 class EntityExposure(StrEnum):
@@ -68,6 +96,21 @@ class EntityCreationRule:
     removal_phase: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LegacyEntityRegistryEntry:
+    """Registry row covered by the compact-model compatibility migration."""
+
+    entity_id: str
+    unique_id: str
+    domain: str
+    key: str
+    replacement: str
+    disabled_by: str | None
+    hidden_by: str | None
+    customized: bool
+    cleanup_safe: bool
+
+
 _DETAIL_ORDER = {
     ENTITY_DETAIL_SIMPLE: 0,
     ENTITY_DETAIL_STANDARD: 1,
@@ -87,8 +130,10 @@ def should_create_entity(
     """Return whether the compact model should create a described entity."""
     del circuit, coordinator
     compatibility_keys = {str(item) for item in legacy_compatibility_keys}
+    if rule_key(rule) in compatibility_keys or rule.key in compatibility_keys:
+        return True
     if rule.legacy:
-        return rule_key(rule) in compatibility_keys or rule.key in compatibility_keys
+        return False
 
     normalized_detail = _normalize_detail_level(detail_level)
     if _DETAIL_ORDER[normalized_detail] < _DETAIL_ORDER[
@@ -131,6 +176,139 @@ def legacy_compatibility_keys_for_coordinator(coordinator: Any) -> set[str]:
         raw_value = container.get(CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS)
         keys.update(_normalize_legacy_compatibility_keys(raw_value))
     return keys
+
+
+def legacy_compatibility_keys_for_setup(
+    hass: Any,
+    *,
+    entry_id: str,
+    coordinator: Any,
+) -> set[str]:
+    """Return explicit and registry-discovered compatibility keys for setup."""
+    keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    keys.update(
+        legacy_compatibility_keys_for_registry_entries(
+            _registry_entries_for_hass(hass),
+            entry_id=entry_id,
+        )
+    )
+    return keys
+
+
+def legacy_compatibility_keys_for_registry_entries(
+    entries: Collection[Any],
+    *,
+    entry_id: str,
+) -> set[str]:
+    """Return compatibility keys for existing legacy rows not safe to remove."""
+    return {
+        f"{entry.domain}:{entry.key}"
+        for entry in legacy_entity_registry_entries(entries, entry_id=entry_id)
+        if not entry.cleanup_safe
+    }
+
+
+def legacy_entity_registry_entries(
+    entries: Collection[Any],
+    *,
+    entry_id: str,
+) -> tuple[LegacyEntityRegistryEntry, ...]:
+    """Classify registry rows covered by compact-model migration metadata."""
+    legacy_entries: list[LegacyEntityRegistryEntry] = []
+    for entry in entries:
+        legacy_entry = _legacy_entity_registry_entry(entry, entry_id=entry_id)
+        if legacy_entry is not None:
+            legacy_entries.append(legacy_entry)
+    return tuple(sorted(legacy_entries, key=lambda item: item.entity_id))
+
+
+def legacy_entity_registry_entries_for_hass(
+    hass: Any,
+    *,
+    entry_id: str,
+) -> tuple[LegacyEntityRegistryEntry, ...]:
+    """Return compact-model legacy rows from Home Assistant's entity registry."""
+    return legacy_entity_registry_entries(
+        _registry_entries_for_hass(hass),
+        entry_id=entry_id,
+    )
+
+
+def compact_migration_preview_for_registry(
+    entries: Collection[Any],
+    *,
+    entry_id: str,
+) -> dict[str, Any]:
+    """Return a compact-model migration preview for registry-backed options UI."""
+    matching_entries = tuple(_matching_registry_entries(entries, entry_id=entry_id))
+    legacy_entries = legacy_entity_registry_entries(entries, entry_id=entry_id)
+    legacy_entity_ids = {entry.entity_id for entry in legacy_entries}
+    new_maintenance_switches = _new_maintenance_switch_unique_ids(
+        matching_entries,
+        legacy_entries,
+        entry_id=entry_id,
+    )
+    will_remove = [
+        {
+            "entity_id": entry.entity_id,
+            "unique_id": entry.unique_id,
+            "domain": entry.domain,
+            "key": entry.key,
+            "replacement": entry.replacement,
+            "customized": entry.customized,
+            "disabled_by": entry.disabled_by,
+            "hidden_by": entry.hidden_by,
+        }
+        for entry in legacy_entries
+    ]
+    will_remain = [
+        str(getattr(entry, "entity_id", ""))
+        for entry in matching_entries
+        if str(getattr(entry, "entity_id", "")) not in legacy_entity_ids
+    ]
+    return {
+        "before_count": len(matching_entries),
+        "remove_count": len(will_remove),
+        "after_count": max(
+            len(matching_entries) - len(will_remove) + len(new_maintenance_switches),
+            0,
+        ),
+        "customized_count": sum(1 for entry in legacy_entries if entry.customized),
+        "will_remove": will_remove,
+        "will_remain": sorted(will_remain),
+        "new_maintenance_switches": new_maintenance_switches,
+    }
+
+
+def compact_migration_preview_for_hass(
+    hass: Any,
+    *,
+    entry_id: str,
+) -> dict[str, Any]:
+    """Return a compact-model migration preview from the live entity registry."""
+    return compact_migration_preview_for_registry(
+        _registry_entries_for_hass(hass),
+        entry_id=entry_id,
+    )
+
+
+def remove_legacy_entity_registry_entries(
+    hass: Any,
+    *,
+    entry_id: str,
+) -> dict[str, Any]:
+    """Remove legacy registry rows after explicit compact-model confirmation."""
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
+        return compact_migration_preview_for_registry((), entry_id=entry_id)
+    entries = getattr(registry, "entities", {})
+    values = tuple(entries.values() if hasattr(entries, "values") else entries)
+    preview = compact_migration_preview_for_registry(values, entry_id=entry_id)
+    remove = getattr(registry, "async_remove", None)
+    if callable(remove):
+        for item in preview["will_remove"]:
+            remove(item["entity_id"])
+    return preview
 
 
 def selected_entity_groups_for_coordinator(coordinator: Any) -> set[EntityGroup]:
@@ -251,6 +429,134 @@ def _normalize_groups_from_value(value: Any) -> set[EntityGroup]:
     if isinstance(value, Collection):
         return _normalize_groups(value)
     return set()
+
+
+def _entity_registry_for_hass(hass: Any) -> Any | None:
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return getattr(hass, "entity_registry", None)
+    try:
+        return er.async_get(hass)
+    except (AttributeError, TypeError):
+        return getattr(hass, "entity_registry", None)
+
+
+def _registry_entries_for_hass(hass: Any) -> tuple[Any, ...]:
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
+        return ()
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries
+    return tuple(values)
+
+
+def _matching_registry_entries(
+    entries: Collection[Any],
+    *,
+    entry_id: str,
+) -> tuple[Any, ...]:
+    return tuple(
+        entry
+        for entry in entries
+        if getattr(entry, "config_entry_id", None) == entry_id
+        and getattr(entry, "platform", None) == DOMAIN
+        and str(getattr(entry, "entity_id", "")).partition(".")[0] in _COUNT_DOMAINS
+    )
+
+
+def _legacy_entity_registry_entry(
+    entry: Any,
+    *,
+    entry_id: str,
+) -> LegacyEntityRegistryEntry | None:
+    if (
+        getattr(entry, "config_entry_id", None) != entry_id
+        or getattr(entry, "platform", None) != DOMAIN
+    ):
+        return None
+    entity_id = str(getattr(entry, "entity_id", ""))
+    domain = entity_id.partition(".")[0]
+    if domain not in _COUNT_DOMAINS:
+        return None
+    unique_id = str(getattr(entry, "unique_id", ""))
+    if not unique_id.startswith(f"{entry_id}_"):
+        return None
+    key = _legacy_key_from_unique_id(unique_id)
+    if key is None:
+        return None
+    disabled_by = _registry_marker_name(getattr(entry, "disabled_by", None))
+    hidden_by = _registry_marker_name(getattr(entry, "hidden_by", None))
+    customized = _registry_entry_has_user_customization(
+        entry,
+        disabled_by=disabled_by,
+        hidden_by=hidden_by,
+    )
+    cleanup_safe = (
+        not customized
+        and (disabled_by == "integration" or hidden_by == "integration")
+    )
+    return LegacyEntityRegistryEntry(
+        entity_id=entity_id,
+        unique_id=unique_id,
+        domain=domain,
+        key=key,
+        replacement=LEGACY_ENTITY_REPLACEMENTS[key],
+        disabled_by=disabled_by,
+        hidden_by=hidden_by,
+        customized=customized,
+        cleanup_safe=cleanup_safe,
+    )
+
+
+def _legacy_key_from_unique_id(unique_id: str) -> str | None:
+    for key in sorted(LEGACY_ENTITY_REPLACEMENTS, key=len, reverse=True):
+        if unique_id.endswith(f"_{key}"):
+            return key
+    return None
+
+
+def _registry_entry_has_user_customization(
+    entry: Any,
+    *,
+    disabled_by: str | None,
+    hidden_by: str | None,
+) -> bool:
+    if disabled_by == "user" or hidden_by == "user":
+        return True
+    for attribute in ("name", "name_by_user", "icon", "area_id"):
+        if getattr(entry, attribute, None):
+            return True
+    return False
+
+
+def _registry_marker_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw_value = getattr(value, "value", None)
+    raw_name = getattr(value, "name", None)
+    text = str(raw_value or raw_name or value).split(".")[-1].strip().lower()
+    return text or None
+
+
+def _new_maintenance_switch_unique_ids(
+    entries: Collection[Any],
+    legacy_entries: Collection[LegacyEntityRegistryEntry],
+    *,
+    entry_id: str,
+) -> list[str]:
+    current_unique_ids = {str(getattr(entry, "unique_id", "")) for entry in entries}
+    missing: set[str] = set()
+    for entry in legacy_entries:
+        if entry.key not in {"start_maintenance", "end_maintenance"}:
+            continue
+        circuit_id = entry.unique_id.removeprefix(f"{entry_id}_").removesuffix(
+            f"_{entry.key}"
+        )
+        switch_unique_id = f"{entry_id}_{circuit_id}_maintenance"
+        if switch_unique_id not in current_unique_ids:
+            missing.add(switch_unique_id)
+    return sorted(missing)
 
 
 def _rule(

@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -28,6 +29,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
     ENTITY_DETAIL_EXPERT,
+    ENTITY_MODEL_LEGACY,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
     AnalyzerState,
@@ -919,6 +921,7 @@ async def test_migrate_entry_canonicalizes_legacy_sensitivity_values() -> None:
                 "options": {
                     CONF_SENSITIVITY: "sensitive",
                     CONF_ADVANCED_SETTINGS: {"dryer": {"preset": "sensitive"}},
+                    CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_LEGACY,
                 },
             },
         )

@@ -1,29 +1,29 @@
 # Generated Codegraph
 
-**Commit:** `adcdd557bc560ae9656eb46fa40d17a400a0ecf5`
+**Commit:** `4731180728373ff06bfe91599fb217c3d9e42cb0`
 **Branch:** `feature/compact-entity-model`
-**Generated:** `2026-06-19T23:30:45.427545+00:00`
+**Generated:** `2026-06-19T23:58:17.171254+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **166**
 - Python modules: **152**
-- Symbols: **3271**
-- Internal import edges: **452**
+- Symbols: **3299**
+- Internal import edges: **455**
 - External import edges: **504**
 
 ## Entrypoints
 
 | Symbol | Location | Reason |
 |---|---|---|
-| `custom_components.circuitsetup_energy_analyzer.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:31` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.async_migrate_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:66` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.async_unload_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:84` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.binary_sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/binary_sensor.py:371` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.button.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/button.py:302` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerConfigFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3340` | Home Assistant config flow |
-| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerOptionsFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3503` | Home Assistant options flow |
+| `custom_components.circuitsetup_energy_analyzer.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:35` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.async_migrate_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:77` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.async_unload_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:100` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.binary_sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/binary_sensor.py:378` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.button.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/button.py:294` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerConfigFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3349` | Home Assistant config flow |
+| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerOptionsFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3512` | Home Assistant options flow |
 | `custom_components.circuitsetup_energy_analyzer.diagnostics.async_get_config_entry_diagnostics` | `custom_components/circuitsetup_energy_analyzer/diagnostics.py:16` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.entity.CircuitAnalyzerEntity` | `custom_components/circuitsetup_energy_analyzer/entity.py:693` | Home Assistant entity |
 | `custom_components.circuitsetup_energy_analyzer.number.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/number.py:158` | Home Assistant lifecycle/API entrypoint |
@@ -51,7 +51,7 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.utility_comparison.UtilityComparisonProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py:53` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.water_context.WaterContextAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py:33` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.select.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/select.py:372` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3181` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3188` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:364` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:381` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/switch.py:152` | Home Assistant lifecycle/API entrypoint |
@@ -69,8 +69,8 @@
 | `custom_components.circuitsetup_energy_analyzer.processors` | 21 | 1 | 20 | `custom_components/circuitsetup_energy_analyzer/processors/__init__.py` |
 | `custom_components.circuitsetup_energy_analyzer.storage` | 19 | 13 | 6 | `custom_components/circuitsetup_energy_analyzer/storage.py` |
 | `custom_components.circuitsetup_energy_analyzer.sensor` | 18 | 1 | 17 | `custom_components/circuitsetup_energy_analyzer/sensor.py` |
+| `custom_components.circuitsetup_energy_analyzer.config_flow` | 17 | 0 | 17 | `custom_components/circuitsetup_energy_analyzer/config_flow.py` |
 | `tests.test_processors` | 16 | 0 | 16 | `tests/test_processors.py` |
-| `custom_components.circuitsetup_energy_analyzer.config_flow` | 16 | 0 | 16 | `custom_components/circuitsetup_energy_analyzer/config_flow.py` |
 | `custom_components.circuitsetup_energy_analyzer.ux` | 15 | 11 | 4 | `custom_components/circuitsetup_energy_analyzer/ux.py` |
 | `custom_components.circuitsetup_energy_analyzer.contextual_baseline` | 14 | 10 | 4 | `custom_components/circuitsetup_energy_analyzer/contextual_baseline.py` |
 | `custom_components.circuitsetup_energy_analyzer.demo` | 13 | 12 | 1 | `custom_components/circuitsetup_energy_analyzer/demo.py` |
@@ -78,13 +78,13 @@
 | `custom_components.circuitsetup_energy_analyzer.operating_detection` | 11 | 9 | 2 | `custom_components/circuitsetup_energy_analyzer/operating_detection.py` |
 | `custom_components.circuitsetup_energy_analyzer.entity` | 11 | 8 | 3 | `custom_components/circuitsetup_energy_analyzer/entity.py` |
 | `tests.helpers.calibration` | 11 | 1 | 10 | `tests/helpers/calibration.py` |
+| `custom_components.circuitsetup_energy_analyzer.entity_catalog` | 10 | 9 | 1 | `custom_components/circuitsetup_energy_analyzer/entity_catalog.py` |
+| `custom_components.circuitsetup_energy_analyzer` | 10 | 2 | 8 | `custom_components/circuitsetup_energy_analyzer/__init__.py` |
 | `custom_components.circuitsetup_energy_analyzer.processors.cycles` | 10 | 1 | 9 | `custom_components/circuitsetup_energy_analyzer/processors/cycles.py` |
 | `custom_components.circuitsetup_energy_analyzer.notifications` | 9 | 5 | 4 | `custom_components/circuitsetup_energy_analyzer/notifications.py` |
 | `custom_components.circuitsetup_energy_analyzer.settings_advisor` | 9 | 2 | 7 | `custom_components/circuitsetup_energy_analyzer/settings_advisor.py` |
 | `custom_components.circuitsetup_energy_analyzer.local_time` | 8 | 8 | 0 | `custom_components/circuitsetup_energy_analyzer/local_time.py` |
 | `custom_components.circuitsetup_energy_analyzer.usage` | 8 | 7 | 1 | `custom_components/circuitsetup_energy_analyzer/usage.py` |
-| `custom_components.circuitsetup_energy_analyzer.entity_catalog` | 8 | 7 | 1 | `custom_components/circuitsetup_energy_analyzer/entity_catalog.py` |
-| `custom_components.circuitsetup_energy_analyzer.baseline` | 8 | 7 | 1 | `custom_components/circuitsetup_energy_analyzer/baseline.py` |
 
 ## Import cycles
 
@@ -155,6 +155,7 @@ flowchart LR
   n_tests_test_processors["test_processors.py"]
   n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_const
   n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_coordinator
+  n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_entity_catalog
   n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_panel
   n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_storage
   n_custom_components_circuitsetup_energy_analyzer --> n_custom_components_circuitsetup_energy_analyzer_ux
@@ -176,6 +177,7 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_demo
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_discovery
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_entity
+  n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_entity_catalog
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_metric_consistency
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_models
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_operating_detection

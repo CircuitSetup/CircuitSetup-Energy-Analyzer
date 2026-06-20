@@ -241,6 +241,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility",
         "dashboard",
         "entity_detail",
+        "compact_migration",
         "recommendations",
         "advanced",
     ]
@@ -251,6 +252,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
         "entity_detail": "👁️ Entity Detail Level",
+        "compact_migration": "🧹 Migrate To Compact Entity Model",
         "recommendations": "💡 Review Suggested Settings",
         "advanced": "🛠️ Advanced Circuit Settings",
     }
@@ -283,6 +285,16 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "reloads" in entity_detail["description"].lower()
     assert "simple" in entity_detail["data_description"]["entity_detail_level"].lower()
     assert "creates" in entity_detail["data_description"]["entity_detail_level"].lower()
+    compact_migration = strings["options"]["step"]["compact_migration"]
+    assert (
+        compact_migration["data"]["confirm_compact_migration"]
+        == "Remove Legacy Entities"
+    )
+    assert "{will_remove}" in compact_migration["description"]
+    assert "{will_remain}" in compact_migration["description"]
+    assert "{before_count}" in compact_migration["description"]
+    assert "{after_count}" in compact_migration["description"]
+    assert "customized" in compact_migration["description"].lower()
     dashboard = strings["options"]["step"]["dashboard"]
     assert dashboard["data"]["dashboard_layout"] == "Dashboard Layout"
     assert (
@@ -456,6 +468,7 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
             ("options", "nilm"),
             ("options", "utility"),
             ("options", "entity_detail"),
+            ("options", "compact_migration"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),

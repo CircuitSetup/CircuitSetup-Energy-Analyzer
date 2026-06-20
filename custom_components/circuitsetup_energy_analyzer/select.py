@@ -27,7 +27,7 @@ from .entity import (
 )
 from .entity_catalog import (
     compact_creation_rule_for_entity,
-    legacy_compatibility_keys_for_coordinator,
+    legacy_compatibility_keys_for_setup,
     selected_entity_groups_for_coordinator,
     should_create_entity,
 )
@@ -388,6 +388,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             descriptions,
             raw_circuit,
             coordinator,
+            hass=hass,
+            entry_id=entry_id,
         )
         entities.extend(
             CircuitAlertSensitivitySelect(
@@ -424,8 +426,15 @@ def _compact_select_descriptions_for_setup(
     descriptions: tuple[CircuitSelectDescription, ...],
     circuit: Any,
     coordinator: Any,
+    *,
+    hass: Any,
+    entry_id: str,
 ) -> tuple[CircuitSelectDescription, ...]:
-    compatibility_keys = legacy_compatibility_keys_for_coordinator(coordinator)
+    compatibility_keys = legacy_compatibility_keys_for_setup(
+        hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
     selected_groups = selected_entity_groups_for_coordinator(coordinator)
     detail_level = entity_detail_level_for_coordinator(coordinator)
     compact_descriptions: list[CircuitSelectDescription] = []

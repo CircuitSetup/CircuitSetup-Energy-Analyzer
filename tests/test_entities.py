@@ -4200,6 +4200,87 @@ async def test_sensor_setup_entry_preserves_legacy_compatibility_sensor_keys(
 
 
 @pytest.mark.asyncio
+async def test_sensor_setup_entry_preserves_enabled_legacy_registry_rows(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.fridge_sensitivity": SimpleNamespace(
+                    entity_id="sensor.fridge_sensitivity",
+                    unique_id="entry-1_fridge_sensitivity",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by=None,
+                    entity_category=None,
+                ),
+                "sensor.fridge_readiness": SimpleNamespace(
+                    entity_id="sensor.fridge_readiness",
+                    unique_id="entry-1_fridge_readiness",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by="integration",
+                    hidden_by=None,
+                    entity_category=None,
+                ),
+            }
+            self.removed: list[str] = []
+
+        def async_remove(self, entity_id: str) -> None:
+            self.removed.append(entity_id)
+
+        def async_update_entity(self, *args, **kwargs) -> None:
+            pass
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(circuit,),
+        entry_data={},
+        options={},
+    )
+    fake_registry = FakeRegistry()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=fake_registry,
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert "entry-1_fridge_sensitivity" in unique_ids
+    assert "entry-1_fridge_readiness" not in unique_ids
+    assert fake_registry.removed == ["sensor.fridge_readiness"]
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 

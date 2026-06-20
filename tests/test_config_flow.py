@@ -14,8 +14,10 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -34,6 +36,8 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
+    ENTITY_MODEL_COMPACT,
+    ENTITY_MODEL_LEGACY,
 )
 from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
 from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
@@ -193,8 +197,34 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
     assert validated[CONF_MAINS_SOURCE_ENTITIES] == payload[CONF_MAINS_SOURCE_ENTITIES]
     assert validated[CONF_SENSITIVITY] == "sensitive"
     assert validated[CONF_RETENTION_MODE] == "diagnostic"
+    assert validated[CONF_ENTITY_MODEL_VERSION] == ENTITY_MODEL_COMPACT
     assert "circuits" not in validated
     assert "known_load_circuits" not in validated
+
+
+@pytest.mark.asyncio
+async def test_async_migrate_entry_marks_unversioned_existing_entries_legacy() -> None:
+    from custom_components.circuitsetup_energy_analyzer import async_migrate_entry
+
+    updates: list[dict[str, object]] = []
+
+    class FakeConfigEntries:
+        def async_update_entry(self, entry, **kwargs) -> None:
+            updates.append(kwargs)
+
+    entry = SimpleNamespace(
+        data={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
+        options={},
+    )
+    hass = SimpleNamespace(config_entries=FakeConfigEntries())
+
+    assert await async_migrate_entry(hass, entry)
+    assert updates == [
+        {
+            "data": {CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
+            "options": {CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_LEGACY},
+        },
+    ]
 
 
 def test_validate_setup_input_parses_text_entity_values() -> None:
@@ -644,6 +674,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
         "utility",
         "dashboard",
         "entity_detail",
+        "compact_migration",
         "recommendations",
         "advanced",
     ]
@@ -1358,6 +1389,121 @@ async def test_options_entity_detail_step_saves_profile_without_registry_apply(
         {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
     )
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_options_compact_migration_previews_and_confirms_cleanup(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        FIELD_CONFIRM_COMPACT_MIGRATION,
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.fridge_sensitivity": SimpleNamespace(
+                    entity_id="sensor.fridge_sensitivity",
+                    unique_id="entry-1_fridge_sensitivity",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by=None,
+                ),
+                "button.fridge_start_maintenance": SimpleNamespace(
+                    entity_id="button.fridge_start_maintenance",
+                    unique_id="entry-1_fridge_start_maintenance",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by="user",
+                ),
+                "sensor.fridge_health_summary": SimpleNamespace(
+                    entity_id="sensor.fridge_health_summary",
+                    unique_id="entry-1_fridge_health_summary",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by=None,
+                ),
+            }
+            self.removed: list[str] = []
+
+        def async_remove(self, entity_id: str) -> None:
+            self.removed.append(entity_id)
+            self.entities.pop(entity_id, None)
+
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module.async_get = lambda hass: hass.entity_registry
+    helpers_module.entity_registry = entity_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.entity_registry",
+        entity_registry_module,
+    )
+
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={},
+        options={
+            CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_LEGACY,
+            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["sensor:sensitivity"],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(entity_registry=FakeRegistry())
+
+    menu = await flow.async_step_init()
+    assert "compact_migration" in menu["menu_options"]
+
+    form = await flow.async_step_compact_migration()
+
+    assert form["type"] == "form"
+    assert form["step_id"] == "compact_migration"
+    assert (
+        _schema_default(form["data_schema"], FIELD_CONFIRM_COMPACT_MIGRATION)
+        is False
+    )
+    placeholders = form["description_placeholders"]
+    assert "sensor.fridge_sensitivity -> select:alert_sensitivity" in placeholders[
+        "will_remove"
+    ]
+    assert "button.fridge_start_maintenance -> switch:maintenance" in placeholders[
+        "will_remove"
+    ]
+    assert placeholders["before_count"] == "3"
+    assert placeholders["after_count"] == "2"
+    assert "customized" in placeholders["warning"].lower()
+
+    rejected = await flow.async_step_compact_migration(
+        {FIELD_CONFIRM_COMPACT_MIGRATION: False}
+    )
+    assert rejected["errors"] == {"base": "confirm_required"}
+    assert flow.hass.entity_registry.removed == []
+
+    result = await flow.async_step_compact_migration(
+        {FIELD_CONFIRM_COMPACT_MIGRATION: True}
+    )
+
+    _assert_create_entry_result(
+        result,
+        {
+            CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
+        },
+    )
+    assert flow.hass.entity_registry.removed == [
+        "button.fridge_start_maintenance",
+        "sensor.fridge_sensitivity",
+    ]
 
 
 @pytest.mark.asyncio

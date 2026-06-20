@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import repairs
 from .const import (
+    CONF_ENTITY_MODEL_VERSION,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_SOURCE_ENTITIES,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
+    ENTITY_MODEL_LEGACY,
     PLATFORMS,
 )
 from .coordinator import EnergyAnalyzerCoordinator
+from .entity_catalog import legacy_entity_registry_entries_for_hass
 from .panel import async_setup_panel, async_unload_panel
 from .services import async_setup_services, async_unload_services
 from .storage import FeatureStore, FeatureStoreData
@@ -53,6 +57,13 @@ async def async_setup_entry(
         await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        await repairs.async_sync_compact_entity_model_issue(
+            hass,
+            entry_id,
+            legacy_count=len(
+                legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
+            ),
+        )
     except Exception:
         hass.data.get(DOMAIN, {}).pop(entry_id, None)
         await coordinator.async_stop()
@@ -70,6 +81,11 @@ async def async_migrate_entry(
     """Migrate config-entry data while preserving existing keys."""
     data = canonicalize_sensitivity_config(getattr(entry, "data", {}) or {})
     options = canonicalize_sensitivity_config(getattr(entry, "options", {}) or {})
+    if (
+        CONF_ENTITY_MODEL_VERSION not in data
+        and CONF_ENTITY_MODEL_VERSION not in options
+    ):
+        options[CONF_ENTITY_MODEL_VERSION] = ENTITY_MODEL_LEGACY
     if data != dict(getattr(entry, "data", {}) or {}) or options != dict(
         getattr(entry, "options", {}) or {}
     ):

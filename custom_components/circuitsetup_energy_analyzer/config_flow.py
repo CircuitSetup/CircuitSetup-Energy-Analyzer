@@ -127,10 +127,12 @@ from .const import (
     CONF_DEMO_SOURCE_BUNDLE_ENABLED,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
     CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
@@ -163,6 +165,7 @@ from .const import (
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
+    ENTITY_MODEL_COMPACT,
 )
 from .dashboard import normalize_dashboard_layout
 from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
@@ -178,6 +181,10 @@ from .discovery import (
 from .entity import (
     apply_entity_profile_to_registry,
     normalize_entity_detail_level,
+)
+from .entity_catalog import (
+    compact_migration_preview_for_hass,
+    remove_legacy_entity_registry_entries,
 )
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
@@ -367,6 +374,7 @@ FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
+FIELD_CONFIRM_COMPACT_MIGRATION = "confirm_compact_migration"
 FIELD_REMOVE_DASHBOARD = "remove_dashboard"
 FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
 RECOMMENDATION_ACTION_APPLY = "apply"
@@ -858,6 +866,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
+        CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
         CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
@@ -3526,6 +3535,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "utility",
                     "dashboard",
                     "entity_detail",
+                    "compact_migration",
                     "recommendations",
                     "advanced",
                 ],
@@ -3920,6 +3930,35 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             data_schema=_entity_detail_schema(self._config_entry),
             errors={},
         )
+
+    async def async_step_compact_migration(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Preview and confirm removal of legacy compact-model registry rows."""
+        if user_input is not None:
+            if not bool(user_input.get(FIELD_CONFIRM_COMPACT_MIGRATION, False)):
+                return _compact_migration_form(
+                    self,
+                    errors={"base": "confirm_required"},
+                )
+
+            remove_legacy_entity_registry_entries(
+                getattr(self, "hass", None),
+                entry_id=getattr(self._config_entry, "entry_id", ""),
+            )
+            return self.async_create_entry(
+                title="",
+                data=_options_with_updates(
+                    self._config_entry,
+                    {
+                        CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+                        CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
+                    },
+                ),
+            )
+
+        return _compact_migration_form(self)
 
     async def async_step_dashboard(
         self,
@@ -4592,6 +4631,75 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
             ): _select_selector(entity_detail_level_options()),
         }
     )
+
+
+def _compact_migration_schema() -> Any:
+    return vol.Schema(
+        {
+            vol.Optional(
+                FIELD_CONFIRM_COMPACT_MIGRATION,
+                default=False,
+            ): bool,
+        }
+    )
+
+
+def _compact_migration_form(
+    flow: Any,
+    errors: dict[str, str] | None = None,
+) -> config_entries.ConfigFlowResult:
+    return flow.async_show_form(
+        step_id="compact_migration",
+        data_schema=_compact_migration_schema(),
+        errors=errors or {},
+        description_placeholders=_compact_migration_placeholders(flow),
+    )
+
+
+def _compact_migration_placeholders(flow: Any) -> dict[str, str]:
+    preview = compact_migration_preview_for_hass(
+        getattr(flow, "hass", None),
+        entry_id=getattr(getattr(flow, "_config_entry", None), "entry_id", ""),
+    )
+    will_remove = preview.get("will_remove", [])
+    will_remain = preview.get("will_remain", [])
+    new_switches = preview.get("new_maintenance_switches", [])
+    customized_count = int(preview.get("customized_count", 0) or 0)
+    warning = (
+        "Some legacy entities are customized; after removal, re-enabled optional "
+        "entities may return with default entity IDs."
+        if customized_count
+        else "No customized legacy registry rows were detected."
+    )
+    return {
+        "will_remove": _compact_migration_lines(
+            (
+                f"{item['entity_id']} -> {item['replacement']}"
+                for item in will_remove
+            ),
+            empty="No legacy entities detected.",
+        ),
+        "will_remain": _compact_migration_lines(
+            (str(entity_id) for entity_id in will_remain),
+            empty="No existing analyzer entities will remain registered.",
+        ),
+        "new_maintenance_switch": _compact_migration_lines(
+            (str(unique_id) for unique_id in new_switches),
+            empty="Maintenance switch already exists where applicable.",
+        ),
+        "before_count": str(preview.get("before_count", 0)),
+        "after_count": str(preview.get("after_count", 0)),
+        "warning": warning,
+    }
+
+
+def _compact_migration_lines(
+    values: Iterable[str],
+    *,
+    empty: str,
+) -> str:
+    lines = [value for value in values if value]
+    return "\n".join(lines) if lines else empty
 
 
 def _dashboard_schema(
