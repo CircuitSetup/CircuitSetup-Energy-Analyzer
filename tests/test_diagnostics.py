@@ -10,7 +10,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
+    CONF_SELECTED_ENTITY_GROUPS,
+    DOMAIN,
+    ENTITY_MODEL_COMPACT,
+)
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     BaselineStats,
@@ -138,6 +145,66 @@ async def test_diagnostics_includes_redacted_runtime_summaries_without_ha() -> N
         },
     }
     assert "sensor.secret_panel_power" not in repr(diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_includes_entity_model_metadata_without_entity_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    registry = SimpleNamespace(
+        entities={
+            "sensor.fridge_sensitivity": SimpleNamespace(
+                entity_id="sensor.fridge_sensitivity",
+                unique_id="entry-1_fridge_sensitivity",
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+                disabled_by=None,
+                hidden_by=None,
+            ),
+            "sensor.fridge_health_summary": SimpleNamespace(
+                entity_id="sensor.fridge_health_summary",
+                unique_id="entry-1_fridge_health_summary",
+                config_entry_id="entry-1",
+                platform=DOMAIN,
+                disabled_by=None,
+                hidden_by=None,
+            ),
+        }
+    )
+    coordinator = SimpleNamespace(
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: "expert",
+            CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+            CONF_SELECTED_ENTITY_GROUPS: ["cycle_metrics"],
+            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["sensor:sensitivity"],
+        },
+        entry_data={},
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        entity_registry=registry,
+    )
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="Panel Analyzer",
+        data={},
+        options=coordinator.options,
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["entity_model"] == {
+        "version": ENTITY_MODEL_COMPACT,
+        "detail_level": "expert",
+        "selected_groups": ["cycle_metrics"],
+        "desired_entity_count": 1,
+        "legacy_entity_count": 1,
+        "legacy_compatibility_key_count": 1,
+    }
+    assert "sensor.fridge_sensitivity" not in repr(diagnostics["entity_model"])
+    assert "entry-1_fridge_sensitivity" not in repr(diagnostics["entity_model"])
 
 
 def test_diagnostics_reraises_nested_homeassistant_import_failures(

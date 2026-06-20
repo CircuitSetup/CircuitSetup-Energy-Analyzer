@@ -111,6 +111,7 @@
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
           "entity_detail": "👁️ Entity Detail Level",
+          "compact_migration": "🧹 Migrate To Compact Entity Model",
           "recommendations": "💡 Review Suggested Settings",
           "advanced": "🛠️ Advanced Circuit Settings"
         }
@@ -191,14 +192,24 @@
       },
       "entity_detail": {
         "title": "Entity Detail Level",
-        "description": "Choose how many analyzer entities Home Assistant should enable by default. You can still enable disabled diagnostic entities later from the entity registry.",
+        "description": "Choose how many analyzer entities Home Assistant should create. Changing this setting reloads the integration so the entity set matches the selected detail level.",
         "data": {
           "entity_detail_level": "Entity Detail Level",
-          "apply_entity_detail_profile": "Apply To Existing Entities"
+          "selected_entity_groups": "Expert Entity Groups"
         },
         "data_description": {
-          "entity_detail_level": "Simple enables summary entities only. Standard also enables configured feature status entities. Expert enables detailed diagnostic entities for troubleshooting and custom dashboards.",
-          "apply_entity_detail_profile": "Apply the selected profile to current analyzer entities. Entities you manually disabled remain disabled."
+          "entity_detail_level": "Simple creates summary entities only. Standard also creates configured feature status entities. Expert creates selected detailed diagnostic entities for troubleshooting and custom dashboards.",
+          "selected_entity_groups": "Choose the diagnostic and graph groups created when Entity Detail Level is Expert. These groups are ignored for Simple and Standard."
+        }
+      },
+      "compact_migration": {
+        "title": "Migrate To Compact Entity Model",
+        "description": "Review the compact entity model migration preview before removing legacy analyzer entities.\n\nRemove:\n{will_remove}\n\nRemain:\n{will_remain}\n\nNew maintenance switch:\n{new_maintenance_switch}\n\nExpected count: {before_count} before, {after_count} after. Customized row warning: {warning}",
+        "data": {
+          "confirm_compact_migration": "Remove Legacy Entities"
+        },
+        "data_description": {
+          "confirm_compact_migration": "Confirm that the listed legacy entities can be removed now. Re-enabled optional entities may return later with default IDs."
         }
       },
       "dashboard": {
@@ -211,7 +222,7 @@
         },
         "data_description": {
           "dashboard_layout": "Simple keeps the summary dashboard cards compact. Standard adds feature-level mains, HVAC, solar, and utility status cards. Expert also adds analyzer evidence links for each circuit.",
-          "apply_entity_detail_profile": "If the selected dashboard layout needs more analyzer entities than the current Entity Detail Level enables, check this to raise Entity Detail Level to match the layout and apply that profile to current entities. Entities you manually disabled remain disabled.",
+          "apply_entity_detail_profile": "If the selected dashboard layout needs more analyzer entities than the current Entity Detail Level creates, check this to save a matching Entity Detail Level. The integration reloads to rebuild the desired entity set.",
           "remove_dashboard": "Check this to delete the existing CircuitSetup Energy Analyzer dashboard instead of creating or updating it."
         }
       },
@@ -498,7 +509,8 @@
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
-      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
+      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
+      "confirm_required": "Check Remove Legacy Entities to confirm this compact entity model migration."
     }
   },
   "entity": {
@@ -754,6 +766,11 @@
       "water_flow_mismatch": {
         "name": "Water flow mismatch"
       }
+    },
+    "switch": {
+      "maintenance": {
+        "name": "Maintenance"
+      }
     }
   },
   "issues": {
@@ -824,6 +841,10 @@
     "low_nilm_confidence": {
       "title": "Energy Analyzer NILM confidence is low",
       "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications. Suggested fix: {fix}"
+    },
+    "compact_entity_model_available": {
+      "title": "Compact entity model available",
+      "description": "This integration entry has {legacy_count} legacy analyzer entities that can be migrated to the compact entity model. Next step: {recommended_action}"
     }
   }
 }

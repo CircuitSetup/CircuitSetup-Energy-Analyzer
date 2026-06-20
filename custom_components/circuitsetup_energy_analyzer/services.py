@@ -903,6 +903,7 @@ def _known_analyzer_entity_suffixes() -> set[str]:
     from .number import CIRCUIT_NUMBER_DESCRIPTIONS
     from .select import CIRCUIT_SELECT_DESCRIPTIONS
     from .sensor import SENSOR_ENTITY_TIER_BY_KEY
+    from .switch import CIRCUIT_SWITCH_DESCRIPTIONS
 
     return {
         *SENSOR_ENTITY_TIER_BY_KEY,
@@ -910,6 +911,7 @@ def _known_analyzer_entity_suffixes() -> set[str]:
         *(description.key for description in CIRCUIT_BUTTON_DESCRIPTIONS),
         *(description.key for description in CIRCUIT_SELECT_DESCRIPTIONS),
         *(description.key for description in CIRCUIT_NUMBER_DESCRIPTIONS),
+        *(description.key for description in CIRCUIT_SWITCH_DESCRIPTIONS),
     }
 
 

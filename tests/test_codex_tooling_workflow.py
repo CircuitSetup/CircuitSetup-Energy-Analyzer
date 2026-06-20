@@ -1,4 +1,5 @@
-from pathlib import Path
+import subprocess
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).parents[1]
 
@@ -48,3 +49,20 @@ def test_yq_is_wired_into_yaml_workflow() -> None:
 
     assert "yq --version" in setup_script
     assert "MikeFarah.yq" in setup_script
+
+
+def test_only_home_assistant_integrations_use_manifest_filename() -> None:
+    tracked_files = subprocess.check_output(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        text=True,
+    ).splitlines()
+
+    non_integration_manifests = [
+        path
+        for path in tracked_files
+        if PurePosixPath(path).name == "manifest.json"
+        and not path.startswith("custom_components/")
+    ]
+
+    assert non_integration_manifests == []

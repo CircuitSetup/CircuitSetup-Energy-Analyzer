@@ -25,6 +25,12 @@ from .entity import (
     prune_stale_entity_registry_entries,
     supports_daily_circuit_controls,
 )
+from .entity_catalog import (
+    compact_creation_rule_for_entity,
+    legacy_compatibility_keys_for_setup,
+    selected_entity_groups_for_coordinator,
+    should_create_entity,
+)
 from .sensor import sensitivity_value
 from .ux import friendly_sensitivity_label
 
@@ -373,6 +379,18 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        descriptions = tuple(
+            description
+            for description in CIRCUIT_SELECT_DESCRIPTIONS
+            if select_description_applies(description, raw_circuit, coordinator)
+        )
+        descriptions = _compact_select_descriptions_for_setup(
+            descriptions,
+            raw_circuit,
+            coordinator,
+            hass=hass,
+            entry_id=entry_id,
+        )
         entities.extend(
             CircuitAlertSensitivitySelect(
                 coordinator,
@@ -380,8 +398,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 circuit=circuit,
                 description=description,
             )
-            for description in CIRCUIT_SELECT_DESCRIPTIONS
-            if select_description_applies(description, raw_circuit, coordinator)
+            for description in descriptions
         )
 
     entities.extend(
@@ -403,6 +420,38 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
+
+
+def _compact_select_descriptions_for_setup(
+    descriptions: tuple[CircuitSelectDescription, ...],
+    circuit: Any,
+    coordinator: Any,
+    *,
+    hass: Any,
+    entry_id: str,
+) -> tuple[CircuitSelectDescription, ...]:
+    compatibility_keys = legacy_compatibility_keys_for_setup(
+        hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
+    detail_level = entity_detail_level_for_coordinator(coordinator)
+    compact_descriptions: list[CircuitSelectDescription] = []
+    for description in descriptions:
+        rule = compact_creation_rule_for_entity("select", description.key)
+        if not should_create_entity(
+            rule=rule,
+            circuit=circuit,
+            coordinator=coordinator,
+            detail_level=detail_level,
+            selected_groups=selected_groups,
+            legacy_compatibility_keys=compatibility_keys,
+            applicability_already_checked=True,
+        ):
+            continue
+        compact_descriptions.append(description)
+    return tuple(compact_descriptions)
 
 
 def select_description_applies(

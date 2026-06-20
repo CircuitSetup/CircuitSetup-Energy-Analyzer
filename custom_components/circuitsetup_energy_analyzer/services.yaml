@@ -11,7 +11,7 @@ relearn_baseline:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -21,6 +21,7 @@ relearn_baseline:
             - button
             - select
             - number
+            - switch
 pause_alerts:
   name: Pause alerts
   description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause Alerts button entity."
@@ -34,7 +35,7 @@ pause_alerts:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -44,6 +45,7 @@ pause_alerts:
             - button
             - select
             - number
+            - switch
     duration:
       name: Duration
       description: How long alert notifications should stay paused.
@@ -204,7 +206,7 @@ set_circuit_sensitivity:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -214,6 +216,7 @@ set_circuit_sensitivity:
             - button
             - select
             - number
+            - switch
     preset:
       name: Preset
       description: Alert sensitivity preset for the circuit.
@@ -285,7 +288,7 @@ set_energy_goal_settings:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -295,6 +298,7 @@ set_energy_goal_settings:
             - button
             - select
             - number
+            - switch
     daily_goal_kwh:
       name: Daily Goal kWh
       description: Daily kWh target for this circuit; use 0 to clear it.
@@ -923,7 +927,7 @@ set_utility_comparison_settings:
           mode: box
 start_maintenance:
   name: Start maintenance
-  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Start Maintenance button entity."
+  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Maintenance switch entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -934,7 +938,7 @@ start_maintenance:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -944,6 +948,7 @@ start_maintenance:
             - button
             - select
             - number
+            - switch
     note:
       name: Note
       description: Optional maintenance note stored with the circuit.
@@ -967,7 +972,7 @@ start_maintenance:
         boolean:
 end_maintenance:
   name: End maintenance
-  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit End Maintenance button entity."
+  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Maintenance switch entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -978,7 +983,7 @@ end_maintenance:
         text:
     entity_id:
       name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -988,6 +993,7 @@ end_maintenance:
             - button
             - select
             - number
+            - switch
     relearn:
       name: Relearn
       description: Relearn the circuit baseline after ending maintenance.

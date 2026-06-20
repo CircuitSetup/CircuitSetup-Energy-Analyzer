@@ -241,6 +241,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility",
         "dashboard",
         "entity_detail",
+        "compact_migration",
         "recommendations",
         "advanced",
     ]
@@ -251,6 +252,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
         "entity_detail": "👁️ Entity Detail Level",
+        "compact_migration": "🧹 Migrate To Compact Entity Model",
         "recommendations": "💡 Review Suggested Settings",
         "advanced": "🛠️ Advanced Circuit Settings",
     }
@@ -278,15 +280,26 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     ].lower()
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
-    assert (
-        entity_detail["data"]["apply_entity_detail_profile"]
-        == "Apply To Existing Entities"
-    )
+    assert entity_detail["data"]["selected_entity_groups"] == "Expert Entity Groups"
+    assert "apply_entity_detail_profile" not in entity_detail["data"]
+    assert "create" in entity_detail["description"].lower()
+    assert "reloads" in entity_detail["description"].lower()
     assert "simple" in entity_detail["data_description"]["entity_detail_level"].lower()
+    assert "creates" in entity_detail["data_description"]["entity_detail_level"].lower()
     assert (
-        "manually disabled"
-        in entity_detail["data_description"]["apply_entity_detail_profile"].lower()
+        "expert"
+        in entity_detail["data_description"]["selected_entity_groups"].lower()
     )
+    compact_migration = strings["options"]["step"]["compact_migration"]
+    assert (
+        compact_migration["data"]["confirm_compact_migration"]
+        == "Remove Legacy Entities"
+    )
+    assert "{will_remove}" in compact_migration["description"]
+    assert "{will_remain}" in compact_migration["description"]
+    assert "{before_count}" in compact_migration["description"]
+    assert "{after_count}" in compact_migration["description"]
+    assert "customized" in compact_migration["description"].lower()
     dashboard = strings["options"]["step"]["dashboard"]
     assert dashboard["data"]["dashboard_layout"] == "Dashboard Layout"
     assert (
@@ -296,9 +309,12 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert dashboard["data"]["remove_dashboard"] == "Remove Existing Dashboard"
     assert "summary" in dashboard["data_description"]["dashboard_layout"].lower()
     assert (
-        "raise entity detail level to match the layout"
+        "save a matching entity detail level"
         in dashboard["data_description"]["apply_entity_detail_profile"].lower()
     )
+    assert "reloads" in dashboard["data_description"][
+        "apply_entity_detail_profile"
+    ].lower()
     assert (
         "instead of creating or updating"
         in dashboard["data_description"]["remove_dashboard"].lower()
@@ -457,6 +473,7 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
             ("options", "nilm"),
             ("options", "utility"),
             ("options", "entity_detail"),
+            ("options", "compact_migration"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),
@@ -616,9 +633,6 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
     intentional_feature_panel_refs = {
-        "sensor.hvac_run_cycle_duty_cycle",
-        "sensor.hvac_run_cycle_runtime",
-        "sensor.hvac_outdoor_temperature",
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
         "sensor.mains_nilm_monitored_power",
@@ -866,7 +880,7 @@ def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None
     assert graph_cards
     assert graph_cards[0]["entities"] == [
         {"entity": "sensor.hvac_daily_energy_usage", "name": "Daily Energy Usage"},
-        {"entity": "sensor.hvac_outdoor_temperature", "name": "Outdoor Temperature"},
+        {"entity": "sensor.outdoor_temperature", "name": "Outdoor Temperature"},
     ]
 
 
@@ -884,9 +898,7 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.hvac_energy_summary",
         "sensor.hvac_daily_energy_usage",
         "sensor.hvac_weather_context",
-        "sensor.hvac_outdoor_temperature",
-        "sensor.hvac_run_cycle_runtime",
-        "sensor.hvac_run_cycle_duty_cycle",
+        "sensor.outdoor_temperature",
         "sensor.water_heater_activity_summary",
         "sensor.water_heater_electrical_health",
         "sensor.water_heater_energy_summary",
@@ -924,6 +936,9 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.washer_water_flow_correlation",
     }
     assert expected_entities <= refs
+    assert "sensor.hvac_outdoor_temperature" not in refs
+    assert "sensor.hvac_run_cycle_runtime" not in refs
+    assert "sensor.hvac_run_cycle_duty_cycle" not in refs
     assert not any(ref.endswith("_health_summary") for ref in refs)
     assert not any(ref.startswith("binary_sensor.") for ref in refs)
     assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
@@ -945,7 +960,7 @@ def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
     refs = _dashboard_entity_refs_with_conditional_context(dashboard)
     optional_entities = {
         "sensor.hvac_weather_context",
-        "sensor.hvac_outdoor_temperature",
+        "sensor.outdoor_temperature",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
         "sensor.mains_nilm_utility_comparison_difference",
@@ -965,7 +980,7 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Electrical Health" in readme
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
-    assert "Metric Consistency Status" in readme
+    assert "Power-quality evidence and metric/leg status" in readme
 
 
 def test_readme_explains_running_observation_and_alert_distinction() -> None:
@@ -1271,7 +1286,14 @@ def test_daily_action_services_document_entity_targets() -> None:
         assert "analyzer entity" in fields["entity_id"]["description"]
         assert fields["entity_id"]["selector"] == {
             "entity": {
-                "domain": ["sensor", "binary_sensor", "button", "select", "number"]
+                "domain": [
+                    "sensor",
+                    "binary_sensor",
+                    "button",
+                    "select",
+                    "number",
+                    "switch",
+                ]
             }
         }
 
@@ -1505,6 +1527,36 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
     assert "adds small action cards" not in readme_text
+
+
+def test_readme_documents_compact_entity_model_and_migration() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Compact entity model" in readme_text
+    assert "Migrate To Compact Entity Model" in readme_text
+    assert "docs/entity-model.md" in readme_text
+    assert "docs/entity-model-migration.md" in readme_text
+    assert "`switch.<circuit>_maintenance`" in readme_text
+    assert "`button.<circuit>_start_maintenance`" not in readme_text
+    assert "`button.<circuit>_end_maintenance`" not in readme_text
+    assert "`button.<circuit>_pause_alerts`" not in readme_text
+    assert "`sensor.<circuit>_sensitivity`" not in readme_text
+    assert "`sensor.<circuit>_standby_threshold`" not in readme_text
+    assert "Legacy replacement" in readme_text
+    assert "sensor.<circuit>_health_summary" in readme_text
+    assert "configured outdoor temperature source entity" in readme_text
+
+
+def test_entity_model_docs_document_local_count_report_generation() -> None:
+    entity_model = (ROOT / "docs" / "entity-model.md").read_text(encoding="utf-8")
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_readme = " ".join(readme_text.lower().split())
+
+    assert "python scripts/report_entity_inventory.py" in entity_model
+    assert "python scripts/report_compact_entity_inventory.py" in entity_model
+    assert "generated development artifacts are not checked in" in normalized_readme
+    assert "Simple creates 10 or fewer" in entity_model
+    assert "`switch.<circuit>_maintenance`" in entity_model
 
 
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:

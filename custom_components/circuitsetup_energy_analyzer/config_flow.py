@@ -127,10 +127,12 @@ from .const import (
     CONF_DEMO_SOURCE_BUNDLE_ENABLED,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
     CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
+    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
@@ -140,6 +142,7 @@ from .const import (
     CONF_RAIN_RESPONSE_WINDOW_MINUTES,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
+    CONF_SELECTED_ENTITY_GROUPS,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
@@ -163,6 +166,7 @@ from .const import (
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
+    ENTITY_MODEL_COMPACT,
 )
 from .dashboard import normalize_dashboard_layout
 from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
@@ -178,6 +182,11 @@ from .discovery import (
 from .entity import (
     apply_entity_profile_to_registry,
     normalize_entity_detail_level,
+)
+from .entity_catalog import (
+    EntityGroup,
+    compact_migration_preview_for_hass,
+    remove_legacy_entity_registry_entries,
 )
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
@@ -367,6 +376,7 @@ FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
+FIELD_CONFIRM_COMPACT_MIGRATION = "confirm_compact_migration"
 FIELD_REMOVE_DASHBOARD = "remove_dashboard"
 FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
 RECOMMENDATION_ACTION_APPLY = "apply"
@@ -858,6 +868,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
+        CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
         CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
@@ -1075,6 +1086,20 @@ def _selector(config: dict[str, Any], fallback: Any) -> Any:
     return ha_selector(config)
 
 
+class _SerializableSelectorFallback:
+    """Small no-HA selector fallback that voluptuous_serialize can inspect."""
+
+    def __init__(self, config: dict[str, Any], validator: Any) -> None:
+        self._config = config
+        self._validator = validator
+
+    def __call__(self, value: Any) -> Any:
+        return self._validator(value)
+
+    def serialize(self) -> dict[str, Any]:
+        return self._config
+
+
 def _energy_entity_selector_config(
     include_entities: Iterable[str] | None = None,
 ) -> dict[str, Any]:
@@ -1169,15 +1194,16 @@ def _select_selector(options: Iterable[Any]) -> Any:
 
 
 def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
+    config = {
+        "select": {
+            "multiple": True,
+            "mode": "dropdown",
+            "options": list(options),
+        }
+    }
     return _selector(
-        {
-            "select": {
-                "multiple": True,
-                "mode": "dropdown",
-                "options": list(options),
-            }
-        },
-        list,
+        config,
+        _SerializableSelectorFallback(config, vol.Schema([str])),
     )
 
 
@@ -1326,6 +1352,47 @@ def entity_detail_level_options() -> list[dict[str, str]]:
             "label": "Expert",
         },
     ]
+
+
+def entity_group_options() -> list[dict[str, str]]:
+    return [
+        {"value": EntityGroup.CYCLE_METRICS.value, "label": "Cycle Metrics"},
+        {"value": EntityGroup.ELECTRICAL_SCORES.value, "label": "Electrical Scores"},
+        {
+            "value": EntityGroup.POWER_QUALITY_DRIFT.value,
+            "label": "Power Quality Drift",
+        },
+        {"value": EntityGroup.ENERGY_DETAIL.value, "label": "Energy Detail"},
+        {"value": EntityGroup.BILLING_FORECASTS.value, "label": "Billing Forecasts"},
+        {"value": EntityGroup.DEMAND_CAPACITY.value, "label": "Demand Detail"},
+        {"value": EntityGroup.MAINS_SOLAR.value, "label": "Mains and Solar Detail"},
+        {"value": EntityGroup.NILM.value, "label": "NILM Detail"},
+        {"value": EntityGroup.WEATHER.value, "label": "Weather Detail"},
+        {"value": EntityGroup.WATER.value, "label": "Water Detail"},
+        {
+            "value": EntityGroup.DEVELOPER_DIAGNOSTICS.value,
+            "label": "Developer Diagnostics",
+        },
+    ]
+
+
+def _selected_entity_group_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, Iterable):
+        raw_values = list(value)
+    else:
+        return []
+
+    allowed = {option["value"] for option in entity_group_options()}
+    selected: list[str] = []
+    for item in raw_values:
+        text = str(item)
+        if text in allowed and text not in selected:
+            selected.append(text)
+    return selected
 
 
 def entity_detail_level_for_dashboard_layout(layout: Any) -> str:
@@ -3526,6 +3593,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     "utility",
                     "dashboard",
                     "entity_detail",
+                    "compact_migration",
                     "recommendations",
                     "advanced",
                 ],
@@ -3902,23 +3970,29 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Edit entity detail level and optionally apply it to existing entities."""
+        """Edit the entity detail level used for desired entity creation."""
         if user_input is not None:
             detail_level = normalize_entity_detail_level(
                 user_input.get(CONF_ENTITY_DETAIL_LEVEL)
             )
-            if bool(user_input.get(FIELD_APPLY_ENTITY_DETAIL_PROFILE, False)):
-                _apply_entity_detail_profile_to_existing_entities(
-                    getattr(self, "hass", None),
-                    self._config_entry,
-                    detail_level,
+            selected_groups = (
+                _selected_entity_group_values(
+                    user_input.get(CONF_SELECTED_ENTITY_GROUPS)
                 )
+                if detail_level == ENTITY_DETAIL_EXPERT
+                else []
+            )
+            updated_options = _options_with_updates(
+                self._config_entry,
+                {
+                    CONF_ENTITY_DETAIL_LEVEL: detail_level,
+                    CONF_SELECTED_ENTITY_GROUPS: selected_groups,
+                },
+            )
+            await _async_save_options_flow_config(self, updated_options)
             return self.async_create_entry(
                 title="",
-                data=_options_with_updates(
-                    self._config_entry,
-                    {CONF_ENTITY_DETAIL_LEVEL: detail_level},
-                ),
+                data=updated_options,
             )
 
         return self.async_show_form(
@@ -3926,6 +4000,37 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             data_schema=_entity_detail_schema(self._config_entry),
             errors={},
         )
+
+    async def async_step_compact_migration(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Preview and confirm removal of legacy compact-model registry rows."""
+        if user_input is not None:
+            if not bool(user_input.get(FIELD_CONFIRM_COMPACT_MIGRATION, False)):
+                return _compact_migration_form(
+                    self,
+                    errors={"base": "confirm_required"},
+                )
+
+            remove_legacy_entity_registry_entries(
+                getattr(self, "hass", None),
+                entry_id=getattr(self._config_entry, "entry_id", ""),
+            )
+            updated_options = _options_with_updates(
+                self._config_entry,
+                {
+                    CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+                    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
+                },
+            )
+            await _async_save_options_flow_config(self, updated_options)
+            return self.async_create_entry(
+                title="",
+                data=updated_options,
+            )
+
+        return _compact_migration_form(self)
 
     async def async_step_dashboard(
         self,
@@ -4017,16 +4122,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         if hasattr(result, "__await__"):
                             await result
                         layout_was_changed = layout != current_layout
-                    detail_profile_was_changed = False
-                    if matching_detail_level is not None:
-                        _apply_entity_detail_profile_to_existing_entities(
-                            getattr(self, "hass", None),
-                            self._config_entry,
-                            matching_detail_level,
-                        )
-                        detail_profile_was_changed = (
-                            matching_detail_level != current_detail_level
-                        )
                     create_dashboard = getattr(
                         coordinator,
                         "async_create_dashboard",
@@ -4040,12 +4135,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                             dashboard_result,
                             coordinator,
                         ):
-                            if detail_profile_was_changed:
-                                _apply_entity_detail_profile_to_existing_entities(
-                                    getattr(self, "hass", None),
-                                    self._config_entry,
-                                    current_detail_level,
-                                )
                             if callable(set_layout) and layout_was_changed:
                                 rollback = set_layout(current_layout)
                                 if hasattr(rollback, "__await__"):
@@ -4606,6 +4695,9 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
             DEFAULT_ENTITY_DETAIL_LEVEL,
         )
     )
+    selected_groups = _selected_entity_group_values(
+        _entry_value(config_entry, CONF_SELECTED_ENTITY_GROUPS, [])
+    )
     return vol.Schema(
         {
             vol.Optional(
@@ -4613,11 +4705,80 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
                 default=detail_level,
             ): _select_selector(entity_detail_level_options()),
             vol.Optional(
-                FIELD_APPLY_ENTITY_DETAIL_PROFILE,
+                CONF_SELECTED_ENTITY_GROUPS,
+                default=selected_groups,
+            ): _multi_select_selector(entity_group_options()),
+        }
+    )
+
+
+def _compact_migration_schema() -> Any:
+    return vol.Schema(
+        {
+            vol.Optional(
+                FIELD_CONFIRM_COMPACT_MIGRATION,
                 default=False,
             ): bool,
         }
     )
+
+
+def _compact_migration_form(
+    flow: Any,
+    errors: dict[str, str] | None = None,
+) -> config_entries.ConfigFlowResult:
+    return flow.async_show_form(
+        step_id="compact_migration",
+        data_schema=_compact_migration_schema(),
+        errors=errors or {},
+        description_placeholders=_compact_migration_placeholders(flow),
+    )
+
+
+def _compact_migration_placeholders(flow: Any) -> dict[str, str]:
+    preview = compact_migration_preview_for_hass(
+        getattr(flow, "hass", None),
+        entry_id=getattr(getattr(flow, "_config_entry", None), "entry_id", ""),
+    )
+    will_remove = preview.get("will_remove", [])
+    will_remain = preview.get("will_remain", [])
+    new_switches = preview.get("new_maintenance_switches", [])
+    customized_count = int(preview.get("customized_count", 0) or 0)
+    warning = (
+        "Some legacy entities are customized; after removal, re-enabled optional "
+        "entities may return with default entity IDs."
+        if customized_count
+        else "No customized legacy registry rows were detected."
+    )
+    return {
+        "will_remove": _compact_migration_lines(
+            (
+                f"{item['entity_id']} -> {item['replacement']}"
+                for item in will_remove
+            ),
+            empty="No legacy entities detected.",
+        ),
+        "will_remain": _compact_migration_lines(
+            (str(entity_id) for entity_id in will_remain),
+            empty="No existing analyzer entities will remain registered.",
+        ),
+        "new_maintenance_switch": _compact_migration_lines(
+            (str(unique_id) for unique_id in new_switches),
+            empty="Maintenance switch already exists where applicable.",
+        ),
+        "before_count": str(preview.get("before_count", 0)),
+        "after_count": str(preview.get("after_count", 0)),
+        "warning": warning,
+    }
+
+
+def _compact_migration_lines(
+    values: Iterable[str],
+    *,
+    empty: str,
+) -> str:
+    lines = [value for value in values if value]
+    return "\n".join(lines) if lines else empty
 
 
 def _dashboard_schema(

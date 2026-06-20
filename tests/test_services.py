@@ -310,6 +310,55 @@ async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_compact_entity_model_repair_is_single_integration_issue(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import repairs
+
+    calls = []
+    homeassistant_module = ModuleType("homeassistant")
+    helpers_module = ModuleType("homeassistant.helpers")
+    issue_registry_module = ModuleType("homeassistant.helpers.issue_registry")
+
+    class FakeIssueSeverity:
+        WARNING = "warning"
+        ERROR = "error"
+
+    def fake_create_issue(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    issue_registry_module.IssueSeverity = FakeIssueSeverity
+    issue_registry_module.async_create_issue = fake_create_issue
+    helpers_module.issue_registry = issue_registry_module
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.issue_registry",
+        issue_registry_module,
+    )
+
+    await repairs.async_create_compact_entity_model_issue(
+        SimpleNamespace(),
+        "entry-1",
+        legacy_count=3,
+    )
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[:3] == (
+        SimpleNamespace(),
+        DOMAIN,
+        "compact_entity_model_available_entry-1",
+    )
+    assert kwargs["translation_key"] == "compact_entity_model_available"
+    assert kwargs["is_fixable"] is False
+    assert kwargs["is_persistent"] is True
+    assert kwargs["data"]["legacy_count"] == 3
+    assert "Migrate To Compact Entity Model" in kwargs["data"]["recommended_action"]
+
+
 def test_nilm_label_schema_validates_required_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         NILM_LABEL_SERVICE_SCHEMA,
@@ -938,6 +987,80 @@ async def test_circuit_services_accept_renamed_registry_entity_target(
     )
 
     assert coordinator.calls == [("async_relearn_baseline", ("fridge",))]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_service_accepts_switch_entity_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.services as services
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_START_MAINTENANCE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeEntityRegistry:
+        def async_get(self, entity_id: str):
+            if entity_id == "switch.kitchen_fridge_maintenance":
+                return SimpleNamespace(
+                    platform=DOMAIN,
+                    unique_id="entry-1_fridge_maintenance",
+                )
+            return None
+
+    class FakeEntityRegistryModule:
+        @staticmethod
+        def async_get(hass):
+            return FakeEntityRegistry()
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="fridge")]
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "fridge"
+
+        async def async_start_maintenance(
+            self,
+            circuit_id: str,
+            note: str,
+            duration: object,
+            relearn_on_end: bool,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_start_maintenance",
+                    (circuit_id, note, duration, relearn_on_end),
+                )
+            )
+
+    monkeypatch.setattr(services, "er", FakeEntityRegistryModule)
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_START_MAINTENANCE)](
+        SimpleNamespace(data={"entity_id": "switch.kitchen_fridge_maintenance"})
+    )
+
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False))
+    ]
 
 
 @pytest.mark.asyncio

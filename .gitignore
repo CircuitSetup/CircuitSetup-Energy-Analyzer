@@ -11,6 +11,7 @@ htmlcov/
 !/.codex/scripts/*.ps1
 /docs/superpowers
 /docs/qa/
+/docs/development/
 /.vscode
 *.egg-info/
 /.codex-remote-attachments

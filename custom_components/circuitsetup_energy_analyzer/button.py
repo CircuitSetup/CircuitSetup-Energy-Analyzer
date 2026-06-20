@@ -11,9 +11,17 @@ from .entity import (
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
+    entity_detail_level_for_coordinator,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     supports_daily_circuit_controls,
+)
+from .entity_catalog import (
+    compact_creation_rule_for_entity,
+    compact_rule_is_setup_managed,
+    legacy_compatibility_keys_for_setup,
+    selected_entity_groups_for_coordinator,
+    should_create_entity,
 )
 
 try:
@@ -111,7 +119,6 @@ GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
         icon="mdi:tune-variant",
     ),
 )
-
 
 class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
     """Button entity exposing a daily circuit action."""
@@ -289,6 +296,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[ButtonEntity] = []
+    compatibility_keys = legacy_compatibility_keys_for_setup(
+        hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
+    detail_level = entity_detail_level_for_coordinator(coordinator)
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
@@ -303,6 +317,14 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             )
             for description in CIRCUIT_BUTTON_DESCRIPTIONS
             if button_description_applies(description, raw_circuit, coordinator)
+            and _button_description_should_create(
+                description,
+                circuit,
+                coordinator,
+                detail_level=detail_level,
+                selected_groups=selected_groups,
+                legacy_compatibility_keys=compatibility_keys,
+            )
         )
 
     entities.extend(
@@ -343,6 +365,29 @@ def button_description_applies(
     }:
         return True
     return supports_daily_circuit_controls(circuit)
+
+
+def _button_description_should_create(
+    description: CircuitButtonDescription,
+    circuit: Any,
+    coordinator: Any,
+    *,
+    detail_level: str,
+    selected_groups: set[Any],
+    legacy_compatibility_keys: set[str],
+) -> bool:
+    rule = compact_creation_rule_for_entity("button", description.key)
+    if not compact_rule_is_setup_managed(rule):
+        return True
+    return should_create_entity(
+        rule=rule,
+        circuit=circuit,
+        coordinator=coordinator,
+        detail_level=detail_level,
+        selected_groups=selected_groups,
+        legacy_compatibility_keys=legacy_compatibility_keys,
+        applicability_already_checked=True,
+    )
 
 
 def _button_availability_reason(

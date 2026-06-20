@@ -14,6 +14,7 @@ from custom_components.circuitsetup_energy_analyzer import (
     number,
     select,
     sensor,
+    switch,
 )
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_DASHBOARD_LAYOUT,
@@ -97,7 +98,7 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
     )
     added_entities: list[Any] = []
 
-    for platform in (sensor, binary_sensor, button, select, number):
+    for platform in (sensor, binary_sensor, button, select, number, switch):
         await platform.async_setup_entry(hass, entry, added_entities.extend)
 
     unique_ids = {entity.unique_id for entity in added_entities}
@@ -108,6 +109,7 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
         "runtime-entry_dashboard_layout",
         "runtime-entry_entity_detail_level",
         "runtime-entry_fridge_daily_energy_goal",
+        "runtime-entry_fridge_maintenance",
     } <= unique_ids
     assert (
         entity_registry.async_get_entity_id("sensor", DOMAIN, stale_entity.unique_id)

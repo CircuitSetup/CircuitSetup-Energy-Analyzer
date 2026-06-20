@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     DASHBOARD_LAYOUT_EXPERT,
     DASHBOARD_LAYOUT_SIMPLE,
     DASHBOARD_LAYOUT_STANDARD,
@@ -78,13 +79,23 @@ def _example_circuits() -> tuple[CircuitConfig, ...]:
 
 
 def _circuit_dicts() -> list[dict[str, object]]:
+    return _circuit_config_dicts(_circuits())
+
+
+def _example_circuit_dicts() -> list[dict[str, object]]:
+    return _circuit_config_dicts(_example_circuits())
+
+
+def _circuit_config_dicts(
+    circuits: tuple[CircuitConfig, ...],
+) -> list[dict[str, object]]:
     return [
         {
             **asdict(circuit),
             "appliance_profile": circuit.appliance_profile.value,
             "mode": circuit.mode.value,
         }
-        for circuit in _circuits()
+        for circuit in circuits
     ]
 
 
@@ -359,13 +370,42 @@ def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
             ),
         ),
         DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.backyard_temperature",
     )
     hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
     refs = _entity_refs(hvac_section)
+    dashboard_refs = _entity_refs(dashboard)
+
+    assert "sensor.compressor_activity_summary" in dashboard_refs
+    assert "sensor.compressor_weather_context" in refs
+    assert "sensor.backyard_temperature" in refs
+    assert "sensor.compressor_outdoor_temperature" not in refs
+    assert "sensor.compressor_run_cycle_runtime" not in refs
+    assert "sensor.compressor_run_cycle_duty_cycle" not in refs
+
+
+def test_dashboard_omits_hvac_outdoor_temperature_mirror_without_source_entity() -> (
+    None
+):
+    dashboard = build_recommended_dashboard(
+        (
+            CircuitConfig(
+                circuit_id="compressor",
+                name="A/C Compressor",
+                appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+                mode=CircuitMode.DUAL_PHASE,
+                sensors=(
+                    SensorRef("sensor.compressor_power", SensorRole.REAL_POWER),
+                    SensorRef("sensor.compressor_energy", SensorRole.ENERGY),
+                ),
+            ),
+        ),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    refs = _entity_refs(dashboard)
 
     assert "sensor.compressor_weather_context" in refs
-    assert "sensor.compressor_run_cycle_runtime" in refs
-    assert "sensor.compressor_run_cycle_duty_cycle" in refs
+    assert "sensor.compressor_outdoor_temperature" not in refs
 
 
 def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() -> None:
@@ -991,7 +1031,10 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
     )
     coordinator = EnergyAnalyzerCoordinator(
         hass,
-        entry_data={"circuits": _circuit_dicts()},
+        entry_data={
+            "circuits": _example_circuit_dicts(),
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+        },
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
     )
 
@@ -1006,6 +1049,8 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
     saved_dashboard = str(dashboards[DASHBOARD_URL_PATH].saved[0])
     assert "Appliance Status" in saved_dashboard
     assert "sensor.fridge_activity_summary" in saved_dashboard
+    assert "sensor.outdoor_temperature" in saved_dashboard
+    assert "sensor.hvac_outdoor_temperature" not in saved_dashboard
     assert "sensor.fridge_metric_consistency_status" not in saved_dashboard
     assert coordinator.last_dashboard_create_request["action"] == "created"
     assert (

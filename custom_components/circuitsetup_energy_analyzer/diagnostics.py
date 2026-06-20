@@ -3,7 +3,19 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
-from .const import DOMAIN
+from .const import (
+    CONF_ENTITY_DETAIL_LEVEL,
+    CONF_ENTITY_MODEL_VERSION,
+    DEFAULT_ENTITY_DETAIL_LEVEL,
+    DOMAIN,
+    ENTITY_MODEL_COMPACT,
+)
+from .entity_catalog import (
+    compact_migration_preview_for_hass,
+    legacy_compatibility_keys_for_coordinator,
+    legacy_entity_registry_entries_for_hass,
+    selected_entity_groups_for_coordinator,
+)
 
 try:
     from homeassistant.helpers import device_registry as dr
@@ -24,6 +36,7 @@ async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str,
             "option_keys": sorted(getattr(entry, "options", {})),
         },
         "devices": _devices_for_entry(hass, entry_id),
+        "entity_model": _entity_model_summary(hass, entry),
         "runtime_loaded": entry_id in getattr(hass, "data", {}).get(DOMAIN, {}),
     }
     runtime = _runtime_summary(hass, entry_id)
@@ -77,6 +90,56 @@ def _runtime_summary(hass: Any, entry_id: str) -> dict[str, Any] | None:
             getattr(coordinator, "last_exported_diagnostics", {}) or {}
         ),
     }
+
+
+def _entity_model_summary(hass: Any, entry: Any) -> dict[str, Any]:
+    entry_id = getattr(entry, "entry_id", "default")
+    data = getattr(entry, "data", {}) or {}
+    options = getattr(entry, "options", {}) or {}
+    coordinator = getattr(hass, "data", {}).get(DOMAIN, {}).get(entry_id)
+    metadata_source = coordinator
+    if metadata_source is None:
+        metadata_source = type(
+            "_EntityModelDiagnosticSource",
+            (),
+            {"options": options, "entry_data": data},
+        )()
+    preview = compact_migration_preview_for_hass(hass, entry_id=entry_id)
+    return {
+        "version": _entry_value(
+            data,
+            options,
+            CONF_ENTITY_MODEL_VERSION,
+            ENTITY_MODEL_COMPACT,
+        ),
+        "detail_level": _entry_value(
+            data,
+            options,
+            CONF_ENTITY_DETAIL_LEVEL,
+            DEFAULT_ENTITY_DETAIL_LEVEL,
+        ),
+        "selected_groups": sorted(
+            group.value for group in selected_entity_groups_for_coordinator(
+                metadata_source
+            )
+        ),
+        "desired_entity_count": int(preview.get("after_count", 0) or 0),
+        "legacy_entity_count": len(
+            legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
+        ),
+        "legacy_compatibility_key_count": len(
+            legacy_compatibility_keys_for_coordinator(metadata_source)
+        ),
+    }
+
+
+def _entry_value(
+    data: dict[str, Any],
+    options: dict[str, Any],
+    key: str,
+    default: Any,
+) -> Any:
+    return options.get(key, data.get(key, default))
 
 
 def _count_by_circuit(items: list[Any]) -> dict[str, Any]:
