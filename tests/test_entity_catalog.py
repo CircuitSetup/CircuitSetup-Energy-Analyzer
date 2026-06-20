@@ -37,6 +37,13 @@ from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
     selected_entity_groups_for_coordinator,
     should_create_entity,
 )
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    SensorRef,
+    SensorRole,
+)
 
 
 def test_should_create_entity_respects_detail_levels_and_selected_groups() -> None:
@@ -188,6 +195,14 @@ def test_legacy_registry_entries_drive_compatibility_and_preview() -> None:
             hidden_by=None,
         ),
         SimpleNamespace(
+            entity_id="select.fridge_alert_sensitivity",
+            unique_id="entry-1_fridge_alert_sensitivity",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+            disabled_by=None,
+            hidden_by=None,
+        ),
+        SimpleNamespace(
             entity_id="sensor.fridge_readiness",
             unique_id="entry-1_fridge_readiness",
             config_entry_id="entry-1",
@@ -239,9 +254,9 @@ def test_legacy_registry_entries_drive_compatibility_and_preview() -> None:
 
     preview = compact_migration_preview_for_registry(entries, entry_id="entry-1")
 
-    assert preview["before_count"] == 4
+    assert preview["before_count"] == 5
     assert preview["remove_count"] == 3
-    assert preview["after_count"] == 2
+    assert preview["after_count"] == 3
     assert preview["customized_count"] == 1
     assert {
         item["entity_id"]: item["replacement"]
@@ -251,6 +266,7 @@ def test_legacy_registry_entries_drive_compatibility_and_preview() -> None:
         "sensor.fridge_readiness": "sensor:health_summary#readiness",
         "sensor.fridge_sensitivity": "select:alert_sensitivity",
     }
+    assert "select.fridge_alert_sensitivity" in preview["will_remain"]
 
 
 def test_compact_creation_rule_documents_requested_replacements() -> None:
@@ -265,6 +281,108 @@ def test_compact_creation_rule_documents_requested_replacements() -> None:
     assert run_cycle_status.replacement == "sensor.<circuit>_activity_summary"
     assert maintenance_start.legacy
     assert maintenance_start.replacement == "switch.<circuit>_maintenance"
+
+
+def test_pause_alerts_button_is_expert_developer_diagnostic_opt_in() -> None:
+    rule = compact_creation_rule_for_entity("button", "pause_alerts")
+
+    assert rule.group is EntityGroup.DEVELOPER_DIAGNOSTICS
+    assert not should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert not should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_STANDARD,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert not should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert should_create_entity(
+        rule=rule,
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups={EntityGroup.DEVELOPER_DIAGNOSTICS},
+        legacy_compatibility_keys=(),
+    )
+
+
+def test_should_create_entity_checks_feature_source_applicability() -> None:
+    rule = compact_creation_rule_for_entity("number", "daily_energy_goal")
+    power_only = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    with_energy = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+        ),
+    )
+
+    assert not should_create_entity(
+        rule=rule,
+        circuit=power_only,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+    assert should_create_entity(
+        rule=rule,
+        circuit=with_energy,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=(),
+    )
+
+
+def test_solar_flexible_load_detail_uses_evidence_without_new_entities() -> None:
+    rules = compact_creation_rules_by_key()
+    legacy_mains_solar_keys = {
+        "solar_site_consumption_power",
+        "solar_grid_import_power",
+        "solar_grid_export_power",
+        "solar_self_consumption",
+        "solar_powered",
+        "solar_flexible_load_power",
+        "solar_flexible_load_coverage",
+        "solar_load_shift_power",
+        "solar_load_shift_status",
+        "utility_comparison_difference",
+    }
+
+    assert all(rules[("sensor", key)].legacy for key in legacy_mains_solar_keys)
+    assert not should_create_entity(
+        rule=rules[("sensor", "solar_flexible_load_power")],
+        circuit=None,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_EXPERT,
+        selected_groups={EntityGroup.MAINS_SOLAR},
+        legacy_compatibility_keys=(),
+    )
 
 
 def test_core_duplicate_rules_are_marked_for_phase_two_removal() -> None:

@@ -8,6 +8,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
+    CONF_SELECTED_ENTITY_GROUPS,
     DASHBOARD_LAYOUT_EXPERT,
     DOMAIN,
     PLATFORMS,
@@ -235,7 +236,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     by_unique_id = {entity.unique_id: entity for entity in added_entities}
     assert set(by_unique_id) == {
         "entry-1_fridge_relearn_baseline",
-        "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
     }
@@ -256,11 +256,8 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
     for entity in added_entities:
         _assert_base_description_defaults(entity.entity_description)
 
-    coordinator.data.active_alerts_by_circuit["fridge"] = [object()]
-
     for unique_id in (
         "entry-1_fridge_relearn_baseline",
-        "entry-1_fridge_pause_alerts",
         "entry-1_run_mapping_checks",
         "entry-1_recalculate_suggestions",
     ):
@@ -268,7 +265,6 @@ async def test_button_setup_entry_adds_circuit_and_global_controls(
 
     assert coordinator.calls == [
         ("async_relearn_baseline", ("fridge",)),
-        ("async_pause_alerts", ("fridge", None)),
         ("async_run_mapping_checks", ()),
         ("async_recalculate_setting_recommendations", (None,)),
     ]
@@ -292,7 +288,7 @@ async def test_button_setup_skips_inapplicable_controls_and_keeps_single_globals
 
     unique_ids = {entity.unique_id for entity in added_entities}
 
-    assert "entry-1_fridge_pause_alerts" in unique_ids
+    assert "entry-1_fridge_pause_alerts" not in unique_ids
     assert "entry-1_mains_pause_alerts" not in unique_ids
     assert "entry-1_mains_relearn_baseline" not in unique_ids
     assert {
@@ -408,6 +404,8 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
 
     _disable_registry_pruning(monkeypatch, button)
     coordinator = _FakeCoordinator()
+    coordinator.options[CONF_ENTITY_DETAIL_LEVEL] = "expert"
+    coordinator.options[CONF_SELECTED_ENTITY_GROUPS] = ["developer_diagnostics"]
     added_entities = []
 
     await button.async_setup_entry(
@@ -1044,7 +1042,6 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
 
     assert {entity.unique_id for entity in button_entities} >= {
         "entry-1_dishwasher_relearn_baseline",
-        "entry-1_dishwasher_pause_alerts",
     }
     assert [entity.unique_id for entity in number_entities] == [
         "entry-1_dishwasher_daily_energy_goal"

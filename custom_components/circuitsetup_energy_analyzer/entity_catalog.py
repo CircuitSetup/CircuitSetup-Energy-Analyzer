@@ -45,6 +45,16 @@ LEGACY_ENTITY_REPLACEMENTS: Mapping[str, str] = {
     "cost_status": "cost_cycle#status",
     "standby_threshold": "Advanced Circuit Settings / standby_status attribute",
     "outdoor_temperature": "configured source entity / weather_context attribute",
+    "solar_site_consumption_power": "sensor:solar_flow_status / evidence_panel",
+    "solar_grid_import_power": "sensor:solar_flow_status / evidence_panel",
+    "solar_grid_export_power": "sensor:solar_flow_status / evidence_panel",
+    "solar_self_consumption": "sensor:solar_flow_status / evidence_panel",
+    "solar_powered": "sensor:solar_flow_status / evidence_panel",
+    "solar_flexible_load_power": "sensor:solar_load_shift_evidence",
+    "solar_flexible_load_coverage": "sensor:solar_load_shift_evidence",
+    "solar_load_shift_power": "sensor:solar_surplus_power / evidence_panel",
+    "solar_load_shift_status": "sensor:solar_surplus_status / evidence_panel",
+    "utility_comparison_difference": "sensor:utility_comparison_status",
     "start_maintenance": "switch:maintenance",
     "end_maintenance": "switch:maintenance",
 }
@@ -126,9 +136,15 @@ def should_create_entity(
     detail_level: str,
     selected_groups: Collection[str | EntityGroup],
     legacy_compatibility_keys: Collection[str],
+    applicability_already_checked: bool = False,
 ) -> bool:
     """Return whether the compact model should create a described entity."""
-    del circuit, coordinator
+    if (
+        not applicability_already_checked
+        and not _rule_applies_to_circuit(rule, circuit, coordinator)
+    ):
+        return False
+
     compatibility_keys = {str(item) for item in legacy_compatibility_keys}
     if rule_key(rule) in compatibility_keys or rule.key in compatibility_keys:
         return True
@@ -149,6 +165,106 @@ def should_create_entity(
     if rule.create_in_expert:
         return True
     return rule.group in _normalize_groups(selected_groups)
+
+
+def _rule_applies_to_circuit(
+    rule: EntityCreationRule,
+    circuit: Any,
+    coordinator: Any,
+) -> bool:
+    """Return whether the rule's platform-level applicability allows creation."""
+    if circuit is None:
+        return True
+
+    if rule.domain == "sensor":
+        from . import sensor as sensor_platform
+
+        description = _description_by_key(
+            sensor_platform.SENSOR_DESCRIPTIONS,
+            rule.key,
+        )
+        configured_circuits = getattr(coordinator, "circuit_configs", None)
+        return description is None or sensor_platform.sensor_description_applies(
+            description,
+            circuit,
+            coordinator,
+            configured_circuits,
+        )
+    if rule.domain == "binary_sensor":
+        from . import binary_sensor as binary_sensor_platform
+
+        description = _description_by_key(
+            binary_sensor_platform.BINARY_SENSOR_DESCRIPTIONS,
+            rule.key,
+        )
+        return (
+            description is None
+            or binary_sensor_platform.binary_sensor_description_applies(
+                description,
+                circuit,
+                coordinator,
+            )
+        )
+    if rule.domain == "button":
+        from . import button as button_platform
+
+        description = _description_by_key(
+            button_platform.CIRCUIT_BUTTON_DESCRIPTIONS,
+            rule.key,
+        )
+        return description is None or button_platform.button_description_applies(
+            description,
+            circuit,
+            coordinator,
+        )
+    if rule.domain == "select":
+        from . import select as select_platform
+
+        description = _description_by_key(
+            select_platform.CIRCUIT_SELECT_DESCRIPTIONS,
+            rule.key,
+        )
+        return description is None or select_platform.select_description_applies(
+            description,
+            circuit,
+            coordinator,
+        )
+    if rule.domain == "number":
+        from . import number as number_platform
+
+        description = _description_by_key(
+            number_platform.CIRCUIT_NUMBER_DESCRIPTIONS,
+            rule.key,
+        )
+        return description is None or number_platform.number_description_applies(
+            description,
+            circuit,
+            coordinator,
+        )
+    if rule.domain == "switch":
+        from . import switch as switch_platform
+
+        description = _description_by_key(
+            switch_platform.CIRCUIT_SWITCH_DESCRIPTIONS,
+            rule.key,
+        )
+        return description is None or switch_platform.switch_description_applies(
+            description,
+            circuit,
+            coordinator,
+        )
+    return True
+
+
+def _description_by_key(descriptions: Collection[Any], key: str) -> Any | None:
+    return next(
+        (
+            description
+            for description in descriptions
+            if getattr(description, "key", None) == key
+        ),
+        None,
+    )
 
 
 def rule_key(rule: EntityCreationRule) -> str:
@@ -482,7 +598,7 @@ def _legacy_entity_registry_entry(
     unique_id = str(getattr(entry, "unique_id", ""))
     if not unique_id.startswith(f"{entry_id}_"):
         return None
-    key = _legacy_key_from_unique_id(unique_id)
+    key = _legacy_key_from_unique_id(unique_id, domain=domain)
     if key is None:
         return None
     disabled_by = _registry_marker_name(getattr(entry, "disabled_by", None))
@@ -509,10 +625,15 @@ def _legacy_entity_registry_entry(
     )
 
 
-def _legacy_key_from_unique_id(unique_id: str) -> str | None:
-    for key in sorted(LEGACY_ENTITY_REPLACEMENTS, key=len, reverse=True):
-        if unique_id.endswith(f"_{key}"):
-            return key
+def _legacy_key_from_unique_id(unique_id: str, *, domain: str) -> str | None:
+    legacy_rules = (
+        rule
+        for rule in COMPACT_ENTITY_RULES.values()
+        if rule.key in LEGACY_ENTITY_REPLACEMENTS and rule.domain == domain
+    )
+    for rule in sorted(legacy_rules, key=lambda item: len(item.key), reverse=True):
+        if unique_id.endswith(f"_{rule.key}"):
+            return rule.key
     return None
 
 
@@ -758,12 +879,9 @@ _RULES: tuple[EntityCreationRule, ...] = (
     _rule(
         "button",
         "pause_alerts",
-        EntityExposure.CORE,
-        EntityGroup.CORE,
-        ENTITY_DETAIL_SIMPLE,
-        simple=True,
-        standard=True,
-        expert=True,
+        EntityExposure.DIAGNOSTIC,
+        EntityGroup.DEVELOPER_DIAGNOSTICS,
+        ENTITY_DETAIL_EXPERT,
     ),
     _rule(
         "number",
@@ -929,20 +1047,60 @@ _RULES: tuple[EntityCreationRule, ...] = (
     _graph_sensor("monitored_coverage", EntityGroup.MAINS_SOLAR),
     _diagnostic_sensor("balance_status", EntityGroup.MAINS_SOLAR),
     _graph_sensor("solar_generation_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_grid_import_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_grid_export_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_site_consumption_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_self_consumption", EntityGroup.MAINS_SOLAR),
     _graph_sensor("solar_surplus_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_powered", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_flexible_load_power", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_flexible_load_coverage", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("solar_load_shift_power", EntityGroup.MAINS_SOLAR),
     _diagnostic_sensor("solar_flow_status", EntityGroup.MAINS_SOLAR),
     _diagnostic_sensor("solar_surplus_status", EntityGroup.MAINS_SOLAR),
-    _diagnostic_sensor("solar_load_shift_status", EntityGroup.MAINS_SOLAR),
-    _graph_sensor("utility_comparison_difference", EntityGroup.MAINS_SOLAR),
     _diagnostic_sensor("utility_comparison_status", EntityGroup.MAINS_SOLAR),
+    _legacy_sensor(
+        "solar_site_consumption_power",
+        "sensor.<circuit>_solar_flow_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_grid_import_power",
+        "sensor.<circuit>_solar_flow_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_grid_export_power",
+        "sensor.<circuit>_solar_flow_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_self_consumption",
+        "sensor.<circuit>_solar_flow_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_powered",
+        "sensor.<circuit>_solar_flow_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_flexible_load_power",
+        "solar load-shift evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_flexible_load_coverage",
+        "solar load-shift evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_load_shift_power",
+        "sensor.<circuit>_solar_surplus_power and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "solar_load_shift_status",
+        "sensor.<circuit>_solar_surplus_status and evidence panel",
+        EntityGroup.MAINS_SOLAR,
+    ),
+    _legacy_sensor(
+        "utility_comparison_difference",
+        "sensor.<circuit>_utility_comparison_status",
+        EntityGroup.MAINS_SOLAR,
+    ),
     _graph_sensor("nilm_signature_count", EntityGroup.NILM),
     _graph_sensor("nilm_unknown_loads", EntityGroup.NILM),
     _graph_sensor("nilm_unmatched_load_percentage", EntityGroup.NILM),

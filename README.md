@@ -366,7 +366,6 @@ Most users should configure these options from the Home Assistant UI. Developer 
 Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions. If you do call a circuit service from an automation, you can target a renamed analyzer entity instead of typing the circuit ID.
 
 - `button.<circuit>_relearn_baseline`
-- `button.<circuit>_pause_alerts`
 - `select.<circuit>_alert_sensitivity`
 - `number.<circuit>_daily_energy_goal`
 - `switch.<circuit>_maintenance`
@@ -847,6 +846,14 @@ entities instead of every intermediate calculation as a standalone entity.
 - **Standard** adds canonical status and graph entities for features you configured.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
 
+See `docs/entity-model.md` and `docs/entity-model-migration.md` for the full
+model and migration notes. The checked-in development count reports live in
+`docs/development/entity-inventory-before.md`,
+`docs/development/entity-inventory-after.md`, and
+`docs/development/entity-count-comparison.md`; automated Home Assistant
+validation is recorded in
+`docs/development/home-assistant-compact-entity-results.md`.
+
 Existing installs can keep enabled legacy entities for one compatibility release
 so dashboards and automations do not break during upgrade. To migrate explicitly,
 open **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure >
@@ -979,19 +986,19 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 | **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Normal entity for mains circuits. | Percentage values |
 | **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Advanced diagnostic, disabled by default. | `missing_mains`, `tracking`, `negative_balance` |
 | **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Grid Import Power** | `sensor.<circuit>_solar_grid_import_power` | Current grid import. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Grid Export Power** | `sensor.<circuit>_solar_grid_export_power` | Current grid export. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Self Consumption** | `sensor.<circuit>_solar_self_consumption` | Percent of generated solar consumed on site. | Normal entity for solar/generation circuits. | Percentage values |
-| **Solar Powered** | `sensor.<circuit>_solar_powered` | Percent of current site load powered by solar. | Normal entity for solar/generation circuits. | Percentage values |
+| **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
+| **Solar Grid Import Power** | `sensor.<circuit>_solar_grid_import_power` | Current grid import. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
+| **Solar Grid Export Power** | `sensor.<circuit>_solar_grid_export_power` | Current grid export. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
+| **Solar Self Consumption** | `sensor.<circuit>_solar_self_consumption` | Percent of generated solar consumed on site. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Percentage values |
+| **Solar Powered** | `sensor.<circuit>_solar_powered` | Percent of current site load powered by solar. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Percentage values |
 | **Solar Flow Status** | `sensor.<circuit>_solar_flow_status` | Instantaneous solar-flow state. | Normal entity for solar/generation circuits. | `missing_mains`, `missing_generation`, `no_generation`, `importing`, `exporting`, `self_powered`, `inconsistent_export` |
 | **Solar Surplus Power** | `sensor.<circuit>_solar_surplus_power` | Exported solar available as surplus. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Load Shift Power** | `sensor.<circuit>_solar_load_shift_power` | Surplus power above the configured load-shift threshold. Attributes show a bounded preview of up to five flexible-load candidates with counts for hidden candidates. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Flexible Load Power** | `sensor.<circuit>_solar_flexible_load_power` | Current power used by flexible loads such as EV chargers, water heaters, HVAC, or pool pumps. | Normal entity for solar/generation circuits. | Watts |
-| **Solar Flexible Load Coverage** | `sensor.<circuit>_solar_flexible_load_coverage` | Percent of active flexible-load power estimated to be solar-covered. | Normal entity for solar/generation circuits. | Percentage values |
-| **Solar Load Shift Status** | `sensor.<circuit>_solar_load_shift_status` | Flexible-load solar support state. Attributes show the same bounded flexible-load candidate preview as Solar Load Shift Power. | Normal entity for solar/generation circuits. | `not_applicable`, `waiting_for_surplus`, `surplus_candidate`, `active_solar_supported`, `active_grid_supported` |
+| **Solar Load Shift Power** | `sensor.<circuit>_solar_load_shift_power` | Surplus power above the configured load-shift threshold. Attributes show a bounded preview of up to five flexible-load candidates with counts for hidden candidates. | Legacy compatibility; use Solar Surplus Power and the evidence panel. | Watts |
+| **Solar Flexible Load Power** | `sensor.<circuit>_solar_flexible_load_power` | Current power used by flexible loads such as EV chargers, water heaters, HVAC, or pool pumps. | Legacy compatibility; use load-shift evidence. | Watts |
+| **Solar Flexible Load Coverage** | `sensor.<circuit>_solar_flexible_load_coverage` | Percent of active flexible-load power estimated to be solar-covered. | Legacy compatibility; use load-shift evidence. | Percentage values |
+| **Solar Load Shift Status** | `sensor.<circuit>_solar_load_shift_status` | Flexible-load solar support state. Attributes show the same bounded flexible-load candidate preview as Solar Load Shift Power. | Legacy compatibility; use Solar Surplus Status and the evidence panel. | `not_applicable`, `waiting_for_surplus`, `surplus_candidate`, `active_solar_supported`, `active_grid_supported` |
 | **Solar Surplus Status** | `sensor.<circuit>_solar_surplus_status` | Solar surplus state. | Normal entity for solar/generation circuits. | `missing_mains`, `missing_generation`, `no_generation`, `no_surplus`, `surplus_available`, `high_surplus`, `inconsistent_export` |
-| **Utility Comparison Difference** | `sensor.<circuit>_utility_comparison_difference` | Difference between measured kWh and utility/Opower kWh. | Normal entity when utility comparison exists. | Percentage difference |
+| **Utility Comparison Difference** | `sensor.<circuit>_utility_comparison_difference` | Difference between measured kWh and utility/Opower kWh. | Legacy compatibility; use Utility Comparison Status attributes. | Percentage difference |
 | **Utility Comparison Status** | `sensor.<circuit>_utility_comparison_status` | Utility comparison state. | Normal entity when utility comparison exists. | `unconfigured`, `missing_utility`, `missing_measured`, `tracking`, `mismatch` |
 
 ### Standby and Always On sensors

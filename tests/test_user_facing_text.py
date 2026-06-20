@@ -1534,14 +1534,49 @@ def test_readme_documents_compact_entity_model_and_migration() -> None:
 
     assert "Compact entity model" in readme_text
     assert "Migrate To Compact Entity Model" in readme_text
+    assert "docs/entity-model.md" in readme_text
+    assert "docs/entity-model-migration.md" in readme_text
     assert "`switch.<circuit>_maintenance`" in readme_text
     assert "`button.<circuit>_start_maintenance`" not in readme_text
     assert "`button.<circuit>_end_maintenance`" not in readme_text
+    assert "`button.<circuit>_pause_alerts`" not in readme_text
     assert "`sensor.<circuit>_sensitivity`" not in readme_text
     assert "`sensor.<circuit>_standby_threshold`" not in readme_text
     assert "Legacy replacement" in readme_text
     assert "sensor.<circuit>_health_summary" in readme_text
     assert "configured outdoor temperature source entity" in readme_text
+
+
+def test_compact_entity_development_reports_document_switch_replacement() -> None:
+    after_report = json.loads(
+        (ROOT / "docs" / "development" / "entity-inventory-after.json").read_text(
+            encoding="utf-8",
+        )
+    )
+    refrigerator = next(
+        scenario
+        for scenario in after_report["scenarios"]
+        if scenario["scenario_id"] == "refrigerator"
+    )
+    simple_keys = set(
+        refrigerator["detail_levels"]["simple"]["created"]["keys"],
+    )
+
+    assert "switch:maintenance" in simple_keys
+    assert "button:pause_alerts" not in simple_keys
+    assert all(
+        scenario["detail_levels"]["expert_all_groups"]["created"]["total"] <= 50
+        for scenario in after_report["scenarios"]
+    )
+
+    comparison = (
+        ROOT / "docs" / "development" / "entity-count-comparison.md"
+    ).read_text(encoding="utf-8")
+    assert "Simple maximum: 10 per-circuit entities." in comparison
+    assert "`switch.<circuit>_maintenance`" in comparison
+    assert (
+        ROOT / "docs" / "development" / "home-assistant-compact-entity-results.md"
+    ).exists()
 
 
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:

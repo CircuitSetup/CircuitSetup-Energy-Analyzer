@@ -2689,6 +2689,7 @@ def _compact_sensor_descriptions_for_setup(
             detail_level=detail_level,
             selected_groups=selected_groups,
             legacy_compatibility_keys=compatibility_keys,
+            applicability_already_checked=True,
         ):
             continue
         compact_descriptions.append(description)

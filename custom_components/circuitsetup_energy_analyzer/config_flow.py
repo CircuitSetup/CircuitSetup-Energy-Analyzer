@@ -3982,15 +3982,17 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 if detail_level == ENTITY_DETAIL_EXPERT
                 else []
             )
+            updated_options = _options_with_updates(
+                self._config_entry,
+                {
+                    CONF_ENTITY_DETAIL_LEVEL: detail_level,
+                    CONF_SELECTED_ENTITY_GROUPS: selected_groups,
+                },
+            )
+            await _async_save_options_flow_config(self, updated_options)
             return self.async_create_entry(
                 title="",
-                data=_options_with_updates(
-                    self._config_entry,
-                    {
-                        CONF_ENTITY_DETAIL_LEVEL: detail_level,
-                        CONF_SELECTED_ENTITY_GROUPS: selected_groups,
-                    },
-                ),
+                data=updated_options,
             )
 
         return self.async_show_form(
@@ -4015,15 +4017,17 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 getattr(self, "hass", None),
                 entry_id=getattr(self._config_entry, "entry_id", ""),
             )
+            updated_options = _options_with_updates(
+                self._config_entry,
+                {
+                    CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
+                    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
+                },
+            )
+            await _async_save_options_flow_config(self, updated_options)
             return self.async_create_entry(
                 title="",
-                data=_options_with_updates(
-                    self._config_entry,
-                    {
-                        CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
-                        CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
-                    },
-                ),
+                data=updated_options,
             )
 
         return _compact_migration_form(self)

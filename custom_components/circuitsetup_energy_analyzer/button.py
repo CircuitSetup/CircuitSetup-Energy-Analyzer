@@ -386,6 +386,7 @@ def _button_description_should_create(
         detail_level=detail_level,
         selected_groups=selected_groups,
         legacy_compatibility_keys=legacy_compatibility_keys,
+        applicability_already_checked=True,
     )
 
 

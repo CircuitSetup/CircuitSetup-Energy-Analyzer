@@ -1452,6 +1452,47 @@ async def test_options_entity_detail_step_saves_expert_entity_groups() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_entity_detail_step_reloads_entity_set_changes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.updates: list[tuple[object, dict[str, object]]] = []
+            self.reloads: list[str] = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            self.updates.append((entry, kwargs))
+            entry.options = dict(kwargs["options"])
+
+        async def async_reload(self, entry_id: str) -> bool:
+            self.reloads.append(entry_id)
+            return True
+
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    config_entries = FakeConfigEntries()
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(config_entries=config_entries)
+
+    result = await flow.async_step_entity_detail(
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: ["cycle_metrics"],
+        }
+    )
+
+    expected_options = {
+        CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+        CONF_SELECTED_ENTITY_GROUPS: ["cycle_metrics"],
+    }
+    _assert_create_entry_result(result, expected_options)
+    assert config_entries.updates == [(entry, {"options": expected_options})]
+    assert config_entries.reloads == ["entry-1"]
+    assert entry.options == expected_options
+
+
+@pytest.mark.asyncio
 async def test_options_compact_migration_previews_and_confirms_cleanup(
     monkeypatch,
 ) -> None:
@@ -1469,6 +1510,14 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
                 "sensor.fridge_sensitivity": SimpleNamespace(
                     entity_id="sensor.fridge_sensitivity",
                     unique_id="entry-1_fridge_sensitivity",
+                    config_entry_id="entry-1",
+                    platform=DOMAIN,
+                    disabled_by=None,
+                    hidden_by=None,
+                ),
+                "select.fridge_alert_sensitivity": SimpleNamespace(
+                    entity_id="select.fridge_alert_sensitivity",
+                    unique_id="entry-1_fridge_alert_sensitivity",
                     config_entry_id="entry-1",
                     platform=DOMAIN,
                     disabled_by=None,
@@ -1497,6 +1546,19 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
             self.removed.append(entity_id)
             self.entities.pop(entity_id, None)
 
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.updates: list[tuple[object, dict[str, object]]] = []
+            self.reloads: list[str] = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            self.updates.append((entry, kwargs))
+            entry.options = dict(kwargs["options"])
+
+        async def async_reload(self, entry_id: str) -> bool:
+            self.reloads.append(entry_id)
+            return True
+
     homeassistant_module = ModuleType("homeassistant")
     helpers_module = ModuleType("homeassistant.helpers")
     entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
@@ -1519,7 +1581,11 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
         },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
-    flow.hass = SimpleNamespace(entity_registry=FakeRegistry())
+    config_entries = FakeConfigEntries()
+    flow.hass = SimpleNamespace(
+        config_entries=config_entries,
+        entity_registry=FakeRegistry(),
+    )
 
     menu = await flow.async_step_init()
     assert "compact_migration" in menu["menu_options"]
@@ -1539,8 +1605,9 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
     assert "button.fridge_start_maintenance -> switch:maintenance" in placeholders[
         "will_remove"
     ]
-    assert placeholders["before_count"] == "3"
-    assert placeholders["after_count"] == "2"
+    assert "select.fridge_alert_sensitivity" in placeholders["will_remain"]
+    assert placeholders["before_count"] == "4"
+    assert placeholders["after_count"] == "3"
     assert "customized" in placeholders["warning"].lower()
 
     rejected = await flow.async_step_compact_migration(
@@ -1564,6 +1631,10 @@ async def test_options_compact_migration_previews_and_confirms_cleanup(
         "button.fridge_start_maintenance",
         "sensor.fridge_sensitivity",
     ]
+    assert "select.fridge_alert_sensitivity" in flow.hass.entity_registry.entities
+    assert config_entries.updates == [(entry, {"options": result["data"]})]
+    assert config_entries.reloads == ["entry-1"]
+    assert entry.options == result["data"]
 
 
 @pytest.mark.asyncio

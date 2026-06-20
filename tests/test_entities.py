@@ -4767,8 +4767,8 @@ async def test_sensor_setup_entry_uses_entry_data_for_solar_flow_applicability()
     assert {
         "entry-1_mains_solar_flow_status",
         "entry-1_mains_solar_surplus_status",
-        "entry-1_mains_solar_load_shift_status",
     } <= unique_ids
+    assert "entry-1_mains_solar_load_shift_status" not in unique_ids
     assert "entry-1_solar_solar_flow_status" not in unique_ids
 
 
@@ -4807,10 +4807,8 @@ async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     unique_ids = {entity.unique_id for entity in added_entities}
-    assert {
-        "entry-1_mains_utility_comparison_difference",
-        "entry-1_mains_utility_comparison_status",
-    } <= unique_ids
+    assert "entry-1_mains_utility_comparison_status" in unique_ids
+    assert "entry-1_mains_utility_comparison_difference" not in unique_ids
 
 
 @pytest.mark.asyncio
