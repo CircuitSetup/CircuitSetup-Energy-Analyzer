@@ -45,6 +45,38 @@ def test_activity_alert_flags_active_run_over_configured_duration() -> None:
     }
 
 
+def test_activity_alert_skips_active_duration_when_suppressed() -> None:
+    from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
+        ActivityAlertSettings,
+        evaluate_activity_alert,
+    )
+
+    summary = CircuitCycleSummary(
+        circuit_id="main_panel",
+        date="2026-06-16",
+        status="running",
+        start_count=1,
+        completed_cycle_count=0,
+        runtime_seconds=38520.0,
+        average_cycle_seconds=0.0,
+        active_cycle_seconds=38520.0,
+        duty_cycle_percent=100.0,
+        day_elapsed_seconds=38520.0,
+        last_start=datetime(2026, 6, 16, 0, 0, tzinfo=UTC),
+    )
+
+    assert (
+        evaluate_activity_alert(
+            circuit_id="main_panel",
+            circuit_name="Main Panel",
+            summary=summary,
+            settings=ActivityAlertSettings(max_active_minutes=66.0),
+            suppress_active_duration_alert=True,
+        )
+        is None
+    )
+
+
 def test_activity_alert_flags_idle_period_over_configured_duration() -> None:
     from custom_components.circuitsetup_energy_analyzer.activity_alerts import (
         ActivityAlertSettings,

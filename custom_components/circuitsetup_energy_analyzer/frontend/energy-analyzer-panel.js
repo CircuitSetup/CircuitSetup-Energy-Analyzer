@@ -215,10 +215,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._lastActionMessage = "Action complete.";
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
+      this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
-      this._render();
+      this._renderAndScrollToTop();
     }
   }
 
@@ -235,7 +236,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const label = labelInput ? labelInput.value.trim() : "";
       if (!label) {
         this._error = "Enter a label for this NILM signature before saving.";
-        this._render();
+        this._renderAndScrollToTop();
         return;
       }
       data.label = label;
@@ -245,7 +246,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const target = targetList ? targetList.dataset.selected || "" : "";
       if (!target) {
         this._error = "Choose a merge target before merging NILM signatures.";
-        this._render();
+        this._renderAndScrollToTop();
         return;
       }
       data.target_signature_id = target;
@@ -265,10 +266,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._lastActionMessage = this._nilmActionMessage(actionKey, data);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
+      this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
-      this._render();
+      this._renderAndScrollToTop();
     }
   }
 
@@ -293,11 +295,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
       this._lastActionMessage = this._recommendationActionMessage(actionKey);
+      this._busyAction = "";
       await this._loadEvidence({ routeKey: this._routeKey() });
+      this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
-      this._render();
+      this._renderAndScrollToTop();
     }
   }
 
@@ -313,17 +317,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         composed: true,
       })
     );
+    this._scrollToTop();
   }
 
   _guardActionCall(action, label) {
     if (!action) {
       this._error = `Action unavailable: ${label}. Reload the evidence panel and try again.`;
-      this._render();
+      this._renderAndScrollToTop();
       return false;
     }
     if (action.enabled === false) {
       this._error = action.unavailable_label || `Action unavailable: ${action.unavailable_reason || label}.`;
-      this._render();
+      this._renderAndScrollToTop();
       return false;
     }
     if (action.path) {
@@ -331,15 +336,29 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (!action.service) {
       this._error = `Action unavailable: ${label}. The panel did not receive a service to call.`;
-      this._render();
+      this._renderAndScrollToTop();
       return false;
     }
     if (!this._hass || !this._hass.callService) {
       this._error = "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.";
-      this._render();
+      this._renderAndScrollToTop();
       return false;
     }
     return true;
+  }
+
+  _renderAndScrollToTop() {
+    this._render();
+    this._scrollToTop();
+  }
+
+  _scrollToTop() {
+    requestAnimationFrame(() => {
+      this.scrollIntoView({ block: "start" });
+      if (typeof window.scrollTo === "function") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    });
   }
 
   _routeKey() {
@@ -605,10 +624,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <h1>${this._escape((circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence")}</h1>
           <p class="muted">${this._escape((alert && alert.message) || "Historical alert not found")}</p>
         </section>
-        ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
-        ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
-        ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
-        ${alert ? this._renderAlert(alert, circuit) : this._renderNotFound()}
+      ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
+      ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
+      ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
+      ${this._renderSelectedRecommendationEvidence()}
+      ${alert ? this._renderAlert(alert, circuit) : this._renderNotFound()}
       </main>
     `;
 
@@ -809,15 +829,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <div class="entity-list">
           ${recommendationItems.map(({ recommendation, originalIndex }) => `
             <div class="metric">
-              <span>${this._escape(recommendation.feature || "Suggested setting")}</span>
               <strong>${this._escape(recommendation.display_label || recommendation.title || "Suggested setting")}</strong>
               ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
               ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
-              <div class="entity-list">
-                ${recommendation.current_value !== undefined ? `<code>Current: ${this._escape(recommendation.current_value)}</code>` : ""}
-                ${recommendation.default_value !== undefined ? `<code>Default: ${this._escape(recommendation.default_value)}</code>` : ""}
-                ${recommendation.suggested_value !== undefined ? `<code>Suggested: ${this._escape(recommendation.suggested_value)}</code>` : ""}
-              </div>
+              ${this._recommendationValueRows(recommendation)}
               ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
                 <div class="actions">
@@ -832,6 +847,50 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </section>
     `;
+  }
+
+  _renderSelectedRecommendationEvidence() {
+    const recommendation = this._payload && this._payload.selected_recommendation;
+    if (!recommendation) {
+      return "";
+    }
+    const label = recommendation.display_label || recommendation.title || "Suggested setting";
+    const evidenceCount = Number(recommendation.evidence_key_count || 0);
+    const omittedCount = Number(recommendation.evidence_omitted_key_count || 0);
+    const evidenceSummary = recommendation.evidence_preview
+      ? `<p>${this._escape(recommendation.evidence_preview)}</p>`
+      : `<p class="muted">No compact evidence summary is available for this recommendation.</p>`;
+    const countSummary = evidenceCount > 0
+      ? `<p class="muted">${this._escape(evidenceCount)} evidence fields were captured${omittedCount > 0 ? `; ${this._escape(omittedCount)} are hidden from this compact preview.` : "."}</p>`
+      : "";
+    return `
+      <section class="panel">
+        <h2>Recommendation Evidence</h2>
+        <p class="muted">Previewing evidence for ${this._escape(label)}.</p>
+        ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
+        ${this._recommendationValueRows(recommendation)}
+        ${evidenceSummary}
+        ${countSummary}
+      </section>
+    `;
+  }
+
+  _recommendationValueRows(recommendation) {
+    const status = String((recommendation && recommendation.status) || "pending");
+    const applied = status === "applied";
+    const currentValue = applied && recommendation.suggested_value !== undefined ? recommendation.suggested_value : recommendation.current_value;
+    const suggestedValue = applied ? undefined : recommendation.suggested_value;
+    const rows = [];
+    if (currentValue !== undefined) {
+      rows.push(`<code>Current: ${this._escape(currentValue)}</code>`);
+    }
+    if (recommendation.default_value !== undefined) {
+      rows.push(`<code>Default: ${this._escape(recommendation.default_value)}</code>`);
+    }
+    if (suggestedValue !== undefined) {
+      rows.push(`<code>Suggested: ${this._escape(suggestedValue)}</code>`);
+    }
+    return rows.length ? `<div class="entity-list">${rows.join("")}</div>` : "";
   }
 
   _renderNilmMergeTarget(signature, index) {

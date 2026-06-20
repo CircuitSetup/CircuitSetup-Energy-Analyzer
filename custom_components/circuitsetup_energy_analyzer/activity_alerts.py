@@ -38,6 +38,7 @@ def evaluate_activity_alert(
     circuit_name: str,
     summary: CircuitCycleSummary,
     settings: ActivityAlertSettings,
+    suppress_active_duration_alert: bool = False,
 ) -> ActivityAlertEvidence | None:
     """Return evidence when a configured activity alert is active."""
     del circuit_id
@@ -45,6 +46,7 @@ def evaluate_activity_alert(
     active_minutes = round(summary.active_cycle_seconds / 60.0, 3)
     if (
         max_active_minutes is not None
+        and not suppress_active_duration_alert
         and summary.status == "running"
         and active_minutes > max_active_minutes
     ):
