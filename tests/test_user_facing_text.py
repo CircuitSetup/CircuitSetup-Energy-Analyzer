@@ -1547,36 +1547,16 @@ def test_readme_documents_compact_entity_model_and_migration() -> None:
     assert "configured outdoor temperature source entity" in readme_text
 
 
-def test_compact_entity_development_reports_document_switch_replacement() -> None:
-    after_report = json.loads(
-        (ROOT / "docs" / "development" / "entity-inventory-after.json").read_text(
-            encoding="utf-8",
-        )
-    )
-    refrigerator = next(
-        scenario
-        for scenario in after_report["scenarios"]
-        if scenario["scenario_id"] == "refrigerator"
-    )
-    simple_keys = set(
-        refrigerator["detail_levels"]["simple"]["created"]["keys"],
-    )
+def test_entity_model_docs_document_local_count_report_generation() -> None:
+    entity_model = (ROOT / "docs" / "entity-model.md").read_text(encoding="utf-8")
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_readme = " ".join(readme_text.lower().split())
 
-    assert "switch:maintenance" in simple_keys
-    assert "button:pause_alerts" not in simple_keys
-    assert all(
-        scenario["detail_levels"]["expert_all_groups"]["created"]["total"] <= 50
-        for scenario in after_report["scenarios"]
-    )
-
-    comparison = (
-        ROOT / "docs" / "development" / "entity-count-comparison.md"
-    ).read_text(encoding="utf-8")
-    assert "Simple maximum: 10 per-circuit entities." in comparison
-    assert "`switch.<circuit>_maintenance`" in comparison
-    assert (
-        ROOT / "docs" / "development" / "home-assistant-compact-entity-results.md"
-    ).exists()
+    assert "python scripts/report_entity_inventory.py" in entity_model
+    assert "python scripts/report_compact_entity_inventory.py" in entity_model
+    assert "generated development artifacts are not checked in" in normalized_readme
+    assert "Simple creates 10 or fewer" in entity_model
+    assert "`switch.<circuit>_maintenance`" in entity_model
 
 
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:

@@ -52,12 +52,14 @@ Choose groups explicitly from the Entity Detail Level options screen.
 
 ## Count Evidence
 
-The generated development reports show the compact model counts:
+Local count reports can be regenerated with:
 
-- `docs/development/entity-inventory-before.md`
-- `docs/development/entity-inventory-after.md`
-- `docs/development/entity-count-comparison.md`
-- `docs/development/home-assistant-compact-entity-results.md`
+```powershell
+python scripts/report_entity_inventory.py
+python scripts/report_compact_entity_inventory.py
+```
+
+Generated development artifacts are local-only and are not checked in.
 
 In the representative matrix, Simple creates 10 or fewer per-circuit entities
 and Standard creates 17 or fewer. Expert creates only explicitly selected

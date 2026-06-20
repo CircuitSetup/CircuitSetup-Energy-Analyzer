@@ -9,6 +9,7 @@ from scripts.entity_inventory import (
     REPRESENTATIVE_SCENARIO_IDS,
     build_inventory_report,
 )
+from scripts.report_compact_entity_inventory import _build_after_report
 
 
 def test_inventory_report_covers_representative_before_count_scenarios() -> None:
@@ -116,3 +117,28 @@ def test_inventory_report_distinguishes_created_enabled_disabled_and_hidden() ->
     )
     assert "sensor.refrigerator_recent_activity" in simple["hidden"]["entity_ids"]
     assert "binary_sensor.refrigerator_learning" in simple["hidden"]["entity_ids"]
+
+
+def test_compact_inventory_report_keeps_count_bounds_and_switch_replacement() -> None:
+    report = _build_after_report()
+    refrigerator = next(
+        scenario
+        for scenario in report["scenarios"]
+        if scenario["scenario_id"] == "refrigerator"
+    )
+    simple_keys = set(refrigerator["detail_levels"]["simple"]["created"]["keys"])
+
+    assert "switch:maintenance" in simple_keys
+    assert "button:pause_alerts" not in simple_keys
+    assert max(
+        scenario["detail_levels"]["simple"]["created"]["total"]
+        for scenario in report["scenarios"]
+    ) == 10
+    assert max(
+        scenario["detail_levels"]["standard"]["created"]["total"]
+        for scenario in report["scenarios"]
+    ) == 17
+    assert all(
+        scenario["detail_levels"]["expert_all_groups"]["created"]["total"] <= 50
+        for scenario in report["scenarios"]
+    )

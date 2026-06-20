@@ -847,12 +847,10 @@ entities instead of every intermediate calculation as a standalone entity.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
 
 See `docs/entity-model.md` and `docs/entity-model-migration.md` for the full
-model and migration notes. The checked-in development count reports live in
-`docs/development/entity-inventory-before.md`,
-`docs/development/entity-inventory-after.md`, and
-`docs/development/entity-count-comparison.md`; automated Home Assistant
-validation is recorded in
-`docs/development/home-assistant-compact-entity-results.md`.
+model and migration notes. Local count reports can be regenerated with
+`python scripts/report_entity_inventory.py` and
+`python scripts/report_compact_entity_inventory.py` when needed; generated
+development artifacts are not checked in.
 
 Existing installs can keep enabled legacy entities for one compatibility release
 so dashboards and automations do not break during upgrade. To migrate explicitly,
