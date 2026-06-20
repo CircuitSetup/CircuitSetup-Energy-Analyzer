@@ -10,7 +10,7 @@ This bundle is designed for Codex and other code agents.
 - `codegraph.dot` — high-level Graphviz graph.
 - `generate_codegraph.py` — dependency-free AST generator for exact imports, definitions, entrypoints, local-call hints, centrality, and import cycles from a local checkout.
 - `CODEX_README.md` — concise agent instructions.
-- `manifest.json` — bundle metadata and checksums.
+- `bundle-manifest.json` — bundle metadata and checksums.
 
 ## Recommended use
 
