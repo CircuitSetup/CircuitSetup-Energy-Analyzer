@@ -194,10 +194,12 @@
         "title": "Entity Detail Level",
         "description": "Choose how many analyzer entities Home Assistant should create. Changing this setting reloads the integration so the entity set matches the selected detail level.",
         "data": {
-          "entity_detail_level": "Entity Detail Level"
+          "entity_detail_level": "Entity Detail Level",
+          "selected_entity_groups": "Expert Entity Groups"
         },
         "data_description": {
-          "entity_detail_level": "Simple creates summary entities only. Standard also creates configured feature status entities. Expert creates selected detailed diagnostic entities for troubleshooting and custom dashboards."
+          "entity_detail_level": "Simple creates summary entities only. Standard also creates configured feature status entities. Expert creates selected detailed diagnostic entities for troubleshooting and custom dashboards.",
+          "selected_entity_groups": "Choose the diagnostic and graph groups created when Entity Detail Level is Expert. These groups are ignored for Simple and Standard."
         }
       },
       "compact_migration": {

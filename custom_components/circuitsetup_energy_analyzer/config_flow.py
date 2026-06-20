@@ -142,6 +142,7 @@ from .const import (
     CONF_RAIN_RESPONSE_WINDOW_MINUTES,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
+    CONF_SELECTED_ENTITY_GROUPS,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
@@ -183,6 +184,7 @@ from .entity import (
     normalize_entity_detail_level,
 )
 from .entity_catalog import (
+    EntityGroup,
     compact_migration_preview_for_hass,
     remove_legacy_entity_registry_entries,
 )
@@ -1084,6 +1086,20 @@ def _selector(config: dict[str, Any], fallback: Any) -> Any:
     return ha_selector(config)
 
 
+class _SerializableSelectorFallback:
+    """Small no-HA selector fallback that voluptuous_serialize can inspect."""
+
+    def __init__(self, config: dict[str, Any], validator: Any) -> None:
+        self._config = config
+        self._validator = validator
+
+    def __call__(self, value: Any) -> Any:
+        return self._validator(value)
+
+    def serialize(self) -> dict[str, Any]:
+        return self._config
+
+
 def _energy_entity_selector_config(
     include_entities: Iterable[str] | None = None,
 ) -> dict[str, Any]:
@@ -1178,15 +1194,16 @@ def _select_selector(options: Iterable[Any]) -> Any:
 
 
 def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
+    config = {
+        "select": {
+            "multiple": True,
+            "mode": "dropdown",
+            "options": list(options),
+        }
+    }
     return _selector(
-        {
-            "select": {
-                "multiple": True,
-                "mode": "dropdown",
-                "options": list(options),
-            }
-        },
-        list,
+        config,
+        _SerializableSelectorFallback(config, vol.Schema([str])),
     )
 
 
@@ -1335,6 +1352,47 @@ def entity_detail_level_options() -> list[dict[str, str]]:
             "label": "Expert",
         },
     ]
+
+
+def entity_group_options() -> list[dict[str, str]]:
+    return [
+        {"value": EntityGroup.CYCLE_METRICS.value, "label": "Cycle Metrics"},
+        {"value": EntityGroup.ELECTRICAL_SCORES.value, "label": "Electrical Scores"},
+        {
+            "value": EntityGroup.POWER_QUALITY_DRIFT.value,
+            "label": "Power Quality Drift",
+        },
+        {"value": EntityGroup.ENERGY_DETAIL.value, "label": "Energy Detail"},
+        {"value": EntityGroup.BILLING_FORECASTS.value, "label": "Billing Forecasts"},
+        {"value": EntityGroup.DEMAND_CAPACITY.value, "label": "Demand Detail"},
+        {"value": EntityGroup.MAINS_SOLAR.value, "label": "Mains and Solar Detail"},
+        {"value": EntityGroup.NILM.value, "label": "NILM Detail"},
+        {"value": EntityGroup.WEATHER.value, "label": "Weather Detail"},
+        {"value": EntityGroup.WATER.value, "label": "Water Detail"},
+        {
+            "value": EntityGroup.DEVELOPER_DIAGNOSTICS.value,
+            "label": "Developer Diagnostics",
+        },
+    ]
+
+
+def _selected_entity_group_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, Iterable):
+        raw_values = list(value)
+    else:
+        return []
+
+    allowed = {option["value"] for option in entity_group_options()}
+    selected: list[str] = []
+    for item in raw_values:
+        text = str(item)
+        if text in allowed and text not in selected:
+            selected.append(text)
+    return selected
 
 
 def entity_detail_level_for_dashboard_layout(layout: Any) -> str:
@@ -3917,11 +3975,21 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             detail_level = normalize_entity_detail_level(
                 user_input.get(CONF_ENTITY_DETAIL_LEVEL)
             )
+            selected_groups = (
+                _selected_entity_group_values(
+                    user_input.get(CONF_SELECTED_ENTITY_GROUPS)
+                )
+                if detail_level == ENTITY_DETAIL_EXPERT
+                else []
+            )
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
                     self._config_entry,
-                    {CONF_ENTITY_DETAIL_LEVEL: detail_level},
+                    {
+                        CONF_ENTITY_DETAIL_LEVEL: detail_level,
+                        CONF_SELECTED_ENTITY_GROUPS: selected_groups,
+                    },
                 ),
             )
 
@@ -4623,12 +4691,19 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
             DEFAULT_ENTITY_DETAIL_LEVEL,
         )
     )
+    selected_groups = _selected_entity_group_values(
+        _entry_value(config_entry, CONF_SELECTED_ENTITY_GROUPS, [])
+    )
     return vol.Schema(
         {
             vol.Optional(
                 CONF_ENTITY_DETAIL_LEVEL,
                 default=detail_level,
             ): _select_selector(entity_detail_level_options()),
+            vol.Optional(
+                CONF_SELECTED_ENTITY_GROUPS,
+                default=selected_groups,
+            ): _multi_select_selector(entity_group_options()),
         }
     )
 

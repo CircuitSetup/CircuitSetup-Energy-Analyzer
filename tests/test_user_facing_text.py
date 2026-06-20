@@ -280,11 +280,16 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     ].lower()
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
+    assert entity_detail["data"]["selected_entity_groups"] == "Expert Entity Groups"
     assert "apply_entity_detail_profile" not in entity_detail["data"]
     assert "create" in entity_detail["description"].lower()
     assert "reloads" in entity_detail["description"].lower()
     assert "simple" in entity_detail["data_description"]["entity_detail_level"].lower()
     assert "creates" in entity_detail["data_description"]["entity_detail_level"].lower()
+    assert (
+        "expert"
+        in entity_detail["data_description"]["selected_entity_groups"].lower()
+    )
     compact_migration = strings["options"]["step"]["compact_migration"]
     assert (
         compact_migration["data"]["confirm_compact_migration"]
@@ -975,7 +980,7 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Electrical Health" in readme
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
-    assert "Metric Consistency Status" in readme
+    assert "Power-quality evidence and metric/leg status" in readme
 
 
 def test_readme_explains_running_observation_and_alert_distinction() -> None:
@@ -1522,6 +1527,21 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
     assert "adds small action cards" not in readme_text
+
+
+def test_readme_documents_compact_entity_model_and_migration() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Compact entity model" in readme_text
+    assert "Migrate To Compact Entity Model" in readme_text
+    assert "`switch.<circuit>_maintenance`" in readme_text
+    assert "`button.<circuit>_start_maintenance`" not in readme_text
+    assert "`button.<circuit>_end_maintenance`" not in readme_text
+    assert "`sensor.<circuit>_sensitivity`" not in readme_text
+    assert "`sensor.<circuit>_standby_threshold`" not in readme_text
+    assert "Legacy replacement" in readme_text
+    assert "sensor.<circuit>_health_summary" in readme_text
+    assert "configured outdoor temperature source entity" in readme_text
 
 
 def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:

@@ -366,11 +366,10 @@ Most users should configure these options from the Home Assistant UI. Developer 
 Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions. If you do call a circuit service from an automation, you can target a renamed analyzer entity instead of typing the circuit ID.
 
 - `button.<circuit>_relearn_baseline`
-- `button.<circuit>_start_maintenance`
-- `button.<circuit>_end_maintenance`
 - `button.<circuit>_pause_alerts`
 - `select.<circuit>_alert_sensitivity`
 - `number.<circuit>_daily_energy_goal`
+- `switch.<circuit>_maintenance`
 
 Integration-level controls are grouped on the CircuitSetup Energy Analyzer device:
 
@@ -838,6 +837,38 @@ binary_sensor.refrigerator_running
 
 Advanced diagnostic entities are disabled by default. Enable them from the Home Assistant entity registry only when you want more detail or need them for automations.
 
+## Compact entity model
+
+The analyzer uses a compact entity model so Home Assistant gets appliance-focused
+entities instead of every intermediate calculation as a standalone entity.
+
+- **Simple** creates summary entities, Running, Daily Energy Usage when available,
+  and the small daily control set.
+- **Standard** adds canonical status and graph entities for features you configured.
+- **Expert** adds only the diagnostic or graph groups you explicitly select.
+
+Existing installs can keep enabled legacy entities for one compatibility release
+so dashboards and automations do not break during upgrade. To migrate explicitly,
+open **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure >
+Migrate To Compact Entity Model**. The preview lists entities that will be
+removed, replacements, entities that will remain, the new maintenance switch,
+before/after counts, and any customization warning.
+
+Legacy replacement highlights:
+
+| Legacy replacement | Compact location |
+|---|---|
+| Sensitivity sensor | `select.<circuit>_alert_sensitivity` |
+| Readiness and learning progress | `sensor.<circuit>_health_summary` attributes |
+| Data quality checklist | Setup Health, Repairs, and Health Summary attributes |
+| Alert evidence and last event | Dynamic Alert Evidence panel and recent activity |
+| Power-quality evidence and metric/leg status | `sensor.<circuit>_electrical_health` attributes |
+| Run-cycle status | `sensor.<circuit>_activity_summary` and `binary_sensor.<circuit>_running` |
+| Billing and cost forecast/status details | `sensor.<circuit>_billing_cycle_usage` and `sensor.<circuit>_cost_cycle` attributes |
+| Standby threshold | Advanced Circuit Settings and `sensor.<circuit>_standby_status` attributes |
+| Outdoor temperature mirror | configured outdoor temperature source entity and Weather Context attributes |
+| Start/End Maintenance buttons | `switch.<circuit>_maintenance` |
+
 ## Sensor reference
 
 The analyzer creates entities based on the circuit mode, appliance profile, source sensors, enabled feature settings, and the selected **Entity Detail Level**. Not every circuit will have every entity.
@@ -879,15 +910,8 @@ These help explain why a summary changed. They are useful for troubleshooting, a
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Advanced diagnostic, disabled by default. | `0.0` when quiet; higher values as evidence accumulates |
-| **Last Event** | `sensor.<circuit>_last_event` | Latest retained event type. | Advanced diagnostic, disabled by default. | `start`, `stop`, `steady_window`, `voltage_sag`, `voltage_swell`, `leg_imbalance`, `data_quality`, `unknown` |
-| **Readiness** | `sensor.<circuit>_readiness` | Machine-readable readiness state with attributes explaining blocked or learning checks. | Advanced diagnostic, disabled by default. | `learning`, `ready`, `needs_data`, `paused`, `possible_issue`, `mixed_observation`, `nilm_review` |
-| **Learning Progress** | `sensor.<circuit>_learning_progress` | Percent of baseline learning completed for the circuit. | Advanced diagnostic, disabled by default. | `0` to `100%` |
-| **Data Quality Checklist** | `sensor.<circuit>_data_quality_checklist` | Missing, stale, invalid, or mismatched source-data checklist. | Advanced diagnostic, disabled by default. | `ok`, `problem` |
 | **Energy Dashboard Status** | `sensor.<circuit>_energy_dashboard_status` | Whether the configured energy or power source has metadata that Home Assistant's Energy Dashboard can use. | Advanced diagnostic, disabled by default. | `ready`, `needs_energy_source`, or metadata issue states |
-| **Alert Evidence** | `sensor.<circuit>_alert_evidence` | Feature behind the latest active alert evidence. | Advanced diagnostic, disabled by default. | Feature names such as `reactive_power`, `cycle_duration`, `demand`, `capacity`, `utility_comparison`; blank when quiet |
 | **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. Attributes show a bounded preview of up to five recent items; use the evidence panel or diagnostics for the full retained timeline. | Advanced diagnostic, disabled by default. | `No recent activity`, `start`, `stop`, issue summary text |
-| **Recent Activity Count** | `sensor.<circuit>_recent_activity_count` | Count of retained recent activity items. Attributes show the same bounded preview as Recent Activity without exposing the full timeline in entity state. | Advanced diagnostic, disabled by default. | Integer counts |
-| **Sensitivity** | `sensor.<circuit>_sensitivity` | Active alert-sensitivity preset for the circuit. | Advanced diagnostic, disabled by default. | `Quiet`, `Balanced`, or `Sensitive` |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes show a bounded preview of up to five suggestions with IDs, setting labels, current values, and suggested values. Open Review Suggested Settings or the evidence panel for full evidence and actions. | Feature-specific; enabled in Standard/Expert when applicable. | `0`, `1`, or higher counts |
 
 ### Appliance behavior and power-quality sensors
@@ -897,21 +921,17 @@ These are most useful for dedicated appliance circuits such as refrigerators, fr
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Advanced diagnostic, disabled by default. | `0.0` when quiet; higher values when relationships drift |
-| **Power Quality Evidence** | `sensor.<circuit>_power_quality_evidence` | Text evidence for the latest power-quality observation. | Advanced diagnostic, disabled by default. | Blank text, baseline/learning text, or possible-issue evidence |
 | **Reactive Power Drift** | `sensor.<circuit>_reactive_power_drift` | Ratio-style drift in VAR behavior compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
 | **Apparent Power Drift** | `sensor.<circuit>_apparent_power_drift` | Ratio-style drift in VA behavior compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
 | **Power Factor Drift** | `sensor.<circuit>_power_factor_drift` | Ratio-style drift in power factor compared with the learned baseline. | Advanced diagnostic, disabled by default. | `0.0` or positive drift values |
 | **Run Cycle Count** | `sensor.<circuit>_run_cycle_count` | Today's retained start count for cyclic appliances. | Normal entity for appliance circuits. | Integer cycle counts |
 | **Run Cycle Runtime** | `sensor.<circuit>_run_cycle_runtime` | Today's total active runtime from retained start/stop evidence. | Normal entity for appliance circuits. | Seconds |
 | **Run Cycle Duty Cycle** | `sensor.<circuit>_run_cycle_duty_cycle` | Percent of today spent active. | Normal entity for appliance circuits. | `0` to `100%` |
-| **Run Cycle Status** | `sensor.<circuit>_run_cycle_status` | Current cycle state used by Activity Summary and the Running binary sensor. | Advanced diagnostic, disabled by default. | `running`, `idle`, `no_activity` |
 | **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Visible for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
-| **Outdoor Temperature** | `sensor.<circuit>_outdoor_temperature` | Graphable outdoor temperature value used by HVAC weather context. | Visible for HVAC-like circuits when outdoor temperature context is configured. | Numeric temperature in `°F` or `°C` |
 | **Rain Pump Correlation** | `sensor.<circuit>_rain_pump_correlation` | Pump runtime compared with rain, optional rain intensity, HVAC compressor context, and learned dry-weather runtime. Attributes include rain source, rain activity, compressor context, observed runtime, dry baseline, and explanation. | Visible for sump pump, water pump, and well pump circuits when a rain source is configured. | `Unconfigured`, `Learning`, `Normal`, `Rain Explained`, `Compressor Explained`, `Weather Explained`, `Possible Excess Pump Activity`, `Possible Missing Pump Activity` |
 | **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Visible for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
 | **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Visible for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | Minutes |
 | **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Advanced diagnostic, disabled by default. | Percentage mismatch |
-| **Metric Consistency Status** | `sensor.<circuit>_metric_consistency_status` | Relationship status between real power, apparent power, voltage, current, and power factor. | Advanced diagnostic, disabled by default. | `consistent`, `idle`, `missing_metrics`, `apparent_power_mismatch`, `power_factor_mismatch`, `metric_mismatch` |
 
 ### Energy usage, goals, billing, and cost sensors
 
@@ -925,13 +945,7 @@ These require cumulative energy inputs. Use Home Assistant's Energy Dashboard fo
 | **Energy Goal Usage** | `sensor.<circuit>_energy_goal_usage` | Today's usage as a percent of the configured daily goal. | Normal entity when a goal is configured. | Percentage values |
 | **Energy Goal Status** | `sensor.<circuit>_energy_goal_status` | Daily goal tracker state. | Normal entity when a goal is configured. | `unconfigured`, `tracking`, `near_goal`, `over_goal` |
 | **Billing Cycle Usage** | `sensor.<circuit>_billing_cycle_usage` | Current billing-cycle kWh for the circuit. | Normal entity when billing tracking exists. | `kWh` |
-| **Billing Cycle Forecast** | `sensor.<circuit>_billing_cycle_forecast` | Projected end-of-cycle kWh based on current pace. | Normal entity when billing tracking exists. | `kWh` |
-| **Billing Cycle Budget Usage** | `sensor.<circuit>_billing_cycle_budget_usage` | Current or projected budget usage percentage. | Normal entity when a budget is configured. | Percentage values |
-| **Billing Cycle Status** | `sensor.<circuit>_billing_cycle_status` | Billing-cycle budget state. | Normal entity when billing tracking exists. | `no_budget`, `tracking`, `over_budget`, `projected_over_budget` |
-| **Cost Current Rate** | `sensor.<circuit>_cost_current_rate` | Active per-kWh cost rate for the circuit. | Normal entity when cost tracking exists. | Decimal currency-per-kWh values |
 | **Cost Cycle** | `sensor.<circuit>_cost_cycle` | Current cycle cost estimate. | Normal entity when cost tracking exists. | Numeric cost estimates |
-| **Cost Cycle Forecast** | `sensor.<circuit>_cost_cycle_forecast` | Projected end-of-cycle cost estimate. | Normal entity when cost tracking exists. | Numeric cost estimates |
-| **Cost Status** | `sensor.<circuit>_cost_status` | Cost tracker state. | Normal entity when cost tracking exists. | `unconfigured`, `tracking`, `tou_peak` |
 
 ### Demand, capacity, and dual-phase sensors
 
@@ -950,7 +964,6 @@ Capacity sensors require either current sensors or real power plus voltage, and 
 | **Circuit Capacity Usage** | `sensor.<circuit>_capacity_usage` | Current amps as a percent of configured circuit capacity. | Normal entity when capacity is configured. | Percentage values |
 | **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Advanced diagnostic, disabled by default. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
 | **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Normal entity for dual-phase circuits. | Percentage imbalance |
-| **Leg Imbalance Status** | `sensor.<circuit>_leg_imbalance_status` | Split-phase balance state. | Advanced diagnostic, disabled by default. | `not_dual_phase`, `missing_leg_power`, `idle`, `tracking`, `imbalanced` |
 
 ### Mains NILM, balance, solar, and utility comparison sensors
 
@@ -988,7 +1001,6 @@ These apply to non-mains load circuits with real-power data. They are useful for
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Always On Power** | `sensor.<circuit>_always_on_power` | Lowest retained power level in the standby window. | Normal entity for non-mains load circuits. | Watts |
-| **Standby Threshold** | `sensor.<circuit>_standby_threshold` | Configured watts threshold separating off, standby, and on behavior. | Normal entity for non-mains load circuits. | Watts |
 | **Standby Status** | `sensor.<circuit>_standby_status` | Current standby state. | Normal entity for non-mains load circuits. | `learning`, `off`, `standby`, `on` |
 | **Always On Limit Usage** | `sensor.<circuit>_always_on_limit_usage` | Always-on estimate as a percent of the configured limit. | Normal entity for non-mains load circuits. | Percentage values |
 

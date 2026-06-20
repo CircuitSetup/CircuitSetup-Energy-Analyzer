@@ -23,6 +23,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
+    CONF_SELECTED_ENTITY_GROUPS,
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
@@ -1386,9 +1387,68 @@ async def test_options_entity_detail_step_saves_profile_without_registry_apply(
 
     _assert_create_entry_result(
         result,
-        {CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT},
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: [],
+        },
     )
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_options_entity_detail_step_saves_expert_entity_groups() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_entity_detail(
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: [
+                "cycle_metrics",
+                "power_quality_drift",
+            ],
+        }
+    )
+
+    _assert_create_entry_result(
+        result,
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: [
+                "cycle_metrics",
+                "power_quality_drift",
+            ],
+        },
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: ["cycle_metrics"],
+        },
+        entry_id="entry-1",
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_entity_detail(
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+            CONF_SELECTED_ENTITY_GROUPS: ["cycle_metrics"],
+        }
+    )
+
+    _assert_create_entry_result(
+        result,
+        {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+            CONF_SELECTED_ENTITY_GROUPS: [],
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -4831,6 +4891,15 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
             ]
         }
     }
+    group_options = _schema_validator(
+        entity_detail_schema,
+        CONF_SELECTED_ENTITY_GROUPS,
+    )["select"]["options"]
+    assert {"value": "cycle_metrics", "label": "Cycle Metrics"} in group_options
+    assert {
+        "value": "power_quality_drift",
+        "label": "Power Quality Drift",
+    } in group_options
     assert (
         _schema_default(entity_detail_schema, CONF_ENTITY_DETAIL_LEVEL)
         == DEFAULT_ENTITY_DETAIL_LEVEL
