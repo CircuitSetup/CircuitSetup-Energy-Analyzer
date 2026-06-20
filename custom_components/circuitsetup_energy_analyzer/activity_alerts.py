@@ -40,11 +40,11 @@ def evaluate_activity_alert(
     settings: ActivityAlertSettings,
 ) -> ActivityAlertEvidence | None:
     """Return evidence when a configured activity alert is active."""
-    del circuit_id
     max_active_minutes = _positive_float_or_none(settings.max_active_minutes)
     active_minutes = round(summary.active_cycle_seconds / 60.0, 3)
     if (
         max_active_minutes is not None
+        and not _is_mains_circuit(circuit_id)
         and summary.status == "running"
         and active_minutes > max_active_minutes
     ):
@@ -115,6 +115,10 @@ def _idle_seconds(summary: CircuitCycleSummary) -> float | None:
         0.0,
     )
     return max(seconds_since_stop, 0.0)
+
+
+def _is_mains_circuit(circuit_id: str) -> bool:
+    return circuit_id.strip().casefold() == "mains"
 
 
 def _day_start(summary: CircuitCycleSummary, reference: datetime) -> datetime:
