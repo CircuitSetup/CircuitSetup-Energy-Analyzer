@@ -248,8 +248,8 @@ def test_legacy_registry_entries_drive_compatibility_and_preview() -> None:
         entries,
         entry_id="entry-1",
     ) == {
-        "button:start_maintenance",
-        "sensor:sensitivity",
+        "button:fridge:start_maintenance",
+        "sensor:fridge:sensitivity",
     }
 
     preview = compact_migration_preview_for_registry(entries, entry_id="entry-1")
@@ -267,6 +267,65 @@ def test_legacy_registry_entries_drive_compatibility_and_preview() -> None:
         "sensor.fridge_sensitivity": "select:alert_sensitivity",
     }
     assert "select.fridge_alert_sensitivity" in preview["will_remain"]
+
+
+def test_registry_compatibility_keys_are_scoped_to_matching_circuit() -> None:
+    entries = [
+        SimpleNamespace(
+            entity_id="sensor.fridge_sensitivity",
+            unique_id="entry-1_fridge_sensitivity",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+            disabled_by=None,
+            hidden_by=None,
+            name_by_user="Legacy sensitivity",
+        ),
+        SimpleNamespace(
+            entity_id="sensor.garage_sensitivity",
+            unique_id="entry-1_garage_sensitivity",
+            config_entry_id="entry-1",
+            platform=DOMAIN,
+            disabled_by="integration",
+            hidden_by=None,
+        ),
+    ]
+    rule = compact_creation_rule_for_entity("sensor", "sensitivity")
+    compatibility_keys = legacy_compatibility_keys_for_registry_entries(
+        entries,
+        entry_id="entry-1",
+    )
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(),
+    )
+    garage = CircuitConfig(
+        circuit_id="garage",
+        name="Garage",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(),
+    )
+
+    assert compatibility_keys == {"sensor:fridge:sensitivity"}
+    assert should_create_entity(
+        rule=rule,
+        circuit=fridge,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=compatibility_keys,
+    )
+    assert not should_create_entity(
+        rule=rule,
+        circuit=garage,
+        coordinator=None,
+        detail_level=ENTITY_DETAIL_SIMPLE,
+        selected_groups=(),
+        legacy_compatibility_keys=compatibility_keys,
+    )
 
 
 def test_compact_creation_rule_documents_requested_replacements() -> None:

@@ -112,6 +112,7 @@ class LegacyEntityRegistryEntry:
 
     entity_id: str
     unique_id: str
+    circuit_id: str
     domain: str
     key: str
     replacement: str
@@ -147,6 +148,12 @@ def should_create_entity(
 
     compatibility_keys = {str(item) for item in legacy_compatibility_keys}
     if rule_key(rule) in compatibility_keys or rule.key in compatibility_keys:
+        return True
+    circuit_id = _circuit_id(circuit)
+    if (
+        circuit_id
+        and f"{rule.domain}:{circuit_id}:{rule.key}" in compatibility_keys
+    ):
         return True
     if rule.legacy:
         return False
@@ -318,7 +325,7 @@ def legacy_compatibility_keys_for_registry_entries(
 ) -> set[str]:
     """Return compatibility keys for existing legacy rows not safe to remove."""
     return {
-        f"{entry.domain}:{entry.key}"
+        f"{entry.domain}:{entry.circuit_id}:{entry.key}"
         for entry in legacy_entity_registry_entries(entries, entry_id=entry_id)
         if not entry.cleanup_safe
     }
@@ -601,6 +608,13 @@ def _legacy_entity_registry_entry(
     key = _legacy_key_from_unique_id(unique_id, domain=domain)
     if key is None:
         return None
+    circuit_id = _legacy_circuit_id_from_unique_id(
+        unique_id,
+        entry_id=entry_id,
+        key=key,
+    )
+    if not circuit_id:
+        return None
     disabled_by = _registry_marker_name(getattr(entry, "disabled_by", None))
     hidden_by = _registry_marker_name(getattr(entry, "hidden_by", None))
     customized = _registry_entry_has_user_customization(
@@ -615,6 +629,7 @@ def _legacy_entity_registry_entry(
     return LegacyEntityRegistryEntry(
         entity_id=entity_id,
         unique_id=unique_id,
+        circuit_id=circuit_id,
         domain=domain,
         key=key,
         replacement=LEGACY_ENTITY_REPLACEMENTS[key],
@@ -635,6 +650,23 @@ def _legacy_key_from_unique_id(unique_id: str, *, domain: str) -> str | None:
         if unique_id.endswith(f"_{rule.key}"):
             return rule.key
     return None
+
+
+def _legacy_circuit_id_from_unique_id(
+    unique_id: str,
+    *,
+    entry_id: str,
+    key: str,
+) -> str:
+    return unique_id.removeprefix(f"{entry_id}_").removesuffix(f"_{key}")
+
+
+def _circuit_id(circuit: Any) -> str:
+    if circuit is None:
+        return ""
+    if isinstance(circuit, Mapping):
+        return str(circuit.get("circuit_id") or circuit.get("id") or "")
+    return str(getattr(circuit, "circuit_id", "") or "")
 
 
 def _registry_entry_has_user_customization(
