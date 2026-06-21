@@ -537,6 +537,17 @@ def test_services_are_labeled_as_advanced_script_paths() -> None:
         assert "normal user path" in description.lower(), service_name
 
 
+def test_maintenance_switch_label_describes_mode_not_power_control() -> None:
+    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    translations = json.loads(
+        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
+    )
+
+    for payload in (strings, translations):
+        label = payload["entity"]["switch"]["maintenance"]["name"]
+        assert label == "Maintenance mode"
+
+
 def test_readme_documents_normal_user_action_paths() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())
