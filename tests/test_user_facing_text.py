@@ -1068,6 +1068,65 @@ def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
     assert fallback_path == "/circuitsetup-energy-analyzer-evidence"
 
 
+def test_alert_blueprint_matches_current_summary_alert_states() -> None:
+    from jinja2 import Template
+
+    class BlueprintLoader(yaml.SafeLoader):
+        pass
+
+    BlueprintLoader.add_constructor(
+        "!input",
+        lambda loader, node: loader.construct_scalar(node),
+    )
+    blueprint_path = (
+        ROOT
+        / "blueprints"
+        / "automation"
+        / "circuitsetup_energy_analyzer"
+        / "energy_alert_notification.yaml"
+    )
+    blueprint = yaml.load(blueprint_path.read_text(encoding="utf-8"), BlueprintLoader)
+    alert_input = blueprint["blueprint"]["input"]["alert_states"]
+    defaults = alert_input["default"]
+    options = {
+        option["value"]
+        for option in alert_input["selector"]["select"]["options"]
+    }
+
+    assert "possible_issue" in defaults
+    assert {
+        "possible_imbalance",
+        "possible_metric_mismatch",
+        "possible_power_quality_change",
+        "high_usage",
+        "watch",
+        "needs_data",
+        "needs_energy_data",
+        "mixed_observation",
+        "nilm_review",
+    } <= options
+
+    state_template = Template(blueprint["variables"]["alert_state_normalized"])
+    condition_template = Template(blueprint["condition"][0]["value_template"])
+
+    def condition_matches(state: str, selected_states: list[str]) -> bool:
+        trigger = {"to_state": {"state": state}}
+        alert_state_normalized = state_template.render(trigger=trigger).strip()
+        rendered = condition_template.render(
+            trigger=trigger,
+            alert_state_normalized=alert_state_normalized,
+            alert_states=selected_states,
+        )
+        return rendered.strip() == "True"
+
+    assert condition_matches("Possible issue", defaults)
+    assert condition_matches("Possible issue: Cycle Duration", defaults)
+    assert condition_matches("High Usage", defaults)
+    assert condition_matches("Watch", defaults)
+    assert not condition_matches("Needs data", defaults)
+    assert condition_matches("Needs data", ["needs_data"])
+
+
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     asset_path = (
         INTEGRATION_DIR
