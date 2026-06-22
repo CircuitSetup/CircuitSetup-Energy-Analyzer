@@ -54,7 +54,7 @@ class CircuitSwitchDescription:
 CIRCUIT_SWITCH_DESCRIPTIONS: tuple[CircuitSwitchDescription, ...] = (
     CircuitSwitchDescription(
         key="maintenance",
-        name_suffix="Maintenance",
+        name_suffix="Maintenance mode",
         icon="mdi:wrench-clock",
         has_entity_name=True,
         translation_key="maintenance",
@@ -83,7 +83,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
             name_suffix=description.name_suffix,
         )
         self.entity_description = description
-        self._attr_name = None
+        self._attr_name = description.name_suffix
         self._attr_has_entity_name = description.has_entity_name
         self._attr_icon = description.icon
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
