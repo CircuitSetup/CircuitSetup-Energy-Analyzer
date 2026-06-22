@@ -240,7 +240,7 @@ Choose one layout:
 
 1. **Simple**: compact appliance status, mains rollup, and energy tracking sections built from summary entities.
 2. **Standard**: Simple plus feature-level mains, HVAC, solar, utility, weather, water, billing, and cost cards when matching Standard entities exist.
-3. **Expert**: Standard plus analyzer evidence links and graph/detail cards for the Expert groups you selected.
+3. **Expert**: Standard plus analyzer evidence links for each circuit. It does not add diagnostic/detail entity cards automatically.
 
 The dashboard form has three setup paths:
 
@@ -984,7 +984,7 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **NILM Discovered Signatures** | `sensor.<circuit>_nilm_signature_count` | Count of recurring aggregate NILM signatures. | Expert NILM Detail group. | Integer counts |
+| **NILM Discovered Signatures** | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Expert NILM Detail group. | Integer counts |
 | **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes show a bounded preview of up to five unknown loads with signature ID, display name, likely type, typical watts, confidence, and first seen time. Open the evidence panel for the full review inventory and actions. | Expert NILM Detail group. | `0`, `1`, or higher counts |
 | **NILM Unmatched Load Percentage** | `sensor.<circuit>_nilm_unmatched_load_percentage` | Share of current aggregate mains power not matched to known loads. | Expert NILM Detail group. | Percentage values |
 | **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Expert NILM Detail group. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
