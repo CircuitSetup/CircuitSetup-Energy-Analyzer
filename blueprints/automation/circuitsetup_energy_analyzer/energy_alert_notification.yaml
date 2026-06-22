@@ -17,8 +17,18 @@ blueprint:
             - integration: circuitsetup_energy_analyzer
     alert_states:
       name: Alert States
-      description: Choose the states that should be treated as actionable possible issue alerts.
+      description: >-
+        Choose the states that should be treated as actionable alerts. Current
+        summary entities use display states such as Possible issue and High
+        Usage; older diagnostic status entities may use raw values such as
+        projected_over_budget or over_limit.
       default:
+        - possible_issue
+        - possible_imbalance
+        - possible_metric_mismatch
+        - possible_power_quality_change
+        - high_usage
+        - watch
         - warning
         - mismatch
         - projected_over_budget
@@ -29,6 +39,28 @@ blueprint:
           multiple: true
           mode: dropdown
           options:
+            - label: Possible Issue
+              value: possible_issue
+            - label: Possible Imbalance
+              value: possible_imbalance
+            - label: Possible Metric Mismatch
+              value: possible_metric_mismatch
+            - label: Possible Power Quality Change
+              value: possible_power_quality_change
+            - label: High Usage
+              value: high_usage
+            - label: Watch
+              value: watch
+            - label: Needs Data
+              value: needs_data
+            - label: Needs Energy Data
+              value: needs_energy_data
+            - label: Needs Metrics
+              value: needs_metrics
+            - label: Mixed Observation
+              value: mixed_observation
+            - label: NILM Review
+              value: nilm_review
             - label: Warning
               value: warning
             - label: Mismatch
@@ -88,6 +120,10 @@ variables:
   alert_entity_id: "{{ trigger.entity_id }}"
   alert_entity_name: "{{ trigger.to_state.name if trigger.to_state else trigger.entity_id }}"
   alert_state: "{{ trigger.to_state.state if trigger.to_state else 'unknown' }}"
+  alert_state_normalized: >-
+    {% set raw_state = trigger.to_state.state if trigger.to_state else 'unknown' %}
+    {% set base_state = (raw_state | string).split(':', 1)[0] %}
+    {{ base_state | lower | trim | replace(' ', '_') | replace('-', '_') }}
   alert_evidence: >-
     {% if trigger.to_state %}
       {{ trigger.to_state.attributes.evidence
@@ -104,7 +140,15 @@ variables:
 
 condition:
   - condition: template
-    value_template: "{{ trigger.to_state is not none and alert_state in alert_states }}"
+    value_template: >-
+      {% set selected_states = alert_states
+         | map('string')
+         | map('lower')
+         | map('trim')
+         | map('replace', ' ', '_')
+         | map('replace', '-', '_')
+         | list %}
+      {{ trigger.to_state is not none and alert_state_normalized in selected_states }}
 
 action:
   - choose:
