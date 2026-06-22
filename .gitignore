@@ -7,11 +7,10 @@ __pycache__/
 .coverage
 htmlcov/
 /.codex/*
-!/.codex/scripts/
-!/.codex/scripts/*.ps1
 /docs/superpowers
 /docs/qa/
 /docs/development/
+/docs/codegraph/
 /.vscode
 *.egg-info/
 /.codex-remote-attachments
