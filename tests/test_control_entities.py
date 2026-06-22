@@ -511,11 +511,13 @@ async def test_switch_setup_entry_adds_maintenance_switch(
     assert len(added_entities) == 1
     maintenance = added_entities[0]
     assert maintenance.unique_id == "entry-1_fridge_maintenance"
-    assert maintenance.name is None
+    assert maintenance.name == "Maintenance mode"
     assert maintenance.suggested_object_id == "fridge_maintenance"
     assert maintenance.icon == "mdi:wrench-clock"
+    assert maintenance.entity_description.name_suffix == "Maintenance mode"
     assert maintenance.entity_description.has_entity_name is True
     assert maintenance.entity_description.translation_key == "maintenance"
+    assert maintenance._attr_name == "Maintenance mode"
     assert maintenance._attr_has_entity_name is True
     assert maintenance._attr_translation_key == "maintenance"
     assert maintenance.is_on is True
