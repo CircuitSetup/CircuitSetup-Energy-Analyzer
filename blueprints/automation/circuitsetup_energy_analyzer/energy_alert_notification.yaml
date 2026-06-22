@@ -55,6 +55,8 @@ blueprint:
               value: needs_data
             - label: Needs Energy Data
               value: needs_energy_data
+            - label: Needs Metrics
+              value: needs_metrics
             - label: Mixed Observation
               value: mixed_observation
             - label: NILM Review

@@ -1102,6 +1102,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         "watch",
         "needs_data",
         "needs_energy_data",
+        "needs_metrics",
         "mixed_observation",
         "nilm_review",
     } <= options
@@ -1125,6 +1126,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     assert condition_matches("Watch", defaults)
     assert not condition_matches("Needs data", defaults)
     assert condition_matches("Needs data", ["needs_data"])
+    assert condition_matches("Needs Metrics", ["needs_metrics"])
 
 
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
