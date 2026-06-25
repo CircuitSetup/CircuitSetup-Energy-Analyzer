@@ -174,7 +174,6 @@ from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
     async_discover_energy_source_entities,
     async_discover_energy_source_entities_for_devices,
-    async_discover_sensors,
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
     infer_sensor_role,
@@ -189,7 +188,7 @@ from .entity_catalog import (
     remove_legacy_entity_registry_entries,
 )
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
-from .mapping import DualPhaseSuggestion, suggest_dual_phase_pairs
+from .mapping import DualPhaseSuggestion
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -1176,10 +1175,6 @@ def _source_device_selector_config() -> dict[str, Any]:
             ],
         }
     }
-
-
-def _assignment_text_selector() -> Any:
-    return _selector({"text": {"multiline": True, "multiple": False}}, str)
 
 
 def _select_selector(options: Iterable[Any]) -> Any:
@@ -2437,12 +2432,6 @@ def assignment_picker_options(
 
 def friendly_circuit_mode_label(mode: str) -> str:
     return _CIRCUIT_MODE_LABELS.get(mode, _friendly_name_from_id(mode))
-
-
-def _default_assignment_power_flow(group: Mapping[str, Any]) -> str:
-    profile = str(group.get("appliance_profile") or "").strip()
-    mode = str(group.get("mode") or "").strip()
-    return _default_power_flow_for_assignment(profile, mode)
 
 
 def _default_power_flow_for_assignment(profile: str, mode: str = "") -> str:
@@ -5202,22 +5191,6 @@ def _circuits_without_demo_source_bundle(
     return pruned_circuits
 
 
-async def _async_save_assignment_edit_and_return_to_picker(
-    flow: Any,
-    final_config: Mapping[str, Any],
-) -> config_entries.ConfigFlowResult:
-    """Persist one edited assignment and reopen the assignment picker."""
-    saved_config = dict(final_config)
-    await _async_save_options_flow_config(flow, saved_config)
-    return _start_assignment_review(
-        flow,
-        saved_config,
-        existing_circuits=saved_config.get(CONF_CIRCUITS, []) or [],
-        show_picker=True,
-        update_existing=True,
-    )
-
-
 async def _async_save_options_flow_config(
     flow: Any,
     options: Mapping[str, Any],
@@ -5361,13 +5334,6 @@ def _default_circuit_id(options: Iterable[Mapping[str, str]]) -> str:
     if option_list:
         return str(option_list[0].get("value") or "mains")
     return "mains"
-
-
-def _circuit_label_from_config(config: Mapping[str, Any], circuit_id: str) -> str:
-    for option in _circuit_options_from_config(config, include_mains=True):
-        if option.get("value") == circuit_id:
-            return str(option.get("label") or circuit_id)
-    return circuit_id
 
 
 def _advanced_circuit_context_from_config(
@@ -5793,16 +5759,6 @@ def _nonnegative_float_from_input(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= 0.0 else default
-
-
-async def _async_format_mapping_suggestions(hass: Any) -> str:
-    if hass is None:
-        return format_mapping_suggestions([])
-    try:
-        discovered = await async_discover_sensors(hass)
-    except Exception:
-        discovered = []
-    return format_mapping_suggestions(suggest_dual_phase_pairs(discovered))
 
 
 async def _async_source_selection_with_device_entities(

@@ -2482,7 +2482,6 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         has_data_quality_problem,
         is_appliance_running,
-        is_laundry_appliance_running,
         is_learning,
         is_maintenance_active,
     )
@@ -2503,29 +2502,20 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert has_data_quality_problem(state, "unknown") is False
     assert is_maintenance_active(state, "fridge") is True
     assert is_maintenance_active(state, "unknown") is False
-    assert (
-        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
-        is False
-    )
+    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
 
     state.latest_real_power_w_by_circuit["washer"] = 19.9
     state.latest_real_power_w_by_circuit["dryer"] = 99.9
-    assert (
-        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
-        is False
-    )
-    assert is_laundry_appliance_running(state, "dryer", ApplianceProfile.DRYER) is False
+    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
+    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is False
 
     state.latest_real_power_w_by_circuit["washer"] = 20.0
     state.latest_real_power_w_by_circuit["dryer"] = 100.0
     state.latest_real_power_w_by_circuit["refrigerator"] = 40.0
     state.latest_real_power_w_by_circuit["microwave"] = 650.0
     state.latest_real_power_w_by_circuit["mixed"] = 1200.0
-    assert (
-        is_laundry_appliance_running(state, "washer", ApplianceProfile.WASHER)
-        is True
-    )
-    assert is_laundry_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
+    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is True
+    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
     assert (
         is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
         is True

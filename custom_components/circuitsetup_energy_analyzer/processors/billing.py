@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..billing import (
@@ -11,23 +11,15 @@ from ..billing import (
     BillingCycleSettings,
     record_billing_cycle_usage,
 )
-from ..models import AlertEvidence, CircuitConfig
+from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
-from .base import FeatureResult, ProcessingContext, StateUpdate
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type BillingCycleSettingsProvider = Callable[
     [CircuitConfig | None, str],
     BillingCycleSettings,
 ]
-type BillingAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type BillingAlertPolicyProvider = Callable[[str], AlertPolicy]
 
 
 class BillingCycleProcessor:

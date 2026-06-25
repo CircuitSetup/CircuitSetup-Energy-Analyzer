@@ -1677,7 +1677,6 @@ def test_entity_model_docs_document_local_count_report_generation() -> None:
     normalized_readme = " ".join(readme_text.lower().split())
 
     assert "python scripts/report_entity_inventory.py" in entity_model
-    assert "python scripts/report_compact_entity_inventory.py" in entity_model
     assert "generated development artifacts are not checked in" in normalized_readme
     assert "Simple creates 10 or fewer" in entity_model
     assert "`switch.<circuit>_maintenance`" in entity_model

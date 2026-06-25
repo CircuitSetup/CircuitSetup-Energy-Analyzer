@@ -154,10 +154,6 @@ def season_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
     return "fall"
 
 
-def month_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
-    return f"{_calendar_datetime(dt, time_zone).month:02d}"
-
-
 def day_type_for_datetime(dt: datetime, *, time_zone: TimeZone = None) -> str:
     calendar_dt = _calendar_datetime(dt, time_zone)
     return "weekend" if calendar_dt.weekday() >= 5 else "weekday"

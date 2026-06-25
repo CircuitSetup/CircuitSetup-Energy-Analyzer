@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
-import re
-from hashlib import sha256
 from typing import Any
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import DOMAIN
+from .ids import readable_component as _readable_component
+from .ids import tuple_id as _tuple_id
 from .models import AlertEvidence, CircuitConfig
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
@@ -40,12 +39,12 @@ def alert_notification_message(
     lines.extend(
         [
             "",
-        "[Open evidence graph]"
-        f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
-        "",
-        f"- Observed value: {alert.observed_value}",
-        f"- {_comparison_value_label(alert)}: {alert.baseline_value}",
-        f"- Repeated observations: {alert.repeated_count}",
+            "[Open evidence graph]"
+            f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+            "",
+            f"- Observed value: {alert.observed_value}",
+            f"- {_comparison_value_label(alert)}: {alert.baseline_value}",
+            f"- Repeated observations: {alert.repeated_count}",
         ]
     )
     if feature_needs_electrical_safety_notice(alert.feature):
@@ -126,15 +125,3 @@ def _comparison_value_label(alert: AlertEvidence) -> str:
     if alert.feature in {"demand_limit", "demand_monthly_peak"}:
         return "Comparison value"
     return "Baseline value"
-
-
-def _tuple_id(prefix: str, *components: str) -> str:
-    payload = json.dumps(components, separators=(",", ":"))
-    digest = sha256(payload.encode()).hexdigest()[:12]
-    readable = "_".join(_readable_component(component) for component in components)
-    return f"{prefix}_{readable}_{digest}"
-
-
-def _readable_component(component: str) -> str:
-    readable = re.sub(r"[^A-Za-z0-9]+", "_", component).strip("_").lower()
-    return readable or "blank"

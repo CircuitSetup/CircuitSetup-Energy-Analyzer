@@ -9,7 +9,7 @@ from scripts.entity_inventory import (
     REPRESENTATIVE_SCENARIO_IDS,
     build_inventory_report,
 )
-from scripts.report_compact_entity_inventory import _build_after_report
+from scripts.report_entity_inventory import _build_after_report
 
 
 def test_inventory_report_covers_representative_before_count_scenarios() -> None:

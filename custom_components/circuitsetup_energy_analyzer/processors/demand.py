@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..contextual_baseline import (
@@ -25,20 +25,13 @@ from ..demand import (
 )
 from ..models import AlertEvidence, CircuitConfig, PowerFlowMode
 from ..normalize import NormalizedCircuitSample
-from .base import FeatureResult, ProcessingContext, StateUpdate
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 DEMAND_PEAK_FEATURE = "peak_demand_w"
 
 
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
 type DemandSettingsProvider = Callable[[CircuitConfig | None, str], DemandSettings]
-type DemandAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type DemandAlertPolicyProvider = Callable[[str], AlertPolicy]
 type RetentionDaysProvider = Callable[[str], int]
 
 

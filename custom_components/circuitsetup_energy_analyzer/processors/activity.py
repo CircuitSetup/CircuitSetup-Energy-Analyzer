@@ -4,32 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, Protocol
+from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings, evaluate_activity_alert
 from ..alerting import Observation
 from ..cycles import summarize_circuit_cycles
-from ..models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from ..models import ApplianceProfile, CircuitConfig, CircuitMode
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_state_is_running,
     resolve_operating_detection_from_settings,
 )
-from .base import FeatureResult, ProcessingContext
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
+from .base import AlertPolicy, FeatureResult, ProcessingContext
 
 type ActivityAlertSettingsProvider = Callable[
     [CircuitConfig | None, str],
     ActivityAlertSettings,
 ]
-type ActivityAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type ActivityAlertPolicyProvider = Callable[[str], AlertPolicy]
 
 
 class ActivityAlertProcessor:

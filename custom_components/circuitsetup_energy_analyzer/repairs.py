@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import inspect
-import json
-import re
 from collections.abc import Iterable, Mapping
-from hashlib import sha256
 from typing import Any
 
 from .const import DOMAIN
+from .ids import tuple_id as _tuple_id
 from .models import Severity
 
 REPAIR_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
@@ -307,19 +305,6 @@ def _call_accepts_keyword(callable_obj: Any, keyword: str) -> bool:
     except (TypeError, ValueError):
         return True
     return any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        or parameter.name == keyword
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == keyword
         for parameter in parameters
     )
-
-
-def _tuple_id(prefix: str, *components: str) -> str:
-    payload = json.dumps(components, separators=(",", ":"))
-    digest = sha256(payload.encode()).hexdigest()[:12]
-    readable = "_".join(_readable_component(component) for component in components)
-    return f"{prefix}_{readable}_{digest}"
-
-
-def _readable_component(component: str) -> str:
-    readable = re.sub(r"[^A-Za-z0-9]+", "_", component).strip("_").lower()
-    return readable or "blank"

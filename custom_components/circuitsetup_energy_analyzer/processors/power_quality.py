@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..baseline import build_baseline
-from ..models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from ..models import ApplianceProfile, CircuitConfig, CircuitMode
 from ..normalize import NormalizedCircuitSample
 from ..power_quality import (
     PowerQualityEvidence,
@@ -18,20 +18,9 @@ from ..power_quality import (
     score_power_quality_features,
     select_power_quality_evidence,
 )
-from .base import FeatureResult, ProcessingContext, StateUpdate
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    min_average_score: float
-    min_baseline_confidence: float
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
-type PowerQualityAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type PowerQualityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type LearningMaturePredicate = Callable[[CircuitConfig, Any], bool]
 type DemoEventSeeder = Callable[[CircuitConfig, Any], None]
 type DemoPowerQualityBaselineSeeder = Callable[
@@ -154,7 +143,7 @@ class PowerQualityProcessor:
 
 def real_power_fallback_evidence(
     scores: Iterable[Any],
-    policy: _AlertPolicy,
+    policy: AlertPolicy,
 ) -> PowerQualityEvidence | None:
     """Return real-power fallback evidence when no relationship evidence wins."""
     for score in scores:

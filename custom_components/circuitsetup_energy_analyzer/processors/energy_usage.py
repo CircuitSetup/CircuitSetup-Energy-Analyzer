@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..contextual_baseline import (
@@ -18,25 +18,17 @@ from ..contextual_baseline import (
     stored_contextual_samples,
     upsert_contextual_sample,
 )
-from ..models import AlertEvidence, CircuitConfig
+from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
-from .base import FeatureResult, ProcessingContext, StateUpdate
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type EnergyUsageSettingsProvider = Callable[
     [CircuitConfig | None, str],
     EnergyUsageSettings,
 ]
 type RetentionDaysProvider = Callable[[str], int]
-type UsageAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type UsageAlertPolicyProvider = Callable[[str], AlertPolicy]
 type DemoEnergyUsageSeeder = Callable[
     [CircuitConfig, NormalizedCircuitSample, Any, EnergyUsageSettings],
     None,

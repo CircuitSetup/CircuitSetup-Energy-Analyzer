@@ -152,15 +152,6 @@ def is_appliance_running(
         return False
 
 
-def is_laundry_appliance_running(
-    state: Any,
-    circuit_id: str,
-    appliance_profile: ApplianceProfile | str | None = None,
-) -> bool:
-    """Return whether a washer or dryer appears active from latest watts."""
-    return is_appliance_running(state, circuit_id, appliance_profile)
-
-
 def has_water_flow_mismatch(
     state: Any,
     circuit_id: str,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..models import AlertEvidence, CircuitConfig, CircuitMode
@@ -14,17 +14,9 @@ from ..phase_balance import (
     LegImbalanceResult,
     evaluate_dual_phase_leg_imbalance,
 )
-from .base import FeatureResult, ProcessingContext, StateUpdate
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
-type LegImbalanceAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type LegImbalanceAlertPolicyProvider = Callable[[str], AlertPolicy]
 
 
 class LegImbalanceProcessor:
