@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..goals import (
@@ -12,23 +12,15 @@ from ..goals import (
     evaluate_daily_energy_goal,
 )
 from ..local_time import local_date
-from ..models import AlertEvidence, CircuitConfig
+from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
-from .base import FeatureResult, ProcessingContext, StateUpdate
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type EnergyGoalSettingsProvider = Callable[
     [CircuitConfig | None, str],
     EnergyGoalSettings,
 ]
-type GoalAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type GoalAlertPolicyProvider = Callable[[str], AlertPolicy]
 
 
 class EnergyGoalProcessor:

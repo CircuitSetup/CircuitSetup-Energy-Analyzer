@@ -217,6 +217,7 @@ from .ux import (
     friendly_feature_name,
     health_summary,
     learning_progress,
+    mutable_config_copy,
     normalize_sensitivity,
 )
 from .water_correlations import (
@@ -609,16 +610,6 @@ def _merged_entry_settings_map(
             if isinstance(value, Mapping):
                 settings[str(circuit_id)] = dict(value)
     return settings
-
-
-def _mutable_copy(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _mutable_copy(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_mutable_copy(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_mutable_copy(item) for item in value)
-    return value
 
 
 def _recommendation_materially_matches(
@@ -1882,11 +1873,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if update_entry is None:
             return
 
-        options = _mutable_copy(self.options)
+        options = mutable_config_copy(self.options)
         result = update_entry(self._config_entry, options=options)
         if isawaitable(result):
             await result
-        self.options = _mutable_copy(options)
+        self.options = mutable_config_copy(options)
 
     async def _async_reload_config_entry(self: Self) -> None:
         if self._config_entry is None:
@@ -4140,10 +4131,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if entity_id:
                 return entity_id
         return ""
-
-    def _temperature_f_for_entity(self: Self, entity_id: str) -> float | None:
-        reading = self._temperature_reading_for_entity(entity_id)
-        return None if reading is None else reading["temperature_f"]
 
     def _temperature_reading_for_entity(
         self: Self,
@@ -6983,20 +6970,6 @@ def _sample_value_or_none(
     if value is None:
         return None
     return float(value)
-
-
-def _sum_sample_values(
-    samples: Iterable[NormalizedCircuitSample],
-    attribute: str,
-) -> float | None:
-    values = [
-        value
-        for sample in samples
-        if (value := getattr(sample, attribute, None)) is not None
-    ]
-    if not values:
-        return None
-    return float(sum(values))
 
 
 def _sum_complete_sample_values(

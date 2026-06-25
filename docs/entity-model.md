@@ -56,7 +56,6 @@ Local count reports can be regenerated with:
 
 ```powershell
 python scripts/report_entity_inventory.py
-python scripts/report_compact_entity_inventory.py
 ```
 
 Generated development artifacts are local-only and are not checked in.

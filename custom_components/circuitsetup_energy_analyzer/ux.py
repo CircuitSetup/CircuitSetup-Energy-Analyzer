@@ -91,7 +91,7 @@ def friendly_sensitivity_label(value: Any) -> str:
 
 def canonicalize_sensitivity_config(value: Mapping[str, Any]) -> dict[str, Any]:
     """Return a mutable config copy using canonical sensitivity preset names."""
-    copied = _mutable_config_copy(value)
+    copied = mutable_config_copy(value)
     if CONF_SENSITIVITY_KEY in copied:
         copied[CONF_SENSITIVITY_KEY] = normalize_sensitivity(
             copied[CONF_SENSITIVITY_KEY]
@@ -106,18 +106,19 @@ def canonicalize_sensitivity_config(value: Mapping[str, Any]) -> dict[str, Any]:
     return copied
 
 
+def mutable_config_copy(value: Any) -> Any:
+    """Return a mutable plain-Python copy of nested config mappings."""
+    if isinstance(value, Mapping):
+        return {key: mutable_config_copy(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [mutable_config_copy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(mutable_config_copy(item) for item in value)
+    return value
+
+
 CONF_SENSITIVITY_KEY = "sensitivity"
 CONF_ADVANCED_SETTINGS_KEY = "advanced_settings"
-
-
-def _mutable_config_copy(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _mutable_config_copy(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_mutable_config_copy(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_mutable_config_copy(item) for item in value)
-    return value
 
 
 def friendly_feature_name(value: Any) -> str:

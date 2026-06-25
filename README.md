@@ -855,9 +855,8 @@ entities instead of every intermediate calculation as a standalone entity.
 
 See `docs/entity-model.md` and `docs/entity-model-migration.md` for the full
 model and migration notes. Local count reports can be regenerated with
-`python scripts/report_entity_inventory.py` and
-`python scripts/report_compact_entity_inventory.py` when needed; generated
-development artifacts are not checked in.
+`python scripts/report_entity_inventory.py` when needed; generated development
+artifacts are not checked in.
 
 Existing installs can keep enabled legacy entities for one compatibility release
 so dashboards and automations do not break during upgrade. To migrate explicitly,

@@ -53,16 +53,8 @@ class NormalizedCircuitSample(CircuitSample):
         return self.raw_real_power
 
     @property
-    def reactive_power_var(self) -> float | None:
-        return self.reactive_power
-
-    @property
     def apparent_power_va(self) -> float | None:
         return self.apparent_power
-
-    @property
-    def frequency_hz(self) -> float | None:
-        return self.frequency
 
 
 def build_circuit_sample(

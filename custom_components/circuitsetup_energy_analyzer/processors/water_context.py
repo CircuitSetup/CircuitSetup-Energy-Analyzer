@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
-from ..models import AlertEvidence, CircuitConfig
-from .base import FeatureResult, ProcessingContext
+from ..models import CircuitConfig
+from .base import AlertPolicy, FeatureResult, ProcessingContext
 
 ALERT_STATUSES = frozenset(
     {
@@ -20,14 +20,7 @@ ALERT_STATUSES = frozenset(
 )
 
 
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
-type WaterContextAlertPolicyProvider = Callable[[str, str], _AlertPolicy]
+type WaterContextAlertPolicyProvider = Callable[[str, str], AlertPolicy]
 
 
 class WaterContextAlertProcessor:

@@ -13,14 +13,7 @@ from ..utility_comparison import (
     UtilityComparisonSettings,
     compare_utility_energy,
 )
-from .base import FeatureResult, ProcessingContext, StateUpdate
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 
 class _UtilityReading(Protocol):
@@ -33,7 +26,7 @@ class _UtilityReading(Protocol):
 
 
 type UtilitySettingsProvider = Callable[[str], UtilityComparisonSettings]
-type UtilityAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type UtilityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type EnergyEntityReader = Callable[[str, datetime], float | None]
 type EnergyEntitySummer = Callable[
     [Iterable[str], datetime],

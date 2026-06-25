@@ -58,6 +58,16 @@ class FeatureResult:
     store_dirty: bool = False
 
 
+class AlertPolicy(Protocol):
+    """Alert policy surface used by feature processors."""
+
+    min_average_score: float
+    min_baseline_confidence: float
+
+    def observe(self, observation: Observation) -> AlertEvidence | None:
+        """Fold an observation into the alert policy."""
+
+
 class FeatureProcessor(Protocol):
     """Feature processor contract."""
 

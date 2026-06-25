@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..baseline import build_baseline
@@ -27,26 +27,16 @@ from ..cycles import (
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
 )
-from ..models import AlertEvidence, BaselineStats, CircuitConfig
+from ..models import BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_state_is_running,
     resolve_operating_detection_from_settings,
 )
 from ..storage import FeatureStoreData
-from .base import FeatureResult, ProcessingContext
+from .base import AlertPolicy, FeatureResult, ProcessingContext
 
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    min_average_score: float
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
-type CycleAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type CycleAlertPolicyProvider = Callable[[str], AlertPolicy]
 type LearningMaturityProvider = Callable[[CircuitConfig, datetime], bool]
 
 

@@ -4,24 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..capacity import CapacityResult, CapacitySettings, evaluate_circuit_capacity
 from ..models import AlertEvidence, CircuitConfig, CircuitMode, SensorRole
 from ..normalize import NormalizedCircuitSample, SourceState
-from .base import FeatureResult, ProcessingContext, StateUpdate
-
-
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type CapacitySettingsProvider = Callable[[str], CapacitySettings]
-type CapacityAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type CapacityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type RetentionDaysProvider = Callable[[str], int]
 type SourceStatesProvider = Callable[
     [CircuitConfig, datetime],

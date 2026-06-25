@@ -3,25 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
-from ..models import AlertEvidence, CircuitConfig, CircuitMode
+from ..models import CircuitConfig, CircuitMode
 from ..nilm import KnownLoadMatch
-from .base import FeatureResult, ProcessingContext, StateUpdate
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE = 0.5
 
 
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
 type KnownConfigProvider = Callable[[str], CircuitConfig | None]
-type TopologyAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type TopologyAlertPolicyProvider = Callable[[str], AlertPolicy]
 
 
 class NilmTopologyProcessor:

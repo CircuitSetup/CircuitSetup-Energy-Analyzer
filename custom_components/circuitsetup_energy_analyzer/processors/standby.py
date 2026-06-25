@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from ..alerting import Observation
 from ..contextual_baseline import (
@@ -29,20 +29,13 @@ from ..standby import (
     StandbySettings,
     record_standby_sample,
 )
-from .base import FeatureResult, ProcessingContext, StateUpdate
+from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 STANDBY_POWER_FEATURE = "standby_power_w"
 
 
-class _AlertPolicy(Protocol):
-    """Small alert policy surface used by this processor."""
-
-    def observe(self, observation: Observation) -> AlertEvidence | None:
-        """Fold an observation into the alert policy."""
-
-
 type StandbySettingsProvider = Callable[[CircuitConfig | None, str], StandbySettings]
-type StandbyAlertPolicyProvider = Callable[[str], _AlertPolicy]
+type StandbyAlertPolicyProvider = Callable[[str], AlertPolicy]
 type DemoStandbySeeder = Callable[
     [CircuitConfig, NormalizedCircuitSample, ProcessingContext, StandbySettings],
     None,
