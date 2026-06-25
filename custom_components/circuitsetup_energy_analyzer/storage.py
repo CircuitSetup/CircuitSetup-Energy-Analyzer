@@ -644,11 +644,11 @@ def _recommendation_decisions_from_raw(
 
 
 def _episode_key_from_raw(values: Any) -> tuple[tuple[str, ...], ...]:
-    parts: list[tuple[str, ...]] = []
-    for value in _list_items(values):
-        if isinstance(value, list | tuple):
-            parts.append(tuple(str(item) for item in value))
-    return tuple(parts)
+    return tuple(
+        tuple(str(item) for item in value)
+        for value in _list_items(values)
+        if isinstance(value, list | tuple)
+    )
 
 
 def _mapping_items(values: Any) -> Iterable[tuple[Any, Any]]:
@@ -951,8 +951,7 @@ def _prune_contextual_baselines(
             )
             if len(ranked) > cap_per_feature:
                 changed = True
-            for key, stats in ranked[:cap_per_feature]:
-                retained[key] = stats
+            retained.update(dict(ranked[:cap_per_feature]))
 
         if retained:
             pruned[str(circuit_id)] = retained

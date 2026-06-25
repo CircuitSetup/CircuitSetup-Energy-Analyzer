@@ -422,14 +422,15 @@ def _energy_tracking_section(
                 "entities": electrical_rows,
             }
         )
-    if include_feature_cards:
-        if water_flow_card := _water_flow_context_card(
+    if include_feature_cards and (
+        water_flow_card := _water_flow_context_card(
             appliance_circuits,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
-        ):
-            cards.append(water_flow_card)
+        )
+    ):
+        cards.append(water_flow_card)
 
     if not cards:
         cards.append(

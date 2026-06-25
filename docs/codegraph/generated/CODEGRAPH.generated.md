@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `266f4ac2459ff959b67955dbdc1ad872dc415d72`
+**Commit:** `a01c114217d220b7a3283fdf087350a75cc8652f`
 **Branch:** `chore/ponytail-audit-cleanup`
-**Generated:** `2026-06-25T15:11:34.307561+00:00`
+**Generated:** `2026-06-25T15:39:12.721291+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **168**
 - Python modules: **154**
-- Symbols: **3298**
+- Symbols: **3299**
 - Internal import edges: **460**
-- External import edges: **507**
+- External import edges: **506**
 
 ## Entrypoints
 
@@ -30,22 +30,22 @@
 | `custom_components.circuitsetup_energy_analyzer.panel.AlertEvidenceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:92` | HTTP/API view |
 | `custom_components.circuitsetup_energy_analyzer.panel.async_setup_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:113` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.panel.async_unload_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:132` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.processors.activity.ActivityAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/activity.py:28` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.activity.ActivityAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/activity.py:27` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.base.FeatureProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/base.py:71` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.billing.BillingCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/billing.py:26` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.capacity.CapacityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/capacity.py:25` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.billing.BillingCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/billing.py:25` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.capacity.CapacityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/capacity.py:24` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.cost.CostProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/cost.py:16` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.cycles.RunCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/cycles.py:44` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.cycles.RunCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/cycles.py:43` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.demand.DemandProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/demand.py:38` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.energy_goal.EnergyGoalProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py:27` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.energy_usage.EnergyUsageProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py:39` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.energy_goal.EnergyGoalProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/energy_goal.py:26` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.energy_usage.EnergyUsageProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/energy_usage.py:38` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.events.CircuitEventProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/events.py:18` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.leg_imbalance.LegImbalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py:23` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.leg_imbalance.LegImbalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py:22` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.mains_balance.MainsBalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py:21` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.metric_consistency.MetricConsistencyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py:19` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.nilm_sample.NilmSampleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py:38` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.nilm_topology.NilmTopologyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py:20` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.power_quality.PowerQualityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/power_quality.py:40` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.power_quality.PowerQualityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/power_quality.py:39` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.solar_flow.SolarFlowProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py:55` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.standby.StandbyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/standby.py:45` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.utility_comparison.UtilityComparisonProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py:46` | Feature processor |

@@ -164,11 +164,13 @@ def _current_state_markdown(report: dict[str, Any]) -> str:
             "|---|---|---|---|",
         ]
     )
-    for row in report["global_entities"]:
-        lines.append(
+    lines.extend(
+        (
             f"| {row['domain']} | `{row['key']}` | "
             f"`{row['unique_id_pattern']}` | {row['notes']} |"
         )
+        for row in report["global_entities"]
+    )
     lines.extend(
         [
             "",

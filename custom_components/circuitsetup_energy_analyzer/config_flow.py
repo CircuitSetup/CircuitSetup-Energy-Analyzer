@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any
 
@@ -3036,17 +3037,17 @@ def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str
         "# Format: Circuit name | appliance_type | mode | entity_id, entity_id",
         "# Generated from guided circuit assignment review.",
     ]
-    for circuit in circuits:
-        lines.append(
-            " | ".join(
-                (
-                    str(circuit.get("name") or circuit.get("circuit_id") or "Circuit"),
-                    str(circuit.get("appliance_profile") or ApplianceProfile.MIXED),
-                    str(circuit.get("mode") or CircuitMode.MIXED),
-                    ", ".join(_sensor_entity_ids_from_circuit(circuit)),
-                )
+    lines.extend(
+        " | ".join(
+            (
+                str(circuit.get("name") or circuit.get("circuit_id") or "Circuit"),
+                str(circuit.get("appliance_profile") or ApplianceProfile.MIXED),
+                str(circuit.get("mode") or CircuitMode.MIXED),
+                ", ".join(_sensor_entity_ids_from_circuit(circuit)),
             )
         )
+        for circuit in circuits
+    )
     return "\n".join(lines)
 
 
@@ -4051,27 +4052,29 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 )
             )
             matching_detail_level: str | None = None
-            if not remove_dashboard:
-                if dashboard_layout_exceeds_entity_detail(layout, current_detail_level):
-                    if not apply_entity_detail_profile:
-                        return self.async_show_form(
-                            step_id="dashboard",
-                            data_schema=_dashboard_schema(
-                                self._config_entry,
-                                layout=layout,
-                                remove_dashboard=remove_dashboard,
-                                apply_entity_detail_profile=apply_entity_detail_profile,
-                            ),
-                            errors={
-                                "base": (
-                                    "dashboard_layout_requires_higher_entity_detail"
-                                )
-                            },
-                        )
-                    matching_detail_level = entity_detail_level_for_dashboard_layout(
-                        layout
+            if (
+                not remove_dashboard
+                and dashboard_layout_exceeds_entity_detail(layout, current_detail_level)
+            ):
+                if not apply_entity_detail_profile:
+                    return self.async_show_form(
+                        step_id="dashboard",
+                        data_schema=_dashboard_schema(
+                            self._config_entry,
+                            layout=layout,
+                            remove_dashboard=remove_dashboard,
+                            apply_entity_detail_profile=apply_entity_detail_profile,
+                        ),
+                        errors={
+                            "base": (
+                                "dashboard_layout_requires_higher_entity_detail"
+                            )
+                        },
                     )
-                    detail_updates[CONF_ENTITY_DETAIL_LEVEL] = matching_detail_level
+                matching_detail_level = entity_detail_level_for_dashboard_layout(
+                    layout
+                )
+                detail_updates[CONF_ENTITY_DETAIL_LEVEL] = matching_detail_level
             coordinator = _options_flow_coordinator(self)
             if coordinator is not None:
                 if remove_dashboard:
@@ -4317,9 +4320,11 @@ def _pending_setting_recommendations(coordinator: Any) -> list[Any]:
             (str, bytes),
         ):
             continue
-        for recommendation in circuit_recommendations:
-            if _recommendation_status(recommendation) == "pending":
-                recommendations.append(recommendation)
+        recommendations.extend(
+            recommendation
+            for recommendation in circuit_recommendations
+            if _recommendation_status(recommendation) == "pending"
+        )
     return recommendations
 
 
@@ -4464,7 +4469,7 @@ def _recommendation_evidence_text(recommendation: Any) -> str:
         key_text = str(key)
         if _is_hidden_recommendation_evidence_key(key_text):
             continue
-        if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        if isinstance(value, (Mapping, list, tuple, set)):
             continue
         parts.append(
             f"{_friendly_name_from_id(key_text)}: "
@@ -4857,9 +4862,8 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
     merged_source_entities = list(
         dict.fromkeys([*extra_source_entities, *source_entities])
     )
-    if not merged_source_entities:
-        if not mains_source_entities:
-            raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    if not merged_source_entities and not mains_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     return {
         CONF_SOURCE_DEVICES: _strict_string_list(
@@ -5210,10 +5214,8 @@ async def _async_save_options_flow_config(
             if hasattr(reload_result, "__await__"):
                 await reload_result
         return
-    try:
+    with suppress(AttributeError):
         config_entry.options = dict(options)
-    except AttributeError:
-        pass
 
 
 def _apply_entity_detail_profile_to_existing_entities(
@@ -5647,8 +5649,7 @@ def _set_optional_string(
 
 
 def _tou_weekday_selection(value: Any) -> list[str]:
-    selected = _weekday_values(value)
-    return selected
+    return _weekday_values(value)
 
 
 def _set_optional_tou_weekdays(

@@ -157,7 +157,7 @@ def recommendation_evidence_preview(evidence: Any, *, limit: int = 4) -> str:
         key_text = str(key)
         if is_hidden_recommendation_evidence_key(key_text):
             continue
-        if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        if isinstance(value, (Mapping, list, tuple, set)):
             continue
         parts.append(
             f"{friendly_feature_name(key_text)}: {_format_recommendation_value(value)}"

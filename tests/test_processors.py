@@ -106,7 +106,6 @@ class _CaptureObservationOnlyPolicy:
 
     def observe(self, observation: Observation) -> None:
         self.observations.append(observation)
-        return None
 
 
 def test_feature_result_defaults_are_independent() -> None:

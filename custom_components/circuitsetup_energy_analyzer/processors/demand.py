@@ -116,14 +116,16 @@ class DemandProcessor:
                 result.limit_exceeded,
                 contextual_comparison,
             )
-        elif result.monthly_peak_warning is not None:
-            if contextual_comparison.get("status_override") != "context_explained":
-                alert = self._demand_monthly_peak_alert(
-                    circuit_config,
-                    context,
-                    result.monthly_peak_warning,
-                    contextual_comparison,
-                )
+        elif (
+            result.monthly_peak_warning is not None
+            and contextual_comparison.get("status_override") != "context_explained"
+        ):
+            alert = self._demand_monthly_peak_alert(
+                circuit_config,
+                context,
+                result.monthly_peak_warning,
+                contextual_comparison,
+            )
         if alert is not None:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)

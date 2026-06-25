@@ -469,7 +469,7 @@ class OperatingStateMachine:
                 if sag_event is not None:
                     result = OperatingDetectionResult(
                         snapshot=result.snapshot,
-                        events=result.events + (sag_event,),
+                        events=(*result.events, sag_event),
                     )
                     self._sag_emitted_for_run = True
 

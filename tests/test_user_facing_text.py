@@ -992,6 +992,8 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
     assert "Power-quality evidence and metric/leg status" in readme
+    assert "Expert creates only the diagnostic or graph groups you select" in readme
+    assert "Expert Entity Groups" in readme
 
 
 def test_readme_explains_running_observation_and_alert_distinction() -> None:
@@ -1650,6 +1652,14 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     )
     assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
+    assert "Create Or Update Dashboard" in readme_text
+    assert "Match Entity Detail Level To Layout" in readme_text
+    assert "Remove Existing Dashboard" in readme_text
+    assert "dashboard action still runs from Configure" in readme_text
+    assert "**Expert**: Standard plus analyzer evidence links" in readme_text
+    assert "does not add diagnostic/detail entity cards automatically" in readme_text
+    assert "graph/detail cards for the Expert groups you selected" not in readme_text
+    assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text
     assert "adds small action cards" not in readme_text
 
 
@@ -1702,8 +1712,17 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
     assert "- Health Summary:" not in readme_text
     assert "Known Load Share" in readme_text
+    assert "`sensor.<circuit>_nilm_discovered_signatures`" in readme_text
+    assert "`sensor.<circuit>_nilm_signature_count`" not in readme_text
+    assert "Expert Energy Detail group" in readme_text
+    assert "Expert Demand and Capacity group" in readme_text
+    assert "Expert Mains and Solar Detail group" in readme_text
+    assert "Expert NILM Detail group" in readme_text
+    assert "Expert Developer Diagnostics group" in readme_text
     assert "how much of current mains power is explained" in readme_text
-    assert "Advanced diagnostic, disabled by default." in readme_text
+    assert "Expert group" in readme_text
+    assert "Core/default visible" in readme_text
+    assert "Standard feature entity" in readme_text
     assert "Advanced diagnostic, hidden by default." not in readme_text
 
 
