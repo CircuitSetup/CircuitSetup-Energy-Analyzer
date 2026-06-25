@@ -926,11 +926,11 @@ def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
     for coordinator in coordinators:
         known_circuit_ids = _known_circuit_ids(coordinator)
         has_circuit = getattr(coordinator, "has_circuit", None)
-        if callable(has_circuit) and has_circuit(circuit_id):
-            matched.append(coordinator)
-        elif circuit_id in known_circuit_ids:
-            matched.append(coordinator)
-        elif not callable(has_circuit) and not known_circuit_ids:
+        if (
+            (callable(has_circuit) and has_circuit(circuit_id))
+            or circuit_id in known_circuit_ids
+            or (not callable(has_circuit) and not known_circuit_ids)
+        ):
             matched.append(coordinator)
     if matched:
         return matched

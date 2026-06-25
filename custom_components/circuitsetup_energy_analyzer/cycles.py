@@ -506,7 +506,7 @@ def _session_runtime_within_day(
 
 
 def _format_seconds(value: float) -> str:
-    seconds = int(round(value))
+    seconds = round(value)
     if seconds < 60:
         return f"{seconds} s"
     minutes = seconds / 60.0

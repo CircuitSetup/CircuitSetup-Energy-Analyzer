@@ -2828,12 +2828,12 @@ def _has_rain_context_source(coordinator: Any) -> bool:
 
 def _has_water_flow_source(coordinator: Any, circuit: Any | None = None) -> bool:
     value = _coordinator_config_value(coordinator, CONF_WATER_FLOW_SENSOR_ENTITIES)
-    if isinstance(value, str):
-        if value.strip():
-            return True
-    if isinstance(value, (list, tuple, set)):
-        if any(bool(str(item).strip()) for item in value):
-            return True
+    if isinstance(value, str) and value.strip():
+        return True
+    if isinstance(value, (list, tuple, set)) and any(
+        bool(str(item).strip()) for item in value
+    ):
+        return True
     return circuit is not None and _has_linked_water_flow_source(coordinator, circuit)
 
 

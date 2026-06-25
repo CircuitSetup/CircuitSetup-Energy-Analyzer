@@ -201,9 +201,9 @@ class NilmSampleProcessor:
             user_label = metadata_current.get("user_label")
             classified_signature = replace(signature, user_label=user_label)
             ignored = bool(metadata_current.get("ignored")) or (
-                circuit_id,
-                signature.signature_id,
-            ) in self.ignored_signatures and bool(metadata_current)
+                (circuit_id, signature.signature_id) in self.ignored_signatures
+                and bool(metadata_current)
+            )
             payload = {
                 "signature_id": signature.signature_id,
                 "median_delta_w": signature.median_delta_w,

@@ -1218,7 +1218,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.operating_detection_settings_by_circuit,
             circuit_id,
             settings,
-            OPERATING_DETECTION_OVERRIDE_FIELDS + (OPERATING_DETECTION_SOURCE,),
+            (*OPERATING_DETECTION_OVERRIDE_FIELDS, OPERATING_DETECTION_SOURCE),
         )
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
@@ -4675,7 +4675,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 f"Add measured kWh source for {circuit_name}"
             ),
         }
-        repair_data = {
+        return {
             "circuit_name": str(circuit_name),
             "reason": self._setup_health_repair_reason(circuit_id, problem),
             "recommended_action": recommended_actions.get(
@@ -4687,7 +4687,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 problem,
             ),
         }
-        return repair_data
 
     def _setup_health_repair_reason(self: Self, circuit_id: str, problem: str) -> str:
         config = self._config_for_circuit(circuit_id)
@@ -5502,7 +5501,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 {"energy": "kWh"},
                 {"change", "sum", "state"},
             )
-        except Exception as err:  # noqa: BLE001 - recorder availability varies by setup.
+        except Exception as err:
             _LOGGER.debug(
                 "Recorder statistics unavailable for %s: %s",
                 sorted(statistic_ids),
@@ -7967,7 +7966,7 @@ async def _async_recorder_executor_job(hass: Any, target: Any, *args: Any) -> An
     if _ha_recorder_get_instance is not None:
         try:
             recorder = _ha_recorder_get_instance(hass)
-        except Exception:  # noqa: BLE001 - recorder may be absent during tests/setup.
+        except Exception:
             recorder = None
         add_recorder_job = getattr(recorder, "async_add_executor_job", None)
         if callable(add_recorder_job):

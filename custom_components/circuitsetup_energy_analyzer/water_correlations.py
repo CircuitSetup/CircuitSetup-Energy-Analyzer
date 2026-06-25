@@ -202,10 +202,7 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
         and flow_active <= 0.0
         and recent_related_runtime <= 0.0
         and mapped_appliance_count <= 0
-    ):
-        status = "possible_sensor_problem"
-        mismatch_minutes = load_without_flow_minutes
-    elif (
+    ) or (
         appliance_runtime >= threshold_minutes
         and flow_active <= 0.0
         and not recent_flow_explains_activity

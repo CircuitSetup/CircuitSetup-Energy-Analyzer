@@ -172,7 +172,7 @@ def _switch_rows_for_circuit(circuit: Any, coordinator: Any) -> list[dict[str, A
 
 def _bucket(rows: list[dict[str, Any]]) -> dict[str, Any]:
     domains = ("sensor", "binary_sensor", "button", "select", "number", "switch")
-    counts = {domain: 0 for domain in domains}
+    counts = dict.fromkeys(domains, 0)
     for row in rows:
         counts[row["domain"]] = counts.get(row["domain"], 0) + 1
     return {

@@ -639,7 +639,7 @@ def _recommendation_evidence_metadata(
         key_text = str(key)
         if is_hidden_recommendation_evidence_key(key_text):
             continue
-        if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        if isinstance(value, (Mapping, list, tuple, set)):
             continue
         preview_key_count += 1
         if preview_key_count >= limit:
