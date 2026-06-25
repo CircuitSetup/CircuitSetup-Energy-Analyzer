@@ -324,7 +324,7 @@ def data_quality_checklist(
     """Summarize source sensor and sample coverage for one circuit."""
     configured_roles = {sensor.role for sensor in config.sensors}
     roles_with_values = _roles_with_sample_values(sample)
-    required_present = REQUIRED_ROLES <= roles_with_values
+    required_present = roles_with_values >= REQUIRED_ROLES
     configured_optional = configured_roles & OPTIONAL_ROLES
     optional_present = (
         bool(configured_optional) and configured_optional <= roles_with_values

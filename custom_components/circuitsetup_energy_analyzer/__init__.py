@@ -154,9 +154,11 @@ def _source_entities_for_entry(
         entity_ids.extend(
             entity_id for entity_id in flow_entities if isinstance(entity_id, str)
         )
-    for config in getattr(coordinator, "circuit_configs", ()):
-        for sensor in getattr(config, "sensors", ()):
-            entity_ids.append(sensor.entity_id)
+    entity_ids.extend(
+        sensor.entity_id
+        for config in getattr(coordinator, "circuit_configs", ())
+        for sensor in getattr(config, "sensors", ())
+    )
     return tuple(
         dict.fromkeys(
             _resolve_registered_demo_source_entity_ids(

@@ -94,8 +94,8 @@ def build_markdown_report(
         "| Fixture | TP | FP | FN | Precision | Recall | Latency seconds |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for metrics in metrics_list:
-        lines.append(
+    lines.extend(
+        (
             "| "
             f"{metrics.fixture_id} | "
             f"{metrics.true_positive_alerts} | "
@@ -105,6 +105,8 @@ def build_markdown_report(
             f"{_format_metric(metrics.recall)} | "
             f"{_format_metric(metrics.detection_latency_seconds)} |"
         )
+        for metrics in metrics_list
+    )
 
     failures = [metrics for metrics in metrics_list if metrics.expectation_failures]
     if failures:
@@ -112,8 +114,7 @@ def build_markdown_report(
         for metrics in failures:
             lines.append(f"### {metrics.fixture_id}")
             lines.append("")
-            for failure in metrics.expectation_failures:
-                lines.append(f"- {failure}")
+            lines.extend(f"- {failure}" for failure in metrics.expectation_failures)
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

@@ -267,14 +267,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 source_states,
                 calibration_sample.timestamp,
             )
-            for issue in normalized_sample.quality_issues:
-                setup_issues.append(
-                    {
-                        "timestamp": calibration_sample.timestamp.isoformat(),
-                        "circuit_id": circuit_config.circuit_id,
-                        "issue": issue,
-                    }
-                )
+            setup_issues.extend(
+                {
+                    "timestamp": calibration_sample.timestamp.isoformat(),
+                    "circuit_id": circuit_config.circuit_id,
+                    "issue": issue,
+                }
+                for issue in normalized_sample.quality_issues
+            )
 
             for result in (
                 event_processor.process(

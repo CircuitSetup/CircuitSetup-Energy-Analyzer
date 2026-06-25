@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `902b8dbe4fd1639d2e8f45578abbc3076b34dbb2`
-**Branch:** `release/v0.9.3`
-**Generated:** `2026-06-20T21:50:41.578511+00:00`
+**Commit:** `266f4ac2459ff959b67955dbdc1ad872dc415d72`
+**Branch:** `chore/ponytail-codegraph-cleanup`
+**Generated:** `2026-06-25T01:34:38.716429+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **167**
 - Python modules: **153**
-- Symbols: **3335**
+- Symbols: **3337**
 - Internal import edges: **457**
-- External import edges: **507**
+- External import edges: **508**
 
 ## Entrypoints
 
@@ -22,8 +22,8 @@
 | `custom_components.circuitsetup_energy_analyzer.async_unload_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:100` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.binary_sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/binary_sensor.py:379` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.button.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/button.py:294` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerConfigFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3407` | Home Assistant config flow |
-| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerOptionsFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3570` | Home Assistant options flow |
+| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerConfigFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3408` | Home Assistant config flow |
+| `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerOptionsFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3571` | Home Assistant options flow |
 | `custom_components.circuitsetup_energy_analyzer.diagnostics.async_get_config_entry_diagnostics` | `custom_components/circuitsetup_energy_analyzer/diagnostics.py:28` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.entity.CircuitAnalyzerEntity` | `custom_components/circuitsetup_energy_analyzer/entity.py:693` | Home Assistant entity |
 | `custom_components.circuitsetup_energy_analyzer.number.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/number.py:158` | Home Assistant lifecycle/API entrypoint |

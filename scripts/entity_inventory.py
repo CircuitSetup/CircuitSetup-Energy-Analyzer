@@ -396,17 +396,10 @@ def _detail_level_summary(
 
 def _bucket(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     items = list(rows)
-    counts = {
-        domain: 0
-        for domain in (
-            "sensor",
-            "binary_sensor",
-            "button",
-            "select",
-            "number",
-            "switch",
-        )
-    }
+    counts = dict.fromkeys(
+        ("sensor", "binary_sensor", "button", "select", "number", "switch"),
+        0,
+    )
     for row in items:
         counts[row["domain"]] = counts.get(row["domain"], 0) + 1
     return {

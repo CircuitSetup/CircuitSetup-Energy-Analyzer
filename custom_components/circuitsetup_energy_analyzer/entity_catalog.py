@@ -497,7 +497,7 @@ def compact_entity_count_preview(
     legacy_compatibility_keys: Collection[str],
 ) -> dict[str, int]:
     """Return desired compact entity counts by Home Assistant domain."""
-    counts = {domain: 0 for domain in _COUNT_DOMAINS}
+    counts = dict.fromkeys(_COUNT_DOMAINS, 0)
     rules = desired_compact_entity_rules(
         current_entities=current_entities,
         circuit=circuit,
