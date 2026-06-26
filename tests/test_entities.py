@@ -4212,6 +4212,82 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "via_device": (DOMAIN, "entry-1_mains"),
     }
 
+    coordinator._nilm_unmatched_edges["mains"].append(
+        NilmEdge(
+            timestamp=datetime(2026, 6, 6, 10, 0, tzinfo=UTC),
+            delta_w=900.0,
+            delta_var=125.0,
+            delta_va=910.0,
+            delta_pf=-0.04,
+            direction="on",
+        ),
+    )
+
+    assert estimated_power.native_value == 900.0
+    assert running.is_on is True
+
+
+def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "signature-dishwasher",
+                        "median_delta_w": 820.0,
+                        "split_phase_type": "single_leg",
+                    },
+                    {
+                        "signature_id": "signature-washer",
+                        "median_delta_w": 420.0,
+                        "split_phase_type": "single_leg",
+                    },
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "display_name": "Dishwasher",
+                        "signature_fingerprints": ["signature-dishwasher"],
+                    },
+                    {
+                        "assignment_id": "assignment-washer",
+                        "display_name": "Washer",
+                        "signature_fingerprints": ["signature-washer"],
+                    },
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                    delta_w=420.0,
+                    delta_var=80.0,
+                    delta_va=430.0,
+                    delta_pf=-0.04,
+                    direction="on",
+                    split_phase_type="single_leg",
+                ),
+            ]
+        },
+    )
+
+    states = {
+        state.assignment_id: state
+        for state in nilm_virtual_appliance_states(coordinator)
+    }
+
+    assert states["assignment-dishwasher"].is_running is False
+    assert states["assignment-washer"].is_running is True
+
 
 @pytest.mark.asyncio
 async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() -> None:

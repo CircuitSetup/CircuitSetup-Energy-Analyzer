@@ -3144,6 +3144,7 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._nilm_state = state
+        self._assignment_id = state.assignment_id
         self.entity_description = description
         self._attr_name = f"{state.display_name} {description.name_suffix}"
         self._attr_unique_id = nilm_virtual_unique_id(
@@ -3170,17 +3171,23 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         """Return the estimated NILM value."""
-        return self.entity_description.value_fn(self._nilm_state)
+        return self.entity_description.value_fn(self._current_nilm_state())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return common estimated NILM attributes."""
-        return nilm_virtual_attributes(self._nilm_state)
+        return nilm_virtual_attributes(self._current_nilm_state())
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Group estimated NILM entities by assignment device."""
-        return nilm_virtual_device_info(self._entry_id, self._nilm_state)
+        return nilm_virtual_device_info(self._entry_id, self._current_nilm_state())
+
+    def _current_nilm_state(self) -> NilmVirtualApplianceState:
+        for state in published_nilm_virtual_appliance_states(self.coordinator):
+            if state.assignment_id == self._assignment_id:
+                return state
+        return self._nilm_state
 
 
 class DemoSourceSensor(SensorEntity):

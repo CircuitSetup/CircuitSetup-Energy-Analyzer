@@ -363,6 +363,7 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._nilm_state = state
+        self._assignment_id = state.assignment_id
         self._attr_name = f"{state.display_name} Estimated Running"
         self._attr_unique_id = nilm_virtual_unique_id(
             entry_id,
@@ -383,17 +384,23 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
     @property
     def is_on(self) -> bool:
         """Return whether NILM currently estimates the appliance is running."""
-        return self._nilm_state.is_running
+        return self._current_nilm_state().is_running
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return common estimated NILM attributes."""
-        return nilm_virtual_attributes(self._nilm_state)
+        return nilm_virtual_attributes(self._current_nilm_state())
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Group estimated NILM entities by assignment device."""
-        return nilm_virtual_device_info(self._entry_id, self._nilm_state)
+        return nilm_virtual_device_info(self._entry_id, self._current_nilm_state())
+
+    def _current_nilm_state(self) -> NilmVirtualApplianceState:
+        for state in published_nilm_virtual_appliance_states(self.coordinator):
+            if state.assignment_id == self._assignment_id:
+                return state
+        return self._nilm_state
 
 
 def _compact_binary_sensor_descriptions_for_setup(

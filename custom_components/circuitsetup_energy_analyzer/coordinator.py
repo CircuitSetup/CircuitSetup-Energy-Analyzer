@@ -3687,6 +3687,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._mark_store_dirty()
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
+        await self._async_reload_config_entry()
 
     async def async_ignore_nilm_signature(
         self: Self,

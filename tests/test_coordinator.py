@@ -3934,8 +3934,19 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
         EnergyAnalyzerCoordinator,
     )
 
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloaded: list[str] = []
+
+        async def async_reload(self, entry_id: str) -> None:
+            self.reloaded.append(entry_id)
+
+    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
     coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(data={}),
+        hass,
+        entry_id=entry.entry_id,
+        config_entry=entry,
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={
                 "mains": [
@@ -3970,6 +3981,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
     assert published["created_device"] is True
     assert published["lifecycle_state"] == "published"
     assert published["updated_at"] == "2026-06-02T14:00:00+00:00"
+    assert hass.config_entries.reloaded == ["entry-1"]
 
     unpublished = await coordinator.async_unpublish_nilm_appliance_assignment(
         "mains",
@@ -3979,6 +3991,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
     assert unpublished["publish_entities"] is False
     assert unpublished["created_device"] is True
     assert unpublished["lifecycle_state"] == "validated"
+    assert hass.config_entries.reloaded == ["entry-1", "entry-1"]
 
     retired = await coordinator.async_retire_nilm_appliance_assignment(
         "mains",
@@ -3987,6 +4000,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
 
     assert retired["publish_entities"] is False
     assert retired["lifecycle_state"] == "retired"
+    assert hass.config_entries.reloaded == ["entry-1", "entry-1", "entry-1"]
 
 
 @pytest.mark.asyncio
