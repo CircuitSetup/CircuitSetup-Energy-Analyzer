@@ -1221,6 +1221,119 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
     assert virtual["model_status"] == "learning"
 
 
+def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [
+            {
+                "interval_id": "label-dishwasher",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dishwasher",
+                "label": "Dishwasher",
+                "start": "2026-06-06T08:10:00+00:00",
+                "end": "2026-06-06T08:40:00+00:00",
+                "source": "sensor",
+                "confidence": 0.95,
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dishwasher_power",
+            },
+            {
+                "interval_id": "label-dryer",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dryer",
+                "label": "Dryer",
+                "start": "2026-06-06T10:00:00+00:00",
+                "end": "2026-06-06T10:30:00+00:00",
+                "source": "sensor",
+                "confidence": 0.95,
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dryer_power",
+            },
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "label_interval_ids": ["label-dishwasher"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 12, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=120.0,
+                delta_va=830.0,
+                delta_pf=-0.05,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 37, tzinfo=UTC),
+                delta_w=-815.0,
+                delta_var=-118.0,
+                delta_va=-825.0,
+                delta_pf=0.04,
+                direction="off",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    validation = payload["validation"]
+    assert validation["metrics"] == {
+        "ground_truth_interval_count": 2,
+        "prediction_count": 1,
+        "matched_ground_truth_count": 1,
+        "matched_prediction_count": 1,
+        "missed_ground_truth_count": 1,
+        "precision": 1.0,
+        "recall": 0.5,
+    }
+    assert validation["prediction_preview"][0] == {
+        "interval_id": "label-dishwasher",
+        "label": "Dishwasher",
+        "ground_truth_entity_id": "sensor.dishwasher_power",
+        "source": "sensor",
+        "prediction_status": "matched",
+        "matched_assignment_id": "assignment-dishwasher",
+        "matched_session_id": payload["sessions"][0]["session_id"],
+        "overlap_seconds": 1500.0,
+        "prediction_confidence": payload["sessions"][0]["confidence"],
+    }
+    assert validation["prediction_preview"][1] == {
+        "interval_id": "label-dryer",
+        "label": "Dryer",
+        "ground_truth_entity_id": "sensor.dryer_power",
+        "source": "sensor",
+        "prediction_status": "missed",
+        "matched_assignment_id": None,
+        "matched_session_id": None,
+        "overlap_seconds": 0.0,
+        "prediction_confidence": None,
+    }
+
+
 def test_nilm_workspace_history_rows_are_capped() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,

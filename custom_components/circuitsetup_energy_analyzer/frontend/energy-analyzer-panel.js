@@ -68,7 +68,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
-    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
+    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -132,7 +132,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
-    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
+    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._render();
 
     const routeUrl = new URL(routeKey, window.location.origin);
@@ -359,6 +359,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.start = start;
       data.end = end;
       data.appliance_id = String(draft.appliance_id || label).trim();
+      const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
+      if (groundTruthEntityId) {
+        data.ground_truth_entity_id = groundTruthEntityId;
+        data.source = "sensor";
+      }
     } else if (actionKey === "delete") {
       const interval = intervals && intervals[index];
       action = interval && interval.actions && interval.actions.delete;
@@ -382,7 +387,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ? `Saved interval label: ${data.label}.`
         : "Deleted interval label.";
       if (actionKey === "save") {
-        this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
+        this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
       }
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_label_interval") });
@@ -1124,6 +1129,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
+        ${this._renderNilmValidation(workspace.validation)}
         ${this._renderNilmWorkspaceList("Estimated Appliances", workspace.virtual_appliances, "No estimated appliances are available yet.", (item) => `
           <div class="metric">
             <span>${this._escape(item.model_status || "candidate")}</span>
@@ -1188,6 +1194,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <span class="muted">Appliance profile</span>
             <input type="text" data-nilm-label-interval-input="appliance_id" value="${this._escape(draft.appliance_id || "")}" placeholder="dishwasher">
           </label>
+          <label>
+            <span class="muted">Ground Truth Sensor</span>
+            <input type="text" data-nilm-label-interval-input="ground_truth_entity_id" value="${this._escape(draft.ground_truth_entity_id || "")}" placeholder="sensor.dishwasher_power">
+          </label>
         </div>
         <div class="actions">
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
@@ -1198,6 +1208,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <span>${this._escape(item.start || "")} - ${this._escape(item.end || "")}</span>
           <strong>${this._escape(item.label || item.appliance_id || "Labeled interval")}</strong>
           ${item.mains_entity_id ? `<p class="muted">${this._escape(item.mains_entity_id)}</p>` : ""}
+          ${item.ground_truth_entity_id ? `<p class="muted">Ground Truth Sensor: ${this._escape(item.ground_truth_entity_id)}</p>` : ""}
           <div class="actions">
             <button
               type="button"
@@ -1209,6 +1220,40 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </div>
         </div>
       `).join("")}</div>` : `<p class="muted">No manual NILM labels are saved yet.</p>`}
+    `;
+  }
+
+  _renderNilmValidation(validation) {
+    if (!validation) {
+      return "";
+    }
+    const metrics = validation.metrics || {};
+    const preview = Array.isArray(validation.prediction_preview)
+      ? validation.prediction_preview
+      : [];
+    return `
+      <h3>Validation</h3>
+      <div class="summary">
+        <div class="metric">
+          <span>Ground truth</span>
+          <strong>${this._escape(metrics.ground_truth_interval_count || 0)}</strong>
+        </div>
+        <div class="metric">
+          <span>Precision</span>
+          <strong>${this._escape(Math.round(Number(metrics.precision || 0) * 100))}%</strong>
+        </div>
+        <div class="metric">
+          <span>Recall</span>
+          <strong>${this._escape(Math.round(Number(metrics.recall || 0) * 100))}%</strong>
+        </div>
+      </div>
+      ${this._renderNilmWorkspaceList("Prediction Preview", preview, "No ground-truth sensor intervals are saved yet.", (item) => `
+        <div class="metric">
+          <span>${this._escape(item.ground_truth_entity_id || "")}</span>
+          <strong>${this._escape(item.label || "Ground truth")} - ${this._escape(item.prediction_status || "missed")}</strong>
+          <p class="muted">${this._escape(item.matched_assignment_id || "No matching NILM prediction")} ${this._escape(this._formatMetricValue(item.overlap_seconds))} seconds overlap</p>
+        </div>
+      `)}
     `;
   }
 
