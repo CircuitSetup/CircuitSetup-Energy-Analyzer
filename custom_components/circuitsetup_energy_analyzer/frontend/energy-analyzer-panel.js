@@ -1124,6 +1124,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
+        ${this._renderNilmWorkspaceList("Estimated Appliances", workspace.virtual_appliances, "No estimated appliances are available yet.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.model_status || "candidate")}</span>
+            <strong>${this._escape(item.display_name || item.appliance_id || "Estimated appliance")} - ${this._escape(item.is_running ? "running" : "idle")}</strong>
+            <p class="muted" data-field="estimated_daily_energy">${this._escape(this._formatMetricValue(item.estimated_power_w))} W, ${this._escape(this._formatMetricValue(item.estimated_energy_kwh_today))} kWh today, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+          </div>
+        `)}
         ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>

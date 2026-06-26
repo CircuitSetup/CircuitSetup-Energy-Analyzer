@@ -1135,6 +1135,19 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assert payload["virtual_appliance_count"] == 1
+    assert payload["virtual_appliances"][0]["assignment_id"] == (
+        "assignment-dishwasher"
+    )
+    assert payload["virtual_appliances"][0]["display_name"] == "Dishwasher"
+    assert payload["virtual_appliances"][0]["is_running"] is False
+    assert payload["virtual_appliances"][0]["estimated_power_w"] == 0.0
+    assert payload["virtual_appliances"][0]["estimated_energy_kwh_today"] == (
+        payload["sessions"][0]["estimated_energy_kwh"]
+    )
+    assert payload["virtual_appliances"][0]["confidence"] == 0.9
+    assert payload["virtual_appliances"][0]["model_status"] == "assigned"
+    assert payload["virtual_appliances"][0]["active_session_id"] is None
     assert payload["actions"]["label_interval"] == {
         "domain": DOMAIN,
         "service": "label_nilm_interval",
@@ -1146,6 +1159,66 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["off_edge_id"] is not None
+
+
+def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "learning",
+                "confidence": 0.8,
+            }
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {"signature_id": "signature_1", "confidence": 0.7}
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=120.0,
+                delta_va=830.0,
+                delta_pf=-0.05,
+                direction="on",
+            )
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    virtual = payload["virtual_appliances"][0]
+    assert virtual["is_running"] is True
+    assert virtual["estimated_power_w"] == 820.0
+    assert virtual["estimated_energy_kwh_today"] == 0.0
+    assert virtual["active_session_id"] == payload["sessions"][0]["session_id"]
+    assert virtual["last_seen"] == "2026-06-06T08:00:00+00:00"
+    assert virtual["model_status"] == "learning"
 
 
 def test_nilm_workspace_history_rows_are_capped() -> None:

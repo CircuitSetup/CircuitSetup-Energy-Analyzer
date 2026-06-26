@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `31c8a091ffe64da3b759859fa45976660470d837`
-**Branch:** `feature/nilm-assignment-registry`
-**Generated:** `2026-06-26T02:21:42.411901+00:00`
+**Commit:** `db507115d414f861333445bb79acc302bee262d0`
+**Branch:** `feature/nilm-virtual-state`
+**Generated:** `2026-06-26T02:36:18.871800+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **168**
 - Python modules: **154**
-- Symbols: **3397**
+- Symbols: **3407**
 - Internal import edges: **461**
 - External import edges: **508**
 

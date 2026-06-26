@@ -73,7 +73,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-workspace-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-virtual-state-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -369,6 +369,17 @@ def nilm_workspace_payload(
         config.circuit_id,
     )
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
+    sessions = _nilm_workspace_sessions(
+        edges,
+        config.circuit_id,
+        signatures=signatures,
+        assignments=assignments,
+    )
+    virtual_appliances = _nilm_virtual_appliances_for_assignments(
+        assignments,
+        sessions,
+        edges,
+    )
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -384,6 +395,8 @@ def nilm_workspace_payload(
         "label_interval_count": len(label_intervals),
         "assignments": assignments,
         "assignment_count": len(assignments),
+        "virtual_appliances": virtual_appliances,
+        "virtual_appliance_count": len(virtual_appliances),
         "actions": {
             "label_interval": _nilm_label_interval_action(config)
         },
@@ -392,11 +405,7 @@ def nilm_workspace_payload(
             for edge in edges[:MAX_NILM_WORKSPACE_EDGES]
         ],
         "edge_count": len(edges),
-        "sessions": _nilm_workspace_sessions(
-            edges,
-            config.circuit_id,
-            signature_fingerprint=_nilm_workspace_signature_fingerprint(signatures),
-        ),
+        "sessions": sessions,
     }
 
 
@@ -1174,6 +1183,146 @@ def _nilm_assignments_for_circuit(
     )
 
 
+def _nilm_virtual_appliances_for_assignments(
+    assignments: list[dict[str, Any]],
+    sessions: list[dict[str, Any]],
+    edges: list[NilmEdge],
+) -> list[dict[str, Any]]:
+    reference_date = _nilm_workspace_reference_date(edges, sessions)
+    virtual_appliances = []
+    for assignment in assignments:
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
+        if not assignment_id:
+            continue
+        assignment_sessions = [
+            session
+            for session in sessions
+            if session.get("assignment_id") == assignment_id
+        ]
+        open_session = _latest_nilm_session(
+            session for session in assignment_sessions if not session.get("end")
+        )
+        latest_session = open_session or _latest_nilm_session(assignment_sessions)
+        virtual_appliances.append(
+            {
+                "appliance_id": str(
+                    assignment.get("appliance_id") or assignment_id
+                ),
+                "assignment_id": assignment_id,
+                "display_name": str(
+                    assignment.get("display_name")
+                    or assignment.get("appliance_id")
+                    or assignment_id
+                ),
+                "is_running": open_session is not None,
+                "estimated_power_w": (
+                    _round_float(open_session.get("median_power_w"))
+                    if open_session
+                    else 0.0
+                ),
+                "estimated_energy_kwh_today": _nilm_daily_energy(
+                    assignment_sessions,
+                    reference_date,
+                ),
+                "confidence": _clamped_float(
+                    assignment.get("confidence"),
+                    default=0.0,
+                    upper=1.0,
+                ),
+                "last_seen": _nilm_session_last_seen(latest_session),
+                "active_signature_id": (
+                    str(open_session.get("signature_fingerprint") or "")
+                    if open_session
+                    else None
+                ),
+                "active_session_id": (
+                    str(open_session.get("session_id") or "")
+                    if open_session
+                    else None
+                ),
+                "model_status": str(
+                    assignment.get("lifecycle_state") or "candidate"
+                ),
+            }
+        )
+    return virtual_appliances
+
+
+def _latest_nilm_session(
+    sessions: Iterable[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    latest: Mapping[str, Any] | None = None
+    latest_seen: datetime | None = None
+    for session in sessions:
+        seen = _nilm_session_seen_datetime(session)
+        if seen is None:
+            continue
+        if latest_seen is None or seen > latest_seen:
+            latest = session
+            latest_seen = seen
+    return latest
+
+
+def _nilm_session_seen_datetime(session: Mapping[str, Any]) -> datetime | None:
+    return _datetime_from_iso(session.get("end")) or _datetime_from_iso(
+        session.get("start")
+    )
+
+
+def _nilm_session_last_seen(session: Mapping[str, Any] | None) -> str | None:
+    if session is None:
+        return None
+    seen = _nilm_session_seen_datetime(session)
+    return seen.isoformat() if seen else None
+
+
+def _nilm_workspace_reference_date(
+    edges: list[NilmEdge],
+    sessions: list[dict[str, Any]],
+) -> Any:
+    latest_edge = max((edge.timestamp for edge in edges), default=None)
+    if latest_edge is not None:
+        return latest_edge.date()
+    latest_session = _latest_nilm_session(sessions)
+    seen = _nilm_session_seen_datetime(latest_session) if latest_session else None
+    return seen.date() if seen else None
+
+
+def _nilm_daily_energy(
+    sessions: list[dict[str, Any]],
+    reference_date: Any,
+) -> float:
+    if reference_date is None:
+        return 0.0
+    return round(
+        sum(
+            _clamped_float(session.get("estimated_energy_kwh"), default=0.0)
+            for session in sessions
+            if (
+                (start := _datetime_from_iso(session.get("start"))) is not None
+                and start.date() == reference_date
+            )
+        ),
+        3,
+    )
+
+
+def _round_float(value: Any) -> float:
+    return round(_clamped_float(value, default=0.0), 3)
+
+
+def _clamped_float(value: Any, *, default: float, upper: float | None = None) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number < 0:
+        return default
+    if upper is not None:
+        return min(number, upper)
+    return number
+
+
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:
     config = _config_for_circuit(coordinator, circuit_id)
     if config is None or not _is_nilm_config(config):
@@ -1309,17 +1458,54 @@ def _nilm_workspace_sessions(
     edges: list[NilmEdge],
     circuit_id: str,
     *,
-    signature_fingerprint: str,
+    signatures: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    sessions = pair_nilm_sessions(
-        edges,
-        mains_circuit_id=circuit_id,
-        signature_fingerprint=signature_fingerprint,
-    )
-    return [
-        _nilm_session_payload(session)
-        for session in sessions[:MAX_NILM_WORKSPACE_SESSIONS]
+    sessions: list[NilmSession] = []
+    for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
+        signatures,
+        assignments,
+    ):
+        sessions.extend(
+            pair_nilm_sessions(
+                edges,
+                mains_circuit_id=circuit_id,
+                signature_fingerprint=signature_fingerprint,
+                assignment_id=assignment_id,
+            )
+        )
+        if len(sessions) >= MAX_NILM_WORKSPACE_SESSIONS:
+            break
+    return [_nilm_session_payload(session) for session in sessions][
+        :MAX_NILM_WORKSPACE_SESSIONS
     ]
+
+
+def _nilm_workspace_session_specs(
+    signatures: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+) -> list[tuple[str, str | None]]:
+    specs: list[tuple[str, str | None]] = []
+    seen: set[tuple[str, str | None]] = set()
+    seen_fingerprints: set[str] = set()
+    for assignment in assignments:
+        assignment_id = str(assignment.get("assignment_id") or "").strip() or None
+        for value in _iter_items(assignment.get("signature_fingerprints")):
+            fingerprint = str(value or "").strip()
+            key = (fingerprint, assignment_id)
+            if fingerprint and key not in seen:
+                specs.append(key)
+                seen.add(key)
+                seen_fingerprints.add(fingerprint)
+    for signature in signatures:
+        fingerprint = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        key = (fingerprint, None)
+        if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
+            specs.append(key)
+            seen.add(key)
+    if specs:
+        return specs
+    return [(_nilm_workspace_signature_fingerprint(signatures), None)]
 
 
 def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
@@ -1339,6 +1525,7 @@ def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
         "alternate_match_count": session.alternate_match_count,
         "known_load_masked": session.known_load_masked,
         "known_load_confidence": session.known_load_confidence,
+        "assignment_id": session.assignment_id,
     }
 
 
