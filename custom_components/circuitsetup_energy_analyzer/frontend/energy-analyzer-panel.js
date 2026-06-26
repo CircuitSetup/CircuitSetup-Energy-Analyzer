@@ -485,8 +485,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const data = Object.assign({}, action.data || {});
     if (action.requires && action.requires.includes("label")) {
-      const labelInput = this.shadowRoot.querySelector(`#nilm_assignment_label_${index}`)
-        || this.shadowRoot.querySelector(`#nilm_session_label_${index}`);
+      const labelInput = this.shadowRoot.querySelector(
+        collectionKey === "sessions"
+          ? `#nilm_session_label_${index}`
+          : `#nilm_assignment_label_${index}`,
+      );
       const existingAssignment = this._nilmExistingAssignmentSelection(`${collectionKey}_${index}`);
       const label = existingAssignment
         ? existingAssignment.label

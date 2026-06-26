@@ -1222,6 +1222,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-assignment-merge-target",
         "profile_options",
         "<select id=\"nilm_assignment_profile_",
+        'collectionKey === "sessions"',
+        "`#nilm_session_label_${index}`",
         "Existing appliance",
         "data-nilm-existing-assignment",
         'actionKey === "assign" ? '
@@ -1332,6 +1334,11 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "Label this NILM signature" not in asset
     assert 'placeholder="sensor.dishwasher_power"' not in asset
     assert "<select id=\"nilm_merge_target_" not in asset
+    assert (
+        "querySelector(`#nilm_assignment_label_${index}`)\n"
+        "        || this.shadowRoot.querySelector(`#nilm_session_label_${index}`)"
+        not in asset
+    )
     assert (
         'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
         not in asset

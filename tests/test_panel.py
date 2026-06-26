@@ -1820,6 +1820,58 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
     assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
 
 
+def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": ["session-dishwasher"],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.8,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.615,
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    virtual = payload["virtual_appliances"][0]
+    assert virtual["assignment_id"] == "assignment-dishwasher"
+    assert virtual["estimated_energy_kwh_today"] == 0.615
+    assert virtual["last_seen"] == "2026-06-06T08:45:00+00:00"
+
+
 def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (

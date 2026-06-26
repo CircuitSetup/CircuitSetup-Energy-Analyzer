@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-workspace-route-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-workspace-route-v2"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -1461,10 +1461,16 @@ def _nilm_virtual_appliances_for_assignments(
         assignment_id = str(assignment.get("assignment_id") or "").strip()
         if not assignment_id:
             continue
+        assignment_session_ids = {
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("session_ids"))
+            if str(value or "").strip()
+        }
         assignment_sessions = [
             session
             for session in sessions
             if session.get("assignment_id") == assignment_id
+            or str(session.get("session_id") or "").strip() in assignment_session_ids
         ]
         open_session = _latest_nilm_session(
             session for session in assignment_sessions if not session.get("end")
