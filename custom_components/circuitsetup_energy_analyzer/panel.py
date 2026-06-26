@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-profile-select-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-ground-truth-select-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -456,7 +456,10 @@ def nilm_workspace_payload(
         "validation": validation,
         "actions": {
             "label_interval": _nilm_label_interval_action(config),
-            "sensor_label_interval": _nilm_sensor_label_interval_action(config),
+            "sensor_label_interval": _nilm_sensor_label_interval_action(
+                config,
+                known_load_overlays,
+            ),
         },
         "edges": [
             _nilm_edge_payload(edge)
@@ -1246,7 +1249,10 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
     }
 
 
-def _nilm_sensor_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
+def _nilm_sensor_label_interval_action(
+    config: CircuitConfig,
+    known_load_overlays: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
     action = _nilm_label_interval_action(config)
     action["service"] = SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS
     action["requires"] = [
@@ -1255,6 +1261,20 @@ def _nilm_sensor_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         ATTR_LABEL,
         ATTR_GROUND_TRUTH_ENTITY_ID,
     ]
+    ground_truth_options = []
+    seen_entities: set[str] = set()
+    for overlay in known_load_overlays:
+        label = str(overlay.get("name") or overlay.get("circuit_id") or "").strip()
+        for entity_id in _iter_items(overlay.get("entity_ids")):
+            entity_text = str(entity_id or "").strip()
+            if not entity_text or entity_text in seen_entities:
+                continue
+            seen_entities.add(entity_text)
+            ground_truth_options.append(
+                {"value": entity_text, "label": label or entity_text},
+            )
+    if ground_truth_options:
+        action["ground_truth_options"] = ground_truth_options
     return action
 
 

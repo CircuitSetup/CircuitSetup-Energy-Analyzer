@@ -1211,6 +1211,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             "mains_entity_id": "sensor.mains_power",
         },
         "requires": ["start", "end", "label", "ground_truth_entity_id"],
+        "ground_truth_options": [
+            {"value": "sensor.pool_pump_power", "label": "Pool Pump"}
+        ],
     }
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["actions"]["assign"] == {

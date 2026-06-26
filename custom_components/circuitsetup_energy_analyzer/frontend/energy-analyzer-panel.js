@@ -962,6 +962,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
       input.addEventListener("input", () => this._rememberNilmLabelIntervalDraft(input));
+      input.addEventListener("change", () => this._rememberNilmLabelIntervalDraft(input));
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));
@@ -1423,6 +1424,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervals = Array.isArray(workspace && workspace.label_intervals)
       ? workspace.label_intervals
       : [];
+    const sensorAction = workspace && workspace.actions && workspace.actions.sensor_label_interval;
+    const groundTruthOptions = sensorAction && Array.isArray(sensorAction.ground_truth_options)
+      ? sensorAction.ground_truth_options
+      : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
     const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" ? "disabled" : "";
     return `
@@ -1443,7 +1448,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </label>
           <label>
             <span class="muted">Ground Truth Sensor</span>
-            <input type="text" data-nilm-label-interval-input="ground_truth_entity_id" value="${this._escape(draft.ground_truth_entity_id || "")}" placeholder="sensor.dishwasher_power">
+            ${groundTruthOptions.length ? `<select data-nilm-label-interval-input="ground_truth_entity_id">
+              <option value="">Select sensor</option>
+              ${groundTruthOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(draft.ground_truth_entity_id || "") ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
+            </select>` : `<input type="text" data-nilm-label-interval-input="ground_truth_entity_id" value="${this._escape(draft.ground_truth_entity_id || "")}" placeholder="sensor.dishwasher_power">`}
           </label>
         </div>
         <div class="actions">

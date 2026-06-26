@@ -1180,6 +1180,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Prediction Preview",
         "Ground Truth Sensor",
         "ground_truth_entity_id",
+        "ground_truth_options",
+        "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
         "_renderNilmValidation",
         "NILM Sessions",
         "Manual Labels",
