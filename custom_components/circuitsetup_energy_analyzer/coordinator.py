@@ -272,6 +272,7 @@ ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
+NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT = 500
 NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
 NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
@@ -3389,6 +3390,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         else:
             existing.clear()
             existing.update(payload)
+        del intervals[:-NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT]
 
         self._mark_store_dirty()
         self.async_set_updated_data(self.state)

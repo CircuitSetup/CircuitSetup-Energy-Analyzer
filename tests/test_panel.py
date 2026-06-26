@@ -1197,6 +1197,15 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         },
         "requires": ["start", "end", "label"],
     }
+    assert payload["actions"]["sensor_label_interval"] == {
+        "domain": DOMAIN,
+        "service": "generate_nilm_sensor_label_intervals",
+        "data": {
+            "circuit_id": "mains",
+            "mains_entity_id": "sensor.mains_power",
+        },
+        "requires": ["start", "end", "label", "ground_truth_entity_id"],
+    }
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["actions"]["assign"] == {
         "domain": DOMAIN,

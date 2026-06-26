@@ -3840,6 +3840,36 @@ async def test_nilm_label_interval_create_update_and_delete() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_label_intervals_are_bounded_per_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    base = datetime(2026, 6, 2, 0, 0, tzinfo=UTC)
+    for index in range(NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT + 1):
+        start = base + timedelta(minutes=index * 2)
+        end = start + timedelta(minutes=1)
+        await coordinator.async_label_nilm_interval(
+            "mains",
+            label=f"Load {index}",
+            start=start.isoformat(),
+            end=end.isoformat(),
+        )
+
+    intervals = coordinator.store_data.nilm_label_intervals_by_circuit["mains"]
+    assert len(intervals) == NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT
+    assert intervals[0]["label"] == "Load 1"
+    assert intervals[-1]["label"] == "Load 500"
+
+
+@pytest.mark.asyncio
 async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

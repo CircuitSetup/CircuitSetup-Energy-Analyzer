@@ -347,8 +347,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervals = workspace && workspace.label_intervals;
     let action = null;
     let data = {};
-    if (actionKey === "save") {
-      action = workspace && workspace.actions && workspace.actions.label_interval;
+    if (actionKey === "save" || actionKey === "generate_sensor") {
+      action = workspace && workspace.actions && (
+        actionKey === "generate_sensor"
+          ? workspace.actions.sensor_label_interval
+          : workspace.actions.label_interval
+      );
       data = Object.assign({}, action && action.data || {});
       const draft = this._nilmLabelIntervalDraft || {};
       const label = String(draft.label || "").trim();
@@ -364,6 +368,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.end = end;
       data.appliance_id = String(draft.appliance_id || label).trim();
       const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
+      if (actionKey === "generate_sensor" && !groundTruthEntityId) {
+        this._error = "Choose a ground truth sensor before generating NILM intervals.";
+        this._renderAndScrollToTop();
+        return;
+      }
       if (groundTruthEntityId) {
         data.ground_truth_entity_id = groundTruthEntityId;
         data.source = "sensor";
@@ -389,8 +398,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!this._guardActionCall(action, `NILM label interval ${actionKey}`)) {
       return;
     }
-    const busyKey = actionKey === "save"
-      ? "nilm_label_interval_save"
+    const busyKey = actionKey === "save" || actionKey === "generate_sensor"
+      ? `nilm_label_interval_${actionKey}`
       : `nilm_label_interval_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -402,10 +411,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       this._lastActionMessage = actionKey === "save"
         ? `Saved interval label: ${data.label}.`
-        : actionKey === "assign"
-          ? `Assigned interval to ${data.label}.`
-          : "Deleted interval label.";
-      if (actionKey === "save") {
+        : actionKey === "generate_sensor"
+          ? `Generated sensor labels for ${data.label}.`
+          : actionKey === "assign"
+            ? `Assigned interval to ${data.label}.`
+            : "Deleted interval label.";
+      if (actionKey === "save" || actionKey === "generate_sensor") {
         this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
       }
       this._busyAction = "";
@@ -1388,6 +1399,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? workspace.label_intervals
       : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
+    const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" ? "disabled" : "";
     return `
       <h3>Manual Labels</h3>
       <div class="metric">
@@ -1411,6 +1423,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
         <div class="actions">
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
+          <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>Generate From Sensor</button>
         </div>
       </div>
       ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `

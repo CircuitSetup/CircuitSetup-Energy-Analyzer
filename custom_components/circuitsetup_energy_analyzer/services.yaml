@@ -299,6 +299,85 @@ delete_nilm_label_interval:
       example: label-abc123def456
       selector:
         text:
+generate_nilm_sensor_label_intervals:
+  name: Generate NILM sensor label intervals
+  description: "Advanced/script action: create NILM label intervals from a directly metered appliance power sensor history. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    label:
+      name: Label
+      description: Friendly appliance name for generated ground-truth intervals.
+      required: true
+      example: Dishwasher
+      selector:
+        text:
+    start:
+      name: Start
+      description: ISO timestamp for the start of the sensor history range.
+      required: true
+      example: "2026-06-02T12:00:00+00:00"
+      selector:
+        text:
+    end:
+      name: End
+      description: ISO timestamp for the end of the sensor history range.
+      required: true
+      example: "2026-06-02T14:00:00+00:00"
+      selector:
+        text:
+    ground_truth_entity_id:
+      name: Ground Truth Entity
+      description: Directly metered appliance power entity used to generate labels.
+      required: true
+      example: sensor.dishwasher_power
+      selector:
+        entity:
+          domain:
+            - sensor
+    threshold_w:
+      name: Threshold W
+      description: Sensor watts above this threshold are treated as appliance running. Defaults to greater than zero.
+      required: false
+      example: 25
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    appliance_id:
+      name: Appliance ID
+      description: Optional stable appliance/profile identifier for generated intervals.
+      required: false
+      example: dishwasher
+      selector:
+        text:
+    mains_entity_id:
+      name: Mains Entity
+      description: Optional mains power entity associated with generated intervals.
+      required: false
+      example: sensor.mains_power
+      selector:
+        entity:
+          domain:
+            - sensor
 assign_signature_to_appliance:
   name: Assign signature to appliance
   description: "Advanced/script action: assign a NILM signature to an appliance. The normal user path is the NILM workspace panel."

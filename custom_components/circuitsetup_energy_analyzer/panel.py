@@ -26,6 +26,7 @@ from .services import (
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
+    ATTR_GROUND_TRUTH_ENTITY_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
@@ -45,6 +46,7 @@ from .services import (
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
+    SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
@@ -453,7 +455,8 @@ def nilm_workspace_payload(
         "virtual_appliance_count": len(virtual_appliances),
         "validation": validation,
         "actions": {
-            "label_interval": _nilm_label_interval_action(config)
+            "label_interval": _nilm_label_interval_action(config),
+            "sensor_label_interval": _nilm_sensor_label_interval_action(config),
         },
         "edges": [
             _nilm_edge_payload(edge)
@@ -1241,6 +1244,18 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "data": data,
         "requires": [ATTR_START, ATTR_END, ATTR_LABEL],
     }
+
+
+def _nilm_sensor_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
+    action = _nilm_label_interval_action(config)
+    action["service"] = SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS
+    action["requires"] = [
+        ATTR_START,
+        ATTR_END,
+        ATTR_LABEL,
+        ATTR_GROUND_TRUTH_ENTITY_ID,
+    ]
+    return action
 
 
 def _nilm_assignments_for_circuit(
