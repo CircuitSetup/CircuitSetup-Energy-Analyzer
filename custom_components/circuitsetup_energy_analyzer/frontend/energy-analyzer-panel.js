@@ -798,6 +798,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .axis, .grid {
           stroke: var(--divider-color, #d8dde6);
         }
+        .nilm-edge-marker {
+          stroke: var(--warning-color, #f59e0b);
+          stroke-dasharray: 4 3;
+          stroke-width: 2;
+        }
         .legend {
           display: grid;
           gap: 6px;
@@ -1354,7 +1359,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const history = workspace.history || {};
     const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
     const graph = series.length
-      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true })
+      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
     return `
       <section class="panel">
@@ -1687,6 +1692,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
     const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
     const timeZoneLabel = this._timeZone();
+    const edgeMarkers = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
+      const markerTime = Date.parse(edge && edge.timestamp || "");
+      if (!Number.isFinite(markerTime) || markerTime < minTime || markerTime > maxTime) {
+        return "";
+      }
+      const markerX = x(markerTime).toFixed(1);
+      const direction = this._friendlyFeature(edge.direction || "NILM edge");
+      return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}"><title>${this._escape(direction)}</title></line>`;
+    }).join("");
     const selectAttrs = alert.nilm_select_interval
       ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"`
       : "";
@@ -1700,6 +1714,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
         <text x="${padLeft}" y="${height - 12}">${this._escape(startLabel)}</text>
         <text x="${width - padRight}" y="${height - 12}" text-anchor="end">${this._escape(endLabel)}</text>
+        ${edgeMarkers}
         ${lines}
       </svg>
       <div class="legend">${legend}</div>
