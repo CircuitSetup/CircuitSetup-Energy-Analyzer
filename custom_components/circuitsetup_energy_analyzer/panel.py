@@ -11,7 +11,7 @@ from urllib.parse import quote, urlencode
 from .alert_links import _feature_for_alert as _canonical_feature_for_alert
 from .const import DOMAIN
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
-from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
+from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
@@ -87,6 +87,8 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "expected",
     "ignored",
     "merged_into",
+    "feedback_fingerprint",
+    "signature_fingerprint",
 )
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
@@ -397,19 +399,30 @@ def nilm_workspace_payload(
     )
     label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
-    all_sessions = _nilm_workspace_sessions(
+    stored_sessions = _nilm_session_history_for_circuit(
+        coordinator,
+        config.circuit_id,
+    )
+    all_generated_sessions = _nilm_workspace_sessions(
         edges,
         config.circuit_id,
         signatures=signatures,
         assignments=assignments,
         limit=None,
     )
-    sessions = _nilm_workspace_sessions(
-        recent_edges,
-        config.circuit_id,
-        signatures=signatures,
-        assignments=assignments,
+    all_sessions = _merge_nilm_session_payloads(
+        all_generated_sessions,
+        stored_sessions,
     )
+    sessions = _merge_nilm_session_payloads(
+        _nilm_workspace_sessions(
+            recent_edges,
+            config.circuit_id,
+            signatures=signatures,
+            assignments=assignments,
+        ),
+        stored_sessions,
+    )[:MAX_NILM_WORKSPACE_SESSIONS]
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
@@ -447,6 +460,7 @@ def nilm_workspace_payload(
         ],
         "edge_count": len(edges),
         "sessions": sessions,
+        "session_count": len(all_sessions),
     }
 
 
@@ -1766,9 +1780,9 @@ def _nilm_workspace_sessions(
 ) -> list[dict[str, Any]]:
     sessions: list[NilmSession] = []
     signature_by_id = {
-        str(signature.get(ATTR_SIGNATURE_ID) or ""): signature
+        key: signature
         for signature in signatures
-        if signature.get(ATTR_SIGNATURE_ID)
+        for key in _nilm_signature_lookup_keys(signature)
     }
     for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
         signatures,
@@ -1811,7 +1825,7 @@ def _nilm_workspace_session_specs(
                 seen.add(key)
                 seen_fingerprints.add(fingerprint)
     for signature in signatures:
-        fingerprint = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
         if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
             specs.append(key)
@@ -1819,6 +1833,57 @@ def _nilm_workspace_session_specs(
     if specs:
         return specs
     return [(_nilm_workspace_signature_fingerprint(signatures), None)]
+
+
+def _nilm_signature_lookup_keys(signature: Mapping[str, Any]) -> list[str]:
+    return [
+        value
+        for value in (
+            str(signature.get(ATTR_SIGNATURE_ID) or "").strip(),
+            str(signature.get("feedback_fingerprint") or "").strip(),
+            str(signature.get("signature_fingerprint") or "").strip(),
+        )
+        if value
+    ]
+
+
+def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
+    return str(
+        signature.get("feedback_fingerprint")
+        or signature.get("signature_fingerprint")
+        or signature.get(ATTR_SIGNATURE_ID)
+        or ""
+    ).strip()
+
+
+def _nilm_session_history_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    sessions_by_circuit = getattr(store_data, "nilm_session_history_by_circuit", {})
+    if not isinstance(sessions_by_circuit, Mapping):
+        return []
+    return [
+        _nilm_session_payload_with_actions(dict(session))
+        for session in _iter_items(sessions_by_circuit.get(circuit_id))
+        if isinstance(session, Mapping)
+    ]
+
+
+def _merge_nilm_session_payloads(
+    primary: Iterable[Mapping[str, Any]],
+    fallback: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for session in (*list(primary), *list(fallback)):
+        session_id = str(session.get("session_id") or "").strip()
+        if not session_id or session_id in seen:
+            continue
+        merged.append(dict(session))
+        seen.add(session_id)
+    return merged
 
 
 def _nilm_edges_matching_signature(
@@ -1843,32 +1908,22 @@ def _nilm_edges_matching_signature(
 
 
 def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
-    payload = {
-        "session_id": session.session_id,
-        "mains_circuit_id": session.mains_circuit_id,
-        "signature_fingerprint": session.signature_fingerprint,
-        "on_edge_id": session.on_edge_id,
-        "off_edge_id": session.off_edge_id,
-        "start": session.start.isoformat(),
-        "end": session.end.isoformat() if session.end is not None else None,
-        "duration_seconds": session.duration_seconds,
-        "median_power_w": session.median_power_w,
-        "estimated_energy_kwh": session.estimated_energy_kwh,
-        "confidence": session.confidence,
-        "overlap_count": session.overlap_count,
-        "ambiguous": session.ambiguous,
-        "alternate_match_count": session.alternate_match_count,
-        "known_load_masked": session.known_load_masked,
-        "known_load_confidence": session.known_load_confidence,
-        "assignment_id": session.assignment_id,
-    }
-    if session.session_id:
+    return _nilm_session_payload_with_actions(nilm_session_to_dict(session))
+
+
+def _nilm_session_payload_with_actions(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(payload.get("session_id") or "").strip()
+    circuit_id = str(payload.get("mains_circuit_id") or "").strip()
+    if session_id and circuit_id:
         data = {
-            ATTR_CIRCUIT_ID: session.mains_circuit_id,
-            ATTR_SESSION_ID: session.session_id,
+            ATTR_CIRCUIT_ID: circuit_id,
+            ATTR_SESSION_ID: session_id,
         }
-        if session.signature_fingerprint:
-            data[ATTR_SIGNATURE_FINGERPRINT] = session.signature_fingerprint
+        signature_fingerprint = str(
+            payload.get("signature_fingerprint") or ""
+        ).strip()
+        if signature_fingerprint:
+            data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
         payload["actions"] = {
             "assign": {
                 "domain": DOMAIN,
@@ -1877,11 +1932,12 @@ def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
                 "requires": [ATTR_LABEL],
             }
         }
-        if session.assignment_id:
+        assignment_id = str(payload.get("assignment_id") or "").strip()
+        if assignment_id:
             action_data = {
-                ATTR_CIRCUIT_ID: session.mains_circuit_id,
-                ATTR_SESSION_ID: session.session_id,
-                ATTR_ASSIGNMENT_ID: session.assignment_id,
+                ATTR_CIRCUIT_ID: circuit_id,
+                ATTR_SESSION_ID: session_id,
+                ATTR_ASSIGNMENT_ID: assignment_id,
             }
             payload["actions"]["validate"] = {
                 "domain": DOMAIN,
@@ -2012,7 +2068,7 @@ def _history_state_payload(
 
 def _nilm_workspace_signature_fingerprint(signatures: list[dict[str, Any]]) -> str:
     for signature in signatures:
-        signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        signature_id = _nilm_signature_session_fingerprint(signature)
         if signature_id:
             return signature_id
     return "unassigned"

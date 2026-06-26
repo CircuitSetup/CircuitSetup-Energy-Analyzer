@@ -1647,6 +1647,129 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
     assert appliances["assignment-dryer"]["estimated_power_w"] == 420.0
 
 
+def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["stable-dishwasher-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "learning",
+                "confidence": 0.8,
+            }
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_cluster_1",
+                    "feedback_fingerprint": "stable-dishwasher-fingerprint",
+                    "typical_watts": 820.0,
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=20.0,
+                delta_va=821.0,
+                delta_pf=-0.01,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 30, tzinfo=UTC),
+                delta_w=-815.0,
+                delta_var=-20.0,
+                delta_va=-816.0,
+                delta_pf=0.01,
+                direction="off",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+                delta_w=420.0,
+                delta_var=15.0,
+                delta_va=421.0,
+                delta_pf=-0.01,
+                direction="on",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["session_count"] == 1
+    assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
+    assert payload["sessions"][0]["signature_fingerprint"] == (
+        "stable-dishwasher-fingerprint"
+    )
+
+
+def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "on_edge_id": "edge-on",
+                "off_edge_id": "edge-off",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.615,
+                "confidence": 0.9,
+                "overlap_count": 0,
+                "ambiguous": False,
+                "alternate_match_count": 0,
+                "known_load_masked": False,
+                "known_load_confidence": None,
+                "assignment_id": "assignment-dishwasher",
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["session_count"] == 1
+    assert payload["sessions"][0]["session_id"] == "session-dishwasher"
+    assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
+
+
 def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (

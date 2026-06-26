@@ -3,6 +3,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -2451,6 +2452,8 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         settings_advisor as advisor,
     )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        NILM_SESSION_HISTORY_MAX_AGE,
+        NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
         NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
         NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
         RECOMMENDATION_DECISIONS_MAX_ITEMS,
@@ -2475,6 +2478,23 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         }
         for index in range(NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT + 10)
     ]
+    session_history = [
+        {
+            "session_id": f"session-{index}",
+            "start": (now - timedelta(minutes=index)).isoformat(),
+            "end": (now - timedelta(minutes=index - 1)).isoformat(),
+        }
+        for index in range(NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT + 10)
+    ]
+    session_history.append(
+        {
+            "session_id": "old-session",
+            "start": (
+                now - NILM_SESSION_HISTORY_MAX_AGE - timedelta(days=1)
+            ).isoformat(),
+            "end": (now - NILM_SESSION_HISTORY_MAX_AGE).isoformat(),
+        }
+    )
     recommendations = {
         f"rec-{index}": _settings_recommendation(
             advisor,
@@ -2505,6 +2525,7 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
             nilm_unknown_loads_by_circuit={
                 "mains": {"unknown_loads": unknown_loads}
             },
+            nilm_session_history_by_circuit={"mains": session_history},
             settings_recommendations=recommendations,
             settings_recommendation_decisions=decisions,
             settings_recommendation_notification_episode_key=episodes,
@@ -2524,6 +2545,17 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     assert len(
         coordinator.store_data.nilm_unknown_loads_by_circuit["mains"]["unknown_loads"]
     ) == NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT
+    assert (
+        len(coordinator.store_data.nilm_session_history_by_circuit["mains"])
+        == NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
+    )
+    assert coordinator.store_data.nilm_session_history_by_circuit["mains"][0][
+        "session_id"
+    ] == "session-0"
+    assert all(
+        session["session_id"] != "old-session"
+        for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
+    )
     assert (
         len(coordinator.store_data.settings_recommendations)
         == RECOMMENDATION_HISTORY_MAX_ITEMS
@@ -2991,7 +3023,12 @@ def test_mains_parallel_sample_treats_partial_power_as_unavailable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None:
+async def test_runtime_experimental_nilm_updates_signature_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -3030,6 +3067,11 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None
         options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
         now_fn=lambda: holder["time"],
     )
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        AsyncMock(),
+    )
 
     for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1):
         holder["watts"] = float(watts)
@@ -3049,6 +3091,14 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics() -> None
         coordinator.store_data.nilm_signatures["mains"][0]["signature_id"]
     )
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
+    sessions = coordinator.store_data.nilm_session_history_by_circuit["mains"]
+    assert sessions
+    assert sessions[0]["mains_circuit_id"] == "mains"
+    assert sessions[0]["session_id"]
+    assert sessions[0]["signature_fingerprint"] == (
+        coordinator.store_data.nilm_signatures["mains"][0]["feedback_fingerprint"]
+    )
+    assert any(session["end"] is not None for session in sessions)
 
 
 @pytest.mark.asyncio

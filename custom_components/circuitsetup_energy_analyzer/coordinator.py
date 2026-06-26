@@ -272,6 +272,8 @@ ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
+NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
+NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
 RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
@@ -6706,7 +6708,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_water_context(now)
         self._prune_contextual_baseline_state(now)
         self._prune_alert_history(now)
-        self._prune_nilm_history()
+        self._prune_nilm_history(now)
         self._prune_alert_feedback(now)
         self._prune_recommendation_history(now)
 
@@ -6873,7 +6875,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             reverse=True,
         )[:ALERT_HISTORY_MAX_ITEMS]
 
-    def _prune_nilm_history(self: Self) -> None:
+    def _prune_nilm_history(self: Self, now: datetime) -> None:
         for circuit_id, signatures in self.store_data.nilm_signatures.items():
             self.store_data.nilm_signatures[circuit_id] = _newest_mapping_items(
                 signatures,
@@ -6886,6 +6888,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     unknown_loads,
                     NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
                 )
+        cutoff = now - NILM_SESSION_HISTORY_MAX_AGE
+        for circuit_id, sessions in list(
+            self.store_data.nilm_session_history_by_circuit.items()
+        ):
+            retained = [
+                dict(session)
+                for session in sessions
+                if isinstance(session, Mapping)
+                and _mapping_time(
+                    session,
+                    "end",
+                    "start",
+                    "updated_at",
+                    "created_at",
+                    "timestamp",
+                )
+                >= cutoff
+            ]
+            self.store_data.nilm_session_history_by_circuit[circuit_id] = sorted(
+                retained,
+                key=lambda session: _mapping_time(
+                    session,
+                    "end",
+                    "start",
+                    "updated_at",
+                    "created_at",
+                    "timestamp",
+                ),
+                reverse=True,
+            )[:NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT]
 
     def _prune_alert_feedback(self: Self, now: datetime) -> None:
         cutoff = now - ALERT_FEEDBACK_MAX_AGE

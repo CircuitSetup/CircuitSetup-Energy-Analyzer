@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `df83a7ed68589fdd3638d46c51fe34d84214b3ab`
+**Commit:** `2e2e5dcc0c4e6f6db5a6a3b47368000c07ad7473`
 **Branch:** `fix/nilm-dashboard-graph-link`
-**Generated:** `2026-06-26T15:48:08.379649+00:00`
+**Generated:** `2026-06-26T16:06:25.923644+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **169**
 - Python modules: **155**
-- Symbols: **3515**
+- Symbols: **3535**
 - Internal import edges: **469**
-- External import edges: **514**
+- External import edges: **516**
 
 ## Entrypoints
 
@@ -27,11 +27,11 @@
 | `custom_components.circuitsetup_energy_analyzer.diagnostics.async_get_config_entry_diagnostics` | `custom_components/circuitsetup_energy_analyzer/diagnostics.py:28` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.entity.CircuitAnalyzerEntity` | `custom_components/circuitsetup_energy_analyzer/entity.py:693` | Home Assistant entity |
 | `custom_components.circuitsetup_energy_analyzer.number.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/number.py:158` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.panel.AlertEvidenceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:129` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:150` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceHistoryView` | `custom_components/circuitsetup_energy_analyzer/panel.py:168` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.async_setup_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:187` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.panel.async_unload_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:206` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.panel.AlertEvidenceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:131` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:152` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceHistoryView` | `custom_components/circuitsetup_energy_analyzer/panel.py:170` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.async_setup_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:189` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.panel.async_unload_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:208` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.processors.activity.ActivityAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/activity.py:27` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.base.FeatureProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/base.py:71` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.billing.BillingCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/billing.py:25` | Feature processor |
@@ -45,7 +45,7 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.leg_imbalance.LegImbalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py:22` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.mains_balance.MainsBalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py:21` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.metric_consistency.MetricConsistencyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py:19` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.nilm_sample.NilmSampleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py:38` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.nilm_sample.NilmSampleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py:40` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.nilm_topology.NilmTopologyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py:20` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.power_quality.PowerQualityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/power_quality.py:39` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.solar_flow.SolarFlowProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py:55` | Feature processor |
