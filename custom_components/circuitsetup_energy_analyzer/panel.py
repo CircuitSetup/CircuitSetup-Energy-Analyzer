@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .alert_links import _feature_for_alert as _canonical_feature_for_alert
 from .const import DOMAIN
-from .models import AlertEvidence, CircuitConfig
+from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
 from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
@@ -64,8 +67,17 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260620-appliance-evidence-panels-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-workspace-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
+NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
+NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
+DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
+MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
+MAX_NILM_WORKSPACE_HISTORY_ENTITIES = 8
+MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY = 240
+MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
+MAX_NILM_WORKSPACE_EDGES = 40
+MAX_NILM_WORKSPACE_SESSIONS = 20
 
 _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
@@ -106,6 +118,43 @@ class AlertEvidenceView(HomeAssistantView):
             feature=request.query.get("feature"),
             recommendation_id=request.query.get(ATTR_RECOMMENDATION_ID),
             include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
+        )
+        return web.json_response(payload)
+
+
+class NilmWorkspaceView(HomeAssistantView):
+    """Authenticated read-only NILM workspace payload."""
+
+    url = NILM_WORKSPACE_API_PATH
+    name = f"api:{DOMAIN}:nilm_workspace"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return bounded NILM workspace data selected by query parameters."""
+        hass = request.app[KEY_HASS]
+        payload = nilm_workspace_payload(
+            _loaded_coordinators(hass),
+            circuit_id=request.query.get("circuit_id"),
+            hours=request.query.get("hours"),
+        )
+        return web.json_response(payload)
+
+
+class NilmWorkspaceHistoryView(HomeAssistantView):
+    """Authenticated bounded history endpoint for the NILM workspace."""
+
+    url = NILM_WORKSPACE_HISTORY_API_PATH
+    name = f"api:{DOMAIN}:nilm_workspace_history"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return capped recorder history for NILM workspace charting."""
+        hass = request.app[KEY_HASS]
+        payload = await nilm_workspace_history_payload(
+            hass,
+            _loaded_coordinators(hass),
+            circuit_id=request.query.get("circuit_id"),
+            hours=request.query.get("hours"),
         )
         return web.json_response(payload)
 
@@ -283,6 +332,53 @@ def alert_evidence_payload(
         requested_feature,
         requested_recommendation_id=requested_recommendation_id,
     )
+
+
+def nilm_workspace_payload(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None = None,
+    hours: Any = None,
+) -> dict[str, Any]:
+    """Return read-only NILM workspace data for one mains NILM circuit."""
+
+    target = _nilm_workspace_target(tuple(coordinators), circuit_id)
+    if target is None:
+        return {
+            "status": "not_found",
+            "requested_circuit_id": circuit_id or None,
+            "message": "No mains NILM circuit is available for this workspace.",
+        }
+
+    coordinator, config = target
+    edges = _nilm_edges_for_circuit(coordinator, config.circuit_id)
+    signatures = _nilm_workspace_signatures(coordinator, config.circuit_id)
+    known_load_overlays = _nilm_known_load_overlays(
+        coordinator,
+        config.circuit_id,
+    )
+    return {
+        "status": "ok",
+        "circuit": _circuit_payload(config),
+        "history": _nilm_workspace_history_payload(
+            config,
+            known_load_overlays,
+            hours=hours,
+        ),
+        "known_load_overlays": known_load_overlays,
+        "signatures": signatures,
+        "signature_count": len(signatures),
+        "edges": [
+            _nilm_edge_payload(edge)
+            for edge in edges[:MAX_NILM_WORKSPACE_EDGES]
+        ],
+        "edge_count": len(edges),
+        "sessions": _nilm_workspace_sessions(
+            edges,
+            config.circuit_id,
+            signature_fingerprint=_nilm_workspace_signature_fingerprint(signatures),
+        ),
+    }
 
 
 def _payload_for_alert(
@@ -700,6 +796,7 @@ def _nilm_payload_for_circuit(
     preview_signatures = (
         signatures if include_all_nilm else signatures[:MAX_NILM_PANEL_SIGNATURES]
     )
+    workspace_paths = _nilm_workspace_paths(coordinator, circuit_id)
     return {
         "signatures": [
             {
@@ -724,6 +821,7 @@ def _nilm_payload_for_circuit(
             len(signatures) - len(preview_signatures),
             0,
         ),
+        **workspace_paths,
     }
 
 
@@ -902,6 +1000,408 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
     if first_seen:
         parts.append(f"first seen {first_seen}")
     return ", ".join(parts)
+
+
+def _nilm_workspace_target(
+    coordinators: Iterable[Any],
+    circuit_id: str | None,
+) -> tuple[Any, CircuitConfig] | None:
+    requested_circuit_id = str(circuit_id or "").strip()
+    for coordinator in coordinators:
+        for config in getattr(coordinator, "circuit_configs", ()) or ():
+            if not isinstance(config, CircuitConfig):
+                continue
+            if requested_circuit_id and config.circuit_id != requested_circuit_id:
+                continue
+            if _is_nilm_config(config):
+                return coordinator, config
+            if requested_circuit_id:
+                return None
+    return None
+
+
+def _is_nilm_config(config: CircuitConfig) -> bool:
+    return (
+        config.mode is CircuitMode.MAINS_NILM
+        or config.appliance_profile is ApplianceProfile.MAINS_NILM
+        or str(config.mode) == CircuitMode.MAINS_NILM.value
+        or str(config.appliance_profile) == ApplianceProfile.MAINS_NILM.value
+    )
+
+
+async def nilm_workspace_history_payload(
+    hass: Any,
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None = None,
+    hours: Any = None,
+) -> list[list[dict[str, Any]]]:
+    """Return capped HA history rows for the NILM workspace."""
+
+    target = _nilm_workspace_target(tuple(coordinators), circuit_id)
+    if target is None:
+        return []
+    coordinator, config = target
+    known_load_overlays = _nilm_known_load_overlays(
+        coordinator,
+        config.circuit_id,
+    )
+    history = _nilm_workspace_history_payload(
+        config,
+        known_load_overlays,
+        hours=hours,
+    )
+    return await _async_history_rows(
+        hass,
+        history["start"],
+        history["end"],
+        history["entities"],
+    )
+
+
+def _nilm_workspace_signatures(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            **_nilm_signature_payload(signature),
+            "display_label": _nilm_signature_label(
+                signature,
+                str(signature[ATTR_SIGNATURE_ID]),
+            ),
+        }
+        for signature in _nilm_signatures_for_circuit(coordinator, circuit_id)
+        if signature.get(ATTR_SIGNATURE_ID)
+    ]
+
+
+def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:
+    config = _config_for_circuit(coordinator, circuit_id)
+    if config is None or not _is_nilm_config(config):
+        return {}
+    query = urlencode({"circuit_id": circuit_id})
+    return {
+        "workspace_api_path": f"{NILM_WORKSPACE_API_PATH}?{query}",
+        "workspace_call_api_path": f"{DOMAIN}/nilm_workspace?{query}",
+    }
+
+
+def _nilm_known_load_overlays(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    known_load_ids = {
+        str(value)
+        for value in _iter_items(getattr(coordinator, "_known_load_circuit_ids", ()))
+    }
+    overlays: list[dict[str, Any]] = []
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        if not isinstance(config, CircuitConfig) or config.circuit_id == circuit_id:
+            continue
+        if known_load_ids and config.circuit_id not in known_load_ids:
+            continue
+        entity_ids = _sensor_entity_ids(config)
+        if not entity_ids:
+            continue
+        overlays.append(
+            {
+                "circuit_id": config.circuit_id,
+                "name": config.name,
+                "entity_ids": entity_ids,
+            }
+        )
+        if len(overlays) >= MAX_NILM_WORKSPACE_KNOWN_LOADS:
+            break
+    return overlays
+
+
+def _nilm_workspace_history_payload(
+    config: CircuitConfig,
+    known_load_overlays: list[dict[str, Any]],
+    *,
+    hours: Any,
+) -> dict[str, Any]:
+    requested_hours = _bounded_float(
+        hours,
+        default=DEFAULT_NILM_WORKSPACE_HISTORY_HOURS,
+        upper=MAX_NILM_WORKSPACE_HISTORY_HOURS,
+    )
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=requested_hours)
+    entities = _nilm_workspace_history_entities(config, known_load_overlays)
+    history_query = urlencode(
+        {
+            "circuit_id": config.circuit_id,
+            "hours": str(requested_hours),
+        }
+    )
+    recorder_query = urlencode(
+        {
+            "filter_entity_id": ",".join(entities),
+            "end_time": end.isoformat(),
+            "minimal_response": "1",
+            "no_attributes": "1",
+        }
+    )
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "hours": requested_hours,
+        "max_hours": MAX_NILM_WORKSPACE_HISTORY_HOURS,
+        "entities": entities,
+        "entity_count": len(entities),
+        "max_entities": MAX_NILM_WORKSPACE_HISTORY_ENTITIES,
+        "api_path": f"{DOMAIN}/nilm_workspace_history?{history_query}",
+        "fetch_path": f"{NILM_WORKSPACE_HISTORY_API_PATH}?{history_query}",
+        "recorder_api_path": (
+            f"history/period/{quote(start.isoformat(), safe='')}?{recorder_query}"
+        ),
+        "max_points_per_entity": MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
+    }
+
+
+def _nilm_workspace_history_entities(
+    config: CircuitConfig,
+    known_load_overlays: list[dict[str, Any]],
+) -> list[str]:
+    entity_ids = [*_sensor_entity_ids(config)]
+    for overlay in known_load_overlays:
+        entity_ids.extend(
+            str(entity_id)
+            for entity_id in _iter_items(overlay.get("entity_ids"))
+            if str(entity_id).strip()
+        )
+    return _unique_strings(entity_ids)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
+
+
+def _sensor_entity_ids(config: CircuitConfig) -> list[str]:
+    return _unique_strings(
+        sensor.entity_id
+        for sensor in config.sensors
+        if getattr(sensor, "entity_id", None)
+    )
+
+
+def _nilm_edges_for_circuit(coordinator: Any, circuit_id: str) -> list[NilmEdge]:
+    edges_by_circuit = getattr(coordinator, "_nilm_unmatched_edges", {})
+    if not isinstance(edges_by_circuit, Mapping):
+        return []
+    return [
+        edge
+        for edge in _iter_items(edges_by_circuit.get(circuit_id, ()))
+        if isinstance(edge, NilmEdge)
+    ]
+
+
+def _nilm_edge_payload(edge: NilmEdge) -> dict[str, Any]:
+    return {
+        "timestamp": edge.timestamp.isoformat(),
+        "direction": edge.direction,
+        "delta_w": edge.delta_w,
+        "delta_var": edge.delta_var,
+        "delta_va": edge.delta_va,
+        "delta_pf": edge.delta_pf,
+        "dominant_leg": edge.dominant_leg,
+        "split_phase_type": edge.split_phase_type,
+    }
+
+
+def _nilm_workspace_sessions(
+    edges: list[NilmEdge],
+    circuit_id: str,
+    *,
+    signature_fingerprint: str,
+) -> list[dict[str, Any]]:
+    sessions = pair_nilm_sessions(
+        edges,
+        mains_circuit_id=circuit_id,
+        signature_fingerprint=signature_fingerprint,
+    )
+    return [
+        _nilm_session_payload(session)
+        for session in sessions[:MAX_NILM_WORKSPACE_SESSIONS]
+    ]
+
+
+def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
+    return {
+        "session_id": session.session_id,
+        "signature_fingerprint": session.signature_fingerprint,
+        "on_edge_id": session.on_edge_id,
+        "off_edge_id": session.off_edge_id,
+        "start": session.start.isoformat(),
+        "end": session.end.isoformat() if session.end is not None else None,
+        "duration_seconds": session.duration_seconds,
+        "median_power_w": session.median_power_w,
+        "estimated_energy_kwh": session.estimated_energy_kwh,
+        "confidence": session.confidence,
+        "overlap_count": session.overlap_count,
+        "ambiguous": session.ambiguous,
+        "alternate_match_count": session.alternate_match_count,
+        "known_load_masked": session.known_load_masked,
+        "known_load_confidence": session.known_load_confidence,
+    }
+
+
+async def _async_history_rows(
+    hass: Any,
+    start: str,
+    end: str,
+    entity_ids: list[str],
+) -> list[list[dict[str, Any]]]:
+    if not entity_ids:
+        return []
+    history_helper = _history_get_significant_states()
+    if history_helper is None:
+        return []
+    start_dt = _datetime_from_iso(start)
+    end_dt = _datetime_from_iso(end)
+    if start_dt is None or end_dt is None:
+        return []
+    recorder = _recorder_get_instance(hass)
+    if recorder is None:
+        return []
+    job = partial(
+        history_helper,
+        hass,
+        start_dt,
+        end_time=end_dt,
+        entity_ids=entity_ids,
+        minimal_response=True,
+        no_attributes=True,
+    )
+    try:
+        rows = recorder.async_add_executor_job(job)
+        if inspect.isawaitable(rows):
+            rows = await rows
+    except Exception:
+        return []
+    return _bounded_history_rows(rows)
+
+
+def _recorder_get_instance(hass: Any) -> Any:
+    try:
+        from homeassistant.components.recorder import get_instance
+    except ModuleNotFoundError:
+        return None
+    try:
+        return get_instance(hass)
+    except Exception:
+        return None
+
+
+def _history_get_significant_states() -> Any:
+    try:
+        from homeassistant.components.recorder.history import get_significant_states
+    except ModuleNotFoundError:
+        return None
+    return get_significant_states
+
+
+def _bounded_history_rows(rows: Any) -> list[list[dict[str, Any]]]:
+    series_rows: Iterable[tuple[str | None, Any]]
+    if isinstance(rows, Mapping):
+        series_rows = ((str(key), value) for key, value in rows.items())
+    else:
+        series_rows = ((None, value) for value in _iter_items(rows))
+    bounded = []
+    for entity_id, series in series_rows:
+        payload = _bounded_history_series(series, entity_id=entity_id)
+        if payload:
+            bounded.append(payload)
+    return bounded
+
+
+def _bounded_history_series(
+    series: Any,
+    *,
+    entity_id: str | None = None,
+) -> list[dict[str, Any]]:
+    items = []
+    for state in _iter_items(series):
+        payload = _history_state_payload(state, fallback_entity_id=entity_id)
+        if payload is not None:
+            items.append(payload)
+    if len(items) <= MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY:
+        return items
+    step = max(len(items) // MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY, 1)
+    return items[::step][:MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY]
+
+
+def _history_state_payload(
+    state: Any,
+    *,
+    fallback_entity_id: str | None,
+) -> dict[str, Any] | None:
+    if isinstance(state, Mapping):
+        entity_id = state.get("entity_id") or fallback_entity_id
+        value = state.get("state")
+        changed = state.get("last_changed") or state.get("last_updated")
+    else:
+        entity_id = getattr(state, "entity_id", None) or fallback_entity_id
+        value = getattr(state, "state", None)
+        changed = getattr(state, "last_changed", None) or getattr(
+            state,
+            "last_updated",
+            None,
+        )
+    if not entity_id or value is None or changed is None:
+        return None
+    changed_text = (
+        changed.isoformat() if hasattr(changed, "isoformat") else str(changed)
+    )
+    return {
+        "entity_id": str(entity_id),
+        "state": str(value),
+        "last_changed": changed_text,
+    }
+
+
+def _nilm_workspace_signature_fingerprint(signatures: list[dict[str, Any]]) -> str:
+    for signature in signatures:
+        signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        if signature_id:
+            return signature_id
+    return "unassigned"
+
+
+def _bounded_float(
+    value: Any,
+    *,
+    default: float,
+    upper: float,
+) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number <= 0:
+        return default
+    return min(number, upper)
+
+
+def _datetime_from_iso(value: Any) -> datetime | None:
+    try:
+        text = str(value).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _format_power_label(typical_watts: float) -> str:
@@ -1108,6 +1608,8 @@ def _register_view(hass: Any) -> None:
     register_view = getattr(http, "register_view", None)
     if register_view is not None:
         register_view(AlertEvidenceView())
+        register_view(NilmWorkspaceView())
+        register_view(NilmWorkspaceHistoryView())
 
 
 async def _async_register_panel(hass: Any) -> bool:

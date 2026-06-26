@@ -1147,6 +1147,17 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "URLSearchParams",
         "/api/circuitsetup_energy_analyzer/alert_evidence",
         "history/period",
+        "/api/circuitsetup_energy_analyzer/nilm_workspace",
+        "NILM_WORKSPACE_CALL_API_PATH",
+        "_loadNilmWorkspace",
+        "_renderNilmWorkspace",
+        "NILM Workspace",
+        "Known Load Overlays",
+        "NILM Sessions",
+        "NILM Signatures",
+        "MAX_CHART_POINTS_PER_SERIES",
+        "_boundedChartPoints",
+        "Could not load NILM workspace history",
         'callService("circuitsetup_energy_analyzer"',
         "acknowledge_alert",
         "mark_alert_expected",
@@ -1213,6 +1224,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "Source Entities" not in asset
     assert "source-entity-chip" not in asset
     assert "data-source-entity" not in asset
+    assert "data-nilm-workspace-action" not in asset
     assert "_openSourceEntity" not in asset
     assert "${this._escape(item.entity_id)}" not in asset
     assert "this._escape(signature.signature_id)}</strong>" not in asset

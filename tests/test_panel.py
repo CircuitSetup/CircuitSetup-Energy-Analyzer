@@ -63,11 +63,15 @@ def _config(circuit_id: str = "hvac") -> CircuitConfig:
     )
 
 
-def _coordinator(*alerts: AlertEvidence, config: CircuitConfig | None = None):
+def _coordinator(
+    *alerts: AlertEvidence,
+    config: CircuitConfig | None = None,
+    configs: tuple[CircuitConfig, ...] | None = None,
+):
     default_config = config or _config(alerts[0].circuit_id if alerts else "hvac")
     return SimpleNamespace(
         store_data=SimpleNamespace(alerts=list(alerts)),
-        circuit_configs=(default_config,),
+        circuit_configs=configs or (default_config,),
         state=SimpleNamespace(alert_evidence_by_circuit={}),
     )
 
@@ -118,6 +122,7 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
+    assert "workspace_call_api_path" not in payload["nilm"]
 
 
 def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
@@ -755,6 +760,7 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     assert payload["nilm"]["signatures"][0]["actions"]["label"]["service"] == (
         "label_nilm_signature"
     )
+    assert payload["nilm"]["workspace_call_api_path"].endswith("circuit_id=mains")
     assert payload["nilm"]["signatures"][0]["actions"]["ignore"] == {
         "domain": DOMAIN,
         "service": "ignore_nilm_signature",
@@ -995,6 +1001,164 @@ def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
     ]
 
 
+def test_nilm_workspace_payload_is_read_only_and_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_reactive_power", SensorRole.REACTIVE_POWER),
+        ),
+    )
+    known_config = CircuitConfig(
+        circuit_id="pool_pump",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.pool_pump_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        config=mains_config,
+        configs=(mains_config, known_config),
+    )
+    coordinator._known_load_circuit_ids = frozenset({"pool_pump"})
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_1",
+                    "display_name": "Pump-like load",
+                    "typical_watts": 800.0,
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=120.0,
+                delta_va=830.0,
+                delta_pf=-0.05,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+                delta_w=-815.0,
+                delta_var=-118.0,
+                delta_va=-825.0,
+                delta_pf=0.04,
+                direction="off",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains", hours="72")
+
+    assert payload["status"] == "ok"
+    assert payload["history"]["hours"] == 24.0
+    assert payload["history"]["entities"] == [
+        "sensor.mains_power",
+        "sensor.mains_reactive_power",
+        "sensor.pool_pump_power",
+    ]
+    assert payload["history"]["api_path"].startswith(
+        "circuitsetup_energy_analyzer/nilm_workspace_history?"
+    )
+    assert payload["history"]["fetch_path"].startswith(
+        "/api/circuitsetup_energy_analyzer/nilm_workspace_history?"
+    )
+    assert "minimal_response=1" in payload["history"]["recorder_api_path"]
+    assert "no_attributes=1" in payload["history"]["recorder_api_path"]
+    assert payload["known_load_overlays"] == [
+        {
+            "circuit_id": "pool_pump",
+            "name": "Pool Pump",
+            "entity_ids": ["sensor.pool_pump_power"],
+        }
+    ]
+    assert payload["signatures"][0]["signature_id"] == "signature_1"
+    assert "actions" not in payload["signatures"][0]
+    assert payload["edges"][0]["direction"] == "on"
+    assert payload["sessions"][0]["off_edge_id"] is not None
+
+
+def test_nilm_workspace_history_rows_are_capped() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
+        _bounded_history_rows,
+    )
+
+    rows = {
+        "sensor.mains_power": [
+            {
+                "state": str(index),
+                "last_changed": (
+                    datetime(2026, 6, 6, tzinfo=UTC) + timedelta(seconds=index)
+                ),
+            }
+            for index in range(MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY + 100)
+        ]
+    }
+
+    bounded = _bounded_history_rows(rows)
+
+    assert len(bounded) == 1
+    assert len(bounded[0]) == MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY
+    assert bounded[0][0]["entity_id"] == "sensor.mains_power"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_uses_recorder_executor(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    class FakeRecorder:
+        def __init__(self) -> None:
+            self.jobs = []
+
+        async def async_add_executor_job(self, job):
+            self.jobs.append(job)
+            return job()
+
+    recorder = FakeRecorder()
+
+    def fake_history(hass, start, **kwargs):
+        assert kwargs["entity_ids"] == ["sensor.mains_power"]
+        assert kwargs["minimal_response"] is True
+        assert kwargs["no_attributes"] is True
+        return {
+            "sensor.mains_power": [
+                {
+                    "entity_id": "sensor.mains_power",
+                    "state": "12",
+                    "last_changed": start,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(panel, "_history_get_significant_states", lambda: fake_history)
+    monkeypatch.setattr(panel, "_recorder_get_instance", lambda hass: recorder)
+
+    rows = await panel._async_history_rows(
+        SimpleNamespace(),
+        "2026-06-06T08:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        ["sensor.mains_power"],
+    )
+
+    assert len(recorder.jobs) == 1
+    assert rows[0][0]["state"] == "12"
+
+
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
@@ -1220,6 +1384,8 @@ def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback(
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         EVIDENCE_API_PATH,
+        NILM_WORKSPACE_API_PATH,
+        NILM_WORKSPACE_HISTORY_API_PATH,
         PANEL_ELEMENT_NAME,
         PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
@@ -1267,8 +1433,11 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
 
     assert len(http.static_paths) == 1
     assert STATIC_URL_PATH in str(http.static_paths[0])
-    assert len(http.views) == 1
-    assert http.views[0].url == EVIDENCE_API_PATH
+    assert [view.url for view in http.views] == [
+        EVIDENCE_API_PATH,
+        NILM_WORKSPACE_API_PATH,
+        NILM_WORKSPACE_HISTORY_API_PATH,
+    ]
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
@@ -1337,7 +1506,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 1
+    assert len(http.views) == 3
 
     assert await async_unload_entry(hass, entry) is True
 

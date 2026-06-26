@@ -1,6 +1,9 @@
 const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_evidence";
 const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
+const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspace";
+const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
 const HISTORY_CALL_API_PREFIX = "history/period";
+const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
@@ -51,10 +54,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._hass = null;
     this._payload = null;
     this._historySeries = [];
+    this._nilmWorkspace = null;
+    this._nilmWorkspaceHistorySeries = [];
     this._loading = true;
     this._historyLoading = false;
+    this._nilmWorkspaceLoading = false;
     this._error = "";
     this._historyError = "";
+    this._nilmWorkspaceError = "";
     this._busyAction = "";
     this._lastActionMessage = "";
     this._loadedRouteKey = "";
@@ -120,6 +127,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._error = "";
     this._historyError = "";
     this._historySeries = [];
+    this._nilmWorkspace = null;
+    this._nilmWorkspaceError = "";
+    this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
     this._render();
 
@@ -141,6 +151,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (alert && alert.graph_entities && alert.graph_entities.length) {
         await this._loadHistory(alert, requestId, routeKey);
       }
+      await this._loadNilmWorkspace(requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -174,6 +185,57 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._historyLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _loadNilmWorkspace(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    const nilm = this._payload && this._payload.nilm;
+    const apiPath = (nilm && nilm.workspace_call_api_path) || "";
+    if (!apiPath) {
+      return;
+    }
+
+    const circuit = this._payload && this._payload.circuit;
+    const fetchPath = (nilm && nilm.workspace_api_path)
+      || `${NILM_WORKSPACE_API_PATH}?${new URLSearchParams({ circuit_id: (circuit && circuit.circuit_id) || "" }).toString()}`;
+    this._nilmWorkspaceLoading = true;
+    this._nilmWorkspaceError = "";
+    this._nilmWorkspaceHistorySeries = [];
+    this._render();
+
+    try {
+      const workspace = await this._requestJson(apiPath || NILM_WORKSPACE_CALL_API_PATH, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._nilmWorkspace = workspace;
+      const historyPath = workspace && workspace.history && workspace.history.api_path;
+      const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
+        || (historyPath ? `/api/${historyPath}` : "");
+      if (historyPath) {
+        try {
+          const history = await this._requestJson(historyPath, historyFetchPath);
+          if (!this._isCurrentRequest(requestId, routeKey)) {
+            return;
+          }
+          this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
+        } catch (error) {
+          if (!this._isCurrentRequest(requestId, routeKey)) {
+            return;
+          }
+          this._nilmWorkspaceError = `Could not load NILM workspace history: ${error.message}`;
+        }
+      }
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._nilmWorkspaceError = `Could not load NILM workspace: ${error.message}`;
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._nilmWorkspaceLoading = false;
         this._render();
       }
     }
@@ -702,6 +764,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>Graph</h2>
         ${this._renderChart(alert)}
       </section>
+      ${this._renderNilmWorkspace()}
       <section class="panel">
         <h2>Actions</h2>
         <div class="actions">
@@ -944,6 +1007,66 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
+  _renderNilmWorkspace() {
+    if (this._nilmWorkspaceLoading) {
+      return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">Loading NILM workspace...</p></section>`;
+    }
+    const workspace = this._nilmWorkspace;
+    if (this._nilmWorkspaceError && (!workspace || workspace.status !== "ok")) {
+      return `<section class="panel error"><h2>NILM Workspace</h2><p>${this._escape(this._nilmWorkspaceError)}</p></section>`;
+    }
+    if (!workspace || workspace.status !== "ok") {
+      return "";
+    }
+    const history = workspace.history || {};
+    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
+    const graph = series.length
+      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end })
+      : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
+    return `
+      <section class="panel">
+        <h2>NILM Workspace</h2>
+        ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
+        ${graph}
+        ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.circuit_id)}</span>
+            <strong>${this._escape(item.name || item.circuit_id)}</strong>
+            <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
+          </div>
+        `)}
+        ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.start || "")}</span>
+            <strong>${this._escape(this._formatMetricValue(item.median_power_w))} W, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</strong>
+            <p class="muted">${this._escape(item.end ? `Ended ${item.end}` : "Open session")}</p>
+          </div>
+        `)}
+        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.signature_id || "")}</span>
+            <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+          </div>
+        `)}
+        ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.timestamp || "")}</span>
+            <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatMetricValue(item.delta_w))} W</strong>
+            <p class="muted">${this._escape(item.split_phase_type || "unknown")}</p>
+          </div>
+        `)}
+      </section>
+    `;
+  }
+
+  _renderNilmWorkspaceList(title, items, emptyText, renderItem) {
+    const safeItems = Array.isArray(items) ? items : [];
+    return `
+      <h3>${this._escape(title)}</h3>
+      ${safeItems.length ? `<div class="entity-list">${safeItems.map(renderItem).join("")}</div>` : `<p class="muted">${this._escape(emptyText)}</p>`}
+    `;
+  }
+
   _renderSafetyNotice(alert) {
     if (!alert.safety_notice) {
       return "";
@@ -1026,9 +1149,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
-  _chartSeries() {
+  _chartSeries(historySeries = this._historySeries) {
     const parsed = [];
-    for (const series of this._historySeries || []) {
+    for (const series of historySeries || []) {
       if (!Array.isArray(series) || !series.length) {
         continue;
       }
@@ -1042,10 +1165,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
       }
       if (points.length) {
-        parsed.push({ entity_id: entityId, name: this._friendlyEntityName(entityId), points });
+        parsed.push({
+          entity_id: entityId,
+          name: this._friendlyEntityName(entityId),
+          points: this._boundedChartPoints(points),
+        });
       }
     }
     return parsed;
+  }
+
+  _boundedChartPoints(points) {
+    if (!points.length || points.length <= MAX_CHART_POINTS_PER_SERIES) {
+      return points;
+    }
+    const step = Math.ceil(points.length / MAX_CHART_POINTS_PER_SERIES);
+    return points.filter((point, index) => index % step === 0);
   }
 
   _friendlyEntityName(entityId) {
@@ -1104,6 +1239,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
         </div>
       </section>
+      ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
       ${this._renderNilmActions()}
     `;
