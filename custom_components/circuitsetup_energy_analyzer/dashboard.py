@@ -338,7 +338,8 @@ def _mains_section(
                 "tap_action": {
                     "action": "navigate",
                     "navigation_path": (
-                        f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}"
+                        f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
+                        f"nilm_workspace=1&circuit_id={circuit_id}"
                     ),
                 },
             }

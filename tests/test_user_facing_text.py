@@ -823,7 +823,10 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_electrical_health" in dashboard_text
     assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
     assert "Open NILM Graph & Review" in dashboard_text
-    assert "/circuitsetup-energy-analyzer-evidence?circuit_id=mains" in dashboard_text
+    assert (
+        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+        in dashboard_text
+    )
 
 
 def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() -> None:
