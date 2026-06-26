@@ -4109,6 +4109,84 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 15, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-dishwasher",
+                        "mains_circuit_id": "mains",
+                        "appliance_id": "dishwasher",
+                        "label": "Dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:30:00+00:00",
+                        "validation_start": "2026-06-02T12:00:00+00:00",
+                        "validation_end": "2026-06-02T14:00:00+00:00",
+                        "source": "sensor",
+                        "confidence": 1.0,
+                        "ground_truth_entity_id": "sensor.dishwasher_power",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-false-positive",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T13:00:00+00:00",
+                        "end": "2026-06-02T13:30:00+00:00",
+                        "confidence": 0.78,
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": [],
+                        "session_ids": ["session-false-positive"],
+                        "label_interval_ids": ["label-dishwasher"],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": [],
+                        "lifecycle_state": "validated",
+                        "confidence": 0.8,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    validated = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert validated["confirmed_session_ids"] == []
+    assert validated["rejected_session_ids"] == ["session-false-positive"]
+    assert validated["confirmed_sessions"] == 0
+    assert validated["rejected_sessions"] == 1
+    assert validated["confidence"] == pytest.approx(0.65)
+    assert validated["lifecycle_state"] == "conflict"
+    assert validated["last_validation"] == "direct_meter_conflict"
+    assert validated["last_rejected_at"] == "2026-06-02T15:00:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_rename_and_profile_update() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

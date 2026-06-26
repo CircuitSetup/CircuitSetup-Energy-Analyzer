@@ -524,6 +524,8 @@ def test_nilm_sensor_history_rows_generate_label_intervals() -> None:
         {
             "start": "2026-06-02T12:05:00+00:00",
             "end": "2026-06-02T12:45:00+00:00",
+            "validation_start": "2026-06-02T12:00:00+00:00",
+            "validation_end": "2026-06-02T13:00:00+00:00",
         }
     ]
 
@@ -2234,6 +2236,8 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
             appliance_id: str | None = None,
             mains_entity_id: str | None = None,
             ground_truth_entity_id: str | None = None,
+            validation_start=None,
+            validation_end=None,
             interval_id: str | None = None,
             source: str = "manual",
             confidence: float = 1.0,
@@ -2249,6 +2253,8 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
                         appliance_id,
                         mains_entity_id,
                         ground_truth_entity_id,
+                        validation_start,
+                        validation_end,
                         interval_id,
                         source,
                         confidence,
@@ -2313,6 +2319,8 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
                 None,
                 None,
                 "sensor.dishwasher_power",
+                "2026-06-02T12:00:00+00:00",
+                "2026-06-02T13:00:00+00:00",
                 None,
                 "sensor",
                 1.0,

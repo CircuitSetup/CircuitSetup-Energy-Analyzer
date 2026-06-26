@@ -3329,6 +3329,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         appliance_id: str | None = None,
         mains_entity_id: str | None = None,
         ground_truth_entity_id: str | None = None,
+        validation_start: Any = None,
+        validation_end: Any = None,
         interval_id: str | None = None,
         source: str = "manual",
         confidence: float = 1.0,
@@ -3384,6 +3386,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text
+        if validation_start is not None and validation_end is not None:
+            validation_start_dt = _nilm_label_interval_datetime(
+                validation_start,
+                "validation_start",
+            )
+            validation_end_dt = _nilm_label_interval_datetime(
+                validation_end,
+                "validation_end",
+            )
+            if validation_end_dt <= validation_start_dt:
+                raise ValueError("NILM validation end must be after start.")
+            payload["validation_start"] = validation_start_dt.isoformat()
+            payload["validation_end"] = validation_end_dt.isoformat()
 
         if existing is None:
             intervals.append(payload)
@@ -3592,6 +3607,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
         assignment_session_ids = set(_clean_string_list(assignment.get("session_ids")))
         matched_session_ids: list[str] = []
+        conflicting_session_ids: list[str] = []
         for session in self.store_data.nilm_session_history_by_circuit.get(
             circuit_id,
             (),
@@ -3614,6 +3630,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for interval in intervals
             ):
                 _append_unique(matched_session_ids, session_id)
+            elif any(
+                _nilm_validation_coverage_overlap_seconds(interval, session) > 0
+                for interval in intervals
+            ):
+                _append_unique(conflicting_session_ids, session_id)
 
         confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = _clean_string_list(assignment.get("rejected_session_ids"))
@@ -3622,7 +3643,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             for session_id in matched_session_ids
             if session_id not in confirmed
         ]
-        if not newly_confirmed:
+        newly_rejected = [
+            session_id
+            for session_id in conflicting_session_ids
+            if session_id not in rejected
+        ]
+        if not newly_confirmed and not newly_rejected:
             raise ValueError(
                 "No matching ground-truth NILM sessions were found for this "
                 "assignment."
@@ -3634,6 +3660,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         rejected = [
             session_id for session_id in rejected if session_id not in newly_confirmed
         ]
+        for session_id in newly_rejected:
+            _append_unique(rejected, session_id)
+        confirmed = [
+            session_id for session_id in confirmed if session_id not in newly_rejected
+        ]
 
         now_dt = self._now_fn()
         now = now_dt.isoformat()
@@ -3641,18 +3672,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment.get("confidence"),
             default=0.0,
         )
-        assignment["confidence"] = min(
+        confidence = min(
             1.0,
             round(current_confidence + (0.05 * len(newly_confirmed)), 3),
         )
+        if newly_rejected:
+            confidence = max(0.0, round(confidence - (0.15 * len(newly_rejected)), 3))
+        assignment["confidence"] = confidence
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
-        if assignment.get("lifecycle_state") not in {"published", "retired"}:
+        if newly_rejected and assignment.get("lifecycle_state") != "retired":
+            assignment["lifecycle_state"] = "conflict"
+        elif assignment.get("lifecycle_state") not in {"published", "retired"}:
             assignment["lifecycle_state"] = "validated"
-        assignment["last_validation"] = "history"
+        assignment["last_validation"] = (
+            "direct_meter_conflict" if newly_rejected else "history"
+        )
         assignment["last_validated_at"] = now
+        if newly_rejected:
+            assignment["last_rejected_at"] = now
         assignment["updated_at"] = now
         self._mark_store_dirty()
         self.async_set_updated_data(self.state)
@@ -8516,6 +8556,20 @@ def _nilm_overlap_seconds(
     if overlap_end <= overlap_start:
         return 0.0
     return (overlap_end - overlap_start).total_seconds()
+
+
+def _nilm_validation_coverage_overlap_seconds(
+    interval: Mapping[str, Any],
+    session: Mapping[str, Any],
+) -> float:
+    validation_start = interval.get("validation_start")
+    validation_end = interval.get("validation_end")
+    if not validation_start or not validation_end:
+        return 0.0
+    return _nilm_overlap_seconds(
+        {"start": validation_start, "end": validation_end},
+        session,
+    )
 
 
 def _nilm_assignment_appliance_id(label: str) -> str:

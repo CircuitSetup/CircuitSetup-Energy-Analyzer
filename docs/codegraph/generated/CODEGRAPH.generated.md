@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `33c563bf6f4377fd712bf921f0eea5963e9c9732`
+**Commit:** `d016054dec4920487f9008efbb4549ca9f84b4c7`
 **Branch:** `fix/nilm-dashboard-graph-link`
-**Generated:** `2026-06-26T16:35:12.142830+00:00`
+**Generated:** `2026-06-26T16:44:06.483273+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **169**
 - Python modules: **155**
-- Symbols: **3553**
+- Symbols: **3555**
 - Internal import edges: **469**
 - External import edges: **517**
 

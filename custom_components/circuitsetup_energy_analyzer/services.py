@@ -789,6 +789,8 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                     appliance_id=data.get(ATTR_APPLIANCE_ID),
                     mains_entity_id=data.get(ATTR_MAINS_ENTITY_ID),
                     ground_truth_entity_id=ground_truth_entity_id,
+                    validation_start=interval.get("validation_start"),
+                    validation_end=interval.get("validation_end"),
                     source="sensor",
                     confidence=data.get(ATTR_CONFIDENCE, 1.0),
                 )
@@ -1893,6 +1895,8 @@ def _nilm_sensor_label_intervals_from_history(
                     {
                         ATTR_START: active_start.isoformat(),
                         ATTR_END: timestamp.isoformat(),
+                        "validation_start": start_dt.isoformat(),
+                        "validation_end": end_dt.isoformat(),
                     }
                 )
             active_start = None
@@ -1901,6 +1905,8 @@ def _nilm_sensor_label_intervals_from_history(
             {
                 ATTR_START: active_start.isoformat(),
                 ATTR_END: end_dt.isoformat(),
+                "validation_start": start_dt.isoformat(),
+                "validation_end": end_dt.isoformat(),
             }
         )
     return intervals
