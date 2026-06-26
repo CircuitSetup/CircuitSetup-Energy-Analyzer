@@ -1,8 +1,8 @@
 # Generated Codegraph
 
-**Commit:** `2433f6a09ef2382a3d339f4bf23b9797e8edcf2e`
+**Commit:** `a8f4ed7d4881576f141e34d5a0afe3136e49a4a0`
 **Branch:** `fix/nilm-dashboard-graph-link`
-**Generated:** `2026-06-26T21:22:50.109187+00:00`
+**Generated:** `2026-06-26T21:31:21.560770+00:00`
 **Tests included:** `True`
 
 ## Scope

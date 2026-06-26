@@ -5,6 +5,7 @@ const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspac
 const HISTORY_CALL_API_PREFIX = "history/period";
 const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
+const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
@@ -204,14 +205,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   async _loadNilmWorkspace(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     const nilm = this._payload && this._payload.nilm;
-    const apiPath = (nilm && nilm.workspace_call_api_path) || "";
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const circuit = this._payload && this._payload.circuit;
+    const circuitId = (circuit && circuit.circuit_id) || routeUrl.searchParams.get("circuit_id") || "";
+    const query = circuitId ? new URLSearchParams({ circuit_id: circuitId }).toString() : "";
+    const routeApiPath = routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1" && query
+      ? `${NILM_WORKSPACE_CALL_API_PATH}?${query}`
+      : "";
+    const apiPath = (nilm && nilm.workspace_call_api_path) || routeApiPath;
     if (!apiPath) {
       return;
     }
 
-    const circuit = this._payload && this._payload.circuit;
     const fetchPath = (nilm && nilm.workspace_api_path)
-      || `${NILM_WORKSPACE_API_PATH}?${new URLSearchParams({ circuit_id: (circuit && circuit.circuit_id) || "" }).toString()}`;
+      || `${NILM_WORKSPACE_API_PATH}?${query}`;
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistorySeries = [];
