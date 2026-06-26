@@ -1252,6 +1252,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "nilm_sessions",
         "nilm-session-band",
         "data-nilm-session-start",
+        "data-nilm-session-confidence",
+        "confidence ${Math.round(confidenceValue * 100)}%",
         "_selectNilmSessionInterval",
         "Loaded NILM session interval.",
         "_startNilmChartSelection",

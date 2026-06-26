@@ -1864,9 +1864,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) {
         return "";
       }
+      const confidence = Number(session && session.confidence);
+      const confidenceValue = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null;
+      const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
+      const confidenceStyle = confidenceValue !== null ? ` style="opacity:${(0.08 + confidenceValue * 0.2).toFixed(2)}"` : "";
+      const confidenceLabel = confidenceValue !== null ? `, confidence ${Math.round(confidenceValue * 100)}%` : "";
       const left = x(Math.max(start, minTime));
       const right = x(Math.min(end, maxTime));
-      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"><title>${this._escape(session.session_id || "NILM session")}</title></rect>`;
+      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${confidenceStyle}><title>${this._escape(session.session_id || "NILM session")}${confidenceLabel}</title></rect>`;
     }).join("");
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
