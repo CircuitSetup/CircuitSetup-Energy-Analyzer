@@ -3546,6 +3546,34 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
+def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    open_session = {
+        "session_id": "open-session",
+        "signature_fingerprint": "signature-dishwasher",
+        "on_edge_id": "edge-on",
+        "off_edge_id": None,
+        "start": "2026-06-11T12:00:00+00:00",
+        "end": None,
+    }
+    closed_update = {
+        "session_id": "closed-session",
+        "signature_fingerprint": "signature-dishwasher",
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "start": "2026-06-11T12:00:00+00:00",
+        "end": "2026-06-11T12:45:00+00:00",
+    }
+
+    merged = _merge_nilm_session_history([open_session], [closed_update])
+
+    assert [session["session_id"] for session in merged] == ["closed-session"]
+    assert merged[0]["off_edge_id"] == "edge-off"
+
+
 def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
 ) -> None:
     from collections import defaultdict

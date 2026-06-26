@@ -1963,6 +1963,36 @@ async def test_nilm_workspace_history_uses_recorder_executor(monkeypatch) -> Non
     assert rows[0][0]["state"] == "12"
 
 
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_handles_missing_recorder_or_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    monkeypatch.setattr(panel, "_history_get_significant_states", lambda: None)
+
+    rows = await panel._async_history_rows(
+        SimpleNamespace(),
+        "2026-06-06T08:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        ["sensor.mains_power"],
+    )
+
+    assert rows == []
+
+    monkeypatch.setattr(panel, "_history_get_significant_states", lambda: object())
+    monkeypatch.setattr(panel, "_recorder_get_instance", lambda hass: None)
+
+    rows = await panel._async_history_rows(
+        SimpleNamespace(),
+        "2026-06-06T08:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        ["sensor.mains_power"],
+    )
+
+    assert rows == []
+
+
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

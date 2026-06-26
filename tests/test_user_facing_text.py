@@ -1881,6 +1881,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "known-load sensors as selectable ground-truth sources",
         "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
+        "Disable Publishing",
+        "NILM estimates are inferred from aggregate power and are not safety evidence",
         "`assign_session_to_appliance`",
         "`publish_nilm_appliance_assignment`",
     ):
