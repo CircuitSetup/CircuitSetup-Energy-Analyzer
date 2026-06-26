@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import median, multimode
 
@@ -60,6 +60,29 @@ class NilmSignature:
     leg_balance_ratio: float | None = None
     dominant_leg: str = "unknown"
     split_phase_type: str = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class NilmSession:
+    """Probable appliance run reconstructed from compatible NILM edges."""
+
+    session_id: str
+    mains_circuit_id: str
+    signature_fingerprint: str
+    on_edge_id: str
+    off_edge_id: str | None
+    start: datetime
+    end: datetime | None
+    duration_seconds: float | None
+    median_power_w: float
+    estimated_energy_kwh: float
+    confidence: float
+    overlap_count: int = 0
+    ambiguous: bool = False
+    alternate_match_count: int = 0
+    known_load_masked: bool = False
+    known_load_confidence: float | None = None
+    assignment_id: str | None = None
 
 
 def nilm_signature_fingerprint(signature: NilmSignature) -> str:
@@ -295,6 +318,110 @@ def classify_signature(signature: NilmSignature) -> str:
     return "unknown recurring load"
 
 
+def pair_nilm_sessions(
+    edges: Iterable[NilmEdge],
+    *,
+    mains_circuit_id: str,
+    signature_fingerprint: str,
+    assignment_id: str | None = None,
+    known_load_masked: bool = False,
+    known_load_confidence: float | None = None,
+    min_duration: timedelta = timedelta(seconds=1),
+    max_duration: timedelta = timedelta(hours=12),
+    min_confidence: float = 0.5,
+) -> list[NilmSession]:
+    """Pair compatible unmatched on/off NILM edges into probable sessions."""
+
+    ordered_edges = sorted(edges, key=lambda edge: edge.timestamp)
+    on_edges = [edge for edge in ordered_edges if edge.direction == "on"]
+    off_edges = [edge for edge in ordered_edges if edge.direction == "off"]
+    used_off_indices: set[int] = set()
+    sessions: list[NilmSession] = []
+
+    for on_position, on_edge in enumerate(on_edges):
+        next_on = next(
+            (
+                later_on.timestamp
+                for later_on in on_edges[on_position + 1 :]
+                if _nilm_magnitude_score(
+                    later_on.delta_w,
+                    on_edge.delta_w,
+                    tolerance_ratio=0.25,
+                    floor=50.0,
+                )
+                is not None
+            ),
+            None,
+        )
+        candidates: list[tuple[float, datetime, int, NilmEdge]] = []
+        for off_index, off_edge in enumerate(off_edges):
+            if off_index in used_off_indices:
+                continue
+            if next_on is not None and off_edge.timestamp > next_on:
+                continue
+            score = _nilm_session_pair_score(
+                on_edge,
+                off_edge,
+                min_duration=min_duration,
+                max_duration=max_duration,
+            )
+            if score is None:
+                continue
+            candidates.append((score, off_edge.timestamp, off_index, off_edge))
+
+        candidates.sort(key=lambda candidate: (-candidate[0], candidate[1]))
+        if not candidates:
+            sessions.append(
+                _open_nilm_session(
+                    on_edge,
+                    mains_circuit_id=mains_circuit_id,
+                    signature_fingerprint=signature_fingerprint,
+                    assignment_id=assignment_id,
+                    known_load_masked=known_load_masked,
+                    known_load_confidence=known_load_confidence,
+                )
+            )
+            continue
+
+        best_score, _timestamp, off_index, off_edge = candidates[0]
+        close_alternates = sum(
+            1 for score, *_rest in candidates[1:] if best_score - score <= 0.08
+        )
+        confidence = best_score * (0.85 ** close_alternates)
+        if known_load_masked:
+            confidence *= _nilm_known_load_penalty(known_load_confidence)
+        if confidence <= min_confidence:
+            sessions.append(
+                _open_nilm_session(
+                    on_edge,
+                    mains_circuit_id=mains_circuit_id,
+                    signature_fingerprint=signature_fingerprint,
+                    assignment_id=assignment_id,
+                    known_load_masked=known_load_masked,
+                    known_load_confidence=known_load_confidence,
+                )
+            )
+            continue
+
+        used_off_indices.add(off_index)
+        sessions.append(
+            _closed_nilm_session(
+                on_edge,
+                off_edge,
+                mains_circuit_id=mains_circuit_id,
+                signature_fingerprint=signature_fingerprint,
+                confidence=confidence,
+                assignment_id=assignment_id,
+                ambiguous=close_alternates > 0,
+                alternate_match_count=close_alternates,
+                known_load_masked=known_load_masked,
+                known_load_confidence=known_load_confidence,
+            )
+        )
+
+    return [_with_nilm_session_overlap(session, sessions) for session in sessions]
+
+
 def unmatched_load_percentage(total_events: int, unmatched_events: int) -> float:
     """Return the share of events that remain unmatched."""
 
@@ -499,3 +626,265 @@ def _split_phase_label(signature: NilmSignature, label: str) -> str:
     if signature.split_phase_type in {"single_leg_a", "single_leg_b"}:
         return f"possible 120 V {label}"
     return f"possible {label}"
+
+
+def _open_nilm_session(
+    on_edge: NilmEdge,
+    *,
+    mains_circuit_id: str,
+    signature_fingerprint: str,
+    assignment_id: str | None,
+    known_load_masked: bool,
+    known_load_confidence: float | None,
+) -> NilmSession:
+    on_edge_id = _nilm_edge_id(on_edge)
+    confidence = 0.35
+    if known_load_masked:
+        confidence *= _nilm_known_load_penalty(known_load_confidence)
+    return NilmSession(
+        session_id=_nilm_session_id(
+            mains_circuit_id,
+            signature_fingerprint,
+            on_edge_id,
+            None,
+        ),
+        mains_circuit_id=mains_circuit_id,
+        signature_fingerprint=signature_fingerprint,
+        on_edge_id=on_edge_id,
+        off_edge_id=None,
+        start=on_edge.timestamp,
+        end=None,
+        duration_seconds=None,
+        median_power_w=round(abs(float(on_edge.delta_w)), 3),
+        estimated_energy_kwh=0.0,
+        confidence=round(confidence, 3),
+        known_load_masked=known_load_masked,
+        known_load_confidence=_nilm_known_load_confidence(
+            known_load_masked,
+            known_load_confidence,
+        ),
+        assignment_id=assignment_id,
+    )
+
+
+def _closed_nilm_session(
+    on_edge: NilmEdge,
+    off_edge: NilmEdge,
+    *,
+    mains_circuit_id: str,
+    signature_fingerprint: str,
+    confidence: float,
+    assignment_id: str | None,
+    ambiguous: bool,
+    alternate_match_count: int,
+    known_load_masked: bool,
+    known_load_confidence: float | None,
+) -> NilmSession:
+    on_edge_id = _nilm_edge_id(on_edge)
+    off_edge_id = _nilm_edge_id(off_edge)
+    duration_seconds = max(
+        0.0,
+        (off_edge.timestamp - on_edge.timestamp).total_seconds(),
+    )
+    median_power_w = round(
+        (abs(float(on_edge.delta_w)) + abs(float(off_edge.delta_w))) / 2.0,
+        3,
+    )
+    return NilmSession(
+        session_id=_nilm_session_id(
+            mains_circuit_id,
+            signature_fingerprint,
+            on_edge_id,
+            off_edge_id,
+        ),
+        mains_circuit_id=mains_circuit_id,
+        signature_fingerprint=signature_fingerprint,
+        on_edge_id=on_edge_id,
+        off_edge_id=off_edge_id,
+        start=on_edge.timestamp,
+        end=off_edge.timestamp,
+        duration_seconds=duration_seconds,
+        median_power_w=median_power_w,
+        estimated_energy_kwh=round(
+            (median_power_w * duration_seconds) / 3_600_000.0,
+            3,
+        ),
+        confidence=round(_clamp(confidence), 3),
+        ambiguous=ambiguous,
+        alternate_match_count=alternate_match_count,
+        known_load_masked=known_load_masked,
+        known_load_confidence=_nilm_known_load_confidence(
+            known_load_masked,
+            known_load_confidence,
+        ),
+        assignment_id=assignment_id,
+    )
+
+
+def _nilm_session_pair_score(
+    on_edge: NilmEdge,
+    off_edge: NilmEdge,
+    *,
+    min_duration: timedelta,
+    max_duration: timedelta,
+) -> float | None:
+    if on_edge.direction != "on" or off_edge.direction != "off":
+        return None
+    duration = off_edge.timestamp - on_edge.timestamp
+    if duration < min_duration or duration > max_duration:
+        return None
+    if not _nilm_pair_topology_compatible(on_edge, off_edge):
+        return None
+
+    watt_score = _nilm_magnitude_score(
+        off_edge.delta_w,
+        on_edge.delta_w,
+        tolerance_ratio=0.25,
+        floor=50.0,
+    )
+    if watt_score is None:
+        return None
+
+    scores = [watt_score]
+    for value, reference, tolerance_ratio, floor in (
+        (off_edge.delta_var, on_edge.delta_var, 0.5, 75.0),
+        (off_edge.delta_va, on_edge.delta_va, 0.35, 75.0),
+        (off_edge.delta_pf, on_edge.delta_pf, 0.5, 0.1),
+    ):
+        score = _nilm_optional_magnitude_score(
+            value,
+            reference,
+            tolerance_ratio=tolerance_ratio,
+            floor=floor,
+        )
+        if score is None and (
+            abs(float(value)) >= floor or abs(float(reference)) >= floor
+        ):
+            return None
+        if score is not None:
+            scores.append(score)
+
+    return _clamp(sum(scores) / len(scores))
+
+
+def _nilm_pair_topology_compatible(on_edge: NilmEdge, off_edge: NilmEdge) -> bool:
+    if not _split_phase_types_compatible(on_edge, off_edge):
+        return False
+    on_leg = on_edge.dominant_leg
+    off_leg = off_edge.dominant_leg
+    return (
+        on_leg in {"unknown", "mixed"}
+        or off_leg in {"unknown", "mixed"}
+        or on_leg == off_leg
+    )
+
+
+def _nilm_magnitude_score(
+    value: float,
+    reference: float,
+    *,
+    tolerance_ratio: float,
+    floor: float,
+) -> float | None:
+    tolerance = max(abs(float(reference)) * tolerance_ratio, floor)
+    distance = abs(abs(float(value)) - abs(float(reference)))
+    if distance > tolerance:
+        return None
+    return _clamp(1.0 - (distance / tolerance))
+
+
+def _nilm_optional_magnitude_score(
+    value: float,
+    reference: float,
+    *,
+    tolerance_ratio: float,
+    floor: float,
+) -> float | None:
+    if abs(float(value)) < floor and abs(float(reference)) < floor:
+        return None
+    return _nilm_magnitude_score(
+        value,
+        reference,
+        tolerance_ratio=tolerance_ratio,
+        floor=floor,
+    )
+
+
+def _with_nilm_session_overlap(
+    session: NilmSession,
+    sessions: list[NilmSession],
+) -> NilmSession:
+    latest_seen = max(candidate.end or candidate.start for candidate in sessions)
+    overlap_count = sum(
+        1
+        for other in sessions
+        if other is not session
+        and _nilm_sessions_overlap(session, other, latest_seen=latest_seen)
+    )
+    if overlap_count == 0:
+        return session
+    return replace(
+        session,
+        overlap_count=overlap_count,
+        confidence=round(_clamp(session.confidence * (0.9 ** overlap_count)), 3),
+    )
+
+
+def _nilm_sessions_overlap(
+    left: NilmSession,
+    right: NilmSession,
+    *,
+    latest_seen: datetime,
+) -> bool:
+    left_end = left.end or latest_seen
+    right_end = right.end or latest_seen
+    return left.start < right_end and right.start < left_end
+
+
+def _nilm_known_load_penalty(known_load_confidence: float | None) -> float:
+    confidence = _nilm_known_load_confidence(True, known_load_confidence)
+    if confidence is None:
+        return 0.85
+    return _clamp(1.0 - (0.3 * confidence))
+
+
+def _nilm_known_load_confidence(
+    known_load_masked: bool,
+    known_load_confidence: float | None,
+) -> float | None:
+    if not known_load_masked or known_load_confidence is None:
+        return None
+    return round(_clamp(known_load_confidence), 3)
+
+
+def _nilm_edge_id(edge: NilmEdge) -> str:
+    return "|".join(
+        (
+            edge.direction,
+            edge.timestamp.isoformat(),
+            f"w={edge.delta_w:.3f}",
+            f"var={edge.delta_var:.3f}",
+            edge.split_phase_type,
+            edge.dominant_leg,
+        )
+    )
+
+
+def _nilm_session_id(
+    mains_circuit_id: str,
+    signature_fingerprint: str,
+    on_edge_id: str,
+    off_edge_id: str | None,
+) -> str:
+    return "|".join(
+        (
+            str(mains_circuit_id),
+            str(signature_fingerprint),
+            on_edge_id,
+            off_edge_id or "open",
+        )
+    )
+
+
+def _clamp(value: float) -> float:
+    return min(max(float(value), 0.0), 1.0)
