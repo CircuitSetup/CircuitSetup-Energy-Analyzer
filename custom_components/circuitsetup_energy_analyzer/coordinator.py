@@ -140,6 +140,7 @@ from .nilm import (
     NilmEdge,
     NilmEdgeDetector,
 )
+from .nilm_virtual import nilm_virtual_appliance_alerts
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
@@ -1394,6 +1395,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
+        alerts.extend(await self._notify_nilm_virtual_appliances(now))
         self._refresh_balance_state(samples, now)
         self._refresh_solar_flow_state(samples, now)
         alerts.extend(await self._observe_utility_comparisons(now))
@@ -2866,6 +2868,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Mark an alert pattern as unhelpful for future notifications."""
         return await self._store_alert_feedback(alert_id, "unhelpful")
 
+    async def async_mark_nilm_appliance_correct(self: Self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as correct."""
+        return await self._store_alert_feedback(alert_id, "correct")
+
+    async def async_mark_nilm_appliance_wrong(self: Self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as the wrong appliance."""
+        return await self._store_alert_feedback(alert_id, "wrong_appliance")
+
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
         self.last_exported_diagnostics = {
@@ -3407,6 +3417,316 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self._async_save_store(now_dt)
         return True
 
+    async def async_assign_nilm_signature(
+        self: Self,
+        circuit_id: str,
+        signature_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM signature to a durable appliance assignment."""
+        signature = self._nilm_signature_for_review(circuit_id, signature_id)
+        fingerprint = _nilm_signature_fingerprint_value(signature, signature_id)
+        assignment = self._upsert_nilm_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=fingerprint,
+            lifecycle_state="assigned",
+            confidence=signature.get("confidence", 1.0),
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
+        signature["review_state"] = "assigned"
+        signature["user_label"] = assignment["display_name"]
+        signature.pop("ignored", None)
+        self.ignored_nilm_signatures.discard((circuit_id, signature_id))
+        self._remove_nilm_signature_from_other_assignments(
+            circuit_id,
+            fingerprint,
+            assignment["assignment_id"],
+        )
+        self._mark_store_dirty()
+        self._refresh_nilm_state(circuit_id)
+        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+        return dict(assignment)
+
+    async def async_assign_nilm_session(
+        self: Self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        label: str,
+        signature_fingerprint: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM session to a durable appliance assignment."""
+        session_id_text = str(session_id or "").strip()
+        if not session_id_text:
+            raise ValueError("Missing session_id.")
+        assignment = self._upsert_nilm_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=signature_fingerprint,
+            session_id=session_id_text,
+            lifecycle_state="assigned",
+        )
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+        return dict(assignment)
+
+    async def async_assign_nilm_interval(
+        self: Self,
+        circuit_id: str,
+        interval_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM label interval to a durable appliance assignment."""
+        interval_id_text = str(interval_id or "").strip()
+        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        interval = next(
+            (
+                item
+                for item in intervals
+                if item.get("interval_id") == interval_id_text
+            ),
+            None,
+        )
+        if interval is None:
+            raise ValueError(f"Unknown interval_id '{interval_id_text}'.")
+        assignment = self._upsert_nilm_assignment(
+            circuit_id,
+            label=label or str(interval.get("label") or ""),
+            appliance_id=appliance_id or str(interval.get("appliance_id") or ""),
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            label_interval_id=interval_id_text,
+            lifecycle_state="assigned",
+            confidence=interval.get("confidence", 1.0),
+        )
+        interval["assignment_id"] = assignment["assignment_id"]
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+        return dict(assignment)
+
+    def _upsert_nilm_assignment(
+        self: Self,
+        circuit_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+        signature_fingerprint: Any = None,
+        session_id: str | None = None,
+        label_interval_id: str | None = None,
+        lifecycle_state: str = "assigned",
+        confidence: Any = 1.0,
+    ) -> dict[str, Any]:
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        appliance_id_text = (
+            str(appliance_id or "").strip()
+            or _nilm_assignment_appliance_id(label_text)
+        )
+        assignments = (
+            self.store_data.nilm_appliance_assignments_by_circuit.setdefault(
+                circuit_id,
+                [],
+            )
+        )
+        assignment_id_text = str(assignment_id or "").strip()
+        assignment = next(
+            (
+                item
+                for item in assignments
+                if (
+                    (
+                        assignment_id_text
+                        and item.get("assignment_id") == assignment_id_text
+                    )
+                    or (
+                        not assignment_id_text
+                        and item.get("appliance_id") == appliance_id_text
+                    )
+                )
+            ),
+            None,
+        )
+        now = self._now_fn().isoformat()
+        if assignment is None:
+            assignment = {
+                "assignment_id": assignment_id_text
+                or _nilm_assignment_id(circuit_id, appliance_id_text),
+                "appliance_id": appliance_id_text,
+                "display_name": label_text,
+                "appliance_profile": str(appliance_profile or "").strip() or None,
+                "mains_circuit_id": circuit_id,
+                "signature_fingerprints": [],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": lifecycle_state,
+                "confidence": 0.0,
+                "created_at": now,
+                "updated_at": now,
+                "created_device": False,
+                "publish_entities": False,
+            }
+            assignments.append(assignment)
+        else:
+            assignment["display_name"] = label_text
+            if appliance_profile:
+                assignment["appliance_profile"] = str(appliance_profile).strip()
+            assignment["lifecycle_state"] = lifecycle_state
+            assignment["updated_at"] = now
+
+        _append_unique(
+            assignment.setdefault("signature_fingerprints", []),
+            signature_fingerprint,
+        )
+        _append_unique(assignment.setdefault("session_ids", []), session_id)
+        _append_unique(
+            assignment.setdefault("label_interval_ids", []),
+            label_interval_id,
+        )
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            confidence_value = 1.0
+        assignment["confidence"] = max(
+            float(assignment.get("confidence") or 0.0),
+            max(min(confidence_value, 1.0), 0.0),
+        )
+        return assignment
+
+    def _remove_nilm_signature_from_other_assignments(
+        self: Self,
+        circuit_id: str,
+        signature_fingerprint: str,
+        assignment_id: str,
+    ) -> None:
+        if not signature_fingerprint:
+            return
+        for assignment in self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if assignment.get("assignment_id") == assignment_id:
+                continue
+            fingerprints = assignment.get("signature_fingerprints")
+            if not isinstance(fingerprints, list):
+                continue
+            assignment["signature_fingerprints"] = [
+                value for value in fingerprints if value != signature_fingerprint
+            ]
+
+    def _nilm_assignment_for_signature(
+        self: Self,
+        circuit_id: str,
+        signature_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        return next(
+            (
+                assignment
+                for assignment in assignments
+                if signature_fingerprint
+                in assignment.get("signature_fingerprints", ())
+            ),
+            None,
+        )
+
+    async def async_publish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Publish estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = True
+        assignment["created_device"] = True
+        assignment["lifecycle_state"] = "published"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_unpublish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Stop publishing estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        if assignment.get("lifecycle_state") == "published":
+            assignment["lifecycle_state"] = "validated"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_retire_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Retire a NILM assignment and stop publishing entities."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        assignment["lifecycle_state"] = "retired"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    def _nilm_assignment_for_id(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        assignment_id_text = str(assignment_id or "").strip()
+        if not assignment_id_text:
+            raise ValueError("Missing assignment_id.")
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        for assignment in assignments:
+            if assignment.get("assignment_id") == assignment_id_text:
+                return assignment
+        raise ValueError(
+            f"Unknown assignment_id '{assignment_id_text}' for circuit_id "
+            f"'{circuit_id}'."
+        )
+
+    async def _async_save_nilm_assignment_change(self: Self) -> None:
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+        await self._async_reload_config_entry()
+
     async def async_ignore_nilm_signature(
         self: Self,
         circuit_id: str,
@@ -3418,13 +3738,32 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["ignored"] = True
+                assignment = self._upsert_nilm_assignment(
+                    circuit_id,
+                    label=_nilm_signature_assignment_label(signature, signature_id),
+                    signature_fingerprint=_nilm_signature_fingerprint_value(
+                        signature,
+                        signature_id,
+                    ),
+                    lifecycle_state="ignored",
+                    confidence=signature.get("confidence", 1.0),
+                )
+                signature["assignment_id"] = assignment["assignment_id"]
                 self._mark_store_dirty()
                 self._refresh_nilm_state(circuit_id)
                 self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
                 self.async_set_updated_data(self.state)
                 await self._async_save_store(self._now_fn())
                 return
-        signatures.append({"signature_id": signature_id, "ignored": True})
+        signature = {"signature_id": signature_id, "ignored": True}
+        assignment = self._upsert_nilm_assignment(
+            circuit_id,
+            label=signature_id,
+            signature_fingerprint=signature_id,
+            lifecycle_state="ignored",
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
+        signatures.append(signature)
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
@@ -3440,6 +3779,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         signature = self._nilm_signature_for_review(circuit_id, signature_id)
         signature["expected"] = True
         signature["review_state"] = "expected"
+        assignment = self._upsert_nilm_assignment(
+            circuit_id,
+            label=_nilm_signature_assignment_label(signature, signature_id),
+            signature_fingerprint=_nilm_signature_fingerprint_value(
+                signature,
+                signature_id,
+            ),
+            lifecycle_state="expected",
+            confidence=signature.get("confidence", 1.0),
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
@@ -3459,6 +3809,31 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         source["merged_into"] = target_signature_id
         if target.get("feedback_fingerprint"):
             source["merged_into_fingerprint"] = target["feedback_fingerprint"]
+        target_fingerprint = _nilm_signature_fingerprint_value(
+            target,
+            target_signature_id,
+        )
+        source_fingerprint = _nilm_signature_fingerprint_value(
+            source,
+            source_signature_id,
+        )
+        assignment = self._nilm_assignment_for_signature(
+            circuit_id,
+            target_fingerprint,
+        ) or self._nilm_assignment_for_signature(circuit_id, source_fingerprint)
+        if assignment is not None:
+            _append_unique(
+                assignment.setdefault("signature_fingerprints", []),
+                source_fingerprint,
+            )
+            assignment["updated_at"] = self._now_fn().isoformat()
+            source["assignment_id"] = assignment["assignment_id"]
+            target["assignment_id"] = assignment["assignment_id"]
+            self._remove_nilm_signature_from_other_assignments(
+                circuit_id,
+                source_fingerprint,
+                assignment["assignment_id"],
+            )
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
@@ -5937,12 +6312,43 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "baseline_value": alert.baseline_value,
             "evidence_count": evidence_count,
         }
+        self._apply_nilm_alert_feedback(alert, action, now)
         self._retire_alert_id(alert_id)
         self._mark_store_dirty()
         self._refresh_all_ux_state(now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
         return True
+
+    def _apply_nilm_alert_feedback(
+        self: Self,
+        alert: AlertEvidence,
+        action: str,
+        now: datetime,
+    ) -> None:
+        if alert.features.get("source") != "nilm":
+            return
+        assignment_id = str(alert.features.get("assignment_id") or "").strip()
+        if not assignment_id:
+            return
+        try:
+            assignment = self._nilm_assignment_for_id(alert.circuit_id, assignment_id)
+        except ValueError:
+            return
+        current_confidence = _nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        if action == "correct":
+            assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
+            assignment["last_validation"] = "correct"
+        elif action == "wrong_appliance":
+            assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
+            assignment["last_validation"] = "wrong_appliance"
+            assignment["lifecycle_state"] = "needs_validation"
+        else:
+            return
+        assignment["updated_at"] = now.isoformat()
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
@@ -6687,6 +7093,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert,
             config=self._config_for_circuit(alert.circuit_id),
         )
+
+    async def _notify_nilm_virtual_appliances(
+        self: Self,
+        now: datetime,
+    ) -> list[AlertEvidence]:
+        active_alerts: list[AlertEvidence] = []
+        for alert in nilm_virtual_appliance_alerts(self, now=now):
+            alert = self._alert_with_feedback(alert)
+            alert_id = notifications.notification_id_for_alert(alert)
+            if alert.feedback_status != "expected":
+                active_alerts.append(alert)
+            if alert_id in self._notified_alert_ids:
+                continue
+            self.store_data.alerts.append(alert)
+            self._mark_store_dirty()
+            await self._notify_alert(alert)
+        return active_alerts
 
 
 def _numeric_items(
@@ -7678,6 +8101,51 @@ def _nilm_label_interval_id(
     seed = f"{circuit_id}|{start}|{end}|{label}"
     digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
     return f"label-{digest}"
+
+
+def _nilm_signature_fingerprint_value(
+    signature: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    return str(
+        signature.get("feedback_fingerprint")
+        or signature.get("signature_fingerprint")
+        or signature.get("signature_id")
+        or fallback
+    ).strip()
+
+
+def _nilm_signature_assignment_label(
+    signature: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    return (
+        str(signature.get("user_label") or "").strip()
+        or str(signature.get("display_name") or "").strip()
+        or str(signature.get("likely_type") or "").strip()
+        or fallback
+    )
+
+
+def _nilm_assignment_appliance_id(label: str) -> str:
+    slug = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in str(label or "").strip()
+    ).strip("_")
+    return "_".join(part for part in slug.split("_") if part)[:64] or "nilm"
+
+
+def _nilm_assignment_id(circuit_id: str, appliance_id: str) -> str:
+    seed = f"{circuit_id}|{appliance_id}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"assignment-{digest}"
+
+
+def _append_unique(values: Any, value: Any) -> None:
+    text = str(value or "").strip()
+    if not text or text in values:
+        return
+    values.append(text)
 
 
 def _positive_int_from_raw(

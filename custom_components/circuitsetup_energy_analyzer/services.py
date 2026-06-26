@@ -31,6 +31,12 @@ SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_LABEL_NILM_INTERVAL = "label_nilm_interval"
 SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
+SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE = "assign_signature_to_appliance"
+SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
+SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
+SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
+SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
+SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
@@ -49,6 +55,8 @@ SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
+SERVICE_MARK_NILM_APPLIANCE_CORRECT = "mark_nilm_appliance_correct"
+SERVICE_MARK_NILM_APPLIANCE_WRONG = "mark_nilm_appliance_wrong"
 SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
 SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
 SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendations"
@@ -63,8 +71,12 @@ ATTR_ENTITY_ID = "entity_id"
 ATTR_DURATION = "duration"
 ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
+ATTR_SIGNATURE_FINGERPRINT = "signature_fingerprint"
 ATTR_INTERVAL_ID = "interval_id"
+ATTR_SESSION_ID = "session_id"
+ATTR_ASSIGNMENT_ID = "assignment_id"
 ATTR_LABEL = "label"
+ATTR_APPLIANCE_PROFILE = "appliance_profile"
 ATTR_START = "start"
 ATTR_END = "end"
 ATTR_APPLIANCE_ID = "appliance_id"
@@ -309,6 +321,41 @@ NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_INTERVAL_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
+NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_ASSIGNMENT_ID,
+        ATTR_APPLIANCE_ID,
+        ATTR_APPLIANCE_PROFILE,
+    ),
+)
+NILM_ASSIGN_SESSION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SESSION_ID, ATTR_LABEL),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_ASSIGNMENT_ID,
+        ATTR_SIGNATURE_FINGERPRINT,
+        ATTR_APPLIANCE_ID,
+        ATTR_APPLIANCE_PROFILE,
+    ),
+)
+NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
+    required=(ATTR_INTERVAL_ID, ATTR_LABEL),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_ASSIGNMENT_ID,
+        ATTR_APPLIANCE_ID,
+        ATTR_APPLIANCE_PROFILE,
+    ),
+)
+NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -355,6 +402,18 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_LABEL_NILM_INTERVAL: NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
     SERVICE_DELETE_NILM_LABEL_INTERVAL: NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE: NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
+    SERVICE_ASSIGN_SESSION_TO_APPLIANCE: NILM_ASSIGN_SESSION_SERVICE_SCHEMA,
+    SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
+    SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
+    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
@@ -377,6 +436,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_WRONG: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
     SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS: (
@@ -462,6 +523,22 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             data,
             method_name="async_mark_alert_unhelpful",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_CORRECT:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_correct",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_WRONG:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_wrong",
         )
         return
 
@@ -622,6 +699,93 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_delete_nilm_label_interval",
                 circuit_id,
                 data.get(ATTR_INTERVAL_ID),
+        )
+        return
+
+    if service == SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_nilm_signature_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_SIGNATURE_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_assign_nilm_signature",
+                circuit_id,
+                data.get(ATTR_SIGNATURE_ID),
+                label=data.get(ATTR_LABEL),
+                appliance_id=data.get(ATTR_APPLIANCE_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_ASSIGN_SESSION_TO_APPLIANCE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_assign_nilm_session",
+                circuit_id,
+                data.get(ATTR_SESSION_ID),
+                label=data.get(ATTR_LABEL),
+                signature_fingerprint=data.get(ATTR_SIGNATURE_FINGERPRINT),
+                appliance_id=data.get(ATTR_APPLIANCE_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_nilm_interval_coordinators(
+            hass,
+            circuit_id,
+            data.get(ATTR_INTERVAL_ID),
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_assign_nilm_interval",
+                circuit_id,
+                data.get(ATTR_INTERVAL_ID),
+                label=data.get(ATTR_LABEL),
+                appliance_id=data.get(ATTR_APPLIANCE_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_publish_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_unpublish_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_retire_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
             )
         return
 
@@ -927,7 +1091,10 @@ def _circuit_id_from_entity_registry(hass: Any, entity_id: str) -> str | None:
     async_get = getattr(er, "async_get", None)
     if async_get is None:
         return None
-    registry = async_get(hass)
+    try:
+        registry = async_get(hass)
+    except TypeError:
+        return None
     entry = getattr(registry, "async_get", lambda _entity_id: None)(entity_id)
     if entry is None or getattr(entry, "platform", None) != DOMAIN:
         return None
@@ -1031,6 +1198,7 @@ def _known_circuit_ids(coordinator: Any) -> set[str]:
         "nilm_signatures",
         "nilm_unknown_loads_by_circuit",
         "nilm_label_intervals_by_circuit",
+        "nilm_appliance_assignments_by_circuit",
         "maintenance_by_circuit",
     ):
         values = getattr(store_data, attr, None)
@@ -1272,6 +1440,43 @@ def _target_nilm_signature_coordinators(
     )
 
 
+def _target_nilm_interval_coordinators(
+    hass: Any,
+    circuit_id: Any,
+    interval_id: Any,
+) -> list[Any]:
+    if not isinstance(circuit_id, str) or not circuit_id:
+        raise HomeAssistantError("Missing circuit_id.")
+    if not isinstance(interval_id, str) or not interval_id:
+        raise HomeAssistantError("Missing interval_id.")
+    target_coordinators = _target_coordinators(hass, circuit_id)
+    matches = [
+        coordinator
+        for coordinator in target_coordinators
+        if interval_id in _known_nilm_interval_ids(coordinator, circuit_id)
+    ]
+    if matches:
+        return matches
+    known_interval_ids = sorted(
+        {
+            known_interval_id
+            for coordinator in target_coordinators
+            for known_interval_id in _known_nilm_interval_ids(
+                coordinator,
+                circuit_id,
+            )
+        }
+    )
+    if known_interval_ids:
+        raise HomeAssistantError(
+            f"Unknown interval_id '{interval_id}'. Known interval IDs for "
+            f"{circuit_id}: {', '.join(known_interval_ids)}."
+        )
+    raise HomeAssistantError(
+        f"Unknown interval_id '{interval_id}' for circuit_id '{circuit_id}'."
+    )
+
+
 def _unknown_nilm_signature_message(
     circuit_id: str,
     signature_id: str,
@@ -1315,6 +1520,25 @@ def _known_nilm_signature_ids(coordinator: Any, circuit_id: str) -> set[str]:
             signature_ids,
         )
     return signature_ids
+
+
+def _known_nilm_interval_ids(coordinator: Any, circuit_id: str) -> set[str]:
+    store_data = getattr(coordinator, "store_data", None)
+    intervals_by_circuit = getattr(store_data, "nilm_label_intervals_by_circuit", {})
+    if not isinstance(intervals_by_circuit, Mapping):
+        return set()
+    intervals = intervals_by_circuit.get(circuit_id, ())
+    if isinstance(intervals, (str, bytes)):
+        return set()
+    try:
+        iterator = iter(intervals)
+    except TypeError:
+        return set()
+    return {
+        str(interval.get("interval_id"))
+        for interval in iterator
+        if isinstance(interval, Mapping) and interval.get("interval_id")
+    }
 
 
 def _collect_signature_ids(
