@@ -1534,6 +1534,7 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         "assign_interval_to_appliance",
         "validate_nilm_session",
         "reject_nilm_session",
+        "validate_nilm_assignment_history",
         "rename_nilm_appliance",
         "change_nilm_appliance_profile",
         "merge_nilm_assignments",

@@ -1283,6 +1283,14 @@ def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
             {"value": "assignment-target", "label": "Dishwasher"},
         ],
     }
+    assert payload["assignments"][0]["actions"]["validate_history"] == {
+        "domain": DOMAIN,
+        "service": "validate_nilm_assignment_history",
+        "data": {
+            "circuit_id": "mains",
+            "assignment_id": "assignment-source",
+        },
+    }
 
 
 def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:

@@ -2427,6 +2427,7 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
 async def test_nilm_session_validation_services_dispatch() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_REJECT_NILM_SESSION,
+        SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
         SERVICE_VALIDATE_NILM_SESSION,
         async_setup_services,
     )
@@ -2487,6 +2488,18 @@ async def test_nilm_session_validation_services_dispatch() -> None:
                 )
             )
 
+        async def async_validate_nilm_assignment_history(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_validate_nilm_assignment_history",
+                    (circuit_id, assignment_id),
+                )
+            )
+
     coordinator = FakeCoordinator()
     hass = SimpleNamespace(
         data={DOMAIN: {"entry-1": coordinator}},
@@ -2505,6 +2518,14 @@ async def test_nilm_session_validation_services_dispatch() -> None:
                 }
             )
         )
+    await hass.services.registered[(DOMAIN, SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "assignment_id": "assignment-dishwasher",
+            }
+        )
+    )
 
     assert coordinator.calls == [
         (
@@ -2514,6 +2535,10 @@ async def test_nilm_session_validation_services_dispatch() -> None:
         (
             "async_reject_nilm_session",
             ("mains", "session_1", "assignment-dishwasher"),
+        ),
+        (
+            "async_validate_nilm_assignment_history",
+            ("mains", "assignment-dishwasher"),
         ),
     ]
 

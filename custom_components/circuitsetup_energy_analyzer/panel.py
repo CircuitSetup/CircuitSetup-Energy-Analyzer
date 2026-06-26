@@ -63,6 +63,7 @@ from .services import (
     SERVICE_START_MAINTENANCE,
     SERVICE_UNDO_SETTING_RECOMMENDATION,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
@@ -1294,6 +1295,11 @@ def _nilm_assignment_payload(
             "service": SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
             "data": dict(action_data),
             "requires": [ATTR_APPLIANCE_PROFILE],
+        }
+        actions["validate_history"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+            "data": dict(action_data),
         }
         target_options = _nilm_assignment_target_options(assignment_id, assignments)
         if target_options:

@@ -3564,6 +3564,99 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             correct=False,
         )
 
+    async def async_validate_nilm_assignment_history(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Confirm assigned NILM sessions that overlap ground-truth intervals."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        intervals = [
+            interval
+            for interval in self.store_data.nilm_label_intervals_by_circuit.get(
+                circuit_id,
+                (),
+            )
+            if isinstance(interval, Mapping)
+            and str(interval.get("ground_truth_entity_id") or "").strip()
+            and _nilm_assignment_interval_matches(interval, assignment)
+        ]
+        if not intervals:
+            raise ValueError(
+                "No matching ground-truth NILM label intervals were found for "
+                "this assignment."
+            )
+
+        assignment_id_text = str(assignment.get("assignment_id") or "").strip()
+        assignment_session_ids = set(_clean_string_list(assignment.get("session_ids")))
+        matched_session_ids: list[str] = []
+        for session in self.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if not isinstance(session, Mapping):
+                continue
+            session_id = str(session.get("session_id") or "").strip()
+            if not session_id:
+                continue
+            session_assignment_id = str(session.get("assignment_id") or "").strip()
+            if (
+                session_assignment_id != assignment_id_text
+                and session_id not in assignment_session_ids
+            ):
+                continue
+            if not session.get("end"):
+                continue
+            if any(
+                _nilm_overlap_seconds(interval, session) > 0
+                for interval in intervals
+            ):
+                _append_unique(matched_session_ids, session_id)
+
+        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
+        newly_confirmed = [
+            session_id
+            for session_id in matched_session_ids
+            if session_id not in confirmed
+        ]
+        if not newly_confirmed:
+            raise ValueError(
+                "No matching ground-truth NILM sessions were found for this "
+                "assignment."
+            )
+
+        for session_id in newly_confirmed:
+            _append_unique(confirmed, session_id)
+            _append_unique(assignment.setdefault("session_ids", []), session_id)
+        rejected = [
+            session_id for session_id in rejected if session_id not in newly_confirmed
+        ]
+
+        now_dt = self._now_fn()
+        now = now_dt.isoformat()
+        current_confidence = _nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        assignment["confidence"] = min(
+            1.0,
+            round(current_confidence + (0.05 * len(newly_confirmed)), 3),
+        )
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        if assignment.get("lifecycle_state") not in {"published", "retired"}:
+            assignment["lifecycle_state"] = "validated"
+        assignment["last_validation"] = "history"
+        assignment["last_validated_at"] = now
+        assignment["updated_at"] = now
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now_dt)
+        return dict(assignment)
+
     async def async_rename_nilm_appliance(
         self: Self,
         circuit_id: str,
@@ -8378,6 +8471,49 @@ def _nilm_signature_assignment_label(
         or str(signature.get("likely_type") or "").strip()
         or fallback
     )
+
+
+def _nilm_assignment_interval_matches(
+    interval: Mapping[str, Any],
+    assignment: Mapping[str, Any],
+) -> bool:
+    interval_id = str(interval.get("interval_id") or "").strip()
+    if interval_id and interval_id in _clean_string_list(
+        assignment.get("label_interval_ids")
+    ):
+        return True
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if (
+        assignment_id
+        and str(interval.get("assignment_id") or "").strip() == assignment_id
+    ):
+        return True
+    interval_appliance = str(
+        interval.get("appliance_id") or interval.get("label") or ""
+    ).strip().casefold()
+    if not interval_appliance:
+        return False
+    return interval_appliance in {
+        str(assignment.get("appliance_id") or "").strip().casefold(),
+        str(assignment.get("display_name") or "").strip().casefold(),
+    }
+
+
+def _nilm_overlap_seconds(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+) -> float:
+    first_start = _datetime_or_none(first.get("start"))
+    first_end = _datetime_or_none(first.get("end"))
+    second_start = _datetime_or_none(second.get("start"))
+    second_end = _datetime_or_none(second.get("end"))
+    if not all((first_start, first_end, second_start, second_end)):
+        return 0.0
+    overlap_start = max(first_start, second_start)
+    overlap_end = min(first_end, second_end)
+    if overlap_end <= overlap_start:
+        return 0.0
+    return (overlap_end - overlap_start).total_seconds()
 
 
 def _nilm_assignment_appliance_id(label: str) -> str:

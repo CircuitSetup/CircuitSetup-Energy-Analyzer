@@ -36,6 +36,7 @@ SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
 SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
 SERVICE_VALIDATE_NILM_SESSION = "validate_nilm_session"
 SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
+SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY = "validate_nilm_assignment_history"
 SERVICE_RENAME_NILM_APPLIANCE = "rename_nilm_appliance"
 SERVICE_CHANGE_NILM_APPLIANCE_PROFILE = "change_nilm_appliance_profile"
 SERVICE_MERGE_NILM_ASSIGNMENTS = "merge_nilm_assignments"
@@ -430,6 +431,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
     SERVICE_VALIDATE_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
     SERVICE_REJECT_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
+    SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY: NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA,
     SERVICE_RENAME_NILM_APPLIANCE: NILM_RENAME_APPLIANCE_SERVICE_SCHEMA,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE: (
         NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA
@@ -807,6 +809,17 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_SESSION_ID),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_validate_nilm_assignment_history",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
             )
         return
 
