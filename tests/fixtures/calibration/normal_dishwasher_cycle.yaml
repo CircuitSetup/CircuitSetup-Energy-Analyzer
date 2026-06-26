@@ -1,0 +1,108 @@
+schema_version: 1
+id: normal_dishwasher_cycle
+description: Normal dishwasher wash and heated-dry cycle stays quiet.
+scenario_type: normal
+appliance_profile: mixed
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: dishwasher
+    name: Dishwasher
+    appliance_profile: mixed
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.35
+    sources:
+      power: sensor.dishwasher_power
+      energy: sensor.dishwasher_energy
+      current: sensor.dishwasher_current
+      voltage: sensor.dishwasher_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 80.0
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+  - t: 60
+    states:
+      sensor.dishwasher_power: 780
+      sensor.dishwasher_energy: 80.0
+      sensor.dishwasher_current: 6.5
+      sensor.dishwasher_voltage: 120.1
+  - t: 120
+    states:
+      sensor.dishwasher_power: 760
+      sensor.dishwasher_energy: 80.02
+      sensor.dishwasher_current: 6.3
+      sensor.dishwasher_voltage: 120.0
+  - t: 900
+    states:
+      sensor.dishwasher_power: 160
+      sensor.dishwasher_energy: 80.15
+      sensor.dishwasher_current: 1.4
+      sensor.dishwasher_voltage: 119.9
+  - t: 1800
+    states:
+      sensor.dishwasher_power: 1180
+      sensor.dishwasher_energy: 80.55
+      sensor.dishwasher_current: 9.8
+      sensor.dishwasher_voltage: 120.2
+  - t: 3000
+    states:
+      sensor.dishwasher_power: 520
+      sensor.dishwasher_energy: 81.05
+      sensor.dishwasher_current: 4.3
+      sensor.dishwasher_voltage: 120.0
+  - t: 3600
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 81.15
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.1
+  - t: 3660
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 81.15
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 80.0
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 120.0
+    daily_usage_kwh: [1.1, 1.2, 1.0, 1.1, 1.2, 1.0, 1.1, 1.2, 1.0, 1.1]
+
+labels:
+  expected_events:
+    - circuit_id: dishwasher
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: stop
+      around_t: 3600
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: dishwasher
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

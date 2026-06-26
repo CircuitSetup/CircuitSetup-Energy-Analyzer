@@ -47,6 +47,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_refrigerator_week",
         "refrigerator_energy_drift",
         "normal_washer_cycle",
+        "normal_dishwasher_cycle",
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
@@ -106,6 +107,23 @@ def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
 
     assert pause_samples
     assert event_types == [EventType.START, EventType.STOP]
+
+
+def test_dishwasher_fixture_exercises_wash_and_dry_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_dishwasher_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events = [event for event in result.events if event.circuit_id == "dishwasher"]
+
+    assert fixture.circuits[0].circuit_id == "dishwasher"
+    assert fixture.circuits[0].name == "Dishwasher"
+    assert [event.event_type for event in events] == [EventType.START, EventType.STOP]
+    assert [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in events
+    ] == [60, 3600]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
 
 
 def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
@@ -265,10 +283,11 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 8 |" in report
+    assert "| Fixtures | 9 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
+    assert "normal_dishwasher_cycle" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report
