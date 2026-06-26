@@ -12,6 +12,7 @@ from .const import (
 )
 from .entity import (
     CircuitAnalyzerEntity,
+    CoordinatorEntity,
     EntityCategory,
     EntityTier,
     circuit_info_from_config,
@@ -30,6 +31,13 @@ from .entity_catalog import (
     should_create_entity,
 )
 from .models import ApplianceProfile, SensorRole
+from .nilm_virtual import (
+    NilmVirtualApplianceState,
+    nilm_virtual_attributes,
+    nilm_virtual_device_info,
+    nilm_virtual_unique_id,
+    published_nilm_virtual_appliance_states,
+)
 from .operating_detection import (
     PROFILE_RUNNING_ON_THRESHOLDS_W,
     operating_state_is_running,
@@ -335,6 +343,59 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
         )
 
 
+class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor for an explicitly published estimated NILM appliance."""
+
+    _attr_device_class = "running"
+    _attr_entity_category = None
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = True
+    _attr_has_entity_name = False
+    _attr_icon = "mdi:power-cycle"
+
+    def __init__(
+        self,
+        coordinator: Any,
+        *,
+        entry_id: str,
+        state: NilmVirtualApplianceState,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._nilm_state = state
+        self._attr_name = f"{state.display_name} Estimated Running"
+        self._attr_unique_id = nilm_virtual_unique_id(
+            entry_id,
+            state,
+            "estimated_running",
+        )
+
+    @property
+    def name(self) -> str:
+        """Entity display name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str:
+        """Unique id for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether NILM currently estimates the appliance is running."""
+        return self._nilm_state.is_running
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return common estimated NILM attributes."""
+        return nilm_virtual_attributes(self._nilm_state)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group estimated NILM entities by assignment device."""
+        return nilm_virtual_device_info(self._entry_id, self._nilm_state)
+
+
 def _compact_binary_sensor_descriptions_for_setup(
     descriptions: tuple[DiagnosticBinarySensorDescription, ...],
     circuit: Any,
@@ -399,6 +460,14 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in descriptions
         )
 
+    entities.extend(
+        NilmVirtualApplianceRunningBinarySensor(
+            coordinator,
+            entry_id=entry_id,
+            state=state,
+        )
+        for state in published_nilm_virtual_appliance_states(coordinator)
+    )
     prune_stale_entity_registry_entries(
         hass,
         entry_id=entry_id,

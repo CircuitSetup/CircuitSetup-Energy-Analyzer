@@ -3929,6 +3929,67 @@ async def test_nilm_signature_merge_tracks_assignment_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["signature_1"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "validated",
+                        "confidence": 0.92,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 14, 0, tzinfo=UTC),
+    )
+
+    published = await coordinator.async_publish_nilm_appliance_assignment(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert published["publish_entities"] is True
+    assert published["created_device"] is True
+    assert published["lifecycle_state"] == "published"
+    assert published["updated_at"] == "2026-06-02T14:00:00+00:00"
+
+    unpublished = await coordinator.async_unpublish_nilm_appliance_assignment(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert unpublished["publish_entities"] is False
+    assert unpublished["created_device"] is True
+    assert unpublished["lifecycle_state"] == "validated"
+
+    retired = await coordinator.async_retire_nilm_appliance_assignment(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert retired["publish_entities"] is False
+    assert retired["lifecycle_state"] == "retired"
+
+
+@pytest.mark.asyncio
 async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

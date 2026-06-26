@@ -1502,6 +1502,9 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         "assign_signature_to_appliance",
         "assign_session_to_appliance",
         "assign_interval_to_appliance",
+        "publish_nilm_appliance_assignment",
+        "unpublish_nilm_appliance_assignment",
+        "retire_nilm_appliance_assignment",
     ):
         fields = services[service_name]["fields"]
         assert fields["circuit_id"]["required"] is False

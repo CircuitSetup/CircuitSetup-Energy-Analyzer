@@ -74,6 +74,13 @@ from .entity_catalog import (
     should_create_entity,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .nilm_virtual import (
+    NilmVirtualApplianceState,
+    nilm_virtual_attributes,
+    nilm_virtual_device_info,
+    nilm_virtual_unique_id,
+    published_nilm_virtual_appliance_states,
+)
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
 from .ux import friendly_feature_name, friendly_sensitivity_label
@@ -3066,6 +3073,116 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         return status_attributes
 
 
+@dataclass(frozen=True, slots=True)
+class NilmVirtualSensorDescription:
+    """Description for one estimated NILM appliance sensor."""
+
+    key: str
+    name_suffix: str
+    value_fn: Callable[[NilmVirtualApplianceState], Any]
+    native_unit_of_measurement: str | None = None
+    icon: str | None = None
+    state_class: str | None = None
+
+
+NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
+    NilmVirtualSensorDescription(
+        key="health_summary",
+        name_suffix="Health Summary",
+        value_fn=lambda state: "Estimated",
+        icon="mdi:heart-pulse",
+    ),
+    NilmVirtualSensorDescription(
+        key="activity_summary",
+        name_suffix="Activity Summary",
+        value_fn=lambda state: "Running" if state.is_running else "Idle",
+        icon="mdi:run-fast",
+    ),
+    NilmVirtualSensorDescription(
+        key="energy_summary",
+        name_suffix="Energy Summary",
+        value_fn=lambda state: (
+            f"{state.estimated_energy_kwh_today:.3f} kWh today"
+        ),
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    NilmVirtualSensorDescription(
+        key="estimated_power",
+        name_suffix="Estimated Power",
+        value_fn=lambda state: state.estimated_power_w,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        icon="mdi:flash-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    NilmVirtualSensorDescription(
+        key="estimated_daily_energy",
+        name_suffix="Estimated Daily Energy",
+        value_fn=lambda state: state.estimated_energy_kwh_today,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        icon="mdi:counter",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+)
+
+
+class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for an explicitly published estimated NILM appliance."""
+
+    _attr_entity_category = None
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = True
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        coordinator: Any,
+        *,
+        entry_id: str,
+        state: NilmVirtualApplianceState,
+        description: NilmVirtualSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._nilm_state = state
+        self.entity_description = description
+        self._attr_name = f"{state.display_name} {description.name_suffix}"
+        self._attr_unique_id = nilm_virtual_unique_id(
+            entry_id,
+            state,
+            description.key,
+        )
+        self._attr_icon = description.icon
+        self._attr_native_unit_of_measurement = (
+            description.native_unit_of_measurement
+        )
+        self._attr_state_class = description.state_class
+
+    @property
+    def name(self) -> str:
+        """Entity display name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str:
+        """Unique id for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def native_value(self) -> Any:
+        """Return the estimated NILM value."""
+        return self.entity_description.value_fn(self._nilm_state)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return common estimated NILM attributes."""
+        return nilm_virtual_attributes(self._nilm_state)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group estimated NILM entities by assignment device."""
+        return nilm_virtual_device_info(self._entry_id, self._nilm_state)
+
+
 class DemoSourceSensor(SensorEntity):
     """Synthetic source sensor used by the installed demo dashboard."""
 
@@ -3221,6 +3338,16 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in descriptions
         )
 
+    entities.extend(
+        NilmVirtualApplianceSensor(
+            coordinator,
+            entry_id=entry_id,
+            state=state,
+            description=description,
+        )
+        for state in published_nilm_virtual_appliance_states(coordinator)
+        for description in NILM_VIRTUAL_SENSOR_DESCRIPTIONS
+    )
     entities.extend(
         _demo_source_entities_for_circuits(
             entry_id,

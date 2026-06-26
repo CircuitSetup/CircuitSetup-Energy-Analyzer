@@ -3622,6 +3622,72 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             None,
         )
 
+    async def async_publish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Publish estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = True
+        assignment["created_device"] = True
+        assignment["lifecycle_state"] = "published"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_unpublish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Stop publishing estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        if assignment.get("lifecycle_state") == "published":
+            assignment["lifecycle_state"] = "validated"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_retire_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Retire a NILM assignment and stop publishing entities."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        assignment["lifecycle_state"] = "retired"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    def _nilm_assignment_for_id(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        assignment_id_text = str(assignment_id or "").strip()
+        if not assignment_id_text:
+            raise ValueError("Missing assignment_id.")
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        for assignment in assignments:
+            if assignment.get("assignment_id") == assignment_id_text:
+                return assignment
+        raise ValueError(
+            f"Unknown assignment_id '{assignment_id_text}' for circuit_id "
+            f"'{circuit_id}'."
+        )
+
+    async def _async_save_nilm_assignment_change(self: Self) -> None:
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+
     async def async_ignore_nilm_signature(
         self: Self,
         circuit_id: str,

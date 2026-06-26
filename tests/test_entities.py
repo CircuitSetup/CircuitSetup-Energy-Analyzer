@@ -4094,6 +4094,176 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
+    from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    assignment = {
+        "assignment_id": "assignment-dishwasher",
+        "appliance_id": "dishwasher",
+        "display_name": "Dishwasher",
+        "appliance_profile": "dishwasher",
+        "mains_circuit_id": "mains",
+        "signature_fingerprints": ["signature_1"],
+        "session_ids": [],
+        "label_interval_ids": [],
+        "lifecycle_state": "published",
+        "confidence": 0.92,
+        "created_device": True,
+        "publish_entities": True,
+    }
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(mains,),
+        entry_data={},
+        options={},
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                    delta_w=820.0,
+                    delta_var=120.0,
+                    delta_va=830.0,
+                    delta_pf=-0.05,
+                    direction="on",
+                ),
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+                    delta_w=-815.0,
+                    delta_var=-118.0,
+                    delta_va=-825.0,
+                    delta_pf=0.04,
+                    direction="off",
+                ),
+            ]
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    sensors = []
+    binary_sensors = []
+
+    await sensor.async_setup_entry(hass, entry, sensors.extend)
+    await binary_sensor.async_setup_entry(hass, entry, binary_sensors.extend)
+
+    sensor_by_id = {entity.unique_id: entity for entity in sensors}
+    binary_by_id = {entity.unique_id: entity for entity in binary_sensors}
+    assert {
+        "entry-1_nilm_assignment-dishwasher_health_summary",
+        "entry-1_nilm_assignment-dishwasher_activity_summary",
+        "entry-1_nilm_assignment-dishwasher_energy_summary",
+        "entry-1_nilm_assignment-dishwasher_estimated_power",
+        "entry-1_nilm_assignment-dishwasher_estimated_daily_energy",
+    } <= set(sensor_by_id)
+    assert set(
+        unique_id
+        for unique_id in sensor_by_id
+        if unique_id.startswith("entry-1_nilm_assignment-dishwasher_")
+    ) == {
+        "entry-1_nilm_assignment-dishwasher_health_summary",
+        "entry-1_nilm_assignment-dishwasher_activity_summary",
+        "entry-1_nilm_assignment-dishwasher_energy_summary",
+        "entry-1_nilm_assignment-dishwasher_estimated_power",
+        "entry-1_nilm_assignment-dishwasher_estimated_daily_energy",
+    }
+    assert {
+        unique_id
+        for unique_id in binary_by_id
+        if unique_id.startswith("entry-1_nilm_assignment-dishwasher_")
+    } == {"entry-1_nilm_assignment-dishwasher_estimated_running"}
+
+    estimated_power = sensor_by_id[
+        "entry-1_nilm_assignment-dishwasher_estimated_power"
+    ]
+    estimated_daily_energy = sensor_by_id[
+        "entry-1_nilm_assignment-dishwasher_estimated_daily_energy"
+    ]
+    running = binary_by_id[
+        "entry-1_nilm_assignment-dishwasher_estimated_running"
+    ]
+    assert estimated_power.native_value == 0.0
+    assert estimated_daily_energy.native_value == 0.818
+    assert running.is_on is False
+    assert estimated_power.extra_state_attributes == {
+        "estimated": True,
+        "source": "nilm",
+        "assignment_id": "assignment-dishwasher",
+        "mains_source": "sensor.mains_power",
+        "confidence": 0.92,
+        "model_status": "published",
+        "last_validation": None,
+    }
+    assert running.extra_state_attributes["estimated"] is True
+    assert estimated_power.device_info == {
+        "identifiers": {(DOMAIN, "entry-1_nilm_assignment-dishwasher")},
+        "name": "Dishwasher",
+        "manufacturer": "CircuitSetup",
+        "model": "NILM Estimated Appliance",
+        "via_device": (DOMAIN, "entry-1_mains"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() -> None:
+    from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(mains,),
+        entry_data={},
+        options={},
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-unpublished",
+                        "display_name": "Unpublished",
+                        "mains_circuit_id": "mains",
+                        "publish_entities": False,
+                        "lifecycle_state": "validated",
+                    },
+                    {
+                        "assignment_id": "assignment-retired",
+                        "display_name": "Retired",
+                        "mains_circuit_id": "mains",
+                        "publish_entities": True,
+                        "lifecycle_state": "retired",
+                    },
+                ]
+            },
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+    added_entities = []
+
+    await sensor.async_setup_entry(hass, entry, added_entities.extend)
+    await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
+
+    assert not any(
+        entity.unique_id.startswith("entry-1_nilm_")
+        for entity in added_entities
+    )
+
+
+@pytest.mark.asyncio
 async def test_sensor_setup_entry_omits_core_duplicate_legacy_sensors() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
