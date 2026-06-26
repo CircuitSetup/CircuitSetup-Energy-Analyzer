@@ -6238,6 +6238,52 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             }
             self._mark_store_dirty()
 
+        if not self.store_data.nilm_session_history_by_circuit.get(config.circuit_id):
+            motor_start = now - timedelta(minutes=38)
+            resistive_start = now - timedelta(hours=5)
+            resistive_end = now - timedelta(hours=4)
+            self.store_data.nilm_session_history_by_circuit[config.circuit_id] = [
+                {
+                    "session_id": "demo_resistive_load_240v_session",
+                    "mains_circuit_id": config.circuit_id,
+                    "signature_fingerprint": "demo_resistive_load_240v",
+                    "on_edge_id": "demo_resistive_load_240v_on",
+                    "off_edge_id": "demo_resistive_load_240v_off",
+                    "start": resistive_start.isoformat(),
+                    "end": resistive_end.isoformat(),
+                    "duration_seconds": 3600.0,
+                    "median_power_w": 4100.0,
+                    "estimated_energy_kwh": 4.1,
+                    "confidence": 0.78,
+                    "overlap_count": 0,
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                    "known_load_masked": False,
+                    "known_load_confidence": None,
+                    "assignment_id": None,
+                },
+                {
+                    "session_id": "demo_motor_load_l1_open",
+                    "mains_circuit_id": config.circuit_id,
+                    "signature_fingerprint": "demo_motor_load_l1",
+                    "on_edge_id": "demo_motor_load_l1_on",
+                    "off_edge_id": None,
+                    "start": motor_start.isoformat(),
+                    "end": None,
+                    "duration_seconds": None,
+                    "median_power_w": 920.0,
+                    "estimated_energy_kwh": 0.583,
+                    "confidence": 0.82,
+                    "overlap_count": 0,
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                    "known_load_masked": False,
+                    "known_load_confidence": None,
+                    "assignment_id": None,
+                },
+            ]
+            self._mark_store_dirty()
+
         self._nilm_total_events_by_circuit[config.circuit_id] = max(
             self._nilm_total_events_by_circuit[config.circuit_id],
             12,
