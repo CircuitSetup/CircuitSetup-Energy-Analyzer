@@ -2272,6 +2272,8 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
+        NILM_WORKSPACE_HISTORY_PLAN_API_PATH,
+        NILM_WORKSPACE_PLAN_API_PATH,
         PANEL_ELEMENT_NAME,
         PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
@@ -2323,6 +2325,8 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
+        NILM_WORKSPACE_PLAN_API_PATH,
+        NILM_WORKSPACE_HISTORY_PLAN_API_PATH,
     ]
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
@@ -2437,7 +2441,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 3
+    assert len(http.views) == 5
 
     assert await async_unload_entry(hass, entry) is True
 
