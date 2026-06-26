@@ -1137,6 +1137,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "service": "assign_signature_to_appliance",
         "data": {"circuit_id": "mains", "signature_id": "signature_1"},
         "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
     }
     assert payload["label_intervals"][0]["label"] == "Dishwasher"
     assert payload["label_intervals"][0]["actions"]["delete"] == {
@@ -1149,6 +1152,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "service": "assign_interval_to_appliance",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
         "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
     }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
@@ -1225,6 +1231,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             "signature_fingerprint": payload["sessions"][0]["signature_fingerprint"],
         },
         "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
     }
     assert payload["sessions"][0]["actions"]["validate"] == {
         "domain": DOMAIN,

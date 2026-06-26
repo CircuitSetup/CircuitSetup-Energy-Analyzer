@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-ground-truth-select-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-assignment-select-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -402,6 +402,7 @@ def nilm_workspace_payload(
     )
     label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
+    assignment_options = _nilm_assignment_options(assignments)
     stored_sessions = _nilm_session_history_for_circuit(
         coordinator,
         config.circuit_id,
@@ -426,6 +427,9 @@ def nilm_workspace_payload(
         ),
         stored_sessions,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
+    _add_nilm_assignment_options(signatures, assignment_options)
+    _add_nilm_assignment_options(label_intervals, assignment_options)
+    _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
@@ -1299,6 +1303,39 @@ def _nilm_assignments_for_circuit(
         _nilm_assignment_payload(circuit_id, item, assignments)
         for item in assignments
     ]
+
+
+def _nilm_assignment_options(
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if (
+            not assignment_id
+            or str(assignment.get("lifecycle_state") or "").lower() == "retired"
+        ):
+            continue
+        label = str(
+            assignment.get("display_name")
+            or assignment.get("appliance_id")
+            or assignment_id,
+        ).strip()
+        options.append({"value": assignment_id, "label": label})
+    return options
+
+
+def _add_nilm_assignment_options(
+    items: Iterable[dict[str, Any]],
+    assignment_options: list[dict[str, str]],
+) -> None:
+    if not assignment_options:
+        return
+    for item in items:
+        actions = item.get("actions")
+        assign = actions.get("assign") if isinstance(actions, dict) else None
+        if isinstance(assign, dict):
+            assign["assignment_options"] = list(assignment_options)
 
 
 def _nilm_assignment_payload(

@@ -1200,6 +1200,11 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-assignment-merge-target",
         "profile_options",
         "<select id=\"nilm_assignment_profile_",
+        "Existing appliance",
+        "data-nilm-existing-assignment",
+        'actionKey === "assign" ? '
+        "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
+        "_renderNilmExistingAssignmentField",
         "Assign Appliance",
         "Publish Entities",
         "Disable Publishing",

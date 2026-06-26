@@ -302,13 +302,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const data = Object.assign({}, action.data || {});
     if (actionKey === "label" || actionKey === "assign") {
       const labelInput = this.shadowRoot.querySelector(`#nilm_label_${index}`);
-      const label = labelInput ? labelInput.value.trim() : "";
+      const existingAssignment = actionKey === "assign" ? this._nilmExistingAssignmentSelection(`signature_${index}`) : null;
+      const label = existingAssignment ? existingAssignment.label : labelInput ? labelInput.value.trim() : "";
       if (!label) {
         this._error = "Enter a label for this NILM signature before saving.";
         this._renderAndScrollToTop();
         return;
       }
       data.label = label;
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
     }
     if (actionKey === "merge") {
       const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
@@ -409,7 +413,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const interval = intervals && intervals[index];
       action = interval && interval.actions && interval.actions.assign;
       data = Object.assign({}, action && action.data || {});
-      data.label = String((interval && (interval.label || interval.appliance_id)) || "").trim();
+      const existingAssignment = this._nilmExistingAssignmentSelection(`label_intervals_${index}`);
+      data.label = existingAssignment
+        ? existingAssignment.label
+        : String((interval && (interval.label || interval.appliance_id)) || "").trim();
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
       if (!data.label) {
         this._error = "Add a label to this NILM interval before assigning it.";
         this._renderAndScrollToTop();
@@ -465,7 +475,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (action.requires && action.requires.includes("label")) {
       const labelInput = this.shadowRoot.querySelector(`#nilm_assignment_label_${index}`)
         || this.shadowRoot.querySelector(`#nilm_session_label_${index}`);
-      const label = labelInput
+      const existingAssignment = this._nilmExistingAssignmentSelection(`${collectionKey}_${index}`);
+      const label = existingAssignment
+        ? existingAssignment.label
+        : labelInput
         ? labelInput.value
         : item.display_name || item.label || item.appliance_id || "";
       if (!label || !label.trim()) {
@@ -474,6 +487,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       data.label = label.trim();
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
       if (item.appliance_id && !data.appliance_id) {
         data.appliance_id = item.appliance_id;
       }
@@ -1079,6 +1095,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
       ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
       ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
+      ${this._renderNilmExistingAssignmentField(signature && signature.actions && signature.actions.assign, `signature_${index}`)}
       ${this._renderNilmLabelField(signature, index)}
       ${this._renderNilmMergeTarget(signature, index)}
       <div class="actions">
@@ -1367,6 +1384,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
+  _renderNilmExistingAssignmentField(action, key) {
+    const options = action && Array.isArray(action.assignment_options)
+      ? action.assignment_options
+      : [];
+    if (!options.length) {
+      return "";
+    }
+    return `
+      <label class="nilm-label-field">
+        <span class="muted">Existing appliance</span>
+        <select data-nilm-existing-assignment="${this._escape(key)}">
+          <option value="">New appliance</option>
+          ${options.map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
+        </select>
+      </label>
+    `;
+  }
+
+  _nilmExistingAssignmentSelection(key) {
+    const select = this.shadowRoot.querySelector(`[data-nilm-existing-assignment="${key}"]`);
+    const assignmentId = select ? String(select.value || "").trim() : "";
+    if (!assignmentId) {
+      return null;
+    }
+    const option = select.selectedOptions && select.selectedOptions[0];
+    return {
+      assignment_id: assignmentId,
+      label: String((option && option.textContent) || assignmentId).trim(),
+    };
+  }
+
   _renderNilmWorkspace() {
     if (this._nilmWorkspaceLoading) {
       return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">Loading NILM workspace...</p></section>`;
@@ -1494,6 +1542,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <strong>${this._escape(item.label || item.appliance_id || "Labeled interval")}</strong>
           ${item.mains_entity_id ? `<p class="muted">${this._escape(item.mains_entity_id)}</p>` : ""}
           ${item.ground_truth_entity_id ? `<p class="muted">Ground Truth Sensor: ${this._escape(item.ground_truth_entity_id)}</p>` : ""}
+          ${item.actions && item.actions.assign ? this._renderNilmExistingAssignmentField(item.actions.assign, `label_intervals_${index}`) : ""}
           <div class="actions">
             ${item.actions && item.actions.assign ? `<button
               type="button"
@@ -1564,6 +1613,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._nilmSessionLabelDrafts.get(draftKey)
       : "";
     return `
+      ${this._renderNilmExistingAssignmentField(session && session.actions && session.actions.assign, `sessions_${index}`)}
       <label class="nilm-label-field" for="nilm_session_label_${index}">
         <span class="muted">Appliance name</span>
         <input
