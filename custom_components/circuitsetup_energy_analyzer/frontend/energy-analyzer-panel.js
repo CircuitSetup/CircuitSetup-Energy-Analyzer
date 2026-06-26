@@ -803,6 +803,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           stroke-dasharray: 4 3;
           stroke-width: 2;
         }
+        .nilm-session-band {
+          fill: var(--warning-color, #f59e0b);
+          opacity: 0.12;
+        }
         .legend {
           display: grid;
           gap: 6px;
@@ -1359,7 +1363,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const history = workspace.history || {};
     const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
     const graph = series.length
-      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges })
+      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: workspace.sessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
     return `
       <section class="panel">
@@ -1701,6 +1705,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const direction = this._friendlyFeature(edge.direction || "NILM edge");
       return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}"><title>${this._escape(direction)}</title></line>`;
     }).join("");
+    const sessionBands = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
+      const start = Date.parse(session && session.start || "");
+      const end = Date.parse(session && session.end || "");
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) {
+        return "";
+      }
+      const left = x(Math.max(start, minTime));
+      const right = x(Math.min(end, maxTime));
+      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}"><title>${this._escape(session.session_id || "NILM session")}</title></rect>`;
+    }).join("");
     const selectAttrs = alert.nilm_select_interval
       ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"`
       : "";
@@ -1710,6 +1724,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
+        ${sessionBands}
         <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
         <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
         <text x="${padLeft}" y="${height - 12}">${this._escape(startLabel)}</text>

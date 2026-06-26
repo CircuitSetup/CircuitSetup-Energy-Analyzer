@@ -1232,6 +1232,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-chart-select",
         "nilm_edges",
         "nilm-edge-marker",
+        "nilm_sessions",
+        "nilm-session-band",
         "_startNilmChartSelection",
         "_chartEventTime",
         "pointerdown",
