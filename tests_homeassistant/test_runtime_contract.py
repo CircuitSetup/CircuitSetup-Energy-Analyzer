@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,6 +32,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     SensorRef,
     SensorRole,
 )
+from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
 def _circuit() -> CircuitConfig:
@@ -43,6 +46,16 @@ def _circuit() -> CircuitConfig:
             SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
             SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
         ),
+    )
+
+
+def _mains_nilm_circuit() -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
     )
 
 
@@ -66,6 +79,46 @@ class _RuntimeCoordinator:
                 "fridge": {"daily_goal_kwh": 4.5},
             },
         )
+
+
+class _NilmRuntimeCoordinator:
+    def __init__(self, hass: Any) -> None:
+        self.hass = hass
+        self.data = AnalyzerState()
+        self.circuit_configs = (_mains_nilm_circuit(),)
+        self.entry_data = {}
+        self.options = {
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+        }
+        self.store_data = FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["signature_1"],
+                        "publish_entities": True,
+                        "created_device": True,
+                        "lifecycle_state": "published",
+                        "confidence": 0.91,
+                    }
+                ]
+            },
+        )
+        self._nilm_unmatched_edges = {
+            "mains": [
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                    delta_w=820.0,
+                    delta_var=120.0,
+                    delta_va=830.0,
+                    delta_pf=-0.05,
+                    direction="on",
+                )
+            ]
+        }
 
 
 @pytest.mark.asyncio
@@ -121,3 +174,41 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
     if updated_stale_device is not None:
         assert entry.entry_id not in updated_stale_device.config_entries
     assert stale_device.id
+
+
+@pytest.mark.asyncio
+async def test_platform_setup_restores_published_nilm_virtual_entities(
+    hass: Any,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="runtime-entry",
+        title="Runtime Contract",
+        data={},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    coordinator = _NilmRuntimeCoordinator(hass)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    added_entities: list[Any] = []
+
+    await sensor.async_setup_entry(hass, entry, added_entities.extend)
+    await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+    assert {
+        "runtime-entry_nilm_assignment-dishwasher_health_summary",
+        "runtime-entry_nilm_assignment-dishwasher_activity_summary",
+        "runtime-entry_nilm_assignment-dishwasher_energy_summary",
+        "runtime-entry_nilm_assignment-dishwasher_estimated_power",
+        "runtime-entry_nilm_assignment-dishwasher_estimated_daily_energy",
+        "runtime-entry_nilm_assignment-dishwasher_estimated_running",
+    } <= unique_ids
+    estimated_power = next(
+        entity
+        for entity in added_entities
+        if entity.unique_id
+        == "runtime-entry_nilm_assignment-dishwasher_estimated_power"
+    )
+    assert estimated_power.extra_state_attributes["estimated"] is True
+    assert estimated_power.device_info["model"] == "NILM Estimated Appliance"
