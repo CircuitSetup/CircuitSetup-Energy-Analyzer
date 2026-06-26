@@ -6198,6 +6198,9 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
 
     now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
     circuit_id = "mains_nilm"
@@ -6354,6 +6357,16 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     unknown_loads = coordinator.state.nilm_unknown_loads_by_circuit[circuit_id]
     assert unknown_loads["unknown_load_count"] > 0
     assert unknown_loads["active_unknown_load_count"] > 0
+    sessions = coordinator.store_data.nilm_session_history_by_circuit[circuit_id]
+    assert any(session["end"] is not None for session in sessions)
+    assert all(session["median_power_w"] > 0 for session in sessions)
+    assert all(session["confidence"] > 0 for session in sessions)
+    workspace = nilm_workspace_payload([coordinator], circuit_id=circuit_id)
+    assert workspace["session_count"] >= 2
+    assert {session["session_id"] for session in workspace["sessions"]} >= {
+        "demo_motor_load_l1_open",
+        "demo_resistive_load_240v_session",
+    }
 
 
 def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
