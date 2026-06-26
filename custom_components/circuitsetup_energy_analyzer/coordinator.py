@@ -3433,6 +3433,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         signature["assignment_id"] = assignment["assignment_id"]
         signature["review_state"] = "assigned"
         signature["user_label"] = assignment["display_name"]
+        signature.pop("ignored", None)
+        self.ignored_nilm_signatures.discard((circuit_id, signature_id))
+        self._remove_nilm_signature_from_other_assignments(
+            circuit_id,
+            fingerprint,
+            assignment["assignment_id"],
+        )
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
@@ -3603,6 +3610,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         return assignment
 
+    def _remove_nilm_signature_from_other_assignments(
+        self: Self,
+        circuit_id: str,
+        signature_fingerprint: str,
+        assignment_id: str,
+    ) -> None:
+        if not signature_fingerprint:
+            return
+        for assignment in self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if assignment.get("assignment_id") == assignment_id:
+                continue
+            fingerprints = assignment.get("signature_fingerprints")
+            if not isinstance(fingerprints, list):
+                continue
+            assignment["signature_fingerprints"] = [
+                value for value in fingerprints if value != signature_fingerprint
+            ]
+
     def _nilm_assignment_for_signature(
         self: Self,
         circuit_id: str,
@@ -3724,6 +3752,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment["updated_at"] = self._now_fn().isoformat()
             source["assignment_id"] = assignment["assignment_id"]
             target["assignment_id"] = assignment["assignment_id"]
+            self._remove_nilm_signature_from_other_assignments(
+                circuit_id,
+                source_fingerprint,
+                assignment["assignment_id"],
+            )
         self._mark_store_dirty()
         self._refresh_nilm_state(circuit_id)
         self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())

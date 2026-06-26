@@ -3869,6 +3869,70 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_signature_assignment_clears_ignored_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "signature_1",
+                        "feedback_fingerprint": "fingerprint_1",
+                        "ignored": True,
+                        "review_state": "ignored",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-ignored",
+                        "appliance_id": "ignored_load",
+                        "display_name": "Ignored Load",
+                        "appliance_profile": None,
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["fingerprint_1"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "ignored",
+                        "confidence": 0.7,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    }
+                ]
+            },
+        ),
+    )
+    coordinator.ignored_nilm_signatures.add(("mains", "signature_1"))
+
+    assignment = await coordinator.async_assign_nilm_signature(
+        "mains",
+        "signature_1",
+        label="Dishwasher",
+        appliance_id="dishwasher",
+    )
+
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ]
+    assert "ignored" not in signature
+    assert ("mains", "signature_1") not in coordinator.ignored_nilm_signatures
+    assert assignment["lifecycle_state"] == "assigned"
+    assert [
+        item
+        for item in assignments
+        if "fingerprint_1" in item.get("signature_fingerprints", ())
+    ] == [assignment]
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_merge_tracks_assignment_target() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -3891,6 +3955,22 @@ async def test_nilm_signature_merge_tracks_assignment_target() -> None:
             },
             nilm_appliance_assignments_by_circuit={
                 "mains": [
+                    {
+                        "assignment_id": "assignment-source",
+                        "appliance_id": "pool_pump",
+                        "display_name": "Pool Pump",
+                        "appliance_profile": "pool_pump",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["source-fingerprint"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "assigned",
+                        "confidence": 1.0,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    },
                     {
                         "assignment_id": "assignment-target",
                         "appliance_id": "dishwasher",
@@ -3918,10 +3998,16 @@ async def test_nilm_signature_merge_tracks_assignment_target() -> None:
         signature["signature_id"]: signature
         for signature in coordinator.store_data.nilm_signatures["mains"]
     }
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignments = {
+        assignment["assignment_id"]: assignment
+        for assignment in coordinator.store_data.nilm_appliance_assignments_by_circuit[
+            "mains"
+        ]
+    }
+    source_assignment = assignments["assignment-source"]
+    assignment = assignments["assignment-target"]
     assert signatures["source"]["assignment_id"] == "assignment-target"
+    assert source_assignment["signature_fingerprints"] == []
     assert assignment["signature_fingerprints"] == [
         "target-fingerprint",
         "source-fingerprint",
