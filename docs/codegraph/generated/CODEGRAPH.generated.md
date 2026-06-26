@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `a01c114217d220b7a3283fdf087350a75cc8652f`
-**Branch:** `chore/ponytail-audit-cleanup`
-**Generated:** `2026-06-25T15:39:12.721291+00:00`
+**Commit:** `221b5739a52cfd64e901cbbb449a1ac92e46b0e3`
+**Branch:** `feature/nilm-appliance-assignment`
+**Generated:** `2026-06-26T00:57:41.888644+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **168**
 - Python modules: **154**
-- Symbols: **3299**
+- Symbols: **3325**
 - Internal import edges: **460**
 - External import edges: **506**
 
