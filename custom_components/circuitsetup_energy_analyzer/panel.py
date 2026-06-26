@@ -364,25 +364,29 @@ def nilm_workspace_payload(
         coordinator,
         config.circuit_id,
     )
-    label_intervals = _nilm_label_intervals_for_circuit(
+    all_label_intervals = _nilm_label_intervals_for_circuit(
         coordinator,
         config.circuit_id,
+        limit=None,
     )
+    label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
-    sessions = _nilm_workspace_sessions(
+    all_sessions = _nilm_workspace_sessions(
         edges,
         config.circuit_id,
         signatures=signatures,
         assignments=assignments,
+        limit=None,
     )
+    sessions = all_sessions[:MAX_NILM_WORKSPACE_SESSIONS]
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
         edges,
     )
     validation = _nilm_validation_payload(
-        label_intervals,
-        sessions,
+        all_label_intervals,
+        all_sessions,
         assignments,
     )
     return {
@@ -1113,6 +1117,8 @@ def _nilm_workspace_signatures(
 def _nilm_label_intervals_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    limit: int | None = MAX_NILM_WORKSPACE_LABEL_INTERVALS,
 ) -> list[dict[str, Any]]:
     store_data = getattr(coordinator, "store_data", None)
     intervals_by_circuit = getattr(store_data, "nilm_label_intervals_by_circuit", {})
@@ -1125,10 +1131,11 @@ def _nilm_label_intervals_for_circuit(
         if isinstance(intervals_by_circuit, Mapping)
         else []
     )
-    return [
+    payloads = [
         _nilm_label_interval_payload(circuit_id, interval)
-        for interval in intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
+        for interval in intervals
     ]
+    return payloads if limit is None else payloads[:limit]
 
 
 def _nilm_label_interval_payload(
@@ -1281,6 +1288,7 @@ def _nilm_validation_payload(
             interval,
             predictions,
             assignment_by_id,
+            matched_prediction_ids,
         )
         if session is not None:
             matched_prediction_ids.add(str(session.get("session_id") or ""))
@@ -1336,9 +1344,13 @@ def _nilm_validation_best_match(
     interval: Mapping[str, Any],
     sessions: list[dict[str, Any]],
     assignment_by_id: Mapping[str, Mapping[str, Any]],
+    matched_prediction_ids: set[str],
 ) -> tuple[dict[str, Any] | None, float]:
     candidates: list[tuple[float, dict[str, Any]]] = []
     for session in sessions:
+        session_id = str(session.get("session_id") or "")
+        if session_id and session_id in matched_prediction_ids:
+            continue
         assignment = assignment_by_id.get(str(session.get("assignment_id") or ""))
         if assignment is None or not _nilm_validation_assignment_matches(
             interval,
@@ -1611,6 +1623,7 @@ def _nilm_workspace_sessions(
     *,
     signatures: list[dict[str, Any]],
     assignments: list[dict[str, Any]],
+    limit: int | None = MAX_NILM_WORKSPACE_SESSIONS,
 ) -> list[dict[str, Any]]:
     sessions: list[NilmSession] = []
     for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
@@ -1625,11 +1638,10 @@ def _nilm_workspace_sessions(
                 assignment_id=assignment_id,
             )
         )
-        if len(sessions) >= MAX_NILM_WORKSPACE_SESSIONS:
+        if limit is not None and len(sessions) >= limit:
             break
-    return [_nilm_session_payload(session) for session in sessions][
-        :MAX_NILM_WORKSPACE_SESSIONS
-    ]
+    payloads = [_nilm_session_payload(session) for session in sessions]
+    return payloads if limit is None else payloads[:limit]
 
 
 def _nilm_workspace_session_specs(
