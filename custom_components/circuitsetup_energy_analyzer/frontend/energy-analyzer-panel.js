@@ -72,6 +72,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmSessionLabelDrafts = new Map();
     this._nilmAssignmentDrafts = new Map();
     this._nilmOverlayVisibility = { known_load: true, solar: true };
+    this._nilmFocusedSignature = "";
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
@@ -138,6 +139,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelDrafts.clear();
     this._nilmSessionLabelDrafts.clear();
     this._nilmAssignmentDrafts.clear();
+    this._nilmFocusedSignature = "";
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._render();
 
@@ -1009,6 +1011,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const marker of this.shadowRoot.querySelectorAll("[data-nilm-edge-time]")) {
       marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-focus]")) {
+      button.addEventListener("click", () => this._focusNilmSignatureOnGraph(button.dataset.nilmSignatureFocus));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -1101,6 +1106,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmSignatureReview(signature, index) {
+    const graphFingerprint = this._nilmWorkspace && this._nilmWorkspace.status === "ok" ? this._nilmSignatureFingerprint(signature) : "";
     return `
       ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
       ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
@@ -1114,6 +1120,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmActionButton(index, "ignore", "Ignore", true)}
         ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
         ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
+        ${graphFingerprint ? `<button type="button" class="secondary" data-nilm-signature-focus="${this._escape(graphFingerprint)}">Show on Graph</button>` : ""}
       </div>
     `;
   }
@@ -1147,6 +1154,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       (signature && (signature.signature_id || signature.id || signature.display_label))
       || ""
     );
+  }
+
+  _nilmSignatureFingerprint(signature) {
+    return String((signature && (signature.feedback_fingerprint || signature.signature_fingerprint || signature.signature_id)) || "").trim();
   }
 
   _rememberNilmLabelDraft(input) {
@@ -1243,6 +1254,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     });
     this._lastActionMessage = "Loaded NILM edge time.";
     this._renderAndScrollToTop();
+  }
+
+  _focusNilmSignatureOnGraph(signatureFingerprint) {
+    this._nilmFocusedSignature = this._nilmFocusedSignature === signatureFingerprint ? "" : signatureFingerprint;
+    this._render();
   }
 
   _snapNilmChartTimeToEdge(time, chart) {
@@ -1472,13 +1488,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const history = workspace.history || {};
     const series = this._visibleNilmWorkspaceSeries(workspace);
+    const graphSessions = this._nilmFocusedSignature
+      ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
+      : workspace.sessions;
     const graph = series.length
-      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: workspace.sessions })
+      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
     return `
       <section class="panel">
         <h2>NILM Workspace</h2>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
+        ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmOverlayToggles(workspace)}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
