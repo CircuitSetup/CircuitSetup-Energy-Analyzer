@@ -73,6 +73,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmAssignmentDrafts = new Map();
     this._nilmOverlayVisibility = { known_load: true, solar: true };
     this._nilmFocusedSignature = "";
+    this._nilmGraphWindow = null;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
@@ -140,6 +141,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmSessionLabelDrafts.clear();
     this._nilmAssignmentDrafts.clear();
     this._nilmFocusedSignature = "";
+    this._nilmGraphWindow = null;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._render();
 
@@ -1014,6 +1016,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-focus]")) {
       button.addEventListener("click", () => this._focusNilmSignatureOnGraph(button.dataset.nilmSignatureFocus));
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-zoom]")) {
+      button.addEventListener("click", () => this._zoomNilmGraph(Number(button.dataset.nilmGraphZoom)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-pan]")) {
+      button.addEventListener("click", () => this._panNilmGraph(Number(button.dataset.nilmGraphPan)));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -1261,6 +1269,42 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._render();
   }
 
+  _zoomNilmGraph(factor) {
+    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    if (!window || !Number.isFinite(factor) || factor <= 0) {
+      return;
+    }
+    const span = window.end - window.start;
+    const nextSpan = Math.max(15 * 60 * 1000, Math.min(window.max - window.min, span * factor));
+    const center = (window.start + window.end) / 2;
+    this._setNilmGraphWindow(center - nextSpan / 2, center + nextSpan / 2, window);
+  }
+
+  _panNilmGraph(direction) {
+    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    if (!window || !Number.isFinite(direction)) {
+      return;
+    }
+    const shift = (window.end - window.start) * direction;
+    this._setNilmGraphWindow(window.start + shift, window.end + shift, window);
+  }
+
+  _setNilmGraphWindow(start, end, bounds) {
+    if (start < bounds.min) {
+      end += bounds.min - start;
+      start = bounds.min;
+    }
+    if (end > bounds.max) {
+      start -= end - bounds.max;
+      end = bounds.max;
+    }
+    this._nilmGraphWindow = {
+      start: Math.max(bounds.min, start),
+      end: Math.min(bounds.max, end),
+    };
+    this._render();
+  }
+
   _snapNilmChartTimeToEdge(time, chart) {
     if (!Number.isFinite(time) || !chart || !chart.dataset.nilmEdgeTimes) {
       return time;
@@ -1487,12 +1531,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const history = workspace.history || {};
-    const series = this._visibleNilmWorkspaceSeries(workspace);
+    const graphWindow = this._nilmWorkspaceGraphWindow(workspace);
+    const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
     const graphSessions = this._nilmFocusedSignature
       ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
       : workspace.sessions;
-    const graph = series.length
-      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
+    const graph = graphWindow && series.length
+      ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
     return `
       <section class="panel">
@@ -1500,6 +1545,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmOverlayToggles(workspace)}
+        ${this._renderNilmGraphControls(graphWindow)}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
         ${this._renderNilmValidation(workspace.validation)}
@@ -1940,6 +1986,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     </div>`;
   }
 
+  _renderNilmGraphControls(window) {
+    if (!window) {
+      return "";
+    }
+    return `<div class="actions">
+      <button type="button" class="secondary" data-nilm-graph-zoom="0.5">Zoom In</button>
+      <button type="button" class="secondary" data-nilm-graph-zoom="2">Zoom Out</button>
+      <button type="button" class="secondary" data-nilm-graph-pan="-0.5">Pan Earlier</button>
+      <button type="button" class="secondary" data-nilm-graph-pan="0.5">Pan Later</button>
+    </div>`;
+  }
+
+  _nilmWorkspaceGraphWindow(workspace) {
+    const history = (workspace && workspace.history) || {};
+    const min = Date.parse(history.start || "");
+    const max = Date.parse(history.end || "");
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+      return null;
+    }
+    const start = Math.max(min, Math.min(max - 1, this._nilmGraphWindow ? this._nilmGraphWindow.start : min));
+    const end = Math.max(start + 1, Math.min(max, this._nilmGraphWindow ? this._nilmGraphWindow.end : max));
+    return { start, end, min, max };
+  }
+
   _chartSeries(historySeries = this._historySeries) {
     const parsed = [];
     for (const series of historySeries || []) {
@@ -1966,10 +2036,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return parsed;
   }
 
-  _visibleNilmWorkspaceSeries(workspace) {
+  _visibleNilmWorkspaceSeries(workspace, graphWindow) {
     const knownIds = new Set((workspace.known_load_overlays || []).flatMap((item) => item.entity_ids || []));
     const solarIds = new Set((workspace.solar_overlays || []).flatMap((item) => item.entity_ids || []));
-    return this._chartSeries(this._nilmWorkspaceHistorySeries).filter((item) => {
+    return this._chartSeries(this._nilmWorkspaceHistorySeries).map((item) => {
+      if (!graphWindow) {
+        return item;
+      }
+      return Object.assign({}, item, {
+        points: item.points.filter((point) => point.time >= graphWindow.start && point.time <= graphWindow.end),
+      });
+    }).filter((item) => item.points.length).filter((item) => {
       if (!this._nilmOverlayVisibility.known_load && knownIds.has(item.entity_id)) {
         return false;
       }
