@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `3abeb9f36866d8ca983563f4fb3ff9cdc77d4446`
-**Branch:** `feature/nilm-validation-dashboard`
-**Generated:** `2026-06-26T03:44:10.484519+00:00`
+**Commit:** `cbde86628bdd06d7eebbacb1cc1c9f15188fe238`
+**Branch:** `fix/nilm-dashboard-graph-link`
+**Generated:** `2026-06-26T15:15:43.777052+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **169**
 - Python modules: **155**
-- Symbols: **3477**
+- Symbols: **3499**
 - Internal import edges: **469**
 - External import edges: **514**
 
@@ -18,20 +18,20 @@
 | Symbol | Location | Reason |
 |---|---|---|
 | `custom_components.circuitsetup_energy_analyzer.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:35` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.async_migrate_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:77` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.async_unload_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:100` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.binary_sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/binary_sensor.py:431` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.async_migrate_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:78` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.async_unload_entry` | `custom_components/circuitsetup_energy_analyzer/__init__.py:101` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.binary_sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/binary_sensor.py:438` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.button.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/button.py:294` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerConfigFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3397` | Home Assistant config flow |
 | `custom_components.circuitsetup_energy_analyzer.config_flow.CircuitSetupEnergyAnalyzerOptionsFlow` | `custom_components/circuitsetup_energy_analyzer/config_flow.py:3560` | Home Assistant options flow |
 | `custom_components.circuitsetup_energy_analyzer.diagnostics.async_get_config_entry_diagnostics` | `custom_components/circuitsetup_energy_analyzer/diagnostics.py:28` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.entity.CircuitAnalyzerEntity` | `custom_components/circuitsetup_energy_analyzer/entity.py:693` | Home Assistant entity |
 | `custom_components.circuitsetup_energy_analyzer.number.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/number.py:158` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.panel.AlertEvidenceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:111` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:132` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceHistoryView` | `custom_components/circuitsetup_energy_analyzer/panel.py:150` | HTTP/API view |
-| `custom_components.circuitsetup_energy_analyzer.panel.async_setup_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:169` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.panel.async_unload_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:188` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.panel.AlertEvidenceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:121` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceView` | `custom_components/circuitsetup_energy_analyzer/panel.py:142` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.NilmWorkspaceHistoryView` | `custom_components/circuitsetup_energy_analyzer/panel.py:160` | HTTP/API view |
+| `custom_components.circuitsetup_energy_analyzer.panel.async_setup_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:179` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.panel.async_unload_panel` | `custom_components/circuitsetup_energy_analyzer/panel.py:198` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.processors.activity.ActivityAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/activity.py:27` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.base.FeatureProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/base.py:71` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.billing.BillingCycleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/billing.py:25` | Feature processor |
@@ -53,7 +53,7 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.utility_comparison.UtilityComparisonProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py:46` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.water_context.WaterContextAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py:26` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.select.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/select.py:372` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3306` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3313` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:454` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:471` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/switch.py:152` | Home Assistant lifecycle/API entrypoint |

@@ -635,7 +635,7 @@ Unknown load estimates may include:
 
 These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
 
-Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and publish that confirmed assignment as estimated Home Assistant appliance entities. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy.
+Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and publish that confirmed assignment as estimated Home Assistant appliance entities. The workspace passes NILM IDs internally, so normal use only needs appliance names and optional ground-truth sensor entities. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy.
 
 ## Suggested settings
 

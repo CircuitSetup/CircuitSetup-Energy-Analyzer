@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -21,16 +21,23 @@ from .recommendation_guidance import (
 )
 from .services import (
     ATTR_ALERT_ID,
+    ATTR_ASSIGNMENT_ID,
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
     ATTR_INTERVAL_ID,
+    ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
     ATTR_RECOMMENDATION_ID,
+    ATTR_SESSION_ID,
+    ATTR_SIGNATURE_FINGERPRINT,
     ATTR_SIGNATURE_ID,
     ATTR_START,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
+    SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+    SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+    SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
@@ -42,10 +49,13 @@ from .services import (
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
+    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_RELEARN_BASELINE,
     SERVICE_RESET_SETTING_RECOMMENDATION,
+    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_START_MAINTENANCE,
     SERVICE_UNDO_SETTING_RECOMMENDATION,
+    SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
@@ -73,7 +83,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-workspace-review-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-workspace-actions-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -194,7 +204,12 @@ async def async_unload_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if remove_panel is not None:
-        await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
+        await _async_call_component_helper(
+            remove_panel,
+            hass,
+            PANEL_URL_PATH,
+            warn_if_unknown=False,
+        )
 
 
 def alert_evidence_payload(
@@ -969,7 +984,13 @@ def _nilm_actions_for_signature(
             "domain": DOMAIN,
             "service": SERVICE_LABEL_NILM_SIGNATURE,
             "data": dict(data),
-            "requires": ["label"],
+            "requires": [ATTR_LABEL],
+        },
+        "assign": {
+            "domain": DOMAIN,
+            "service": SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+            "data": dict(data),
+            "requires": [ATTR_LABEL],
         },
         "ignore": {
             "domain": DOMAIN,
@@ -1172,7 +1193,16 @@ def _nilm_label_interval_payload(
                     ATTR_CIRCUIT_ID: circuit_id,
                     ATTR_INTERVAL_ID: interval_id,
                 },
-            }
+            },
+            "assign": {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_INTERVAL_ID: interval_id,
+                },
+                "requires": [ATTR_LABEL],
+            },
         }
     return payload
 
@@ -1186,7 +1216,7 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "domain": DOMAIN,
         "service": SERVICE_LABEL_NILM_INTERVAL,
         "data": data,
-        "requires": [ATTR_START, ATTR_END, "label"],
+        "requires": [ATTR_START, ATTR_END, ATTR_LABEL],
     }
 
 
@@ -1202,13 +1232,52 @@ def _nilm_assignments_for_circuit(
     )
     return (
         [
-            dict(item)
+            _nilm_assignment_payload(circuit_id, item)
             for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
             if isinstance(item, dict)
         ]
         if isinstance(assignments_by_circuit, Mapping)
         else []
     )
+
+
+def _nilm_assignment_payload(
+    circuit_id: str,
+    assignment: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        str(key): value
+        for key, value in assignment.items()
+        if key != "actions"
+    }
+    assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    if not assignment_id:
+        return payload
+
+    state = str(payload.get("lifecycle_state") or "").strip().lower()
+    action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
+    actions: dict[str, dict[str, Any]] = {}
+    if state != "retired":
+        if payload.get("publish_entities") is True or state == "published":
+            actions["unpublish"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+                "data": dict(action_data),
+            }
+        elif state not in {"expected", "ignored"}:
+            actions["publish"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+                "data": dict(action_data),
+            }
+        actions["retire"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+            "data": dict(action_data),
+        }
+    if actions:
+        payload["actions"] = actions
+    return payload
 
 
 def _nilm_virtual_appliances_for_assignments(
@@ -1719,8 +1788,9 @@ def _nilm_edges_matching_signature(
 
 
 def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
-    return {
+    payload = {
         "session_id": session.session_id,
+        "mains_circuit_id": session.mains_circuit_id,
         "signature_fingerprint": session.signature_fingerprint,
         "on_edge_id": session.on_edge_id,
         "off_edge_id": session.off_edge_id,
@@ -1737,6 +1807,22 @@ def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
         "known_load_confidence": session.known_load_confidence,
         "assignment_id": session.assignment_id,
     }
+    if session.session_id:
+        data = {
+            ATTR_CIRCUIT_ID: session.mains_circuit_id,
+            ATTR_SESSION_ID: session.session_id,
+        }
+        if session.signature_fingerprint:
+            data[ATTR_SIGNATURE_FINGERPRINT] = session.signature_fingerprint
+        payload["actions"] = {
+            "assign": {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+                "data": data,
+                "requires": [ATTR_LABEL],
+            }
+        }
+    return payload
 
 
 async def _async_history_rows(
@@ -2113,7 +2199,8 @@ async def _async_register_panel(hass: Any) -> bool:
     if register_panel is None:
         return False
     try:
-        await register_panel(
+        await _async_call_component_helper(
+            register_panel,
             hass,
             frontend_url_path=PANEL_URL_PATH,
             webcomponent_name=PANEL_ELEMENT_NAME,
@@ -2140,9 +2227,32 @@ async def _async_remove_existing_panel(hass: Any) -> None:
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if panel_exists is None or remove_panel is None:
         return
-    if not await _maybe_await(panel_exists(hass, PANEL_URL_PATH)):
+    if not await _async_call_component_helper(panel_exists, hass, PANEL_URL_PATH):
         return
-    await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
+    await _async_call_component_helper(
+        remove_panel,
+        hass,
+        PANEL_URL_PATH,
+        warn_if_unknown=False,
+    )
+
+
+async def _async_call_component_helper(
+    helper: Callable[..., Any],
+    hass: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    try:
+        return await _maybe_await(helper(hass, *args, **kwargs))
+    except TypeError as err:
+        message = str(err)
+        if (
+            "multiple values for argument" not in message
+            and "positional argument" not in message
+        ):
+            raise
+    return await _maybe_await(helper(*args, **kwargs))
 
 
 async def _maybe_await(value: Any) -> Any:

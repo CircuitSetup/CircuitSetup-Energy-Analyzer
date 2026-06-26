@@ -1132,14 +1132,37 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["signatures"][0]["actions"]["ignore"]["service"] == (
         "ignore_nilm_signature"
     )
+    assert payload["signatures"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_signature_to_appliance",
+        "data": {"circuit_id": "mains", "signature_id": "signature_1"},
+        "requires": ["label"],
+    }
     assert payload["label_intervals"][0]["label"] == "Dishwasher"
     assert payload["label_intervals"][0]["actions"]["delete"] == {
         "domain": DOMAIN,
         "service": "delete_nilm_label_interval",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
     }
+    assert payload["label_intervals"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_interval_to_appliance",
+        "data": {"circuit_id": "mains", "interval_id": "label-1"},
+        "requires": ["label"],
+    }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assert payload["assignments"][0]["actions"]["publish"] == {
+        "domain": DOMAIN,
+        "service": "publish_nilm_appliance_assignment",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+    }
+    assert "unpublish" not in payload["assignments"][0]["actions"]
+    assert payload["assignments"][0]["actions"]["retire"] == {
+        "domain": DOMAIN,
+        "service": "retire_nilm_appliance_assignment",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+    }
     assert payload["virtual_appliance_count"] == 1
     assert payload["virtual_appliances"][0]["assignment_id"] == (
         "assignment-dishwasher"
@@ -1163,6 +1186,16 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "requires": ["start", "end", "label"],
     }
     assert payload["edges"][0]["direction"] == "on"
+    assert payload["sessions"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_session_to_appliance",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "signature_fingerprint": payload["sessions"][0]["signature_fingerprint"],
+        },
+        "requires": ["label"],
+    }
     assert payload["sessions"][0]["off_edge_id"] is not None
 
 
@@ -1961,6 +1994,51 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
 
     assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
     assert DOMAIN in hass.data
+
+
+@pytest.mark.asyncio
+async def test_panel_setup_supports_bound_panel_custom_helper() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_URL_PATH,
+        async_setup_panel,
+        async_unload_panel,
+    )
+
+    class FakeHttp:
+        async def async_register_static_paths(self, paths) -> None:
+            return None
+
+        def register_view(self, view) -> None:
+            return None
+
+    class FakePanelCustom:
+        def __init__(self) -> None:
+            self.panels = []
+
+        async def async_register_panel(self, **kwargs) -> None:
+            self.panels.append(kwargs)
+
+    class FakeFrontend:
+        def __init__(self) -> None:
+            self.removed = []
+
+        def async_remove_panel(self, frontend_url_path, **kwargs) -> None:
+            self.removed.append((frontend_url_path, kwargs))
+
+    panel_custom = FakePanelCustom()
+    frontend = FakeFrontend()
+    hass = SimpleNamespace(
+        data={},
+        http=FakeHttp(),
+        components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
+    )
+
+    assert await async_setup_panel(hass) is True
+    assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
+
+    await async_unload_panel(hass)
+
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
 
 
 @pytest.mark.asyncio
