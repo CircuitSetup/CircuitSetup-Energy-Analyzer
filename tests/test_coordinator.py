@@ -3734,6 +3734,54 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_label_interval_create_update_and_delete() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 13, 0, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now["value"],
+    )
+
+    created = await coordinator.async_label_nilm_interval(
+        "mains",
+        label="Dishwasher",
+        start="2026-06-02T12:00:00+00:00",
+        end="2026-06-02T12:45:00+00:00",
+        appliance_id="dishwasher",
+        mains_entity_id="sensor.mains_power",
+        ground_truth_entity_id="sensor.dishwasher_power",
+    )
+    now["value"] = datetime(2026, 6, 2, 13, 5, tzinfo=UTC)
+    updated = await coordinator.async_label_nilm_interval(
+        "mains",
+        interval_id=created["interval_id"],
+        label="Dishwasher wash cycle",
+        start="2026-06-02T12:05:00+00:00",
+        end="2026-06-02T12:50:00+00:00",
+        appliance_id="dishwasher",
+        mains_entity_id="sensor.mains_power",
+    )
+    now["value"] = datetime(2026, 6, 2, 13, 10, tzinfo=UTC)
+    deleted = await coordinator.async_delete_nilm_label_interval(
+        "mains",
+        created["interval_id"],
+    )
+
+    assert created["interval_id"] == updated["interval_id"]
+    assert updated["label"] == "Dishwasher wash cycle"
+    assert updated["start"] == "2026-06-02T12:05:00+00:00"
+    assert updated["end"] == "2026-06-02T12:50:00+00:00"
+    assert updated["created_at"] == "2026-06-02T13:00:00+00:00"
+    assert updated["updated_at"] == "2026-06-02T13:05:00+00:00"
+    assert deleted is True
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"] == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

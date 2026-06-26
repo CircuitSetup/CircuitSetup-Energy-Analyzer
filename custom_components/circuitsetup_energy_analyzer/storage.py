@@ -67,6 +67,9 @@ class FeatureStoreData:
     nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    nilm_label_intervals_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     weather_context_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -289,6 +292,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_unknown_loads_by_circuit": _dict_of_dicts(
             data.nilm_unknown_loads_by_circuit
         ),
+        "nilm_label_intervals_by_circuit": _dict_of_list_dicts(
+            data.nilm_label_intervals_by_circuit
+        ),
         "weather_context_by_circuit": _dict_of_dicts(
             data.weather_context_by_circuit
         ),
@@ -392,6 +398,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         nilm_unknown_loads_by_circuit=_dict_of_dicts(
             raw.get("nilm_unknown_loads_by_circuit", {})
         ),
+        nilm_label_intervals_by_circuit=_dict_of_list_dicts(
+            raw.get("nilm_label_intervals_by_circuit", {})
+        ),
         weather_context_by_circuit=_dict_of_dicts(
             raw.get("weather_context_by_circuit", {})
         ),
@@ -489,7 +498,13 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
 async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v1 feature-store payload to current storage semantics."""
 
-    return _migrate_v1_to_v2_payload(data)
+    return _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
+
+
+async def migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a v2 feature-store payload to current storage semantics."""
+
+    return _migrate_v2_to_v3_payload(data)
 
 
 def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
@@ -500,6 +515,8 @@ def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
     payload = _copy_payload(raw)
     if version < 2:
         payload = _migrate_v1_to_v2_payload(payload)
+    if version < 3:
+        payload = _migrate_v2_to_v3_payload(payload)
     payload["schema_version"] = STORAGE_VERSION
     return payload
 
@@ -513,7 +530,7 @@ def _schema_version(raw: Mapping[str, Any]) -> int:
 
 def _migrate_v1_to_v2_payload(data: Any) -> dict[str, Any]:
     payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = STORAGE_VERSION
+    payload["schema_version"] = 2
     payload["alert_feedback"] = _migrate_alert_feedback_v1_to_v2(
         payload.get("alert_feedback", {})
     )
@@ -521,6 +538,15 @@ def _migrate_v1_to_v2_payload(data: Any) -> dict[str, Any]:
         _migrate_contextual_baselines_v1_to_v2(
             payload.get("contextual_baselines_by_circuit", {})
         )
+    )
+    return payload
+
+
+def _migrate_v2_to_v3_payload(data: Any) -> dict[str, Any]:
+    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
+    payload["schema_version"] = STORAGE_VERSION
+    payload["nilm_label_intervals_by_circuit"] = _dict_of_list_dicts(
+        payload.get("nilm_label_intervals_by_circuit", {})
     )
     return payload
 
@@ -685,6 +711,7 @@ def prune_events(
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
         nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,
+        nilm_label_intervals_by_circuit=data.nilm_label_intervals_by_circuit,
         weather_context_by_circuit=data.weather_context_by_circuit,
         weather_context_history_by_circuit=data.weather_context_history_by_circuit,
         rain_pump_context_by_circuit=data.rain_pump_context_by_circuit,
@@ -772,6 +799,8 @@ class FeatureStore:
             ) -> dict[str, Any]:
                 if old_major_version == 1:
                     return await migrate_v1_to_v2(old_data)
+                if old_major_version == 2:
+                    return await migrate_v2_to_v3(old_data)
                 if old_major_version == STORAGE_VERSION:
                     return _migrated_feature_store_payload(old_data)
                 raise NotImplementedError

@@ -22,14 +22,20 @@ from .recommendation_guidance import (
 from .services import (
     ATTR_ALERT_ID,
     ATTR_CIRCUIT_ID,
+    ATTR_END,
     ATTR_ENTRY_ID,
+    ATTR_INTERVAL_ID,
+    ATTR_MAINS_ENTITY_ID,
     ATTR_RECOMMENDATION_ID,
     ATTR_SIGNATURE_ID,
+    ATTR_START,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
+    SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
     SERVICE_IGNORE_NILM_SIGNATURE,
+    SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
@@ -78,6 +84,7 @@ MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY = 240
 MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
 MAX_NILM_WORKSPACE_EDGES = 40
 MAX_NILM_WORKSPACE_SESSIONS = 20
+MAX_NILM_WORKSPACE_LABEL_INTERVALS = 40
 
 _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
@@ -340,7 +347,7 @@ def nilm_workspace_payload(
     circuit_id: str | None = None,
     hours: Any = None,
 ) -> dict[str, Any]:
-    """Return read-only NILM workspace data for one mains NILM circuit."""
+    """Return bounded NILM workspace data for one mains NILM circuit."""
 
     target = _nilm_workspace_target(tuple(coordinators), circuit_id)
     if target is None:
@@ -357,6 +364,10 @@ def nilm_workspace_payload(
         coordinator,
         config.circuit_id,
     )
+    label_intervals = _nilm_label_intervals_for_circuit(
+        coordinator,
+        config.circuit_id,
+    )
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -368,6 +379,11 @@ def nilm_workspace_payload(
         "known_load_overlays": known_load_overlays,
         "signatures": signatures,
         "signature_count": len(signatures),
+        "label_intervals": label_intervals,
+        "label_interval_count": len(label_intervals),
+        "actions": {
+            "label_interval": _nilm_label_interval_action(config)
+        },
         "edges": [
             _nilm_edge_payload(edge)
             for edge in edges[:MAX_NILM_WORKSPACE_EDGES]
@@ -1074,6 +1090,64 @@ def _nilm_workspace_signatures(
         for signature in _nilm_signatures_for_circuit(coordinator, circuit_id)
         if signature.get(ATTR_SIGNATURE_ID)
     ]
+
+
+def _nilm_label_intervals_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    intervals_by_circuit = getattr(store_data, "nilm_label_intervals_by_circuit", {})
+    intervals = (
+        [
+            dict(item)
+            for item in _iter_items(intervals_by_circuit.get(circuit_id, ()))
+            if isinstance(item, dict)
+        ]
+        if isinstance(intervals_by_circuit, Mapping)
+        else []
+    )
+    return [
+        _nilm_label_interval_payload(circuit_id, interval)
+        for interval in intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
+    ]
+
+
+def _nilm_label_interval_payload(
+    circuit_id: str,
+    interval: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        str(key): value
+        for key, value in interval.items()
+        if key != "actions"
+    }
+    interval_id = str(payload.get(ATTR_INTERVAL_ID) or "").strip()
+    if interval_id:
+        payload["actions"] = {
+            "delete": {
+                "domain": DOMAIN,
+                "service": SERVICE_DELETE_NILM_LABEL_INTERVAL,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_INTERVAL_ID: interval_id,
+                },
+            }
+        }
+    return payload
+
+
+def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
+    data = {ATTR_CIRCUIT_ID: config.circuit_id}
+    entity_ids = _sensor_entity_ids(config)
+    if entity_ids:
+        data[ATTR_MAINS_ENTITY_ID] = entity_ids[0]
+    return {
+        "domain": DOMAIN,
+        "service": SERVICE_LABEL_NILM_INTERVAL,
+        "data": data,
+        "requires": [ATTR_START, ATTR_END, "label"],
+    }
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:

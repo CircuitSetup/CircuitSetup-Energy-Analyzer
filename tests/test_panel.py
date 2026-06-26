@@ -1001,7 +1001,9 @@ def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
     ]
 
 
-def test_nilm_workspace_payload_is_read_only_and_bounded() -> None:
+def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,
@@ -1028,6 +1030,23 @@ def test_nilm_workspace_payload_is_read_only_and_bounded() -> None:
         config=mains_config,
         configs=(mains_config, known_config),
     )
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [
+            {
+                "interval_id": "label-1",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dishwasher",
+                "label": "Dishwasher",
+                "start": "2026-06-06T08:10:00+00:00",
+                "end": "2026-06-06T08:40:00+00:00",
+                "source": "manual",
+                "confidence": 1.0,
+                "mains_entity_id": "sensor.mains_power",
+                "created_at": "2026-06-06T09:00:00+00:00",
+                "updated_at": "2026-06-06T09:00:00+00:00",
+            }
+        ]
+    }
     coordinator._known_load_circuit_ids = frozenset({"pool_pump"})
     coordinator.state.nilm_unknown_loads_by_circuit = {
         "mains": {
@@ -1088,6 +1107,21 @@ def test_nilm_workspace_payload_is_read_only_and_bounded() -> None:
     ]
     assert payload["signatures"][0]["signature_id"] == "signature_1"
     assert "actions" not in payload["signatures"][0]
+    assert payload["label_intervals"][0]["label"] == "Dishwasher"
+    assert payload["label_intervals"][0]["actions"]["delete"] == {
+        "domain": DOMAIN,
+        "service": "delete_nilm_label_interval",
+        "data": {"circuit_id": "mains", "interval_id": "label-1"},
+    }
+    assert payload["actions"]["label_interval"] == {
+        "domain": DOMAIN,
+        "service": "label_nilm_interval",
+        "data": {
+            "circuit_id": "mains",
+            "mains_entity_id": "sensor.mains_power",
+        },
+        "requires": ["start", "end", "label"],
+    }
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["off_edge_id"] is not None
 

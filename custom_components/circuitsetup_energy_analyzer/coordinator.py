@@ -3303,6 +3303,110 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(self._now_fn())
 
+    async def async_label_nilm_interval(
+        self: Self,
+        circuit_id: str,
+        *,
+        label: str,
+        start: Any,
+        end: Any,
+        appliance_id: str | None = None,
+        mains_entity_id: str | None = None,
+        ground_truth_entity_id: str | None = None,
+        interval_id: str | None = None,
+        source: str = "manual",
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """Persist a user-labeled NILM graph interval."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        start_dt = _nilm_label_interval_datetime(start, "start")
+        end_dt = _nilm_label_interval_datetime(end, "end")
+        if end_dt <= start_dt:
+            raise ValueError("NILM label interval end must be after start.")
+
+        now_dt = self._now_fn()
+        now = now_dt.isoformat()
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+        interval_id_text = str(interval_id or "").strip() or _nilm_label_interval_id(
+            circuit_id,
+            start_iso,
+            end_iso,
+            label_text,
+        )
+        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        existing = next(
+            (
+                interval
+                for interval in intervals
+                if interval.get("interval_id") == interval_id_text
+            ),
+            None,
+        )
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            confidence_value = 1.0
+        payload: dict[str, Any] = {
+            "interval_id": interval_id_text,
+            "mains_circuit_id": circuit_id,
+            "appliance_id": str(appliance_id or label_text).strip(),
+            "label": label_text,
+            "start": start_iso,
+            "end": end_iso,
+            "source": str(source or "manual").strip() or "manual",
+            "confidence": max(min(confidence_value, 1.0), 0.0),
+            "mains_entity_id": str(mains_entity_id or "").strip(),
+            "created_at": str(existing.get("created_at") if existing else now),
+            "updated_at": now,
+        }
+        ground_truth_text = str(ground_truth_entity_id or "").strip()
+        if ground_truth_text:
+            payload["ground_truth_entity_id"] = ground_truth_text
+
+        if existing is None:
+            intervals.append(payload)
+        else:
+            existing.clear()
+            existing.update(payload)
+
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now_dt)
+        return dict(payload)
+
+    async def async_delete_nilm_label_interval(
+        self: Self,
+        circuit_id: str,
+        interval_id: str,
+    ) -> bool:
+        """Delete a user-labeled NILM graph interval."""
+        interval_id_text = str(interval_id or "").strip()
+        if not interval_id_text:
+            raise ValueError("Missing interval_id.")
+        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        remaining = [
+            interval
+            for interval in intervals
+            if interval.get("interval_id") != interval_id_text
+        ]
+        if len(remaining) == len(intervals):
+            return False
+        self.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
+        now_dt = self._now_fn()
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now_dt)
+        return True
+
     async def async_ignore_nilm_signature(
         self: Self,
         circuit_id: str,
@@ -7553,6 +7657,27 @@ def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:
         if ref is not None:
             refs.append(ref)
     return tuple(refs)
+
+
+def _nilm_label_interval_datetime(value: Any, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"Invalid NILM label interval {field_name}.") from err
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _nilm_label_interval_id(
+    circuit_id: str,
+    start: str,
+    end: str,
+    label: str,
+) -> str:
+    seed = f"{circuit_id}|{start}|{end}|{label}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"label-{digest}"
 
 
 def _positive_int_from_raw(

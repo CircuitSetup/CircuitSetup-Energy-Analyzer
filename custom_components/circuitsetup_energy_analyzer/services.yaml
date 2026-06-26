@@ -193,6 +193,112 @@ ignore_nilm_signature:
       example: signature_1
       selector:
         text:
+label_nilm_interval:
+  name: Label NILM interval
+  description: "Advanced/script action: save or adjust a manually selected NILM graph interval. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    interval_id:
+      name: Interval ID
+      description: Existing interval identifier when adjusting a saved label.
+      required: false
+      example: label-abc123def456
+      selector:
+        text:
+    label:
+      name: Label
+      description: Friendly load name for the selected graph interval.
+      required: true
+      example: Dishwasher
+      selector:
+        text:
+    start:
+      name: Start
+      description: ISO timestamp for the start of the selected interval.
+      required: true
+      example: "2026-06-02T12:00:00+00:00"
+      selector:
+        text:
+    end:
+      name: End
+      description: ISO timestamp for the end of the selected interval.
+      required: true
+      example: "2026-06-02T12:45:00+00:00"
+      selector:
+        text:
+    appliance_id:
+      name: Appliance ID
+      description: Optional stable appliance/profile identifier for this label.
+      required: false
+      example: dishwasher
+      selector:
+        text:
+    mains_entity_id:
+      name: Mains Entity
+      description: Optional mains power entity used for this interval.
+      required: false
+      example: sensor.mains_power
+      selector:
+        entity:
+          domain:
+            - sensor
+    ground_truth_entity_id:
+      name: Ground Truth Entity
+      description: Optional directly metered appliance power entity for this interval.
+      required: false
+      example: sensor.dishwasher_power
+      selector:
+        entity:
+          domain:
+            - sensor
+delete_nilm_label_interval:
+  name: Delete NILM label interval
+  description: "Advanced/script action: delete a manually saved NILM graph interval label. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    interval_id:
+      name: Interval ID
+      description: Saved NILM label interval identifier to delete.
+      required: true
+      example: label-abc123def456
+      selector:
+        text:
 set_circuit_sensitivity:
   name: Set circuit sensitivity
   description: "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity."

@@ -393,6 +393,44 @@ def test_nilm_label_schema_raises_for_missing_required_field() -> None:
         )
 
 
+def test_nilm_label_interval_schema_validates_manual_interval_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
+    )
+
+    data = NILM_LABEL_INTERVAL_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "interval_id": "label-1",
+            "label": "Dishwasher",
+            "start": "2026-06-02T12:00:00+00:00",
+            "end": "2026-06-02T12:45:00+00:00",
+            "appliance_id": "dishwasher",
+            "mains_entity_id": "sensor.mains_power",
+            "ground_truth_entity_id": "sensor.dishwasher_power",
+        }
+    )
+
+    assert data["interval_id"] == "label-1"
+    assert data["label"] == "Dishwasher"
+    assert data["appliance_id"] == "dishwasher"
+
+
+def test_nilm_label_interval_schema_raises_for_missing_required_field() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
+    )
+
+    with pytest.raises(vol.Invalid):
+        NILM_LABEL_INTERVAL_SERVICE_SCHEMA(
+            {
+                "circuit_id": "mains",
+                "label": "Dishwasher",
+                "start": "2026-06-02T12:00:00+00:00",
+            }
+        )
+
+
 def test_user_experience_service_schemas_validate_required_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         _SERVICE_SCHEMAS,
@@ -400,6 +438,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         CAPACITY_SETTINGS_SERVICE_SCHEMA,
         MAINTENANCE_END_SERVICE_SCHEMA,
         MAINTENANCE_START_SERVICE_SCHEMA,
+        NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
         SENSITIVITY_SERVICE_SCHEMA,
@@ -448,6 +487,19 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         "circuit_id": "mains",
         "source_signature_id": "signature_2",
         "target_signature_id": "signature_1",
+    }
+    assert NILM_LABEL_INTERVAL_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "label": "Dishwasher",
+            "start": "2026-06-02T12:00:00+00:00",
+            "end": "2026-06-02T12:45:00+00:00",
+        }
+    ) == {
+        "circuit_id": "mains",
+        "label": "Dishwasher",
+        "start": "2026-06-02T12:00:00+00:00",
+        "end": "2026-06-02T12:45:00+00:00",
     }
     assert UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA(
         {
@@ -1881,6 +1933,119 @@ async def test_nilm_signature_services_accept_analyzer_entity_target() -> None:
 
     assert coordinator.calls == [
         ("async_ignore_nilm_signature", ("mains", "signature_1"))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_label_interval_services_accept_create_update_and_delete() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_DELETE_NILM_LABEL_INTERVAL,
+        SERVICE_LABEL_NILM_INTERVAL,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData()
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_label_nilm_interval(
+            self,
+            circuit_id: str,
+            *,
+            label: str,
+            start,
+            end,
+            appliance_id: str | None = None,
+            mains_entity_id: str | None = None,
+            ground_truth_entity_id: str | None = None,
+            interval_id: str | None = None,
+            source: str = "manual",
+            confidence: float = 1.0,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_label_nilm_interval",
+                    (
+                        circuit_id,
+                        label,
+                        start,
+                        end,
+                        appliance_id,
+                        mains_entity_id,
+                        ground_truth_entity_id,
+                        interval_id,
+                        source,
+                        confidence,
+                    ),
+                )
+            )
+
+        async def async_delete_nilm_label_interval(
+            self,
+            circuit_id: str,
+            interval_id: str,
+        ) -> None:
+            self.calls.append(
+                ("async_delete_nilm_label_interval", (circuit_id, interval_id))
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_LABEL_NILM_INTERVAL)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "label": "Dishwasher",
+                "start": "2026-06-02T12:00:00+00:00",
+                "end": "2026-06-02T12:45:00+00:00",
+                "appliance_id": "dishwasher",
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dishwasher_power",
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_DELETE_NILM_LABEL_INTERVAL)](
+        SimpleNamespace(data={"circuit_id": "mains", "interval_id": "label-1"})
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_label_nilm_interval",
+            (
+                "mains",
+                "Dishwasher",
+                "2026-06-02T12:00:00+00:00",
+                "2026-06-02T12:45:00+00:00",
+                "dishwasher",
+                "sensor.mains_power",
+                "sensor.dishwasher_power",
+                None,
+                "manual",
+                1.0,
+            ),
+        ),
+        ("async_delete_nilm_label_interval", ("mains", "label-1")),
     ]
 
 

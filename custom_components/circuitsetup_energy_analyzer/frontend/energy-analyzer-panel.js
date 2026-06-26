@@ -68,6 +68,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
+    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -131,6 +132,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
+    this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
     this._render();
 
     const routeUrl = new URL(routeKey, window.location.origin);
@@ -328,6 +330,62 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._lastActionMessage = this._nilmActionMessage(actionKey, data);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
+      this._scrollToTop();
+    } catch (error) {
+      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._busyAction = "";
+      this._renderAndScrollToTop();
+    }
+  }
+
+  async _callNilmLabelIntervalAction(index, actionKey) {
+    const workspace = this._nilmWorkspace;
+    const intervals = workspace && workspace.label_intervals;
+    let action = null;
+    let data = {};
+    if (actionKey === "save") {
+      action = workspace && workspace.actions && workspace.actions.label_interval;
+      data = Object.assign({}, action && action.data || {});
+      const draft = this._nilmLabelIntervalDraft || {};
+      const label = String(draft.label || "").trim();
+      const start = this._datetimeLocalToIso(draft.start);
+      const end = this._datetimeLocalToIso(draft.end);
+      if (!label || !start || !end) {
+        this._error = "Choose start, end, and label before saving a NILM interval.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.label = label;
+      data.start = start;
+      data.end = end;
+      data.appliance_id = String(draft.appliance_id || label).trim();
+    } else if (actionKey === "delete") {
+      const interval = intervals && intervals[index];
+      action = interval && interval.actions && interval.actions.delete;
+      data = Object.assign({}, action && action.data || {});
+    }
+    if (!this._guardActionCall(action, `NILM label interval ${actionKey}`)) {
+      return;
+    }
+    const busyKey = actionKey === "save"
+      ? "nilm_label_interval_save"
+      : `nilm_label_interval_${index}_delete`;
+    this._busyAction = busyKey;
+    this._render();
+    try {
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, data);
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      this._lastActionMessage = actionKey === "save"
+        ? `Saved interval label: ${data.label}.`
+        : "Deleted interval label.";
+      if (actionKey === "save") {
+        this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "" };
+      }
+      this._busyAction = "";
+      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_label_interval") });
       this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
@@ -659,6 +717,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font: inherit;
           padding: 8px 10px;
         }
+        .nilm-interval-form {
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+          margin: 12px 0;
+        }
+        .nilm-interval-form label {
+          display: grid;
+          gap: 4px;
+        }
+        .nilm-interval-form input {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 8px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          padding: 8px 10px;
+          min-width: 0;
+        }
         .merge-targets {
           display: flex;
           flex-wrap: wrap;
@@ -718,6 +795,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
+      input.addEventListener("input", () => this._rememberNilmLabelIntervalDraft(input));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -726,6 +806,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-load-all-nilm]")) {
       button.addEventListener("click", () => this._loadExpandedNilm());
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmLabelIntervalIndex || "-1", 10);
+        this._callNilmLabelIntervalAction(index, button.dataset.nilmLabelIntervalAction);
+      });
     }
   }
 
@@ -855,6 +941,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     this._nilmLabelDrafts.set(input.dataset.nilmLabelKey, input.value);
+  }
+
+  _rememberNilmLabelIntervalDraft(input) {
+    if (!input || !input.dataset.nilmLabelIntervalInput) {
+      return;
+    }
+    this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+      [input.dataset.nilmLabelIntervalInput]: input.value,
+    });
   }
 
   _renderRecommendations() {
@@ -1028,6 +1123,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>NILM Workspace</h2>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${graph}
+        ${this._renderNilmLabelIntervals(workspace)}
         ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
@@ -1056,6 +1152,56 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </div>
         `)}
       </section>
+    `;
+  }
+
+  _renderNilmLabelIntervals(workspace) {
+    const draft = this._nilmLabelIntervalDraft || {};
+    const intervals = Array.isArray(workspace && workspace.label_intervals)
+      ? workspace.label_intervals
+      : [];
+    const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
+    return `
+      <h3>Manual Labels</h3>
+      <div class="metric">
+        <div class="nilm-interval-form">
+          <label>
+            <span class="muted">Start</span>
+            <input type="datetime-local" data-nilm-label-interval-input="start" value="${this._escape(draft.start || "")}">
+          </label>
+          <label>
+            <span class="muted">End</span>
+            <input type="datetime-local" data-nilm-label-interval-input="end" value="${this._escape(draft.end || "")}">
+          </label>
+          <label>
+            <span class="muted">Label</span>
+            <input type="text" data-nilm-label-interval-input="label" value="${this._escape(draft.label || "")}" placeholder="Appliance name">
+          </label>
+          <label>
+            <span class="muted">Appliance profile</span>
+            <input type="text" data-nilm-label-interval-input="appliance_id" value="${this._escape(draft.appliance_id || "")}" placeholder="dishwasher">
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
+        </div>
+      </div>
+      ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `
+        <div class="metric">
+          <span>${this._escape(item.start || "")} - ${this._escape(item.end || "")}</span>
+          <strong>${this._escape(item.label || item.appliance_id || "Labeled interval")}</strong>
+          ${item.mains_entity_id ? `<p class="muted">${this._escape(item.mains_entity_id)}</p>` : ""}
+          <div class="actions">
+            <button
+              type="button"
+              class="secondary"
+              data-nilm-label-interval-index="${index}"
+              data-nilm-label-interval-action="delete"
+              ${this._busyAction === `nilm_label_interval_${index}_delete` ? "disabled" : ""}
+            >Delete Label</button>
+          </div>
+        </div>
+      `).join("")}</div>` : `<p class="muted">No manual NILM labels are saved yet.</p>`}
     `;
   }
 
@@ -1341,6 +1487,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return this._formatDateTime(value);
     }
     return value;
+  }
+
+  _datetimeLocalToIso(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return "";
+    }
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return date.toISOString();
   }
 
   _formatDateTime(value) {

@@ -29,6 +29,8 @@ SERVICE_EXPORT_HISTORY_CSV = "export_history_csv"
 SERVICE_RUN_MAPPING_CHECKS = "run_mapping_checks"
 SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
+SERVICE_LABEL_NILM_INTERVAL = "label_nilm_interval"
+SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
@@ -61,7 +63,15 @@ ATTR_ENTITY_ID = "entity_id"
 ATTR_DURATION = "duration"
 ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
+ATTR_INTERVAL_ID = "interval_id"
 ATTR_LABEL = "label"
+ATTR_START = "start"
+ATTR_END = "end"
+ATTR_APPLIANCE_ID = "appliance_id"
+ATTR_MAINS_ENTITY_ID = "mains_entity_id"
+ATTR_GROUND_TRUTH_ENTITY_ID = "ground_truth_entity_id"
+ATTR_SOURCE = "source"
+ATTR_CONFIDENCE = "confidence"
 ATTR_PRESET = "preset"
 ATTR_WINDOW_DAYS = "window_days"
 ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
@@ -282,6 +292,23 @@ NILM_LABEL_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
+NILM_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
+    required=(ATTR_LABEL, ATTR_START, ATTR_END),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_INTERVAL_ID,
+        ATTR_APPLIANCE_ID,
+        ATTR_MAINS_ENTITY_ID,
+        ATTR_GROUND_TRUTH_ENTITY_ID,
+        ATTR_SOURCE,
+        ATTR_CONFIDENCE,
+    ),
+)
+NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
+    required=(ATTR_INTERVAL_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -326,6 +353,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RUN_MAPPING_CHECKS: None,
     SERVICE_LABEL_NILM_SIGNATURE: NILM_LABEL_SERVICE_SCHEMA,
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
+    SERVICE_LABEL_NILM_INTERVAL: NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_DELETE_NILM_LABEL_INTERVAL: NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
@@ -563,6 +592,36 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_ignore_nilm_signature",
                 circuit_id,
                 data.get(ATTR_SIGNATURE_ID),
+        )
+        return
+
+    if service == SERVICE_LABEL_NILM_INTERVAL:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_label_nilm_interval",
+                circuit_id,
+                label=data.get(ATTR_LABEL),
+                start=data.get(ATTR_START),
+                end=data.get(ATTR_END),
+                appliance_id=data.get(ATTR_APPLIANCE_ID),
+                mains_entity_id=data.get(ATTR_MAINS_ENTITY_ID),
+                ground_truth_entity_id=data.get(ATTR_GROUND_TRUTH_ENTITY_ID),
+                interval_id=data.get(ATTR_INTERVAL_ID),
+                source=data.get(ATTR_SOURCE, "manual"),
+                confidence=data.get(ATTR_CONFIDENCE, 1.0),
+            )
+        return
+
+    if service == SERVICE_DELETE_NILM_LABEL_INTERVAL:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_delete_nilm_label_interval",
+                circuit_id,
+                data.get(ATTR_INTERVAL_ID),
             )
         return
 
@@ -971,6 +1030,7 @@ def _known_circuit_ids(coordinator: Any) -> set[str]:
         "water_context_history_by_circuit",
         "nilm_signatures",
         "nilm_unknown_loads_by_circuit",
+        "nilm_label_intervals_by_circuit",
         "maintenance_by_circuit",
     ):
         values = getattr(store_data, attr, None)
@@ -1409,11 +1469,16 @@ def _iter_items(value: Any) -> Iterable[Any]:
     return (value,)
 
 
-async def _call_if_present(target: Any, method_name: str, *args: Any) -> Any:
+async def _call_if_present(
+    target: Any,
+    method_name: str,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     method = getattr(target, method_name, None)
     if method is None:
         return None
-    result = method(*args)
+    result = method(*args, **kwargs)
     if inspect.isawaitable(result):
         return await result
     return result
