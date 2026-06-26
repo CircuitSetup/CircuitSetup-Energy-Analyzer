@@ -7,6 +7,7 @@ const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
+const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
 const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
@@ -1152,13 +1153,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _startNilmChartSelection(event, chart) {
-    const startTime = this._chartEventTime(event, chart);
+    const startTime = this._snapNilmChartTimeToEdge(this._chartEventTime(event, chart), chart);
     if (!Number.isFinite(startTime)) {
       return;
     }
     const finish = (finishEvent) => {
       chart.removeEventListener("pointercancel", cancel);
-      const endTime = this._chartEventTime(finishEvent, chart);
+      const endTime = this._snapNilmChartTimeToEdge(this._chartEventTime(finishEvent, chart), chart);
       if (!Number.isFinite(endTime)) {
         return;
       }
@@ -1181,6 +1182,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     chart.addEventListener("pointerup", finish, { once: true });
     chart.addEventListener("pointercancel", cancel, { once: true });
+  }
+
+  _snapNilmChartTimeToEdge(time, chart) {
+    if (!Number.isFinite(time) || !chart || !chart.dataset.nilmEdgeTimes) {
+      return time;
+    }
+    let snapped = time;
+    let closestDistance = NILM_EDGE_SNAP_MS + 1;
+    for (const value of chart.dataset.nilmEdgeTimes.split(",")) {
+      const edgeTime = Number(value);
+      const distance = Math.abs(edgeTime - time);
+      if (Number.isFinite(edgeTime) && distance <= NILM_EDGE_SNAP_MS && distance < closestDistance) {
+        snapped = edgeTime;
+        closestDistance = distance;
+      }
+    }
+    return snapped;
   }
 
   _chartEventTime(event, chart) {
@@ -1696,13 +1714,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
     const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
     const timeZoneLabel = this._timeZone();
-    const edgeMarkers = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
+    const edgeItems = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
       const markerTime = Date.parse(edge && edge.timestamp || "");
       if (!Number.isFinite(markerTime) || markerTime < minTime || markerTime > maxTime) {
-        return "";
+        return null;
       }
+      return { time: markerTime, direction: edge.direction || "NILM edge" };
+    }).filter(Boolean);
+    const edgeMarkers = edgeItems.map((edge) => {
+      const markerTime = edge.time;
       const markerX = x(markerTime).toFixed(1);
-      const direction = this._friendlyFeature(edge.direction || "NILM edge");
+      const direction = this._friendlyFeature(edge.direction);
       return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}"><title>${this._escape(direction)}</title></line>`;
     }).join("");
     const sessionBands = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
@@ -1715,8 +1737,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const right = x(Math.min(end, maxTime));
       return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}"><title>${this._escape(session.session_id || "NILM session")}</title></rect>`;
     }).join("");
+    const edgeTimesAttr = edgeItems.length
+      ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
+      : "";
     const selectAttrs = alert.nilm_select_interval
-      ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"`
+      ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
       : "";
 
     return `
