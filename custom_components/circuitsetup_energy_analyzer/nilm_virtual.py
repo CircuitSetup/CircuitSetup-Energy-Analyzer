@@ -13,6 +13,7 @@ NILM_FINISHED_CONFIDENCE_THRESHOLD = 0.8
 NILM_UNUSUAL_CONFIDENCE_THRESHOLD = 0.8
 NILM_UNUSUAL_MIN_REPEATED = 2
 NILM_VALIDATED_MODEL_STATES = frozenset({"published", "validated"})
+NILM_REVIEW_MODEL_STATES = frozenset({"conflict", "low_confidence", "needs_validation"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +115,7 @@ def nilm_virtual_appliance_alerts(
     for state in published_nilm_virtual_appliance_states(coordinator):
         assignment = _assignment_for_state(coordinator, state)
         for alert in (
+            nilm_virtual_low_confidence_alert(state, now=now),
             nilm_virtual_finished_alert(state, now=now),
             nilm_virtual_unusual_runtime_alert(state, assignment, now=now),
             nilm_virtual_unusual_energy_alert(state, assignment, now=now),
@@ -121,6 +123,52 @@ def nilm_virtual_appliance_alerts(
             if alert is not None:
                 alerts.append(alert)
     return tuple(alerts)
+
+
+def nilm_virtual_low_confidence_alert(
+    state: Any,
+    *,
+    now: datetime,
+) -> AlertEvidence | None:
+    """Return a validation prompt when a published NILM appliance is uncertain."""
+    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    model_status = str(getattr(state, "model_status", "") or "").strip()
+    low_confidence = confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
+    needs_validation = model_status in NILM_REVIEW_MODEL_STATES
+    if not (low_confidence or needs_validation):
+        return None
+    assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
+    if not assignment_id:
+        return None
+    if model_status == "conflict":
+        notification_type = "model_drift"
+        feature = "nilm_model_drift"
+    elif low_confidence:
+        notification_type = "low_confidence"
+        feature = "nilm_low_confidence_change"
+    else:
+        notification_type = "needs_validation"
+        feature = "nilm_assignment_needs_validation"
+    return AlertEvidence(
+        timestamp=now,
+        circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
+        severity=Severity.WARNING,
+        message=_nilm_alert_message(
+            state,
+            "needs validation",
+            confidence=confidence,
+        ),
+        feature=feature,
+        observed_value=confidence,
+        baseline_value=NILM_FINISHED_CONFIDENCE_THRESHOLD,
+        repeated_count=1,
+        last_seen=getattr(state, "last_seen", None),
+        features=_nilm_alert_features(
+            state,
+            notification_type,
+            f"{assignment_id}:{notification_type}",
+        ),
+    )
 
 
 def nilm_virtual_finished_alert(

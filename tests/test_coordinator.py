@@ -4863,6 +4863,166 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
 
 
 @pytest.mark.asyncio
+async def test_nilm_virtual_low_confidence_notification_prompts_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    sent_notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        sent_notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "needs_validation",
+                        "confidence": 0.72,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    notify_virtual = getattr(coordinator, "_notify_nilm_virtual_appliances", None)
+    assert notify_virtual is not None
+    active_alerts = await notify_virtual(now)
+
+    assert sent_notifications
+    assert active_alerts == sent_notifications
+    assert sent_notifications[0].feature == "nilm_low_confidence_change"
+    assert "needs validation" in sent_notifications[0].message
+    assert "Estimated from mains power by NILM" in sent_notifications[0].message
+    assert sent_notifications[0].features["notification_key"] == (
+        "assignment-dishwasher:low_confidence"
+    )
+
+    active_alerts = await notify_virtual(now)
+
+    assert len(sent_notifications) == 1
+    assert active_alerts
+    assert active_alerts[0].feature == "nilm_low_confidence_change"
+
+
+@pytest.mark.asyncio
+async def test_nilm_virtual_needs_validation_notification_uses_review_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    sent_notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        sent_notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "needs_validation",
+                        "confidence": 0.91,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    active_alerts = await coordinator._notify_nilm_virtual_appliances(now)
+
+    assert sent_notifications
+    assert active_alerts == sent_notifications
+    assert sent_notifications[0].feature == "nilm_assignment_needs_validation"
+    assert sent_notifications[0].features["notification_key"] == (
+        "assignment-dishwasher:needs_validation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_nilm_virtual_conflict_notification_uses_model_drift_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    sent_notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        sent_notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "conflict",
+                        "confidence": 0.91,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    active_alerts = await coordinator._notify_nilm_virtual_appliances(now)
+
+    assert sent_notifications
+    assert active_alerts == sent_notifications
+    assert sent_notifications[0].feature == "nilm_model_drift"
+    assert sent_notifications[0].features["notification_key"] == (
+        "assignment-dishwasher:model_drift"
+    )
+
+
+@pytest.mark.asyncio
 async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
