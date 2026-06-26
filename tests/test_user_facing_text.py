@@ -1182,6 +1182,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "ground_truth_entity_id",
         "ground_truth_options",
         "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
+        "No ground-truth sensors are available from known-load circuits.",
         "_renderNilmValidation",
         "NILM Sessions",
         "Manual Labels",
@@ -1293,6 +1294,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "_entityList" not in asset
     assert "window.prompt" not in asset
     assert "Label this NILM signature" not in asset
+    assert 'placeholder="sensor.dishwasher_power"' not in asset
     assert "<select id=\"nilm_merge_target_" not in asset
     assert (
         'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'

@@ -1456,7 +1456,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? sensorAction.ground_truth_options
       : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
-    const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" ? "disabled" : "";
+    const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" || !groundTruthOptions.length ? "disabled" : "";
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     return `
       <h3>Manual Labels</h3>
@@ -1479,7 +1479,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             ${groundTruthOptions.length ? `<select data-nilm-label-interval-input="ground_truth_entity_id">
               <option value="">Select sensor</option>
               ${groundTruthOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(draft.ground_truth_entity_id || "") ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
-            </select>` : `<input type="text" data-nilm-label-interval-input="ground_truth_entity_id" value="${this._escape(draft.ground_truth_entity_id || "")}" placeholder="sensor.dishwasher_power">`}
+            </select>` : `<p class="muted">No ground-truth sensors are available from known-load circuits.</p>`}
           </label>
         </div>
         <div class="actions">
