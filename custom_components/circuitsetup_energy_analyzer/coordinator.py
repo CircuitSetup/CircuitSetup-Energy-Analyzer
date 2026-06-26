@@ -3608,6 +3608,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_session_ids = set(_clean_string_list(assignment.get("session_ids")))
         matched_session_ids: list[str] = []
         conflicting_session_ids: list[str] = []
+        matched_interval_ids: set[int] = set()
+        power_errors: list[float] = []
+        energy_errors: list[float] = []
         for session in self.store_data.nilm_session_history_by_circuit.get(
             circuit_id,
             (),
@@ -3625,11 +3628,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 continue
             if not session.get("end"):
                 continue
-            if any(
-                _nilm_overlap_seconds(interval, session) > 0
+            overlapping_intervals = [
+                interval
                 for interval in intervals
-            ):
+                if _nilm_overlap_seconds(interval, session) > 0
+            ]
+            if overlapping_intervals:
                 _append_unique(matched_session_ids, session_id)
+                session_power = _float_or_none(session.get("median_power_w"))
+                session_energy = _float_or_none(session.get("estimated_energy_kwh"))
+                for interval in overlapping_intervals:
+                    matched_interval_ids.add(id(interval))
+                    interval_power = _float_or_none(interval.get("median_power_w"))
+                    interval_energy = _float_or_none(
+                        interval.get("estimated_energy_kwh"),
+                    )
+                    if session_power is not None and interval_power is not None:
+                        power_errors.append(abs(session_power - interval_power))
+                    if session_energy is not None and interval_energy is not None:
+                        energy_errors.append(abs(session_energy - interval_energy))
             elif any(
                 _nilm_validation_coverage_overlap_seconds(interval, session) > 0
                 for interval in intervals
@@ -3683,6 +3700,51 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment["rejected_session_ids"] = rejected
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        ground_truth_interval_count = len(intervals)
+        matched_ground_truth_count = len(matched_interval_ids)
+        missed_ground_truth_count = max(
+            ground_truth_interval_count - matched_ground_truth_count,
+            0,
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["ground_truth_interval_count"] = ground_truth_interval_count
+        assignment["matched_ground_truth_count"] = matched_ground_truth_count
+        assignment["missed_ground_truth_count"] = missed_ground_truth_count
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["false_negative_rate"] = (
+            round(missed_ground_truth_count / ground_truth_interval_count, 3)
+            if ground_truth_interval_count
+            else 0.0
+        )
+        assignment["median_power_error"] = (
+            round(median(power_errors), 3) if power_errors else None
+        )
+        assignment["energy_estimate_error"] = (
+            round(median(energy_errors), 3) if energy_errors else None
+        )
+        validation_starts: list[datetime] = []
+        validation_ends: list[datetime] = []
+        for interval in intervals:
+            validation_start = _datetime_or_none(
+                interval.get("validation_start") or interval.get("start"),
+            )
+            validation_end = _datetime_or_none(
+                interval.get("validation_end") or interval.get("end"),
+            )
+            if validation_start is not None:
+                validation_starts.append(validation_start)
+            if validation_end is not None:
+                validation_ends.append(validation_end)
+        if validation_starts and validation_ends:
+            assignment["validation_window_start"] = min(validation_starts).isoformat()
+            assignment["validation_window_end"] = max(validation_ends).isoformat()
         if newly_rejected and assignment.get("lifecycle_state") != "retired":
             assignment["lifecycle_state"] = "conflict"
         elif assignment.get("lifecycle_state") not in {"published", "retired"}:

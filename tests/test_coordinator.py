@@ -4045,6 +4045,8 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
                         "confidence": 1.0,
                         "mains_entity_id": "sensor.mains_power",
                         "ground_truth_entity_id": "sensor.dishwasher_power",
+                        "median_power_w": 800.0,
+                        "estimated_energy_kwh": 0.5,
                     }
                 ]
             },
@@ -4056,6 +4058,8 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
                         "start": "2026-06-02T12:00:00+00:00",
                         "end": "2026-06-02T12:45:00+00:00",
                         "confidence": 0.78,
+                        "median_power_w": 820.0,
+                        "estimated_energy_kwh": 0.615,
                     },
                     {
                         "session_id": "session-later",
@@ -4101,10 +4105,18 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
     assert validated["rejected_session_ids"] == []
     assert validated["confirmed_sessions"] == 1
     assert validated["rejected_sessions"] == 0
+    assert validated["adjusted_sessions"] == 0
     assert validated["confidence"] == pytest.approx(0.85)
     assert validated["lifecycle_state"] == "validated"
     assert validated["last_validation"] == "history"
     assert validated["last_validated_at"] == "2026-06-02T14:00:00+00:00"
+    assert validated["ground_truth_interval_count"] == 1
+    assert validated["matched_ground_truth_count"] == 1
+    assert validated["missed_ground_truth_count"] == 0
+    assert validated["false_positive_rate"] == pytest.approx(0.0)
+    assert validated["false_negative_rate"] == pytest.approx(0.0)
+    assert validated["median_power_error"] == pytest.approx(20.0)
+    assert validated["energy_estimate_error"] == pytest.approx(0.115)
     assert "session-later" not in validated["confirmed_session_ids"]
 
 
@@ -4180,10 +4192,20 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
     assert validated["rejected_session_ids"] == ["session-false-positive"]
     assert validated["confirmed_sessions"] == 0
     assert validated["rejected_sessions"] == 1
+    assert validated["adjusted_sessions"] == 0
     assert validated["confidence"] == pytest.approx(0.65)
     assert validated["lifecycle_state"] == "conflict"
     assert validated["last_validation"] == "direct_meter_conflict"
     assert validated["last_rejected_at"] == "2026-06-02T15:00:00+00:00"
+    assert validated["ground_truth_interval_count"] == 1
+    assert validated["matched_ground_truth_count"] == 0
+    assert validated["missed_ground_truth_count"] == 1
+    assert validated["false_positive_rate"] == pytest.approx(1.0)
+    assert validated["false_negative_rate"] == pytest.approx(1.0)
+    assert validated["median_power_error"] is None
+    assert validated["energy_estimate_error"] is None
+    assert validated["validation_window_start"] == "2026-06-02T12:00:00+00:00"
+    assert validated["validation_window_end"] == "2026-06-02T14:00:00+00:00"
 
 
 @pytest.mark.asyncio
