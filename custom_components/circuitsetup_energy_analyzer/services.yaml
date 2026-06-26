@@ -554,6 +554,80 @@ reject_nilm_session:
       example: assignment-abc123def456
       selector:
         text:
+rename_nilm_appliance:
+  name: Rename NILM appliance
+  description: "Advanced/script action: rename a NILM appliance assignment without changing its stable entity identifiers. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to rename. The NILM workspace passes this internally.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+    label:
+      name: Label
+      description: New friendly appliance name.
+      required: true
+      example: Kitchen Dishwasher
+      selector:
+        text:
+change_nilm_appliance_profile:
+  name: Change NILM appliance profile
+  description: "Advanced/script action: change the appliance profile hint for a NILM assignment. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to update. The NILM workspace passes this internally.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+    appliance_profile:
+      name: Appliance Profile
+      description: New appliance profile hint, such as dishwasher or custom.
+      required: true
+      example: dishwasher_heated_dry
+      selector:
+        text:
 publish_nilm_appliance_assignment:
   name: Publish NILM appliance assignment
   description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."

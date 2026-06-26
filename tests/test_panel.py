@@ -1152,6 +1152,18 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assert payload["assignments"][0]["actions"]["rename"] == {
+        "domain": DOMAIN,
+        "service": "rename_nilm_appliance",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["label"],
+    }
+    assert payload["assignments"][0]["actions"]["change_profile"] == {
+        "domain": DOMAIN,
+        "service": "change_nilm_appliance_profile",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["appliance_profile"],
+    }
     assert payload["assignments"][0]["actions"]["publish"] == {
         "domain": DOMAIN,
         "service": "publish_nilm_appliance_assignment",

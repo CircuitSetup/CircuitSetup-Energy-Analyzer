@@ -3562,6 +3562,40 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             correct=False,
         )
 
+    async def async_rename_nilm_appliance(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        label: str,
+    ) -> dict[str, Any]:
+        """Rename a NILM appliance assignment without changing its stable ID."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["display_name"] = label_text
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_change_nilm_appliance_profile(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        appliance_profile: str,
+    ) -> dict[str, Any]:
+        """Change the appliance profile hint for a NILM assignment."""
+        profile_text = str(appliance_profile or "").strip()
+        if not profile_text:
+            raise ValueError("Missing appliance_profile.")
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["appliance_profile"] = profile_text
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
     async def _async_record_nilm_session_validation(
         self: Self,
         circuit_id: str,

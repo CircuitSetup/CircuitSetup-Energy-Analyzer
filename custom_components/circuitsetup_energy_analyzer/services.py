@@ -36,6 +36,8 @@ SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
 SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
 SERVICE_VALIDATE_NILM_SESSION = "validate_nilm_session"
 SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
+SERVICE_RENAME_NILM_APPLIANCE = "rename_nilm_appliance"
+SERVICE_CHANGE_NILM_APPLIANCE_PROFILE = "change_nilm_appliance_profile"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
 SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
@@ -358,6 +360,14 @@ NILM_SESSION_VALIDATION_SERVICE_SCHEMA = _schema(
     required=(ATTR_SESSION_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_ASSIGNMENT_ID),
 )
+NILM_RENAME_APPLIANCE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID, ATTR_LABEL),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
+NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID, ATTR_APPLIANCE_PROFILE),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -413,6 +423,10 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
     SERVICE_VALIDATE_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
     SERVICE_REJECT_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
+    SERVICE_RENAME_NILM_APPLIANCE: NILM_RENAME_APPLIANCE_SERVICE_SCHEMA,
+    SERVICE_CHANGE_NILM_APPLIANCE_PROFILE: (
+        NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA
+    ),
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
@@ -785,6 +799,30 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_SESSION_ID),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_RENAME_NILM_APPLIANCE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_rename_nilm_appliance",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+                label=data.get(ATTR_LABEL),
+            )
+        return
+
+    if service == SERVICE_CHANGE_NILM_APPLIANCE_PROFILE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_change_nilm_appliance_profile",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
             )
         return
 

@@ -69,6 +69,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
     this._nilmSessionLabelDrafts = new Map();
+    this._nilmAssignmentDrafts = new Map();
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
@@ -134,6 +135,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
     this._nilmSessionLabelDrafts.clear();
+    this._nilmAssignmentDrafts.clear();
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._render();
 
@@ -426,7 +428,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const data = Object.assign({}, action.data || {});
     if (action.requires && action.requires.includes("label")) {
-      const labelInput = this.shadowRoot.querySelector(`#nilm_session_label_${index}`);
+      const labelInput = this.shadowRoot.querySelector(`#nilm_assignment_label_${index}`)
+        || this.shadowRoot.querySelector(`#nilm_session_label_${index}`);
       const label = labelInput
         ? labelInput.value
         : item.display_name || item.label || item.appliance_id || "";
@@ -439,6 +442,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (item.appliance_id && !data.appliance_id) {
         data.appliance_id = item.appliance_id;
       }
+    }
+    if (action.requires && action.requires.includes("appliance_profile")) {
+      const profileInput = this.shadowRoot.querySelector(`#nilm_assignment_profile_${index}`);
+      const profile = profileInput ? profileInput.value.trim() : "";
+      if (!profile) {
+        this._error = "Enter an appliance type before changing this NILM assignment.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.appliance_profile = profile;
     }
     const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
     this._busyAction = busyKey;
@@ -610,6 +623,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (actionKey === "retire") {
       return "Retired NILM appliance assignment.";
+    }
+    if (actionKey === "rename") {
+      return `Renamed assignment to ${name}.`;
+    }
+    if (actionKey === "change_profile") {
+      return "Changed appliance type.";
     }
     if (actionKey === "validate") {
       return `Confirmed ${name}.`;
@@ -897,6 +916,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
+      input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
+    }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
     }
@@ -1060,6 +1082,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     this._nilmSessionLabelDrafts.set(input.dataset.nilmSessionLabelKey, input.value);
+  }
+
+  _rememberNilmAssignmentDraft(input) {
+    if (!input || !input.dataset.nilmAssignmentKey || !input.dataset.nilmAssignmentField) {
+      return;
+    }
+    this._nilmAssignmentDrafts.set(`${input.dataset.nilmAssignmentKey}:${input.dataset.nilmAssignmentField}`, input.value);
   }
 
   _startNilmChartSelection(event, chart) {
@@ -1295,6 +1324,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <span>${this._escape(item.lifecycle_state || "assigned")}</span>
             <strong>${this._escape(item.display_name || item.appliance_id || "Assigned appliance")}</strong>
             <p class="muted">Confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+            ${this._renderNilmAssignmentEditFields(item, index)}
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
         `)}
@@ -1418,6 +1448,39 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return String((session && session.session_id) || "");
   }
 
+  _renderNilmAssignmentEditFields(item, index) {
+    const actions = item && item.actions;
+    if (!actions || (!actions.rename && !actions.change_profile)) {
+      return "";
+    }
+    const draftKey = this._nilmAssignmentDraftKey(item);
+    const label = this._nilmAssignmentDraftValue(draftKey, "label", item.display_name || "");
+    const profile = this._nilmAssignmentDraftValue(draftKey, "appliance_profile", item.appliance_profile || "");
+    return `
+      <div class="grid">
+        ${actions.rename ? `<label class="nilm-label-field" for="nilm_assignment_label_${index}">
+          <span class="muted">Appliance name</span>
+          <input id="nilm_assignment_label_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="label" value="${this._escape(label)}" placeholder="Appliance name">
+        </label>` : ""}
+        ${actions.change_profile ? `<label class="nilm-label-field" for="nilm_assignment_profile_${index}">
+          <span class="muted">Appliance type</span>
+          <input id="nilm_assignment_profile_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile" value="${this._escape(profile)}" placeholder="dishwasher">
+        </label>` : ""}
+      </div>
+    `;
+  }
+
+  _nilmAssignmentDraftKey(item) {
+    return String((item && item.assignment_id) || "");
+  }
+
+  _nilmAssignmentDraftValue(draftKey, field, fallback) {
+    const key = `${draftKey}:${field}`;
+    return this._nilmAssignmentDrafts.has(key)
+      ? this._nilmAssignmentDrafts.get(key)
+      : fallback;
+  }
+
   _renderNilmAssignmentActions(item, index) {
     const actions = item && item.actions;
     if (!actions || !Object.keys(actions).length) {
@@ -1425,6 +1488,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     return `
       <div class="actions">
+        ${actions.rename ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="rename" ${this._busyAction === `nilm_assignments_${index}_rename` ? "disabled" : ""}>Rename Appliance</button>` : ""}
+        ${actions.change_profile ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="change_profile" ${this._busyAction === `nilm_assignments_${index}_change_profile` ? "disabled" : ""}>Change Type</button>` : ""}
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Publish Entities</button>` : ""}
         ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Disable Publishing</button>` : ""}
         ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Retire</button>` : ""}

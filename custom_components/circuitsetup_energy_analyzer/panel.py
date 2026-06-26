@@ -21,6 +21,7 @@ from .recommendation_guidance import (
 )
 from .services import (
     ATTR_ALERT_ID,
+    ATTR_APPLIANCE_PROFILE,
     ATTR_ASSIGNMENT_ID,
     ATTR_CIRCUIT_ID,
     ATTR_END,
@@ -38,6 +39,7 @@ from .services import (
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+    SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
@@ -52,6 +54,7 @@ from .services import (
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_REJECT_NILM_SESSION,
     SERVICE_RELEARN_BASELINE,
+    SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESET_SETTING_RECOMMENDATION,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_START_MAINTENANCE,
@@ -1260,6 +1263,18 @@ def _nilm_assignment_payload(
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
     if state != "retired":
+        actions["rename"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RENAME_NILM_APPLIANCE,
+            "data": dict(action_data),
+            "requires": [ATTR_LABEL],
+        }
+        actions["change_profile"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
+            "data": dict(action_data),
+            "requires": [ATTR_APPLIANCE_PROFILE],
+        }
         if payload.get("publish_entities") is True or state == "published":
             actions["unpublish"] = {
                 "domain": DOMAIN,

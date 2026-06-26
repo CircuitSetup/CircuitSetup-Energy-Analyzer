@@ -3943,6 +3943,59 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_rename_and_profile_update() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 15, 0, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["fingerprint_1"],
+                        "session_ids": ["session_1"],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "validated",
+                        "confidence": 0.85,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now["value"],
+    )
+
+    renamed = await coordinator.async_rename_nilm_appliance(
+        "mains",
+        "assignment-dishwasher",
+        label="Kitchen Dishwasher",
+    )
+    now["value"] = datetime(2026, 6, 2, 15, 5, tzinfo=UTC)
+    updated = await coordinator.async_change_nilm_appliance_profile(
+        "mains",
+        "assignment-dishwasher",
+        appliance_profile="dishwasher_heated_dry",
+    )
+
+    assert renamed["display_name"] == "Kitchen Dishwasher"
+    assert renamed["appliance_id"] == "dishwasher"
+    assert updated["display_name"] == "Kitchen Dishwasher"
+    assert updated["appliance_profile"] == "dishwasher_heated_dry"
+    assert updated["updated_at"] == "2026-06-02T15:05:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_assignment_clears_ignored_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
