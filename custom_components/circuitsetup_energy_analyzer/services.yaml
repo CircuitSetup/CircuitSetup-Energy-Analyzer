@@ -480,6 +480,80 @@ assign_interval_to_appliance:
       example: assignment-abc123def456
       selector:
         text:
+validate_nilm_session:
+  name: Validate NILM session
+  description: "Advanced/script action: confirm that a NILM session matched its assigned appliance. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    session_id:
+      name: Session ID
+      description: NILM session identifier to confirm.
+      required: true
+      example: session_1
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
+      required: false
+      example: assignment-abc123def456
+      selector:
+        text:
+reject_nilm_session:
+  name: Reject NILM session
+  description: "Advanced/script action: mark a NILM session as the wrong appliance so the assignment needs review. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    session_id:
+      name: Session ID
+      description: NILM session identifier to reject.
+      required: true
+      example: session_1
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
+      required: false
+      example: assignment-abc123def456
+      selector:
+        text:
 publish_nilm_appliance_assignment:
   name: Publish NILM appliance assignment
   description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."

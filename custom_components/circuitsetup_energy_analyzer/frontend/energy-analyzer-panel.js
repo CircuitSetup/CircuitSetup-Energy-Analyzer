@@ -611,6 +611,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (actionKey === "retire") {
       return "Retired NILM appliance assignment.";
     }
+    if (actionKey === "validate") {
+      return `Confirmed ${name}.`;
+    }
+    if (actionKey === "reject") {
+      return `Marked ${name} for review.`;
+    }
     return "Action complete.";
   }
 
@@ -1305,7 +1311,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <strong>${this._escape(this._formatMetricValue(item.median_power_w))} W, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</strong>
             <p class="muted">${this._escape(item.end ? `Ended ${item.end}` : "Open session")}</p>
             ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, index) : ""}
-            ${item.actions && item.actions.assign ? `<div class="actions"><button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>Assign Appliance</button></div>` : ""}
+            ${item.actions ? `<div class="actions">
+              ${item.actions.assign ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>Assign Appliance</button>` : ""}
+              ${item.actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Confirm Appliance</button>` : ""}
+              ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong Appliance</button>` : ""}
+            </div>` : ""}
           </div>
         `)}
         ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `

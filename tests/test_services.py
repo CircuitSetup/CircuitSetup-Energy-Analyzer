@@ -2424,6 +2424,101 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_session_validation_services_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_REJECT_NILM_SESSION,
+        SERVICE_VALIDATE_NILM_SESSION,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [
+                        {
+                            "assignment_id": "assignment-dishwasher",
+                            "session_ids": ["session_1"],
+                        }
+                    ]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_validate_nilm_session(
+            self,
+            circuit_id: str,
+            session_id: str,
+            *,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_validate_nilm_session",
+                    (circuit_id, session_id, assignment_id),
+                )
+            )
+
+        async def async_reject_nilm_session(
+            self,
+            circuit_id: str,
+            session_id: str,
+            *,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_reject_nilm_session",
+                    (circuit_id, session_id, assignment_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    for service in (SERVICE_VALIDATE_NILM_SESSION, SERVICE_REJECT_NILM_SESSION):
+        await hass.services.registered[(DOMAIN, service)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "session_id": "session_1",
+                    "assignment_id": "assignment-dishwasher",
+                }
+            )
+        )
+
+    assert coordinator.calls == [
+        (
+            "async_validate_nilm_session",
+            ("mains", "session_1", "assignment-dishwasher"),
+        ),
+        (
+            "async_reject_nilm_session",
+            ("mains", "session_1", "assignment-dishwasher"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_services_reject_self_merge() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_MERGE_NILM_SIGNATURES,

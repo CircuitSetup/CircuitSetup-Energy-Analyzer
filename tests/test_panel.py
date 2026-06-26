@@ -1196,6 +1196,24 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         },
         "requires": ["label"],
     }
+    assert payload["sessions"][0]["actions"]["validate"] == {
+        "domain": DOMAIN,
+        "service": "validate_nilm_session",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "assignment_id": "assignment-dishwasher",
+        },
+    }
+    assert payload["sessions"][0]["actions"]["reject"] == {
+        "domain": DOMAIN,
+        "service": "reject_nilm_session",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "assignment_id": "assignment-dishwasher",
+        },
+    }
     assert payload["sessions"][0]["off_edge_id"] is not None
 
 

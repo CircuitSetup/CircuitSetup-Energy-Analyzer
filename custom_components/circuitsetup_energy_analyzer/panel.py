@@ -50,12 +50,14 @@ from .services import (
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_REJECT_NILM_SESSION,
     SERVICE_RELEARN_BASELINE,
     SERVICE_RESET_SETTING_RECOMMENDATION,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_START_MAINTENANCE,
     SERVICE_UNDO_SETTING_RECOMMENDATION,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_VALIDATE_NILM_SESSION,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
@@ -1822,6 +1824,22 @@ def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
                 "requires": [ATTR_LABEL],
             }
         }
+        if session.assignment_id:
+            action_data = {
+                ATTR_CIRCUIT_ID: session.mains_circuit_id,
+                ATTR_SESSION_ID: session.session_id,
+                ATTR_ASSIGNMENT_ID: session.assignment_id,
+            }
+            payload["actions"]["validate"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_VALIDATE_NILM_SESSION,
+                "data": dict(action_data),
+            }
+            payload["actions"]["reject"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_REJECT_NILM_SESSION,
+                "data": dict(action_data),
+            }
     return payload
 
 

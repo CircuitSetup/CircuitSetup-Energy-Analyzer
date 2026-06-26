@@ -3869,6 +3869,80 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_session_validation_updates_assignment_metrics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 14, 0, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["fingerprint_1"],
+                        "session_ids": ["session_1"],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "assigned",
+                        "confidence": 0.8,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now["value"],
+    )
+
+    validated = await coordinator.async_validate_nilm_session("mains", "session_1")
+
+    assert validated["confidence"] == pytest.approx(0.85)
+    assert validated["lifecycle_state"] == "validated"
+    assert validated["confirmed_session_ids"] == ["session_1"]
+    assert validated["rejected_session_ids"] == []
+    assert validated["confirmed_sessions"] == 1
+    assert validated["rejected_sessions"] == 0
+    assert validated["last_validation"] == "correct"
+    assert validated["last_validated_at"] == "2026-06-02T14:00:00+00:00"
+
+    duplicate_validated = await coordinator.async_validate_nilm_session(
+        "mains",
+        "session_1",
+    )
+
+    assert duplicate_validated["confidence"] == pytest.approx(0.85)
+    assert duplicate_validated["confirmed_sessions"] == 1
+
+    now["value"] = datetime(2026, 6, 2, 14, 5, tzinfo=UTC)
+    rejected = await coordinator.async_reject_nilm_session("mains", "session_1")
+
+    assert rejected["confidence"] == pytest.approx(0.7)
+    assert rejected["lifecycle_state"] == "needs_validation"
+    assert rejected["confirmed_session_ids"] == []
+    assert rejected["rejected_session_ids"] == ["session_1"]
+    assert rejected["confirmed_sessions"] == 0
+    assert rejected["rejected_sessions"] == 1
+    assert rejected["last_validation"] == "wrong_appliance"
+    assert rejected["last_rejected_at"] == "2026-06-02T14:05:00+00:00"
+
+    duplicate_rejected = await coordinator.async_reject_nilm_session(
+        "mains",
+        "session_1",
+    )
+
+    assert duplicate_rejected["confidence"] == pytest.approx(0.7)
+    assert duplicate_rejected["rejected_sessions"] == 1
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_assignment_clears_ignored_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

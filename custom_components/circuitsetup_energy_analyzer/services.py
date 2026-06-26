@@ -34,6 +34,8 @@ SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
 SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE = "assign_signature_to_appliance"
 SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
 SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
+SERVICE_VALIDATE_NILM_SESSION = "validate_nilm_session"
+SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
 SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
@@ -352,6 +354,10 @@ NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
         ATTR_APPLIANCE_PROFILE,
     ),
 )
+NILM_SESSION_VALIDATION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SESSION_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_ASSIGNMENT_ID),
+)
 NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -405,6 +411,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE: NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE: NILM_ASSIGN_SESSION_SERVICE_SCHEMA,
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_VALIDATE_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
+    SERVICE_REJECT_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
@@ -752,6 +760,30 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 label=data.get(ATTR_LABEL),
                 appliance_id=data.get(ATTR_APPLIANCE_ID),
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_VALIDATE_NILM_SESSION:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_validate_nilm_session",
+                circuit_id,
+                data.get(ATTR_SESSION_ID),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_REJECT_NILM_SESSION:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_reject_nilm_session",
+                circuit_id,
+                data.get(ATTR_SESSION_ID),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
             )
         return
