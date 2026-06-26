@@ -1626,13 +1626,24 @@ def _nilm_workspace_sessions(
     limit: int | None = MAX_NILM_WORKSPACE_SESSIONS,
 ) -> list[dict[str, Any]]:
     sessions: list[NilmSession] = []
+    signature_by_id = {
+        str(signature.get(ATTR_SIGNATURE_ID) or ""): signature
+        for signature in signatures
+        if signature.get(ATTR_SIGNATURE_ID)
+    }
     for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
         signatures,
         assignments,
     ):
+        signature = signature_by_id.get(signature_fingerprint)
+        session_edges = (
+            _nilm_edges_matching_signature(edges, signature)
+            if signature is not None
+            else edges
+        )
         sessions.extend(
             pair_nilm_sessions(
-                edges,
+                session_edges,
                 mains_circuit_id=circuit_id,
                 signature_fingerprint=signature_fingerprint,
                 assignment_id=assignment_id,
@@ -1669,6 +1680,27 @@ def _nilm_workspace_session_specs(
     if specs:
         return specs
     return [(_nilm_workspace_signature_fingerprint(signatures), None)]
+
+
+def _nilm_edges_matching_signature(
+    edges: list[NilmEdge],
+    signature: Mapping[str, Any],
+) -> list[NilmEdge]:
+    typical_watts = _clamped_float(signature.get("typical_watts"), default=0.0)
+    split_phase_type = str(signature.get("split_phase_type") or "").strip()
+    return [
+        edge
+        for edge in edges
+        if (
+            not typical_watts
+            or abs(abs(edge.delta_w) - typical_watts) <= max(typical_watts * 0.25, 50.0)
+        )
+        and (
+            not split_phase_type
+            or split_phase_type == "unknown"
+            or edge.split_phase_type in {split_phase_type, "unknown"}
+        )
+    ]
 
 
 def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:

@@ -1356,7 +1356,6 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         "prediction_confidence": None,
     }
 
-
 def test_nilm_workspace_validation_uses_uncapped_data() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (
@@ -1398,7 +1397,7 @@ def test_nilm_workspace_validation_uses_uncapped_data() -> None:
                 "signature_fingerprints": ["signature_1"],
                 "lifecycle_state": "assigned",
                 "confidence": 0.9,
-            }
+            },
         ]
     }
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -1440,6 +1439,87 @@ def test_nilm_workspace_validation_uses_uncapped_data() -> None:
     assert payload["validation"]["metrics"]["prediction_count"] == (
         MAX_NILM_WORKSPACE_SESSIONS + 1
     )
+
+
+def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "learning",
+                "confidence": 0.8,
+            },
+            {
+                "assignment_id": "assignment-dryer",
+                "appliance_id": "dryer",
+                "display_name": "Dryer",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_2"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "learning",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_1",
+                    "typical_watts": 820.0,
+                    "confidence": 0.8,
+                },
+                {
+                    "signature_id": "signature_2",
+                    "typical_watts": 420.0,
+                    "confidence": 0.7,
+                },
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                delta_w=420.0,
+                delta_var=20.0,
+                delta_va=421.0,
+                delta_pf=-0.01,
+                direction="on",
+            )
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    appliances = {
+        appliance["assignment_id"]: appliance
+        for appliance in payload["virtual_appliances"]
+    }
+    assert appliances["assignment-dishwasher"]["is_running"] is False
+    assert appliances["assignment-dishwasher"]["estimated_power_w"] == 0.0
+    assert appliances["assignment-dryer"]["is_running"] is True
+    assert appliances["assignment-dryer"]["estimated_power_w"] == 420.0
 
 
 def test_nilm_workspace_history_rows_are_capped() -> None:
