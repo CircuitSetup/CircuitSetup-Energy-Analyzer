@@ -258,6 +258,11 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
             sensitivity="balanced",
         )
         for circuit_config in fixture.circuits:
+            if not any(
+                sensor.entity_id in calibration_sample.states
+                for sensor in circuit_config.sensors
+            ):
+                continue
             source_states = _source_states_for_sample(
                 circuit_config,
                 calibration_sample,

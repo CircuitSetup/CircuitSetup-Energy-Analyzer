@@ -51,6 +51,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_microwave_cycle",
         "normal_kettle_cycle",
         "normal_sump_pump_cycle",
+        "normal_solar_overlap_cycle",
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
@@ -175,6 +176,26 @@ def test_sump_pump_fixture_exercises_short_pump_cycle_without_alerts() -> None:
     assert fixture.circuits[0].appliance_profile == "sump_pump"
     assert event_offsets == [60, 180]
     assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_solar_overlap_fixture_exercises_load_and_generation_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_solar_overlap_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events_by_circuit = {
+        circuit_id: [
+            int((event.timestamp - fixture.start_time).total_seconds())
+            for event in result.events
+            if event.circuit_id == circuit_id
+        ]
+        for circuit_id in ("kettle", "rooftop_solar")
+    }
+
+    assert [circuit.name for circuit in fixture.circuits] == ["Kettle", "Rooftop Solar"]
+    assert events_by_circuit == {"kettle": [60, 240], "rooftop_solar": [60, 300]}
+    assert result.alerts == []
+    assert result.setup_issues == []
     assert metrics.false_positive_alerts == 0
 
 
@@ -335,7 +356,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 12 |" in report
+    assert "| Fixtures | 13 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
@@ -343,6 +364,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "normal_microwave_cycle" in report
     assert "normal_kettle_cycle" in report
     assert "normal_sump_pump_cycle" in report
+    assert "normal_solar_overlap_cycle" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report
