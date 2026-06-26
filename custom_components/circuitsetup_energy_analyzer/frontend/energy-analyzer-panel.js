@@ -71,6 +71,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelDrafts = new Map();
     this._nilmSessionLabelDrafts = new Map();
     this._nilmAssignmentDrafts = new Map();
+    this._nilmOverlayVisibility = { known_load: true, solar: true };
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
@@ -996,6 +997,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-overlay-toggle]")) {
+      input.addEventListener("change", () => this._toggleNilmOverlaySeries(input));
+    }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
     }
@@ -1173,6 +1177,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     this._nilmAssignmentDrafts.set(`${input.dataset.nilmAssignmentKey}:${input.dataset.nilmAssignmentField}`, input.value);
+  }
+
+  _toggleNilmOverlaySeries(input) {
+    this._nilmOverlayVisibility[input.dataset.nilmOverlayToggle] = input.checked;
+    this._render();
   }
 
   _startNilmChartSelection(event, chart) {
@@ -1462,7 +1471,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const history = workspace.history || {};
-    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
+    const series = this._visibleNilmWorkspaceSeries(workspace);
     const graph = series.length
       ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end, nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: workspace.sessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
@@ -1470,6 +1479,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <section class="panel">
         <h2>NILM Workspace</h2>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
+        ${this._renderNilmOverlayToggles(workspace)}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
         ${this._renderNilmValidation(workspace.validation)}
@@ -1898,6 +1908,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
+  _renderNilmOverlayToggles(workspace) {
+    const hasKnown = (workspace.known_load_overlays || []).some((item) => (item.entity_ids || []).length);
+    const hasSolar = (workspace.solar_overlays || []).some((item) => (item.entity_ids || []).length);
+    if (!hasKnown && !hasSolar) {
+      return "";
+    }
+    return `<div class="actions">
+      ${hasKnown ? `<label><input type="checkbox" data-nilm-overlay-toggle="known_load" ${this._nilmOverlayVisibility.known_load ? "checked" : ""}> Show known-load overlays</label>` : ""}
+      ${hasSolar ? `<label><input type="checkbox" data-nilm-overlay-toggle="solar" ${this._nilmOverlayVisibility.solar ? "checked" : ""}> Show solar/net overlays</label>` : ""}
+    </div>`;
+  }
+
   _chartSeries(historySeries = this._historySeries) {
     const parsed = [];
     for (const series of historySeries || []) {
@@ -1922,6 +1944,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
     }
     return parsed;
+  }
+
+  _visibleNilmWorkspaceSeries(workspace) {
+    const knownIds = new Set((workspace.known_load_overlays || []).flatMap((item) => item.entity_ids || []));
+    const solarIds = new Set((workspace.solar_overlays || []).flatMap((item) => item.entity_ids || []));
+    return this._chartSeries(this._nilmWorkspaceHistorySeries).filter((item) => {
+      if (!this._nilmOverlayVisibility.known_load && knownIds.has(item.entity_id)) {
+        return false;
+      }
+      if (!this._nilmOverlayVisibility.solar && solarIds.has(item.entity_id)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   _boundedChartPoints(points) {
