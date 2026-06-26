@@ -347,6 +347,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervals = workspace && workspace.label_intervals;
     let action = null;
     let data = {};
+    if (actionKey === "adjust") {
+      const interval = intervals && intervals[index];
+      if (!interval) {
+        this._error = "Choose a saved NILM interval before adjusting it.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      this._nilmLabelIntervalDraft = {
+        interval_id: String(interval.interval_id || ""),
+        start: this._datetimeLocalFromMillis(Date.parse(interval.start || "")),
+        end: this._datetimeLocalFromMillis(Date.parse(interval.end || "")),
+        label: String(interval.label || interval.appliance_id || ""),
+        appliance_id: String(interval.appliance_id || ""),
+        ground_truth_entity_id: String(interval.ground_truth_entity_id || ""),
+      };
+      this._lastActionMessage = "Loaded interval label for adjustment.";
+      this._renderAndScrollToTop();
+      return;
+    }
     if (actionKey === "save" || actionKey === "generate_sensor") {
       action = workspace && workspace.actions && (
         actionKey === "generate_sensor"
@@ -367,6 +386,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.start = start;
       data.end = end;
       data.appliance_id = String(draft.appliance_id || label).trim();
+      const intervalId = String(draft.interval_id || "").trim();
+      if (intervalId) {
+        data.interval_id = intervalId;
+      }
       const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
       if (actionKey === "generate_sensor" && !groundTruthEntityId) {
         this._error = "Choose a ground truth sensor before generating NILM intervals.";
@@ -1442,6 +1465,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               data-nilm-label-interval-action="assign"
               ${this._busyAction === `nilm_label_interval_${index}_assign` ? "disabled" : ""}
             >Assign Appliance</button>` : ""}
+            <button
+              type="button"
+              class="secondary"
+              data-nilm-label-interval-index="${index}"
+              data-nilm-label-interval-action="adjust"
+            >Adjust Label</button>
             <button
               type="button"
               class="secondary"
