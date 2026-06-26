@@ -1126,7 +1126,12 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         }
     ]
     assert payload["signatures"][0]["signature_id"] == "signature_1"
-    assert "actions" not in payload["signatures"][0]
+    assert payload["signatures"][0]["actions"]["label"]["service"] == (
+        "label_nilm_signature"
+    )
+    assert payload["signatures"][0]["actions"]["ignore"]["service"] == (
+        "ignore_nilm_signature"
+    )
     assert payload["label_intervals"][0]["label"] == "Dishwasher"
     assert payload["label_intervals"][0]["actions"]["delete"] == {
         "domain": DOMAIN,

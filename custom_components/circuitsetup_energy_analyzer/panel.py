@@ -73,7 +73,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-validation-dashboard-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-workspace-review-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -1109,6 +1109,7 @@ def _nilm_workspace_signatures(
     coordinator: Any,
     circuit_id: str,
 ) -> list[dict[str, Any]]:
+    signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
     return [
         {
             **_nilm_signature_payload(signature),
@@ -1116,8 +1117,14 @@ def _nilm_workspace_signatures(
                 signature,
                 str(signature[ATTR_SIGNATURE_ID]),
             ),
+            "actions": _nilm_actions_for_signature(
+                circuit_id,
+                str(signature[ATTR_SIGNATURE_ID]),
+                signatures,
+                include_all_nilm=True,
+            ),
         }
-        for signature in _nilm_signatures_for_circuit(coordinator, circuit_id)
+        for signature in signatures
         if signature.get(ATTR_SIGNATURE_ID)
     ]
 
@@ -2145,6 +2152,12 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _panel_custom_component(hass: Any) -> Any:
+    components = getattr(hass, "components", None)
+    component = getattr(components, "panel_custom", None)
+    if component is not None:
+        return component
+    if components is None:
+        return None
     try:
         from homeassistant.components import panel_custom
 
@@ -2154,6 +2167,12 @@ def _panel_custom_component(hass: Any) -> Any:
 
 
 def _frontend_component(hass: Any) -> Any:
+    components = getattr(hass, "components", None)
+    component = getattr(components, "frontend", None)
+    if component is not None:
+        return component
+    if components is None:
+        return None
     try:
         from homeassistant.components import frontend
 

@@ -288,7 +288,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   async _callNilmAction(index, actionKey) {
-    const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
+    const signatures = this._nilmReviewSignatures();
     const signature = signatures && signatures[index];
     const action = signature && signature.actions && signature.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
@@ -870,43 +870,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </section>
       ${this._renderRecommendations()}
-      ${this._renderNilmActions()}
     `;
   }
 
-  _renderNilmActions() {
-    const nilm = this._payload && this._payload.nilm;
-    const signatures = nilm && nilm.signatures;
-    if (!signatures || !signatures.length) {
-      return "";
+  _nilmReviewSignatures() {
+    const workspace = this._nilmWorkspace;
+    if (workspace && workspace.status === "ok" && Array.isArray(workspace.signatures)) {
+      return workspace.signatures;
     }
-    const totalCount = Number((nilm && nilm.signature_count) || signatures.length);
-    const omittedCount = Number((nilm && nilm.signatures_omitted_count) || 0);
-    const summary = omittedCount > 0
-      ? `<p class="muted">Showing ${signatures.length} of ${totalCount} NILM signatures. ${omittedCount} more can be reviewed after loading the full slim NILM list. <button type="button" class="secondary" data-load-all-nilm>Load all NILM signatures</button></p>`
-      : "";
+    const nilm = this._payload && this._payload.nilm;
+    return (nilm && nilm.signatures) || [];
+  }
+
+  _renderNilmSignatureReview(signature, index) {
     return `
-      <section class="panel">
-        <h2>NILM Review</h2>
-        ${summary}
-        ${signatures.map((signature, index) => `
-          <div class="metric">
-            <span>NILM signature</span>
-            <strong>${this._escape(signature.display_label || signature.display_name || signature.likely_type || "Unknown load")}</strong>
-            ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
-            ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
-            ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
-            ${this._renderNilmLabelField(signature, index)}
-            ${this._renderNilmMergeTarget(signature, index)}
-            <div class="actions">
-              ${this._nilmActionButton(index, "label", "Save Label")}
-              ${this._nilmActionButton(index, "ignore", "Ignore", true)}
-              ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
-              ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
-            </div>
-          </div>
-        `).join("")}
-      </section>
+      ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
+      ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
+      ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
+      ${this._renderNilmLabelField(signature, index)}
+      ${this._renderNilmMergeTarget(signature, index)}
+      <div class="actions">
+        ${this._nilmActionButton(index, "label", "Save Label")}
+        ${this._nilmActionButton(index, "ignore", "Ignore", true)}
+        ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
+        ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
+      </div>
     `;
   }
 
@@ -1151,10 +1139,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <p class="muted">${this._escape(item.end ? `Ended ${item.end}` : "Open session")}</p>
           </div>
         `)}
-        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item) => `
+        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.signature_id || "")}</span>
             <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+            ${this._renderNilmSignatureReview(item, index)}
           </div>
         `)}
         ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
@@ -1439,7 +1428,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       </section>
       ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
-      ${this._renderNilmActions()}
     `;
   }
 

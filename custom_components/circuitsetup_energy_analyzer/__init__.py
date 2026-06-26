@@ -57,13 +57,14 @@ async def async_setup_entry(
         await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        await repairs.async_sync_compact_entity_model_issue(
-            hass,
-            entry_id,
-            legacy_count=len(
-                legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
-            ),
-        )
+        if getattr(hass, "config", None) is not None:
+            await repairs.async_sync_compact_entity_model_issue(
+                hass,
+                entry_id,
+                legacy_count=len(
+                    legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
+                ),
+            )
     except Exception:
         hass.data.get(DOMAIN, {}).pop(entry_id, None)
         await coordinator.async_stop()
@@ -239,4 +240,8 @@ async def _async_load_feature_store(
         store = FeatureStore(hass, entry_id)
     except ModuleNotFoundError:
         return None, FeatureStoreData()
+    except AttributeError:
+        if getattr(hass, "config", None) is None:
+            return None, FeatureStoreData()
+        raise
     return store, await store.async_load()

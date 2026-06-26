@@ -1214,9 +1214,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Evidence:",
         "Preview evidence",
         "recommendation.actions.preview",
-        "NILM Review",
         "nilm-label-field",
         "_renderNilmLabelField",
+        "_renderNilmSignatureReview",
         "_nilmLabelDrafts",
         "_rememberNilmLabelDraft",
         "Enter a label for this NILM signature before saving.",
@@ -1242,6 +1242,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "iframe" not in asset
     assert "Graph entities" not in asset
     assert "Graphed Sources" not in asset
+    assert "NILM Review" not in asset
+    assert "_renderNilmActions" not in asset
     assert "_entityList" not in asset
     assert "window.prompt" not in asset
     assert "Label this NILM signature" not in asset

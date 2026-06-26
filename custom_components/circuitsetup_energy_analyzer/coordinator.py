@@ -1024,11 +1024,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if async_track_state_change_event is None or not self.source_entities:
             return
 
-        self._unsub_state_change = async_track_state_change_event(
-            self.hass,
-            list(self.source_entities),
-            self._async_handle_source_state_change,
-        )
+        try:
+            self._unsub_state_change = async_track_state_change_event(
+                self.hass,
+                list(self.source_entities),
+                self._async_handle_source_state_change,
+            )
+        except AttributeError:
+            self._unsub_state_change = None
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
