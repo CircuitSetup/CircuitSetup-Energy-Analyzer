@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -11,7 +11,7 @@ from urllib.parse import quote, urlencode
 from .alert_links import _feature_for_alert as _canonical_feature_for_alert
 from .const import DOMAIN
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
-from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
+from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
@@ -21,31 +21,52 @@ from .recommendation_guidance import (
 )
 from .services import (
     ATTR_ALERT_ID,
+    ATTR_APPLIANCE_PROFILE,
+    ATTR_ASSIGNMENT_ID,
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
+    ATTR_GROUND_TRUTH_ENTITY_ID,
     ATTR_INTERVAL_ID,
+    ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
     ATTR_RECOMMENDATION_ID,
+    ATTR_SESSION_ID,
+    ATTR_SIGNATURE_FINGERPRINT,
     ATTR_SIGNATURE_ID,
+    ATTR_SOURCE_ASSIGNMENT_ID,
     ATTR_START,
+    ATTR_TARGET_ASSIGNMENT_ID,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
+    SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+    SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+    SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+    SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
+    SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+    SERVICE_MERGE_NILM_ASSIGNMENTS,
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
+    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_REJECT_NILM_SESSION,
     SERVICE_RELEARN_BASELINE,
+    SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESET_SETTING_RECOMMENDATION,
+    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_START_MAINTENANCE,
     SERVICE_UNDO_SETTING_RECOMMENDATION,
+    SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+    SERVICE_VALIDATE_NILM_SESSION,
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
@@ -69,11 +90,13 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "expected",
     "ignored",
     "merged_into",
+    "feedback_fingerprint",
+    "signature_fingerprint",
 )
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-validation-dashboard-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-workspace-route-v2"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -194,7 +217,12 @@ async def async_unload_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if remove_panel is not None:
-        await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
+        await _async_call_component_helper(
+            remove_panel,
+            hass,
+            PANEL_URL_PATH,
+            warn_if_unknown=False,
+        )
 
 
 def alert_evidence_payload(
@@ -367,6 +395,7 @@ def nilm_workspace_payload(
         coordinator,
         config.circuit_id,
     )
+    solar_overlays = _nilm_solar_overlays(coordinator, config.circuit_id)
     all_label_intervals = _nilm_label_intervals_for_circuit(
         coordinator,
         config.circuit_id,
@@ -374,19 +403,34 @@ def nilm_workspace_payload(
     )
     label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
-    all_sessions = _nilm_workspace_sessions(
+    assignment_options = _nilm_assignment_options(assignments)
+    stored_sessions = _nilm_session_history_for_circuit(
+        coordinator,
+        config.circuit_id,
+    )
+    all_generated_sessions = _nilm_workspace_sessions(
         edges,
         config.circuit_id,
         signatures=signatures,
         assignments=assignments,
         limit=None,
     )
-    sessions = _nilm_workspace_sessions(
-        recent_edges,
-        config.circuit_id,
-        signatures=signatures,
-        assignments=assignments,
+    all_sessions = _merge_nilm_session_payloads(
+        all_generated_sessions,
+        stored_sessions,
     )
+    sessions = _merge_nilm_session_payloads(
+        _nilm_workspace_sessions(
+            recent_edges,
+            config.circuit_id,
+            signatures=signatures,
+            assignments=assignments,
+        ),
+        stored_sessions,
+    )[:MAX_NILM_WORKSPACE_SESSIONS]
+    _add_nilm_assignment_options(signatures, assignment_options)
+    _add_nilm_assignment_options(label_intervals, assignment_options)
+    _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
@@ -403,9 +447,11 @@ def nilm_workspace_payload(
         "history": _nilm_workspace_history_payload(
             config,
             known_load_overlays,
+            solar_overlays,
             hours=hours,
         ),
         "known_load_overlays": known_load_overlays,
+        "solar_overlays": solar_overlays,
         "signatures": signatures,
         "signature_count": len(signatures),
         "label_intervals": label_intervals,
@@ -416,7 +462,11 @@ def nilm_workspace_payload(
         "virtual_appliance_count": len(virtual_appliances),
         "validation": validation,
         "actions": {
-            "label_interval": _nilm_label_interval_action(config)
+            "label_interval": _nilm_label_interval_action(config),
+            "sensor_label_interval": _nilm_sensor_label_interval_action(
+                config,
+                known_load_overlays,
+            ),
         },
         "edges": [
             _nilm_edge_payload(edge)
@@ -424,6 +474,7 @@ def nilm_workspace_payload(
         ],
         "edge_count": len(edges),
         "sessions": sessions,
+        "session_count": len(all_sessions),
     }
 
 
@@ -969,7 +1020,13 @@ def _nilm_actions_for_signature(
             "domain": DOMAIN,
             "service": SERVICE_LABEL_NILM_SIGNATURE,
             "data": dict(data),
-            "requires": ["label"],
+            "requires": [ATTR_LABEL],
+        },
+        "assign": {
+            "domain": DOMAIN,
+            "service": SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+            "data": dict(data),
+            "requires": [ATTR_LABEL],
         },
         "ignore": {
             "domain": DOMAIN,
@@ -1092,9 +1149,11 @@ async def nilm_workspace_history_payload(
         coordinator,
         config.circuit_id,
     )
+    solar_overlays = _nilm_solar_overlays(coordinator, config.circuit_id)
     history = _nilm_workspace_history_payload(
         config,
         known_load_overlays,
+        solar_overlays,
         hours=hours,
     )
     return await _async_history_rows(
@@ -1109,6 +1168,7 @@ def _nilm_workspace_signatures(
     coordinator: Any,
     circuit_id: str,
 ) -> list[dict[str, Any]]:
+    signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
     return [
         {
             **_nilm_signature_payload(signature),
@@ -1116,8 +1176,14 @@ def _nilm_workspace_signatures(
                 signature,
                 str(signature[ATTR_SIGNATURE_ID]),
             ),
+            "actions": _nilm_actions_for_signature(
+                circuit_id,
+                str(signature[ATTR_SIGNATURE_ID]),
+                signatures,
+                include_all_nilm=True,
+            ),
         }
-        for signature in _nilm_signatures_for_circuit(coordinator, circuit_id)
+        for signature in signatures
         if signature.get(ATTR_SIGNATURE_ID)
     ]
 
@@ -1165,7 +1231,16 @@ def _nilm_label_interval_payload(
                     ATTR_CIRCUIT_ID: circuit_id,
                     ATTR_INTERVAL_ID: interval_id,
                 },
-            }
+            },
+            "assign": {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_INTERVAL_ID: interval_id,
+                },
+                "requires": [ATTR_LABEL],
+            },
         }
     return payload
 
@@ -1179,8 +1254,37 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "domain": DOMAIN,
         "service": SERVICE_LABEL_NILM_INTERVAL,
         "data": data,
-        "requires": [ATTR_START, ATTR_END, "label"],
+        "requires": [ATTR_START, ATTR_END, ATTR_LABEL],
     }
+
+
+def _nilm_sensor_label_interval_action(
+    config: CircuitConfig,
+    known_load_overlays: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    action = _nilm_label_interval_action(config)
+    action["service"] = SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS
+    action["requires"] = [
+        ATTR_START,
+        ATTR_END,
+        ATTR_LABEL,
+        ATTR_GROUND_TRUTH_ENTITY_ID,
+    ]
+    ground_truth_options = []
+    seen_entities: set[str] = set()
+    for overlay in known_load_overlays:
+        label = str(overlay.get("name") or overlay.get("circuit_id") or "").strip()
+        for entity_id in _iter_items(overlay.get("entity_ids")):
+            entity_text = str(entity_id or "").strip()
+            if not entity_text or entity_text in seen_entities:
+                continue
+            seen_entities.add(entity_text)
+            ground_truth_options.append(
+                {"value": entity_text, "label": label or entity_text},
+            )
+    if ground_truth_options:
+        action["ground_truth_options"] = ground_truth_options
+    return action
 
 
 def _nilm_assignments_for_circuit(
@@ -1193,15 +1297,157 @@ def _nilm_assignments_for_circuit(
         "nilm_appliance_assignments_by_circuit",
         {},
     )
-    return (
-        [
-            dict(item)
-            for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
-            if isinstance(item, dict)
-        ]
-        if isinstance(assignments_by_circuit, Mapping)
-        else []
-    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return []
+    assignments = [
+        item
+        for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
+        if isinstance(item, dict)
+    ]
+    return [
+        _nilm_assignment_payload(circuit_id, item, assignments)
+        for item in assignments
+    ]
+
+
+def _nilm_assignment_options(
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if (
+            not assignment_id
+            or str(assignment.get("lifecycle_state") or "").lower() == "retired"
+        ):
+            continue
+        label = str(
+            assignment.get("display_name")
+            or assignment.get("appliance_id")
+            or assignment_id,
+        ).strip()
+        options.append({"value": assignment_id, "label": label})
+    return options
+
+
+def _add_nilm_assignment_options(
+    items: Iterable[dict[str, Any]],
+    assignment_options: list[dict[str, str]],
+) -> None:
+    if not assignment_options:
+        return
+    for item in items:
+        actions = item.get("actions")
+        assign = actions.get("assign") if isinstance(actions, dict) else None
+        if isinstance(assign, dict):
+            assign["assignment_options"] = list(assignment_options)
+
+
+def _nilm_assignment_payload(
+    circuit_id: str,
+    assignment: Mapping[str, Any],
+    assignments: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    payload = {
+        str(key): value
+        for key, value in assignment.items()
+        if key != "actions"
+    }
+    assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    if not assignment_id:
+        return payload
+
+    state = str(payload.get("lifecycle_state") or "").strip().lower()
+    action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
+    actions: dict[str, dict[str, Any]] = {}
+    if state != "retired":
+        actions["rename"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RENAME_NILM_APPLIANCE,
+            "data": dict(action_data),
+            "requires": [ATTR_LABEL],
+        }
+        actions["change_profile"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
+            "data": dict(action_data),
+            "requires": [ATTR_APPLIANCE_PROFILE],
+        }
+        profile_options = []
+        seen_profiles: set[str] = set()
+        current_profile = str(payload.get(ATTR_APPLIANCE_PROFILE) or "").strip()
+        for profile in (
+            current_profile,
+            *(
+                item.value
+                for item in ApplianceProfile
+                if item is not ApplianceProfile.MAINS_NILM
+            ),
+        ):
+            if not profile or profile in seen_profiles:
+                continue
+            seen_profiles.add(profile)
+            profile_options.append(
+                {"value": profile, "label": friendly_feature_name(profile)},
+            )
+        actions["change_profile"]["profile_options"] = profile_options
+        actions["validate_history"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+            "data": dict(action_data),
+        }
+        target_options = _nilm_assignment_target_options(assignment_id, assignments)
+        if target_options:
+            actions["merge"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MERGE_NILM_ASSIGNMENTS,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_SOURCE_ASSIGNMENT_ID: assignment_id,
+                },
+                "requires": [ATTR_TARGET_ASSIGNMENT_ID],
+                "target_options": target_options,
+            }
+        if payload.get("publish_entities") is True or state == "published":
+            actions["unpublish"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+                "data": dict(action_data),
+            }
+        elif state not in {"expected", "ignored"}:
+            actions["publish"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+                "data": dict(action_data),
+            }
+        actions["retire"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+            "data": dict(action_data),
+        }
+    if actions:
+        payload["actions"] = actions
+    return payload
+
+
+def _nilm_assignment_target_options(
+    assignment_id: str,
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for assignment in assignments:
+        target_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not target_id or target_id == assignment_id:
+            continue
+        if str(assignment.get("lifecycle_state") or "").strip().lower() == "retired":
+            continue
+        label = str(
+            assignment.get("display_name")
+            or assignment.get("appliance_id")
+            or target_id
+        ).strip()
+        options.append({"value": target_id, "label": label})
+    return options
 
 
 def _nilm_virtual_appliances_for_assignments(
@@ -1215,10 +1461,16 @@ def _nilm_virtual_appliances_for_assignments(
         assignment_id = str(assignment.get("assignment_id") or "").strip()
         if not assignment_id:
             continue
+        assignment_session_ids = {
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("session_ids"))
+            if str(value or "").strip()
+        }
         assignment_sessions = [
             session
             for session in sessions
             if session.get("assignment_id") == assignment_id
+            or str(session.get("session_id") or "").strip() in assignment_session_ids
         ]
         open_session = _latest_nilm_session(
             session for session in assignment_sessions if not session.get("end")
@@ -1534,9 +1786,36 @@ def _nilm_known_load_overlays(
     return overlays
 
 
+def _nilm_solar_overlays(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    overlays: list[dict[str, Any]] = []
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        if (
+            not isinstance(config, CircuitConfig)
+            or config.circuit_id == circuit_id
+            or str(config.appliance_profile) != ApplianceProfile.SOLAR_INVERTER.value
+        ):
+            continue
+        entity_ids = _sensor_entity_ids(config)
+        if entity_ids:
+            overlays.append(
+                {
+                    "circuit_id": config.circuit_id,
+                    "name": config.name,
+                    "entity_ids": entity_ids,
+                }
+            )
+        if len(overlays) >= MAX_NILM_WORKSPACE_KNOWN_LOADS:
+            break
+    return overlays
+
+
 def _nilm_workspace_history_payload(
     config: CircuitConfig,
     known_load_overlays: list[dict[str, Any]],
+    solar_overlays: list[dict[str, Any]],
     *,
     hours: Any,
 ) -> dict[str, Any]:
@@ -1547,7 +1826,11 @@ def _nilm_workspace_history_payload(
     )
     end = datetime.now(UTC)
     start = end - timedelta(hours=requested_hours)
-    entities = _nilm_workspace_history_entities(config, known_load_overlays)
+    entities = _nilm_workspace_history_entities(
+        config,
+        known_load_overlays,
+        solar_overlays,
+    )
     history_query = urlencode(
         {
             "circuit_id": config.circuit_id,
@@ -1582,9 +1865,10 @@ def _nilm_workspace_history_payload(
 def _nilm_workspace_history_entities(
     config: CircuitConfig,
     known_load_overlays: list[dict[str, Any]],
+    solar_overlays: list[dict[str, Any]],
 ) -> list[str]:
     entity_ids = [*_sensor_entity_ids(config)]
-    for overlay in known_load_overlays:
+    for overlay in [*known_load_overlays, *solar_overlays]:
         entity_ids.extend(
             str(entity_id)
             for entity_id in _iter_items(overlay.get("entity_ids"))
@@ -1635,9 +1919,9 @@ def _nilm_workspace_sessions(
 ) -> list[dict[str, Any]]:
     sessions: list[NilmSession] = []
     signature_by_id = {
-        str(signature.get(ATTR_SIGNATURE_ID) or ""): signature
+        key: signature
         for signature in signatures
-        if signature.get(ATTR_SIGNATURE_ID)
+        for key in _nilm_signature_lookup_keys(signature)
     }
     for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
         signatures,
@@ -1680,7 +1964,7 @@ def _nilm_workspace_session_specs(
                 seen.add(key)
                 seen_fingerprints.add(fingerprint)
     for signature in signatures:
-        fingerprint = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
         if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
             specs.append(key)
@@ -1688,6 +1972,57 @@ def _nilm_workspace_session_specs(
     if specs:
         return specs
     return [(_nilm_workspace_signature_fingerprint(signatures), None)]
+
+
+def _nilm_signature_lookup_keys(signature: Mapping[str, Any]) -> list[str]:
+    return [
+        value
+        for value in (
+            str(signature.get(ATTR_SIGNATURE_ID) or "").strip(),
+            str(signature.get("feedback_fingerprint") or "").strip(),
+            str(signature.get("signature_fingerprint") or "").strip(),
+        )
+        if value
+    ]
+
+
+def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
+    return str(
+        signature.get("feedback_fingerprint")
+        or signature.get("signature_fingerprint")
+        or signature.get(ATTR_SIGNATURE_ID)
+        or ""
+    ).strip()
+
+
+def _nilm_session_history_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    sessions_by_circuit = getattr(store_data, "nilm_session_history_by_circuit", {})
+    if not isinstance(sessions_by_circuit, Mapping):
+        return []
+    return [
+        _nilm_session_payload_with_actions(dict(session))
+        for session in _iter_items(sessions_by_circuit.get(circuit_id))
+        if isinstance(session, Mapping)
+    ]
+
+
+def _merge_nilm_session_payloads(
+    primary: Iterable[Mapping[str, Any]],
+    fallback: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for session in (*list(primary), *list(fallback)):
+        session_id = str(session.get("session_id") or "").strip()
+        if not session_id or session_id in seen:
+            continue
+        merged.append(dict(session))
+        seen.add(session_id)
+    return merged
 
 
 def _nilm_edges_matching_signature(
@@ -1712,24 +2047,48 @@ def _nilm_edges_matching_signature(
 
 
 def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
-    return {
-        "session_id": session.session_id,
-        "signature_fingerprint": session.signature_fingerprint,
-        "on_edge_id": session.on_edge_id,
-        "off_edge_id": session.off_edge_id,
-        "start": session.start.isoformat(),
-        "end": session.end.isoformat() if session.end is not None else None,
-        "duration_seconds": session.duration_seconds,
-        "median_power_w": session.median_power_w,
-        "estimated_energy_kwh": session.estimated_energy_kwh,
-        "confidence": session.confidence,
-        "overlap_count": session.overlap_count,
-        "ambiguous": session.ambiguous,
-        "alternate_match_count": session.alternate_match_count,
-        "known_load_masked": session.known_load_masked,
-        "known_load_confidence": session.known_load_confidence,
-        "assignment_id": session.assignment_id,
-    }
+    return _nilm_session_payload_with_actions(nilm_session_to_dict(session))
+
+
+def _nilm_session_payload_with_actions(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(payload.get("session_id") or "").strip()
+    circuit_id = str(payload.get("mains_circuit_id") or "").strip()
+    if session_id and circuit_id:
+        data = {
+            ATTR_CIRCUIT_ID: circuit_id,
+            ATTR_SESSION_ID: session_id,
+        }
+        signature_fingerprint = str(
+            payload.get("signature_fingerprint") or ""
+        ).strip()
+        if signature_fingerprint:
+            data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
+        payload["actions"] = {
+            "assign": {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+                "data": data,
+                "requires": [ATTR_LABEL],
+            }
+        }
+        assignment_id = str(payload.get("assignment_id") or "").strip()
+        if assignment_id:
+            action_data = {
+                ATTR_CIRCUIT_ID: circuit_id,
+                ATTR_SESSION_ID: session_id,
+                ATTR_ASSIGNMENT_ID: assignment_id,
+            }
+            payload["actions"]["validate"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_VALIDATE_NILM_SESSION,
+                "data": dict(action_data),
+            }
+            payload["actions"]["reject"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_REJECT_NILM_SESSION,
+                "data": dict(action_data),
+            }
+    return payload
 
 
 async def _async_history_rows(
@@ -1848,7 +2207,7 @@ def _history_state_payload(
 
 def _nilm_workspace_signature_fingerprint(signatures: list[dict[str, Any]]) -> str:
     for signature in signatures:
-        signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        signature_id = _nilm_signature_session_fingerprint(signature)
         if signature_id:
             return signature_id
     return "unassigned"
@@ -2106,7 +2465,8 @@ async def _async_register_panel(hass: Any) -> bool:
     if register_panel is None:
         return False
     try:
-        await register_panel(
+        await _async_call_component_helper(
+            register_panel,
             hass,
             frontend_url_path=PANEL_URL_PATH,
             webcomponent_name=PANEL_ELEMENT_NAME,
@@ -2133,9 +2493,32 @@ async def _async_remove_existing_panel(hass: Any) -> None:
     remove_panel = getattr(frontend, "async_remove_panel", None)
     if panel_exists is None or remove_panel is None:
         return
-    if not await _maybe_await(panel_exists(hass, PANEL_URL_PATH)):
+    if not await _async_call_component_helper(panel_exists, hass, PANEL_URL_PATH):
         return
-    await _maybe_await(remove_panel(hass, PANEL_URL_PATH, warn_if_unknown=False))
+    await _async_call_component_helper(
+        remove_panel,
+        hass,
+        PANEL_URL_PATH,
+        warn_if_unknown=False,
+    )
+
+
+async def _async_call_component_helper(
+    helper: Callable[..., Any],
+    hass: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    try:
+        return await _maybe_await(helper(hass, *args, **kwargs))
+    except TypeError as err:
+        message = str(err)
+        if (
+            "multiple values for argument" not in message
+            and "positional argument" not in message
+        ):
+            raise
+    return await _maybe_await(helper(*args, **kwargs))
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -2145,6 +2528,12 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _panel_custom_component(hass: Any) -> Any:
+    components = getattr(hass, "components", None)
+    component = getattr(components, "panel_custom", None)
+    if component is not None:
+        return component
+    if components is None:
+        return None
     try:
         from homeassistant.components import panel_custom
 
@@ -2154,6 +2543,12 @@ def _panel_custom_component(hass: Any) -> Any:
 
 
 def _frontend_component(hass: Any) -> Any:
+    components = getattr(hass, "components", None)
+    component = getattr(components, "frontend", None)
+    if component is not None:
+        return component
+    if components is None:
+        return None
     try:
         from homeassistant.components import frontend
 

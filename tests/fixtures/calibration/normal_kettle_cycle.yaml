@@ -1,0 +1,96 @@
+schema_version: 1
+id: normal_kettle_cycle
+description: Normal kettle resistive heat cycle and steady daily energy use stays quiet.
+scenario_type: normal
+appliance_profile: resistive_load
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: kettle
+    name: Kettle
+    appliance_profile: resistive_load
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.45
+    sources:
+      power: sensor.kettle_power
+      energy: sensor.kettle_energy
+      current: sensor.kettle_current
+      voltage: sensor.kettle_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.kettle_power: 0
+      sensor.kettle_energy: 15.0
+      sensor.kettle_current: 0.0
+      sensor.kettle_voltage: 120.0
+  - t: 60
+    states:
+      sensor.kettle_power: 1500
+      sensor.kettle_energy: 15.0
+      sensor.kettle_current: 12.5
+      sensor.kettle_voltage: 119.8
+  - t: 120
+    states:
+      sensor.kettle_power: 1480
+      sensor.kettle_energy: 15.03
+      sensor.kettle_current: 12.3
+      sensor.kettle_voltage: 120.0
+  - t: 180
+    states:
+      sensor.kettle_power: 1460
+      sensor.kettle_energy: 15.05
+      sensor.kettle_current: 12.2
+      sensor.kettle_voltage: 120.1
+  - t: 240
+    states:
+      sensor.kettle_power: 0
+      sensor.kettle_energy: 15.07
+      sensor.kettle_current: 0.0
+      sensor.kettle_voltage: 120.0
+  - t: 300
+    states:
+      sensor.kettle_power: 0
+      sensor.kettle_energy: 15.07
+      sensor.kettle_current: 0.0
+      sensor.kettle_voltage: 120.1
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 15.07
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 120.0
+    daily_usage_kwh: [0.55, 0.52, 0.54, 0.56, 0.53, 0.55, 0.52, 0.54, 0.56, 0.53]
+
+labels:
+  expected_events:
+    - circuit_id: kettle
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: kettle
+      event_type: stop
+      around_t: 240
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: kettle
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

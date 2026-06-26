@@ -47,6 +47,24 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         message="Possible issue",
     )
     signatures = {"mains": [{"label": "unknown", "confidence": 0.5}]}
+    nilm_session_history = {
+        "mains": [
+            {
+                "session_id": "session-1",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "on_edge_id": "edge-on",
+                "off_edge_id": "edge-off",
+                "start": (now - timedelta(hours=2)).isoformat(),
+                "end": (now - timedelta(hours=1)).isoformat(),
+                "duration_seconds": 3600.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.82,
+                "confidence": 0.9,
+                "assignment_id": "assignment-dishwasher",
+            }
+        ]
+    }
     sensitivity_by_circuit = {"fridge": "quiet"}
     maintenance_by_circuit = {"fridge": {"active": True}}
     alert_feedback = {"fridge:reactive_power": {"action": "expected"}}
@@ -147,6 +165,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         baselines={"fridge:startup_power_w": baseline},
         alerts=[alert],
         nilm_signatures=signatures,
+        nilm_session_history_by_circuit=nilm_session_history,
         nilm_label_intervals_by_circuit=nilm_label_intervals,
         nilm_appliance_assignments_by_circuit=nilm_assignments,
         sensitivity_by_circuit=sensitivity_by_circuit,
@@ -174,6 +193,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.baselines is data.baselines
     assert pruned.alerts is data.alerts
     assert pruned.nilm_signatures is data.nilm_signatures
+    assert (
+        pruned.nilm_session_history_by_circuit
+        is data.nilm_session_history_by_circuit
+    )
     assert (
         pruned.nilm_label_intervals_by_circuit
         is data.nilm_label_intervals_by_circuit
@@ -1085,6 +1108,38 @@ def test_feature_store_round_trips_nilm_label_intervals() -> None:
 
     assert raw["nilm_label_intervals_by_circuit"] == {"mains": [interval]}
     assert restored.nilm_label_intervals_by_circuit == {"mains": [interval]}
+
+
+def test_feature_store_round_trips_nilm_session_history() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    session = {
+        "session_id": "session-dishwasher",
+        "mains_circuit_id": "mains",
+        "signature_fingerprint": "signature_1",
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=45)).isoformat(),
+        "duration_seconds": 2700.0,
+        "median_power_w": 820.0,
+        "estimated_energy_kwh": 0.615,
+        "confidence": 0.9,
+        "overlap_count": 0,
+        "ambiguous": False,
+        "alternate_match_count": 0,
+        "known_load_masked": False,
+        "known_load_confidence": None,
+        "assignment_id": "assignment-dishwasher",
+    }
+    data = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": [session]},
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+
+    assert raw["nilm_session_history_by_circuit"] == {"mains": [session]}
+    assert restored.nilm_session_history_by_circuit == {"mains": [session]}
 
 
 def test_feature_store_round_trips_nilm_appliance_assignments() -> None:

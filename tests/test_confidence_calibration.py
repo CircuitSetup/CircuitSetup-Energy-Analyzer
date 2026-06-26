@@ -47,6 +47,13 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_refrigerator_week",
         "refrigerator_energy_drift",
         "normal_washer_cycle",
+        "normal_dishwasher_cycle",
+        "normal_microwave_cycle",
+        "normal_kettle_cycle",
+        "normal_sump_pump_cycle",
+        "normal_solar_overlap_cycle",
+        "normal_overlapping_unknown_loads",
+        "normal_direct_meter_validation",
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
@@ -106,6 +113,148 @@ def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
 
     assert pause_samples
     assert event_types == [EventType.START, EventType.STOP]
+
+
+def test_dishwasher_fixture_exercises_wash_and_dry_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_dishwasher_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events = [event for event in result.events if event.circuit_id == "dishwasher"]
+
+    assert fixture.circuits[0].circuit_id == "dishwasher"
+    assert fixture.circuits[0].name == "Dishwasher"
+    assert [event.event_type for event in events] == [EventType.START, EventType.STOP]
+    assert [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in events
+    ] == [60, 3600]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_microwave_fixture_exercises_short_heat_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_microwave_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "microwave"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "microwave"
+    assert event_offsets == [60, 180]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_kettle_fixture_exercises_short_resistive_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_kettle_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "kettle"
+    ]
+
+    assert fixture.circuits[0].name == "Kettle"
+    assert fixture.circuits[0].appliance_profile == "resistive_load"
+    assert event_offsets == [60, 240]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_sump_pump_fixture_exercises_short_pump_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_sump_pump_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "sump_pump"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "sump_pump"
+    assert event_offsets == [60, 180]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_solar_overlap_fixture_exercises_load_and_generation_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_solar_overlap_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    events_by_circuit = {
+        circuit_id: [
+            int((event.timestamp - fixture.start_time).total_seconds())
+            for event in result.events
+            if event.circuit_id == circuit_id
+        ]
+        for circuit_id in ("kettle", "rooftop_solar")
+    }
+
+    assert [circuit.name for circuit in fixture.circuits] == ["Kettle", "Rooftop Solar"]
+    assert events_by_circuit == {"kettle": [60, 240], "rooftop_solar": [60, 300]}
+    assert result.alerts == []
+    assert result.setup_issues == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_overlapping_unknown_load_fixture_reconstructs_nilm_sessions() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "normal_overlapping_unknown_loads.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+    sessions = result.store_data.nilm_session_history_by_circuit["mains"]
+    overlapping_sessions = [
+        session
+        for session in sessions
+        if session.get("end") is not None and session.get("overlap_count") == 1
+    ]
+
+    assert len(result.nilm_signatures) >= 4
+    signature_watts = {
+        round(abs(signature["median_delta_w"])) for signature in result.nilm_signatures
+    }
+
+    assert signature_watts >= {
+        450,
+        800,
+    }
+    assert {
+        round(float(session["median_power_w"]) / 50.0) * 50
+        for session in overlapping_sessions
+    } >= {450, 800}
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_direct_meter_validation_fixture_masks_known_load_from_nilm() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "normal_direct_meter_validation.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+    dishwasher_events = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "dishwasher"
+    ]
+
+    assert dishwasher_events == [
+        EventType.START,
+        EventType.STOP,
+        EventType.START,
+        EventType.STOP,
+        EventType.START,
+        EventType.STOP,
+    ]
+    assert result.nilm_signatures == []
+    assert result.store_data.nilm_session_history_by_circuit.get("mains", []) == []
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
 
 
 def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
@@ -265,10 +414,17 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 8 |" in report
+    assert "| Fixtures | 15 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
+    assert "normal_dishwasher_cycle" in report
+    assert "normal_microwave_cycle" in report
+    assert "normal_kettle_cycle" in report
+    assert "normal_sump_pump_cycle" in report
+    assert "normal_solar_overlap_cycle" in report
+    assert "normal_overlapping_unknown_loads" in report
+    assert "normal_direct_meter_validation" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report

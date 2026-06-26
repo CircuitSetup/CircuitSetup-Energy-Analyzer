@@ -5,8 +5,10 @@ const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspac
 const HISTORY_CALL_API_PREFIX = "history/period";
 const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
+const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
+const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
 const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
@@ -68,6 +70,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
+    this._nilmSessionLabelDrafts = new Map();
+    this._nilmAssignmentDrafts = new Map();
+    this._nilmOverlayVisibility = { known_load: true, solar: true };
+    this._nilmFocusedSignature = "";
+    this._nilmGraphWindow = null;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
@@ -132,6 +139,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
+    this._nilmSessionLabelDrafts.clear();
+    this._nilmAssignmentDrafts.clear();
+    this._nilmFocusedSignature = "";
+    this._nilmGraphWindow = null;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._render();
 
@@ -194,14 +205,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   async _loadNilmWorkspace(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     const nilm = this._payload && this._payload.nilm;
-    const apiPath = (nilm && nilm.workspace_call_api_path) || "";
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const circuit = this._payload && this._payload.circuit;
+    const circuitId = (circuit && circuit.circuit_id) || routeUrl.searchParams.get("circuit_id") || "";
+    const query = circuitId ? new URLSearchParams({ circuit_id: circuitId }).toString() : "";
+    const routeApiPath = routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1" && query
+      ? `${NILM_WORKSPACE_CALL_API_PATH}?${query}`
+      : "";
+    const apiPath = (nilm && nilm.workspace_call_api_path) || routeApiPath;
     if (!apiPath) {
       return;
     }
 
-    const circuit = this._payload && this._payload.circuit;
     const fetchPath = (nilm && nilm.workspace_api_path)
-      || `${NILM_WORKSPACE_API_PATH}?${new URLSearchParams({ circuit_id: (circuit && circuit.circuit_id) || "" }).toString()}`;
+      || `${NILM_WORKSPACE_API_PATH}?${query}`;
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistorySeries = [];
@@ -288,22 +305,26 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   async _callNilmAction(index, actionKey) {
-    const signatures = this._payload && this._payload.nilm && this._payload.nilm.signatures;
+    const signatures = this._nilmReviewSignatures();
     const signature = signatures && signatures[index];
     const action = signature && signature.actions && signature.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
       return;
     }
     const data = Object.assign({}, action.data || {});
-    if (actionKey === "label") {
+    if (actionKey === "label" || actionKey === "assign") {
       const labelInput = this.shadowRoot.querySelector(`#nilm_label_${index}`);
-      const label = labelInput ? labelInput.value.trim() : "";
+      const existingAssignment = actionKey === "assign" ? this._nilmExistingAssignmentSelection(`signature_${index}`) : null;
+      const label = existingAssignment ? existingAssignment.label : labelInput ? labelInput.value.trim() : "";
       if (!label) {
         this._error = "Enter a label for this NILM signature before saving.";
         this._renderAndScrollToTop();
         return;
       }
       data.label = label;
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
     }
     if (actionKey === "merge") {
       const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
@@ -324,7 +345,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
-      if (actionKey === "label") {
+      if (actionKey === "label" || actionKey === "assign") {
         this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
       }
       this._lastActionMessage = this._nilmActionMessage(actionKey, data);
@@ -343,8 +364,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervals = workspace && workspace.label_intervals;
     let action = null;
     let data = {};
-    if (actionKey === "save") {
-      action = workspace && workspace.actions && workspace.actions.label_interval;
+    if (actionKey === "adjust") {
+      const interval = intervals && intervals[index];
+      if (!interval) {
+        this._error = "Choose a saved NILM interval before adjusting it.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      this._nilmLabelIntervalDraft = {
+        interval_id: String(interval.interval_id || ""),
+        start: this._datetimeLocalFromMillis(Date.parse(interval.start || "")),
+        end: this._datetimeLocalFromMillis(Date.parse(interval.end || "")),
+        label: String(interval.label || interval.appliance_id || ""),
+        appliance_id: String(interval.appliance_id || ""),
+        ground_truth_entity_id: String(interval.ground_truth_entity_id || ""),
+      };
+      this._lastActionMessage = "Loaded interval label for adjustment.";
+      this._renderAndScrollToTop();
+      return;
+    }
+    if (actionKey === "save" || actionKey === "generate_sensor") {
+      action = workspace && workspace.actions && (
+        actionKey === "generate_sensor"
+          ? workspace.actions.sensor_label_interval
+          : workspace.actions.label_interval
+      );
       data = Object.assign({}, action && action.data || {});
       const draft = this._nilmLabelIntervalDraft || {};
       const label = String(draft.label || "").trim();
@@ -359,7 +403,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data.start = start;
       data.end = end;
       data.appliance_id = String(draft.appliance_id || label).trim();
+      const intervalId = String(draft.interval_id || "").trim();
+      if (intervalId) {
+        data.interval_id = intervalId;
+      }
       const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
+      if (actionKey === "generate_sensor" && !groundTruthEntityId) {
+        this._error = "Choose a ground truth sensor before generating NILM intervals.";
+        this._renderAndScrollToTop();
+        return;
+      }
       if (groundTruthEntityId) {
         data.ground_truth_entity_id = groundTruthEntityId;
         data.source = "sensor";
@@ -368,13 +421,32 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const interval = intervals && intervals[index];
       action = interval && interval.actions && interval.actions.delete;
       data = Object.assign({}, action && action.data || {});
+    } else if (actionKey === "assign") {
+      const interval = intervals && intervals[index];
+      action = interval && interval.actions && interval.actions.assign;
+      data = Object.assign({}, action && action.data || {});
+      const existingAssignment = this._nilmExistingAssignmentSelection(`label_intervals_${index}`);
+      data.label = existingAssignment
+        ? existingAssignment.label
+        : String((interval && (interval.label || interval.appliance_id)) || "").trim();
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
+      if (!data.label) {
+        this._error = "Add a label to this NILM interval before assigning it.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      if (interval && interval.appliance_id) {
+        data.appliance_id = interval.appliance_id;
+      }
     }
     if (!this._guardActionCall(action, `NILM label interval ${actionKey}`)) {
       return;
     }
-    const busyKey = actionKey === "save"
-      ? "nilm_label_interval_save"
-      : `nilm_label_interval_${index}_delete`;
+    const busyKey = actionKey === "save" || actionKey === "generate_sensor"
+      ? `nilm_label_interval_${actionKey}`
+      : `nilm_label_interval_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
     try {
@@ -385,12 +457,90 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       this._lastActionMessage = actionKey === "save"
         ? `Saved interval label: ${data.label}.`
-        : "Deleted interval label.";
-      if (actionKey === "save") {
+        : actionKey === "generate_sensor"
+          ? `Generated sensor labels for ${data.label}.`
+          : actionKey === "assign"
+            ? `Assigned interval to ${data.label}.`
+            : "Deleted interval label.";
+      if (actionKey === "save" || actionKey === "generate_sensor") {
         this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
       }
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_label_interval") });
+      this._scrollToTop();
+    } catch (error) {
+      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._busyAction = "";
+      this._renderAndScrollToTop();
+    }
+  }
+
+  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {
+    const workspace = this._nilmWorkspace;
+    const items = workspace && workspace[collectionKey];
+    const item = items && items[index];
+    const action = item && item.actions && item.actions[actionKey];
+    if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
+      return;
+    }
+    const data = Object.assign({}, action.data || {});
+    if (action.requires && action.requires.includes("label")) {
+      const labelInput = this.shadowRoot.querySelector(
+        collectionKey === "sessions"
+          ? `#nilm_session_label_${index}`
+          : `#nilm_assignment_label_${index}`,
+      );
+      const existingAssignment = this._nilmExistingAssignmentSelection(`${collectionKey}_${index}`);
+      const label = existingAssignment
+        ? existingAssignment.label
+        : labelInput
+        ? labelInput.value
+        : item.display_name || item.label || item.appliance_id || "";
+      if (!label || !label.trim()) {
+        this._error = "Enter an appliance name before assigning this NILM session.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.label = label.trim();
+      if (existingAssignment) {
+        data.assignment_id = existingAssignment.assignment_id;
+      }
+      if (item.appliance_id && !data.appliance_id) {
+        data.appliance_id = item.appliance_id;
+      }
+    }
+    if (action.requires && action.requires.includes("appliance_profile")) {
+      const profileInput = this.shadowRoot.querySelector(`#nilm_assignment_profile_${index}`);
+      const profile = profileInput ? profileInput.value.trim() : "";
+      if (!profile) {
+        this._error = "Enter an appliance type before changing this NILM assignment.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.appliance_profile = profile;
+    }
+    if (action.requires && action.requires.includes("target_assignment_id")) {
+      const targetInput = this.shadowRoot.querySelector(`#nilm_assignment_merge_target_${index}`);
+      const target = targetInput ? targetInput.value.trim() : "";
+      if (!target) {
+        this._error = "Choose an assignment to merge into.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.target_assignment_id = target;
+    }
+    const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
+    this._busyAction = busyKey;
+    this._render();
+    try {
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, data);
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      this._lastActionMessage = this._nilmWorkspaceActionMessage(actionKey, data, item);
+      this._busyAction = "";
+      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
       this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
@@ -530,6 +680,44 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (actionKey === "merge") {
       return "Merged signature.";
     }
+    if (actionKey === "assign") {
+      return `Assigned signature to ${data.label}.`;
+    }
+    return "Action complete.";
+  }
+
+  _nilmWorkspaceActionMessage(actionKey, data, item) {
+    const name = (data && data.label) || (item && (item.display_name || item.label)) || "appliance";
+    if (actionKey === "assign") {
+      return `Assigned to ${name}.`;
+    }
+    if (actionKey === "publish") {
+      return "Published estimated appliance entities.";
+    }
+    if (actionKey === "unpublish") {
+      return "Disabled estimated appliance publishing.";
+    }
+    if (actionKey === "retire") {
+      return "Retired NILM appliance assignment.";
+    }
+    if (actionKey === "rename") {
+      return `Renamed assignment to ${name}.`;
+    }
+    if (actionKey === "change_profile") {
+      return "Changed appliance type.";
+    }
+    if (actionKey === "validate_history") {
+      return `Validated ${name} history.`;
+    }
+    if (actionKey === "merge") {
+      return `Merged ${name}.`;
+    }
+    if (actionKey === "validate") {
+      return `Confirmed ${name}.`;
+    }
+    if (actionKey === "reject") {
+      return `Marked ${name} for review.`;
+    }
     return "Action complete.";
   }
 
@@ -631,12 +819,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           width: 100%;
           min-height: 340px;
         }
+        .chart[data-nilm-chart-select] {
+          cursor: crosshair;
+          touch-action: none;
+        }
         .chart text {
           fill: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
         }
         .axis, .grid {
           stroke: var(--divider-color, #d8dde6);
+        }
+        .nilm-edge-marker {
+          stroke: var(--warning-color, #f59e0b);
+          stroke-dasharray: 4 3;
+          stroke-width: 2;
+        }
+        .nilm-session-band {
+          fill: var(--warning-color, #f59e0b);
+          opacity: 0.12;
         }
         .legend {
           display: grid;
@@ -802,6 +1003,34 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
       input.addEventListener("input", () => this._rememberNilmLabelIntervalDraft(input));
+      input.addEventListener("change", () => this._rememberNilmLabelIntervalDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
+      input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
+      input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-overlay-toggle]")) {
+      input.addEventListener("change", () => this._toggleNilmOverlaySeries(input));
+    }
+    for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
+      chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
+    }
+    for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
+      band.addEventListener("click", () => this._selectNilmSessionInterval(band));
+    }
+    for (const marker of this.shadowRoot.querySelectorAll("[data-nilm-edge-time]")) {
+      marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-focus]")) {
+      button.addEventListener("click", () => this._focusNilmSignatureOnGraph(button.dataset.nilmSignatureFocus));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-zoom]")) {
+      button.addEventListener("click", () => this._zoomNilmGraph(Number(button.dataset.nilmGraphZoom)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-pan]")) {
+      button.addEventListener("click", () => this._panNilmGraph(Number(button.dataset.nilmGraphPan)));
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
@@ -816,6 +1045,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmLabelIntervalIndex || "-1", 10);
         this._callNilmLabelIntervalAction(index, button.dataset.nilmLabelIntervalAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-session-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmSessionIndex || "-1", 10);
+        this._callNilmWorkspaceItemAction("sessions", index, button.dataset.nilmSessionAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-assignment-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmAssignmentIndex || "-1", 10);
+        this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
       });
     }
   }
@@ -870,43 +1111,35 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </section>
       ${this._renderRecommendations()}
-      ${this._renderNilmActions()}
     `;
   }
 
-  _renderNilmActions() {
-    const nilm = this._payload && this._payload.nilm;
-    const signatures = nilm && nilm.signatures;
-    if (!signatures || !signatures.length) {
-      return "";
+  _nilmReviewSignatures() {
+    const workspace = this._nilmWorkspace;
+    if (workspace && workspace.status === "ok" && Array.isArray(workspace.signatures)) {
+      return workspace.signatures;
     }
-    const totalCount = Number((nilm && nilm.signature_count) || signatures.length);
-    const omittedCount = Number((nilm && nilm.signatures_omitted_count) || 0);
-    const summary = omittedCount > 0
-      ? `<p class="muted">Showing ${signatures.length} of ${totalCount} NILM signatures. ${omittedCount} more can be reviewed after loading the full slim NILM list. <button type="button" class="secondary" data-load-all-nilm>Load all NILM signatures</button></p>`
-      : "";
+    const nilm = this._payload && this._payload.nilm;
+    return (nilm && nilm.signatures) || [];
+  }
+
+  _renderNilmSignatureReview(signature, index) {
+    const graphFingerprint = this._nilmWorkspace && this._nilmWorkspace.status === "ok" ? this._nilmSignatureFingerprint(signature) : "";
     return `
-      <section class="panel">
-        <h2>NILM Review</h2>
-        ${summary}
-        ${signatures.map((signature, index) => `
-          <div class="metric">
-            <span>NILM signature</span>
-            <strong>${this._escape(signature.display_label || signature.display_name || signature.likely_type || "Unknown load")}</strong>
-            ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
-            ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
-            ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
-            ${this._renderNilmLabelField(signature, index)}
-            ${this._renderNilmMergeTarget(signature, index)}
-            <div class="actions">
-              ${this._nilmActionButton(index, "label", "Save Label")}
-              ${this._nilmActionButton(index, "ignore", "Ignore", true)}
-              ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
-              ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
-            </div>
-          </div>
-        `).join("")}
-      </section>
+      ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
+      ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
+      ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
+      ${this._renderNilmExistingAssignmentField(signature && signature.actions && signature.actions.assign, `signature_${index}`)}
+      ${this._renderNilmLabelField(signature, index)}
+      ${this._renderNilmMergeTarget(signature, index)}
+      <div class="actions">
+        ${this._nilmActionButton(index, "label", "Save Label")}
+        ${this._nilmActionButton(index, "assign", "Assign Appliance", true)}
+        ${this._nilmActionButton(index, "ignore", "Ignore", true)}
+        ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
+        ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
+        ${graphFingerprint ? `<button type="button" class="secondary" data-nilm-signature-focus="${this._escape(graphFingerprint)}">Show on Graph</button>` : ""}
+      </div>
     `;
   }
 
@@ -941,6 +1174,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     );
   }
 
+  _nilmSignatureFingerprint(signature) {
+    return String((signature && (signature.feedback_fingerprint || signature.signature_fingerprint || signature.signature_id)) || "").trim();
+  }
+
   _rememberNilmLabelDraft(input) {
     if (!input || !input.dataset.nilmLabelKey) {
       return;
@@ -955,6 +1192,160 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
       [input.dataset.nilmLabelIntervalInput]: input.value,
     });
+  }
+
+  _rememberNilmSessionLabelDraft(input) {
+    if (!input || !input.dataset.nilmSessionLabelKey) {
+      return;
+    }
+    this._nilmSessionLabelDrafts.set(input.dataset.nilmSessionLabelKey, input.value);
+  }
+
+  _rememberNilmAssignmentDraft(input) {
+    if (!input || !input.dataset.nilmAssignmentKey || !input.dataset.nilmAssignmentField) {
+      return;
+    }
+    this._nilmAssignmentDrafts.set(`${input.dataset.nilmAssignmentKey}:${input.dataset.nilmAssignmentField}`, input.value);
+  }
+
+  _toggleNilmOverlaySeries(input) {
+    this._nilmOverlayVisibility[input.dataset.nilmOverlayToggle] = input.checked;
+    this._render();
+  }
+
+  _startNilmChartSelection(event, chart) {
+    const startTime = this._snapNilmChartTimeToEdge(this._chartEventTime(event, chart), chart);
+    if (!Number.isFinite(startTime)) {
+      return;
+    }
+    const finish = (finishEvent) => {
+      chart.removeEventListener("pointercancel", cancel);
+      const endTime = this._snapNilmChartTimeToEdge(this._chartEventTime(finishEvent, chart), chart);
+      if (!Number.isFinite(endTime)) {
+        return;
+      }
+      const start = Math.min(startTime, endTime);
+      const end = Math.max(startTime, endTime);
+      if (end <= start) {
+        return;
+      }
+      this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+        start: this._datetimeLocalFromMillis(start),
+        end: this._datetimeLocalFromMillis(end),
+      });
+      this._render();
+    };
+    const cancel = () => {
+      chart.removeEventListener("pointerup", finish);
+    };
+    if (chart.setPointerCapture && event.pointerId !== undefined) {
+      chart.setPointerCapture(event.pointerId);
+    }
+    chart.addEventListener("pointerup", finish, { once: true });
+    chart.addEventListener("pointercancel", cancel, { once: true });
+  }
+
+  _selectNilmSessionInterval(band) {
+    const start = Date.parse(band && band.dataset.nilmSessionStart || "");
+    const end = Date.parse(band && band.dataset.nilmSessionEnd || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return;
+    }
+    this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+      start: this._datetimeLocalFromMillis(start),
+      end: this._datetimeLocalFromMillis(end),
+    });
+    this._lastActionMessage = "Loaded NILM session interval.";
+    this._renderAndScrollToTop();
+  }
+
+  _selectNilmEdgeTime(marker) {
+    const time = Date.parse(marker && marker.dataset.nilmEdgeTime || "");
+    if (!Number.isFinite(time)) {
+      return;
+    }
+    const field = String(marker.dataset.nilmEdgeDirection || "").toLowerCase() === "off"
+      ? "end"
+      : "start";
+    this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+      [field]: this._datetimeLocalFromMillis(time),
+    });
+    this._lastActionMessage = "Loaded NILM edge time.";
+    this._renderAndScrollToTop();
+  }
+
+  _focusNilmSignatureOnGraph(signatureFingerprint) {
+    this._nilmFocusedSignature = this._nilmFocusedSignature === signatureFingerprint ? "" : signatureFingerprint;
+    this._render();
+  }
+
+  _zoomNilmGraph(factor) {
+    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    if (!window || !Number.isFinite(factor) || factor <= 0) {
+      return;
+    }
+    const span = window.end - window.start;
+    const nextSpan = Math.max(15 * 60 * 1000, Math.min(window.max - window.min, span * factor));
+    const center = (window.start + window.end) / 2;
+    this._setNilmGraphWindow(center - nextSpan / 2, center + nextSpan / 2, window);
+  }
+
+  _panNilmGraph(direction) {
+    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    if (!window || !Number.isFinite(direction)) {
+      return;
+    }
+    const shift = (window.end - window.start) * direction;
+    this._setNilmGraphWindow(window.start + shift, window.end + shift, window);
+  }
+
+  _setNilmGraphWindow(start, end, bounds) {
+    if (start < bounds.min) {
+      end += bounds.min - start;
+      start = bounds.min;
+    }
+    if (end > bounds.max) {
+      start -= end - bounds.max;
+      end = bounds.max;
+    }
+    this._nilmGraphWindow = {
+      start: Math.max(bounds.min, start),
+      end: Math.min(bounds.max, end),
+    };
+    this._render();
+  }
+
+  _snapNilmChartTimeToEdge(time, chart) {
+    if (!Number.isFinite(time) || !chart || !chart.dataset.nilmEdgeTimes) {
+      return time;
+    }
+    let snapped = time;
+    let closestDistance = NILM_EDGE_SNAP_MS + 1;
+    for (const value of chart.dataset.nilmEdgeTimes.split(",")) {
+      const edgeTime = Number(value);
+      const distance = Math.abs(edgeTime - time);
+      if (Number.isFinite(edgeTime) && distance <= NILM_EDGE_SNAP_MS && distance < closestDistance) {
+        snapped = edgeTime;
+        closestDistance = distance;
+      }
+    }
+    return snapped;
+  }
+
+  _chartEventTime(event, chart) {
+    const rect = chart.getBoundingClientRect();
+    const viewBox = String(chart.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+    const width = Number.isFinite(viewBox[2]) ? viewBox[2] : 900;
+    const left = Number(chart.dataset.chartLeft);
+    const right = Number(chart.dataset.chartRight);
+    const start = Number(chart.dataset.chartStart);
+    const end = Number(chart.dataset.chartEnd);
+    if (!rect.width || !Number.isFinite(left) || !Number.isFinite(right) || right <= left || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return Number.NaN;
+    }
+    const viewX = ((event.clientX - rect.left) / rect.width) * width;
+    const ratio = Math.max(0, Math.min(1, (viewX - left) / (right - left)));
+    return start + ((end - start) * ratio);
   }
 
   _renderRecommendations() {
@@ -1107,6 +1498,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
+  _renderNilmExistingAssignmentField(action, key) {
+    const options = action && Array.isArray(action.assignment_options)
+      ? action.assignment_options
+      : [];
+    if (!options.length) {
+      return "";
+    }
+    return `
+      <label class="nilm-label-field">
+        <span class="muted">Existing appliance</span>
+        <select data-nilm-existing-assignment="${this._escape(key)}">
+          <option value="">New appliance</option>
+          ${options.map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
+        </select>
+      </label>
+    `;
+  }
+
+  _nilmExistingAssignmentSelection(key) {
+    const select = this.shadowRoot.querySelector(`[data-nilm-existing-assignment="${key}"]`);
+    const assignmentId = select ? String(select.value || "").trim() : "";
+    if (!assignmentId) {
+      return null;
+    }
+    const option = select.selectedOptions && select.selectedOptions[0];
+    return {
+      assignment_id: assignmentId,
+      label: String((option && option.textContent) || assignmentId).trim(),
+    };
+  }
+
   _renderNilmWorkspace() {
     if (this._nilmWorkspaceLoading) {
       return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">Loading NILM workspace...</p></section>`;
@@ -1119,14 +1541,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const history = workspace.history || {};
-    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
-    const graph = series.length
-      ? this._chartSvg(series, { graph_window_start: history.start, graph_window_end: history.end })
+    const graphWindow = this._nilmWorkspaceGraphWindow(workspace);
+    const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
+    const graphSessions = this._nilmFocusedSignature
+      ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
+      : workspace.sessions;
+    const graph = graphWindow && series.length
+      ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
     return `
       <section class="panel">
         <h2>NILM Workspace</h2>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
+        ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
+        ${this._renderNilmOverlayToggles(workspace)}
+        ${this._renderNilmGraphControls(graphWindow)}
         ${graph}
         ${this._renderNilmLabelIntervals(workspace)}
         ${this._renderNilmValidation(workspace.validation)}
@@ -1137,6 +1566,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <p class="muted" data-field="estimated_daily_energy">${this._escape(this._formatMetricValue(item.estimated_power_w))} W, ${this._escape(this._formatMetricValue(item.estimated_energy_kwh_today))} kWh today, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
           </div>
         `)}
+        ${this._renderNilmWorkspaceList("Appliance Assignments", workspace.assignments, "No appliance assignments are saved yet.", (item, index) => `
+          <div class="metric">
+            <span>${this._escape(item.lifecycle_state || "assigned")}</span>
+            <strong>${this._escape(item.display_name || item.appliance_id || "Assigned appliance")}</strong>
+            <p class="muted">Confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+            <p class="muted">False positives ${this._escape(Math.round(Number(item.false_positive_rate || 0) * 100))}%, False negatives ${this._escape(Math.round(Number(item.false_negative_rate || 0) * 100))}%</p>
+            <p class="muted">Median power error ${this._escape(this._formatMetricValue(item.median_power_error))} W, Energy error ${this._escape(this._formatMetricValue(item.energy_estimate_error))} kWh</p>
+            ${this._renderNilmAssignmentEditFields(item, index)}
+            ${this._renderNilmAssignmentActions(item, index)}
+          </div>
+        `)}
         ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
@@ -1144,17 +1584,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
           </div>
         `)}
-        ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item) => `
+        ${this._renderNilmWorkspaceList("Solar/Net Overlays", workspace.solar_overlays, "No solar or net-flow overlays are configured.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.circuit_id)}</span>
+            <strong>${this._escape(item.name || item.circuit_id)}</strong>
+            <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
+          </div>
+        `)}
+        ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.start || "")}</span>
             <strong>${this._escape(this._formatMetricValue(item.median_power_w))} W, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</strong>
             <p class="muted">${this._escape(item.end ? `Ended ${item.end}` : "Open session")}</p>
+            ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, index) : ""}
+            ${item.actions ? `<div class="actions">
+              ${item.actions.assign ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>Assign Appliance</button>` : ""}
+              ${item.actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Confirm Appliance</button>` : ""}
+              ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong Appliance</button>` : ""}
+            </div>` : ""}
           </div>
         `)}
-        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item) => `
+        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
           <div class="metric">
-            <span>${this._escape(item.signature_id || "")}</span>
+            <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
             <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+            ${this._renderNilmSignatureReview(item, index)}
           </div>
         `)}
         ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
@@ -1173,7 +1627,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervals = Array.isArray(workspace && workspace.label_intervals)
       ? workspace.label_intervals
       : [];
+    const sensorAction = workspace && workspace.actions && workspace.actions.sensor_label_interval;
+    const groundTruthOptions = sensorAction && Array.isArray(sensorAction.ground_truth_options)
+      ? sensorAction.ground_truth_options
+      : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
+    const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" || !groundTruthOptions.length ? "disabled" : "";
+    const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     return `
       <h3>Manual Labels</h3>
       <div class="metric">
@@ -1191,17 +1651,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <input type="text" data-nilm-label-interval-input="label" value="${this._escape(draft.label || "")}" placeholder="Appliance name">
           </label>
           <label>
-            <span class="muted">Appliance profile</span>
-            <input type="text" data-nilm-label-interval-input="appliance_id" value="${this._escape(draft.appliance_id || "")}" placeholder="dishwasher">
-          </label>
-          <label>
             <span class="muted">Ground Truth Sensor</span>
-            <input type="text" data-nilm-label-interval-input="ground_truth_entity_id" value="${this._escape(draft.ground_truth_entity_id || "")}" placeholder="sensor.dishwasher_power">
+            ${groundTruthOptions.length ? `<select data-nilm-label-interval-input="ground_truth_entity_id">
+              <option value="">Select sensor</option>
+              ${groundTruthOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(draft.ground_truth_entity_id || "") ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
+            </select>` : `<p class="muted">No ground-truth sensors are available from known-load circuits.</p>`}
           </label>
         </div>
         <div class="actions">
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
+          <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>Generate From Sensor</button>
         </div>
+        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">Estimated energy ${this._escape(this._formatNumber(intervalPreview.energy_kwh))} kWh over ${this._escape(this._formatNumber(intervalPreview.duration_minutes))} minutes from ${this._escape(intervalPreview.source_name)}.</p>` : ""}
       </div>
       ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `
         <div class="metric">
@@ -1209,7 +1670,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <strong>${this._escape(item.label || item.appliance_id || "Labeled interval")}</strong>
           ${item.mains_entity_id ? `<p class="muted">${this._escape(item.mains_entity_id)}</p>` : ""}
           ${item.ground_truth_entity_id ? `<p class="muted">Ground Truth Sensor: ${this._escape(item.ground_truth_entity_id)}</p>` : ""}
+          ${item.actions && item.actions.assign ? this._renderNilmExistingAssignmentField(item.actions.assign, `label_intervals_${index}`) : ""}
           <div class="actions">
+            ${item.actions && item.actions.assign ? `<button
+              type="button"
+              class="secondary"
+              data-nilm-label-interval-index="${index}"
+              data-nilm-label-interval-action="assign"
+              ${this._busyAction === `nilm_label_interval_${index}_assign` ? "disabled" : ""}
+            >Assign Appliance</button>` : ""}
+            <button
+              type="button"
+              class="secondary"
+              data-nilm-label-interval-index="${index}"
+              data-nilm-label-interval-action="adjust"
+            >Adjust Label</button>
             <button
               type="button"
               class="secondary"
@@ -1220,6 +1695,130 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </div>
         </div>
       `).join("")}</div>` : `<p class="muted">No manual NILM labels are saved yet.</p>`}
+    `;
+  }
+
+  _nilmLabelIntervalEnergyPreview() {
+    const draft = this._nilmLabelIntervalDraft || {};
+    const start = new Date(draft.start || "").getTime();
+    const end = new Date(draft.end || "").getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return null;
+    }
+    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
+    const powerSeries = series.find((item) => {
+      const label = `${item.entity_id || ""} ${item.name || ""}`;
+      return /power|watt|(?:^|[_\s-])w(?:$|[_\s-])/i.test(label);
+    });
+    const points = powerSeries && Array.isArray(powerSeries.points)
+      ? powerSeries.points.filter((point) => point.time >= start && point.time <= end)
+      : [];
+    if (points.length < 2) {
+      return null;
+    }
+    let wattHours = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const hours = (current.time - previous.time) / 3600000;
+      if (hours > 0) {
+        wattHours += ((previous.value + current.value) / 2) * hours;
+      }
+    }
+    if (!Number.isFinite(wattHours)) {
+      return null;
+    }
+    return {
+      energy_kwh: Math.max(wattHours / 1000, 0),
+      duration_minutes: (end - start) / 60000,
+      source_name: powerSeries.name || powerSeries.entity_id || "displayed power samples",
+    };
+  }
+
+  _renderNilmSessionAssignField(session, index) {
+    const draftKey = this._nilmSessionLabelDraftKey(session);
+    const currentLabel = this._nilmSessionLabelDrafts.has(draftKey)
+      ? this._nilmSessionLabelDrafts.get(draftKey)
+      : "";
+    return `
+      ${this._renderNilmExistingAssignmentField(session && session.actions && session.actions.assign, `sessions_${index}`)}
+      <label class="nilm-label-field" for="nilm_session_label_${index}">
+        <span class="muted">Appliance name</span>
+        <input
+          id="nilm_session_label_${index}"
+          type="text"
+          data-nilm-session-label-input
+          data-nilm-session-label-key="${this._escape(draftKey)}"
+          value="${this._escape(currentLabel)}"
+          placeholder="Appliance name"
+        >
+      </label>
+    `;
+  }
+
+  _nilmSessionLabelDraftKey(session) {
+    return String((session && session.session_id) || "");
+  }
+
+  _renderNilmAssignmentEditFields(item, index) {
+    const actions = item && item.actions;
+    if (!actions || (!actions.rename && !actions.change_profile && !actions.merge)) {
+      return "";
+    }
+    const draftKey = this._nilmAssignmentDraftKey(item);
+    const label = this._nilmAssignmentDraftValue(draftKey, "label", item.display_name || "");
+    const profile = this._nilmAssignmentDraftValue(draftKey, "appliance_profile", item.appliance_profile || "");
+    const profileOptions = actions.change_profile && Array.isArray(actions.change_profile.profile_options)
+      ? actions.change_profile.profile_options
+      : [];
+    return `
+      <div class="grid">
+        ${actions.rename ? `<label class="nilm-label-field" for="nilm_assignment_label_${index}">
+          <span class="muted">Appliance name</span>
+          <input id="nilm_assignment_label_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="label" value="${this._escape(label)}" placeholder="Appliance name">
+        </label>` : ""}
+        ${actions.change_profile ? `<label class="nilm-label-field" for="nilm_assignment_profile_${index}">
+          <span class="muted">Appliance type</span>
+          <select id="nilm_assignment_profile_${index}" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile">
+            ${profileOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(profile) ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
+          </select>
+        </label>` : ""}
+        ${actions.merge ? `<label class="nilm-label-field" for="nilm_assignment_merge_target_${index}">
+          <span class="muted">Merge into</span>
+          <select id="nilm_assignment_merge_target_${index}" data-nilm-assignment-merge-target>
+            ${(actions.merge.target_options || []).map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
+          </select>
+        </label>` : ""}
+      </div>
+    `;
+  }
+
+  _nilmAssignmentDraftKey(item) {
+    return String((item && item.assignment_id) || "");
+  }
+
+  _nilmAssignmentDraftValue(draftKey, field, fallback) {
+    const key = `${draftKey}:${field}`;
+    return this._nilmAssignmentDrafts.has(key)
+      ? this._nilmAssignmentDrafts.get(key)
+      : fallback;
+  }
+
+  _renderNilmAssignmentActions(item, index) {
+    const actions = item && item.actions;
+    if (!actions || !Object.keys(actions).length) {
+      return "";
+    }
+    return `
+      <div class="actions">
+        ${actions.rename ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="rename" ${this._busyAction === `nilm_assignments_${index}_rename` ? "disabled" : ""}>Rename Appliance</button>` : ""}
+        ${actions.change_profile ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="change_profile" ${this._busyAction === `nilm_assignments_${index}_change_profile` ? "disabled" : ""}>Change Type</button>` : ""}
+        ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>Validate History</button>` : ""}
+        ${actions.merge ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="merge" ${this._busyAction === `nilm_assignments_${index}_merge` ? "disabled" : ""}>Merge Assignment</button>` : ""}
+        ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Publish Entities</button>` : ""}
+        ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Disable Publishing</button>` : ""}
+        ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Retire</button>` : ""}
+      </div>
     `;
   }
 
@@ -1331,20 +1930,94 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const maxLabel = this._formatNumber(maxValue);
     const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
     const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
+    const timeZoneLabel = this._timeZone();
+    const edgeItems = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
+      const markerTime = Date.parse(edge && edge.timestamp || "");
+      if (!Number.isFinite(markerTime) || markerTime < minTime || markerTime > maxTime) {
+        return null;
+      }
+      return { time: markerTime, direction: edge.direction || "NILM edge" };
+    }).filter(Boolean);
+    const edgeMarkers = edgeItems.map((edge) => {
+      const markerTime = edge.time;
+      const markerX = x(markerTime).toFixed(1);
+      const direction = this._friendlyFeature(edge.direction);
+      return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}" data-nilm-edge-time="${this._escape(new Date(markerTime).toISOString())}" data-nilm-edge-direction="${this._escape(edge.direction)}"><title>${this._escape(direction)}</title></line>`;
+    }).join("");
+    const sessionBands = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
+      const start = Date.parse(session && session.start || "");
+      const end = Date.parse(session && session.end || "");
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) {
+        return "";
+      }
+      const confidence = Number(session && session.confidence);
+      const confidenceValue = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null;
+      const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
+      const confidenceStyle = confidenceValue !== null ? ` style="opacity:${(0.08 + confidenceValue * 0.2).toFixed(2)}"` : "";
+      const confidenceLabel = confidenceValue !== null ? `, confidence ${Math.round(confidenceValue * 100)}%` : "";
+      const left = x(Math.max(start, minTime));
+      const right = x(Math.min(end, maxTime));
+      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${confidenceStyle}><title>${this._escape(session.session_id || "NILM session")}${confidenceLabel}</title></rect>`;
+    }).join("");
+    const edgeTimesAttr = edgeItems.length
+      ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
+      : "";
+    const selectAttrs = alert.nilm_select_interval
+      ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
+      : "";
 
     return `
-      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Alert evidence chart">
+      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Alert evidence chart"${selectAttrs}>
         <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
+        ${sessionBands}
         <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
         <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
         <text x="${padLeft}" y="${height - 12}">${this._escape(startLabel)}</text>
         <text x="${width - padRight}" y="${height - 12}" text-anchor="end">${this._escape(endLabel)}</text>
+        ${edgeMarkers}
         ${lines}
       </svg>
       <div class="legend">${legend}</div>
+      <p class="muted">Graph times shown in ${this._escape(timeZoneLabel)}.</p>
     `;
+  }
+
+  _renderNilmOverlayToggles(workspace) {
+    const hasKnown = (workspace.known_load_overlays || []).some((item) => (item.entity_ids || []).length);
+    const hasSolar = (workspace.solar_overlays || []).some((item) => (item.entity_ids || []).length);
+    if (!hasKnown && !hasSolar) {
+      return "";
+    }
+    return `<div class="actions">
+      ${hasKnown ? `<label><input type="checkbox" data-nilm-overlay-toggle="known_load" ${this._nilmOverlayVisibility.known_load ? "checked" : ""}> Show known-load overlays</label>` : ""}
+      ${hasSolar ? `<label><input type="checkbox" data-nilm-overlay-toggle="solar" ${this._nilmOverlayVisibility.solar ? "checked" : ""}> Show solar/net overlays</label>` : ""}
+    </div>`;
+  }
+
+  _renderNilmGraphControls(window) {
+    if (!window) {
+      return "";
+    }
+    return `<div class="actions">
+      <button type="button" class="secondary" data-nilm-graph-zoom="0.5">Zoom In</button>
+      <button type="button" class="secondary" data-nilm-graph-zoom="2">Zoom Out</button>
+      <button type="button" class="secondary" data-nilm-graph-pan="-0.5">Pan Earlier</button>
+      <button type="button" class="secondary" data-nilm-graph-pan="0.5">Pan Later</button>
+    </div>`;
+  }
+
+  _nilmWorkspaceGraphWindow(workspace) {
+    const history = (workspace && workspace.history) || {};
+    const min = Date.parse(history.start || "");
+    const max = Date.parse(history.end || "");
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+      return null;
+    }
+    const start = Math.max(min, Math.min(max - 1, this._nilmGraphWindow ? this._nilmGraphWindow.start : min));
+    const end = Math.max(start + 1, Math.min(max, this._nilmGraphWindow ? this._nilmGraphWindow.end : max));
+    return { start, end, min, max };
   }
 
   _chartSeries(historySeries = this._historySeries) {
@@ -1371,6 +2044,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
     }
     return parsed;
+  }
+
+  _visibleNilmWorkspaceSeries(workspace, graphWindow) {
+    const knownIds = new Set((workspace.known_load_overlays || []).flatMap((item) => item.entity_ids || []));
+    const solarIds = new Set((workspace.solar_overlays || []).flatMap((item) => item.entity_ids || []));
+    return this._chartSeries(this._nilmWorkspaceHistorySeries).map((item) => {
+      if (!graphWindow) {
+        return item;
+      }
+      return Object.assign({}, item, {
+        points: item.points.filter((point) => point.time >= graphWindow.start && point.time <= graphWindow.end),
+      });
+    }).filter((item) => item.points.length).filter((item) => {
+      if (!this._nilmOverlayVisibility.known_load && knownIds.has(item.entity_id)) {
+        return false;
+      }
+      if (!this._nilmOverlayVisibility.solar && solarIds.has(item.entity_id)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   _boundedChartPoints(points) {
@@ -1439,7 +2133,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       </section>
       ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
-      ${this._renderNilmActions()}
     `;
   }
 
@@ -1553,6 +2246,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return date.toISOString();
   }
 
+  _datetimeLocalFromMillis(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+    return local.toISOString().slice(0, 16);
+  }
+
   _formatDateTime(value) {
     if (value === null || value === undefined || value === "") {
       return "Unknown";
@@ -1561,11 +2263,34 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (Number.isNaN(date.getTime())) {
       return String(value);
     }
-    const year = String(date.getFullYear());
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const minute = String(date.getMinutes()).padStart(2, "0");
-    return this._formatDateParts(year, month, day, date.getHours(), minute);
+    try {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat(undefined, {
+          timeZone: this._timeZone(),
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }).formatToParts(date).map((part) => [part.type, part.value]),
+      );
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}${String(parts.dayPeriod || "").toUpperCase()}`;
+    } catch (_error) {
+      const year = String(date.getFullYear());
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+      return this._formatDateParts(year, month, day, date.getHours(), minute);
+    }
+  }
+
+  _timeZone() {
+    return (
+      (this._hass && this._hass.config && this._hass.config.time_zone)
+      || Intl.DateTimeFormat().resolvedOptions().timeZone
+      || "local time"
+    );
   }
 
   _formatDateParts(year, month, day, hour, minute) {

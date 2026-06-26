@@ -243,6 +243,29 @@ def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() ->
     assert ELECTRICAL_SAFETY_NOTICE in message
 
 
+def test_alert_notification_message_marks_nilm_as_not_safety_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished. Estimated from mains power by NILM.",
+        feature="nilm_appliance_finished",
+        observed_value=0.8,
+        baseline_value=0.8,
+    )
+
+    message = alert_notification_message(alert)
+
+    assert ELECTRICAL_SAFETY_NOTICE in message
+
+
 def test_repair_issue_id_for_circuit_problem_is_stable() -> None:
     from custom_components.circuitsetup_energy_analyzer.repairs import (
         issue_id_for_circuit_problem,
@@ -449,6 +472,26 @@ def test_nilm_label_interval_schema_validates_manual_interval_fields() -> None:
     assert data["appliance_id"] == "dishwasher"
 
 
+def test_nilm_sensor_label_interval_schema_accepts_generation_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA,
+    )
+
+    data = NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "label": "Dishwasher",
+            "start": "2026-06-02T12:00:00+00:00",
+            "end": "2026-06-02T14:00:00+00:00",
+            "ground_truth_entity_id": "sensor.dishwasher_power",
+            "threshold_w": 25,
+        }
+    )
+
+    assert data["ground_truth_entity_id"] == "sensor.dishwasher_power"
+    assert data["threshold_w"] == 25
+
+
 def test_nilm_label_interval_schema_raises_for_missing_required_field() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
@@ -462,6 +505,52 @@ def test_nilm_label_interval_schema_raises_for_missing_required_field() -> None:
                 "start": "2026-06-02T12:00:00+00:00",
             }
         )
+
+
+def test_nilm_sensor_history_rows_generate_label_intervals() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _nilm_sensor_label_intervals_from_history,
+    )
+
+    intervals = _nilm_sensor_label_intervals_from_history(
+        [
+            [
+                {
+                    "entity_id": "sensor.dishwasher_power",
+                    "state": "0",
+                    "last_changed": "2026-06-02T12:00:00+00:00",
+                },
+                {
+                    "entity_id": "sensor.dishwasher_power",
+                    "state": "80",
+                    "last_changed": "2026-06-02T12:05:00+00:00",
+                },
+                {
+                    "entity_id": "sensor.dishwasher_power",
+                    "state": "82",
+                    "last_changed": "2026-06-02T12:35:00+00:00",
+                },
+                {
+                    "entity_id": "sensor.dishwasher_power",
+                    "state": "3",
+                    "last_changed": "2026-06-02T12:45:00+00:00",
+                },
+            ]
+        ],
+        "sensor.dishwasher_power",
+        start="2026-06-02T12:00:00+00:00",
+        end="2026-06-02T13:00:00+00:00",
+        threshold_w=25,
+    )
+
+    assert intervals == [
+        {
+            "start": "2026-06-02T12:05:00+00:00",
+            "end": "2026-06-02T12:45:00+00:00",
+            "validation_start": "2026-06-02T12:00:00+00:00",
+            "validation_end": "2026-06-02T13:00:00+00:00",
+        }
+    ]
 
 
 def test_nilm_assignment_service_schemas_validate_required_fields() -> None:
@@ -2132,6 +2221,138 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
 
 
 @pytest.mark.asyncio
+async def test_nilm_sensor_label_interval_service_generates_from_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData()
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_label_nilm_interval(
+            self,
+            circuit_id: str,
+            *,
+            label: str,
+            start,
+            end,
+            appliance_id: str | None = None,
+            mains_entity_id: str | None = None,
+            ground_truth_entity_id: str | None = None,
+            validation_start=None,
+            validation_end=None,
+            interval_id: str | None = None,
+            source: str = "manual",
+            confidence: float = 1.0,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_label_nilm_interval",
+                    (
+                        circuit_id,
+                        label,
+                        start,
+                        end,
+                        appliance_id,
+                        mains_entity_id,
+                        ground_truth_entity_id,
+                        validation_start,
+                        validation_end,
+                        interval_id,
+                        source,
+                        confidence,
+                    ),
+                )
+            )
+
+    async def fake_history_rows(hass, entity_id, start, end):
+        return [
+            [
+                {
+                    "entity_id": entity_id,
+                    "state": "0",
+                    "last_changed": start.isoformat(),
+                },
+                {
+                    "entity_id": entity_id,
+                    "state": "90",
+                    "last_changed": "2026-06-02T12:10:00+00:00",
+                },
+                {
+                    "entity_id": entity_id,
+                    "state": "0",
+                    "last_changed": "2026-06-02T12:40:00+00:00",
+                },
+            ]
+        ]
+
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", fake_history_rows)
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[
+        (DOMAIN, SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS)
+    ](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "label": "Dishwasher",
+                "start": "2026-06-02T12:00:00+00:00",
+                "end": "2026-06-02T13:00:00+00:00",
+                "ground_truth_entity_id": "sensor.dishwasher_power",
+                "threshold_w": 25,
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_label_nilm_interval",
+            (
+                "mains",
+                "Dishwasher",
+                "2026-06-02T12:10:00+00:00",
+                "2026-06-02T12:40:00+00:00",
+                None,
+                None,
+                "sensor.dishwasher_power",
+                "2026-06-02T12:00:00+00:00",
+                "2026-06-02T13:00:00+00:00",
+                None,
+                "sensor",
+                1.0,
+            ),
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_services_dispatch_to_matching_coordinator() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
@@ -2420,6 +2641,296 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
             "async_retire_nilm_appliance_assignment",
             ("mains", "assignment-dishwasher"),
         ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_session_validation_services_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_REJECT_NILM_SESSION,
+        SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+        SERVICE_VALIDATE_NILM_SESSION,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [
+                        {
+                            "assignment_id": "assignment-dishwasher",
+                            "session_ids": ["session_1"],
+                        }
+                    ]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_validate_nilm_session(
+            self,
+            circuit_id: str,
+            session_id: str,
+            *,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_validate_nilm_session",
+                    (circuit_id, session_id, assignment_id),
+                )
+            )
+
+        async def async_reject_nilm_session(
+            self,
+            circuit_id: str,
+            session_id: str,
+            *,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_reject_nilm_session",
+                    (circuit_id, session_id, assignment_id),
+                )
+            )
+
+        async def async_validate_nilm_assignment_history(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_validate_nilm_assignment_history",
+                    (circuit_id, assignment_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    for service in (SERVICE_VALIDATE_NILM_SESSION, SERVICE_REJECT_NILM_SESSION):
+        await hass.services.registered[(DOMAIN, service)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "session_id": "session_1",
+                    "assignment_id": "assignment-dishwasher",
+                }
+            )
+        )
+    await hass.services.registered[(DOMAIN, SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "assignment_id": "assignment-dishwasher",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_validate_nilm_session",
+            ("mains", "session_1", "assignment-dishwasher"),
+        ),
+        (
+            "async_reject_nilm_session",
+            ("mains", "session_1", "assignment-dishwasher"),
+        ),
+        (
+            "async_validate_nilm_assignment_history",
+            ("mains", "assignment-dishwasher"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_edit_services_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
+        SERVICE_RENAME_NILM_APPLIANCE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [{"assignment_id": "assignment-dishwasher"}]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_rename_nilm_appliance(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+            *,
+            label: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_rename_nilm_appliance",
+                    (circuit_id, assignment_id, label),
+                )
+            )
+
+        async def async_change_nilm_appliance_profile(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+            *,
+            appliance_profile: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_change_nilm_appliance_profile",
+                    (circuit_id, assignment_id, appliance_profile),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_RENAME_NILM_APPLIANCE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "assignment_id": "assignment-dishwasher",
+                "label": "Kitchen Dishwasher",
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_CHANGE_NILM_APPLIANCE_PROFILE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "assignment_id": "assignment-dishwasher",
+                "appliance_profile": "dishwasher_heated_dry",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_rename_nilm_appliance",
+            ("mains", "assignment-dishwasher", "Kitchen Dishwasher"),
+        ),
+        (
+            "async_change_nilm_appliance_profile",
+            ("mains", "assignment-dishwasher", "dishwasher_heated_dry"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_merge_service_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_MERGE_NILM_ASSIGNMENTS,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [
+                        {"assignment_id": "assignment-source"},
+                        {"assignment_id": "assignment-target"},
+                    ]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_merge_nilm_assignments(
+            self,
+            circuit_id: str,
+            source_assignment_id: str,
+            target_assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_merge_nilm_assignments",
+                    (circuit_id, source_assignment_id, target_assignment_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_ASSIGNMENTS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "source_assignment_id": "assignment-source",
+                "target_assignment_id": "assignment-target",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_merge_nilm_assignments",
+            ("mains", "assignment-source", "assignment-target"),
+        )
     ]
 
 

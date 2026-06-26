@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import median, multimode
+from typing import Any
 
 from .models import CircuitEvent, CircuitSample, EventType
 
@@ -83,6 +84,29 @@ class NilmSession:
     known_load_masked: bool = False
     known_load_confidence: float | None = None
     assignment_id: str | None = None
+
+
+def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
+    """Return compact, storage-safe NILM session metadata."""
+    return {
+        "session_id": session.session_id,
+        "mains_circuit_id": session.mains_circuit_id,
+        "signature_fingerprint": session.signature_fingerprint,
+        "on_edge_id": session.on_edge_id,
+        "off_edge_id": session.off_edge_id,
+        "start": session.start.isoformat(),
+        "end": session.end.isoformat() if session.end is not None else None,
+        "duration_seconds": session.duration_seconds,
+        "median_power_w": session.median_power_w,
+        "estimated_energy_kwh": session.estimated_energy_kwh,
+        "confidence": session.confidence,
+        "overlap_count": session.overlap_count,
+        "ambiguous": session.ambiguous,
+        "alternate_match_count": session.alternate_match_count,
+        "known_load_masked": session.known_load_masked,
+        "known_load_confidence": session.known_load_confidence,
+        "assignment_id": session.assignment_id,
+    }
 
 
 def nilm_signature_fingerprint(signature: NilmSignature) -> str:

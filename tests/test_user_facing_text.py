@@ -185,6 +185,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
+    "source_assignment_id": "Source Assignment ID",
     "source_signature_id": "Source Signature ID",
     "solar_surplus_threshold_w": "Solar Surplus Threshold W",
     "session_id": "Session ID",
@@ -192,6 +193,8 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "start": "Start",
     "standby_threshold_w": "Standby Threshold W",
     "target_signature_id": "Target Signature ID",
+    "target_assignment_id": "Target Assignment ID",
+    "threshold_w": "Threshold W",
     "tou_end": "TOU End",
     "tou_name": "TOU Name",
     "tou_rate_per_kwh": "TOU Rate Per kWh",
@@ -819,6 +822,8 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     assert "sensor.mains_nilm_activity_summary" in dashboard_text
     assert "sensor.mains_nilm_electrical_health" in dashboard_text
     assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
+    assert "Open NILM Graph & Review" in dashboard_text
+    assert "/circuitsetup-energy-analyzer-evidence?circuit_id=mains" in dashboard_text
 
 
 def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() -> None:
@@ -1159,25 +1164,85 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "history/period",
         "/api/circuitsetup_energy_analyzer/nilm_workspace",
         "NILM_WORKSPACE_CALL_API_PATH",
+        "nilm_workspace",
+        "NILM_WORKSPACE_QUERY_PARAM",
+        "routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM)",
         "_loadNilmWorkspace",
         "_renderNilmWorkspace",
         "NILM Workspace",
         "Known Load Overlays",
+        "Solar/Net Overlays",
+        "Show known-load overlays",
+        "Show solar/net overlays",
+        "data-nilm-overlay-toggle",
+        "_toggleNilmOverlaySeries",
+        "_visibleNilmWorkspaceSeries",
         "Estimated Appliances",
+        "Appliance Assignments",
         "estimated_daily_energy",
         "model_status",
         "Validation",
+        "False positives",
+        "False negatives",
+        "Median power error",
+        "Energy error",
         "Prediction Preview",
         "Ground Truth Sensor",
         "ground_truth_entity_id",
+        "ground_truth_options",
+        "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
+        "No ground-truth sensors are available from known-load circuits.",
         "_renderNilmValidation",
         "NILM Sessions",
         "Manual Labels",
         "NILM Signatures",
+        "Show on Graph",
+        "data-nilm-signature-focus",
+        "_focusNilmSignatureOnGraph",
+        "_nilmSignatureFingerprint",
+        "Zoom In",
+        "Zoom Out",
+        "Pan Earlier",
+        "Pan Later",
+        "data-nilm-graph-zoom",
+        "data-nilm-graph-pan",
+        "_zoomNilmGraph",
+        "_panNilmGraph",
+        "_nilmWorkspaceGraphWindow",
         "_renderNilmLabelIntervals",
+        "_renderNilmAssignmentActions",
+        "_callNilmWorkspaceItemAction",
         "_callNilmLabelIntervalAction",
         "data-nilm-label-interval-action",
+        'data-nilm-label-interval-action="adjust"',
+        "Adjust Label",
+        "interval_id",
+        "data-nilm-session-action",
+        "data-nilm-assignment-action",
+        "data-nilm-assignment-merge-target",
+        "profile_options",
+        "<select id=\"nilm_assignment_profile_",
+        'collectionKey === "sessions"',
+        "`#nilm_session_label_${index}`",
+        "Existing appliance",
+        "data-nilm-existing-assignment",
+        'actionKey === "assign" ? '
+        "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
+        "_renderNilmExistingAssignmentField",
+        "Assign Appliance",
+        "Publish Entities",
+        "Disable Publishing",
+        "Retire",
+        "Rename Appliance",
+        "Change Type",
+        "Merge Assignment",
+        "Confirm Appliance",
+        "Wrong Appliance",
         "Save Interval",
+        "Generate From Sensor",
+        "Estimated energy",
+        "nilm_interval_energy_preview",
+        "_nilmLabelIntervalEnergyPreview",
         "Delete Label",
         "datetime-local",
         "Saved interval label:",
@@ -1195,6 +1260,28 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
         "Alert evidence chart",
+        "Graph times shown in",
+        "_timeZone",
+        "data-nilm-chart-select",
+        "nilm_edges",
+        "nilm-edge-marker",
+        "data-nilm-edge-times",
+        "data-nilm-edge-time",
+        "data-nilm-edge-direction",
+        "_selectNilmEdgeTime",
+        "Loaded NILM edge time.",
+        "_snapNilmChartTimeToEdge",
+        "NILM_EDGE_SNAP_MS",
+        "nilm_sessions",
+        "nilm-session-band",
+        "data-nilm-session-start",
+        "data-nilm-session-confidence",
+        "confidence ${Math.round(confidenceValue * 100)}%",
+        "_selectNilmSessionInterval",
+        "Loaded NILM session interval.",
+        "_startNilmChartSelection",
+        "_chartEventTime",
+        "pointerdown",
         "<svg",
         "No history samples",
         "Matched alert",
@@ -1212,9 +1299,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Evidence:",
         "Preview evidence",
         "recommendation.actions.preview",
-        "NILM Review",
         "nilm-label-field",
         "_renderNilmLabelField",
+        "_renderNilmSignatureReview",
         "_nilmLabelDrafts",
         "_rememberNilmLabelDraft",
         "Enter a label for this NILM signature before saving.",
@@ -1240,10 +1327,18 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "iframe" not in asset
     assert "Graph entities" not in asset
     assert "Graphed Sources" not in asset
+    assert "NILM Review" not in asset
+    assert "_renderNilmActions" not in asset
     assert "_entityList" not in asset
     assert "window.prompt" not in asset
     assert "Label this NILM signature" not in asset
+    assert 'placeholder="sensor.dishwasher_power"' not in asset
     assert "<select id=\"nilm_merge_target_" not in asset
+    assert (
+        "querySelector(`#nilm_assignment_label_${index}`)\n"
+        "        || this.shadowRoot.querySelector(`#nilm_session_label_${index}`)"
+        not in asset
+    )
     assert (
         'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
         not in asset
@@ -1425,11 +1520,9 @@ def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> Non
 
     assert "new Date(value)" in asset
     assert "raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T" not in asset
-    assert "const year = String(date.getFullYear());" in asset
-    assert (
-        "return this._formatDateParts(year, month, day, date.getHours(), minute);"
-        in asset
-    )
+    assert "new Intl.DateTimeFormat(undefined, {" in asset
+    assert "timeZone: this._timeZone()," in asset
+    assert "this._hass.config.time_zone" in asset
 
 
 def test_daily_action_services_document_entity_targets() -> None:
@@ -1504,9 +1597,16 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         "merge_nilm_signatures",
         "label_nilm_interval",
         "delete_nilm_label_interval",
+        "generate_nilm_sensor_label_intervals",
         "assign_signature_to_appliance",
         "assign_session_to_appliance",
         "assign_interval_to_appliance",
+        "validate_nilm_session",
+        "reject_nilm_session",
+        "validate_nilm_assignment_history",
+        "rename_nilm_appliance",
+        "change_nilm_appliance_profile",
+        "merge_nilm_assignments",
         "publish_nilm_appliance_assignment",
         "unpublish_nilm_appliance_assignment",
         "retire_nilm_appliance_assignment",
@@ -1778,9 +1878,18 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
 
     for expected in (
         "NILM workspace can also pair compatible on/off edges into likely sessions",
+        "Open NILM Graph & Review",
+        "Mains, Solar, and NILM",
         "label signatures, save graph intervals, merge duplicate signatures",
         "assign a signature/session/interval to an appliance",
+        "Adjust Label",
+        "Validate History",
+        "false-positive and false-negative rates",
+        "known-load sensors as selectable ground-truth sources",
+        "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
+        "Disable Publishing",
+        "NILM estimates are inferred from aggregate power and are not safety evidence",
         "`assign_session_to_appliance`",
         "`publish_nilm_appliance_assignment`",
     ):

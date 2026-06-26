@@ -272,6 +272,10 @@ ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
+NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
+NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT = 500
+NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
+NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
 RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
@@ -1024,11 +1028,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if async_track_state_change_event is None or not self.source_entities:
             return
 
-        self._unsub_state_change = async_track_state_change_event(
-            self.hass,
-            list(self.source_entities),
-            self._async_handle_source_state_change,
-        )
+        try:
+            self._unsub_state_change = async_track_state_change_event(
+                self.hass,
+                list(self.source_entities),
+                self._async_handle_source_state_change,
+            )
+        except AttributeError:
+            self._unsub_state_change = None
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
@@ -3323,6 +3330,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         appliance_id: str | None = None,
         mains_entity_id: str | None = None,
         ground_truth_entity_id: str | None = None,
+        validation_start: Any = None,
+        validation_end: Any = None,
         interval_id: str | None = None,
         source: str = "manual",
         confidence: float = 1.0,
@@ -3378,12 +3387,26 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text
+        if validation_start is not None and validation_end is not None:
+            validation_start_dt = _nilm_label_interval_datetime(
+                validation_start,
+                "validation_start",
+            )
+            validation_end_dt = _nilm_label_interval_datetime(
+                validation_end,
+                "validation_end",
+            )
+            if validation_end_dt <= validation_start_dt:
+                raise ValueError("NILM validation end must be after start.")
+            payload["validation_start"] = validation_start_dt.isoformat()
+            payload["validation_end"] = validation_end_dt.isoformat()
 
         if existing is None:
             intervals.append(payload)
         else:
             existing.clear()
             existing.update(payload)
+        del intervals[:-NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT]
 
         self._mark_store_dirty()
         self.async_set_updated_data(self.state)
@@ -3529,6 +3552,396 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self._async_save_store(self._now_fn())
         return dict(assignment)
 
+    async def async_validate_nilm_session(
+        self: Self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record that a NILM session matched its appliance assignment."""
+        return await self._async_record_nilm_session_validation(
+            circuit_id,
+            session_id,
+            assignment_id=assignment_id,
+            correct=True,
+        )
+
+    async def async_reject_nilm_session(
+        self: Self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record that a NILM session did not match its appliance assignment."""
+        return await self._async_record_nilm_session_validation(
+            circuit_id,
+            session_id,
+            assignment_id=assignment_id,
+            correct=False,
+        )
+
+    async def async_validate_nilm_assignment_history(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Confirm assigned NILM sessions that overlap ground-truth intervals."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        intervals = [
+            interval
+            for interval in self.store_data.nilm_label_intervals_by_circuit.get(
+                circuit_id,
+                (),
+            )
+            if isinstance(interval, Mapping)
+            and str(interval.get("ground_truth_entity_id") or "").strip()
+            and _nilm_assignment_interval_matches(interval, assignment)
+        ]
+        if not intervals:
+            raise ValueError(
+                "No matching ground-truth NILM label intervals were found for "
+                "this assignment."
+            )
+
+        assignment_id_text = str(assignment.get("assignment_id") or "").strip()
+        assignment_session_ids = set(_clean_string_list(assignment.get("session_ids")))
+        matched_session_ids: list[str] = []
+        conflicting_session_ids: list[str] = []
+        matched_interval_ids: set[int] = set()
+        power_errors: list[float] = []
+        energy_errors: list[float] = []
+        for session in self.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if not isinstance(session, Mapping):
+                continue
+            session_id = str(session.get("session_id") or "").strip()
+            if not session_id:
+                continue
+            session_assignment_id = str(session.get("assignment_id") or "").strip()
+            if (
+                session_assignment_id != assignment_id_text
+                and session_id not in assignment_session_ids
+            ):
+                continue
+            if not session.get("end"):
+                continue
+            overlapping_intervals = [
+                interval
+                for interval in intervals
+                if _nilm_overlap_seconds(interval, session) > 0
+            ]
+            if overlapping_intervals:
+                _append_unique(matched_session_ids, session_id)
+                session_power = _float_or_none(session.get("median_power_w"))
+                session_energy = _float_or_none(session.get("estimated_energy_kwh"))
+                for interval in overlapping_intervals:
+                    matched_interval_ids.add(id(interval))
+                    interval_power = _float_or_none(interval.get("median_power_w"))
+                    interval_energy = _float_or_none(
+                        interval.get("estimated_energy_kwh"),
+                    )
+                    if session_power is not None and interval_power is not None:
+                        power_errors.append(abs(session_power - interval_power))
+                    if session_energy is not None and interval_energy is not None:
+                        energy_errors.append(abs(session_energy - interval_energy))
+            elif any(
+                _nilm_validation_coverage_overlap_seconds(interval, session) > 0
+                for interval in intervals
+            ):
+                _append_unique(conflicting_session_ids, session_id)
+
+        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
+        newly_confirmed = [
+            session_id
+            for session_id in matched_session_ids
+            if session_id not in confirmed
+        ]
+        newly_rejected = [
+            session_id
+            for session_id in conflicting_session_ids
+            if session_id not in rejected
+        ]
+        if not newly_confirmed and not newly_rejected:
+            raise ValueError(
+                "No matching ground-truth NILM sessions were found for this "
+                "assignment."
+            )
+
+        for session_id in newly_confirmed:
+            _append_unique(confirmed, session_id)
+            _append_unique(assignment.setdefault("session_ids", []), session_id)
+        rejected = [
+            session_id for session_id in rejected if session_id not in newly_confirmed
+        ]
+        for session_id in newly_rejected:
+            _append_unique(rejected, session_id)
+        confirmed = [
+            session_id for session_id in confirmed if session_id not in newly_rejected
+        ]
+
+        now_dt = self._now_fn()
+        now = now_dt.isoformat()
+        current_confidence = _nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        confidence = min(
+            1.0,
+            round(current_confidence + (0.05 * len(newly_confirmed)), 3),
+        )
+        if newly_rejected:
+            confidence = max(0.0, round(confidence - (0.15 * len(newly_rejected)), 3))
+        assignment["confidence"] = confidence
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        ground_truth_interval_count = len(intervals)
+        matched_ground_truth_count = len(matched_interval_ids)
+        missed_ground_truth_count = max(
+            ground_truth_interval_count - matched_ground_truth_count,
+            0,
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["ground_truth_interval_count"] = ground_truth_interval_count
+        assignment["matched_ground_truth_count"] = matched_ground_truth_count
+        assignment["missed_ground_truth_count"] = missed_ground_truth_count
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["false_negative_rate"] = (
+            round(missed_ground_truth_count / ground_truth_interval_count, 3)
+            if ground_truth_interval_count
+            else 0.0
+        )
+        assignment["median_power_error"] = (
+            round(median(power_errors), 3) if power_errors else None
+        )
+        assignment["energy_estimate_error"] = (
+            round(median(energy_errors), 3) if energy_errors else None
+        )
+        validation_starts: list[datetime] = []
+        validation_ends: list[datetime] = []
+        for interval in intervals:
+            validation_start = _datetime_or_none(
+                interval.get("validation_start") or interval.get("start"),
+            )
+            validation_end = _datetime_or_none(
+                interval.get("validation_end") or interval.get("end"),
+            )
+            if validation_start is not None:
+                validation_starts.append(validation_start)
+            if validation_end is not None:
+                validation_ends.append(validation_end)
+        if validation_starts and validation_ends:
+            assignment["validation_window_start"] = min(validation_starts).isoformat()
+            assignment["validation_window_end"] = max(validation_ends).isoformat()
+        if newly_rejected and assignment.get("lifecycle_state") != "retired":
+            assignment["lifecycle_state"] = "conflict"
+        elif assignment.get("lifecycle_state") not in {"published", "retired"}:
+            assignment["lifecycle_state"] = "validated"
+        assignment["last_validation"] = (
+            "direct_meter_conflict" if newly_rejected else "history"
+        )
+        assignment["last_validated_at"] = now
+        if newly_rejected:
+            assignment["last_rejected_at"] = now
+        assignment["updated_at"] = now
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now_dt)
+        return dict(assignment)
+
+    async def async_rename_nilm_appliance(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        label: str,
+    ) -> dict[str, Any]:
+        """Rename a NILM appliance assignment without changing its stable ID."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["display_name"] = label_text
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_change_nilm_appliance_profile(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        appliance_profile: str,
+    ) -> dict[str, Any]:
+        """Change the appliance profile hint for a NILM assignment."""
+        profile_text = str(appliance_profile or "").strip()
+        if not profile_text:
+            raise ValueError("Missing appliance_profile.")
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["appliance_profile"] = profile_text
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_merge_nilm_assignments(
+        self: Self,
+        circuit_id: str,
+        source_assignment_id: str,
+        target_assignment_id: str,
+    ) -> dict[str, Any]:
+        """Merge one NILM appliance assignment into another."""
+        source_id = str(source_assignment_id or "").strip()
+        target_id = str(target_assignment_id or "").strip()
+        if not source_id or not target_id:
+            raise ValueError("Missing source_assignment_id or target_assignment_id.")
+        if source_id == target_id:
+            raise ValueError(
+                "source_assignment_id and target_assignment_id must be different."
+            )
+        source = self._nilm_assignment_for_id(circuit_id, source_id)
+        target = self._nilm_assignment_for_id(circuit_id, target_id)
+        for key in (
+            "signature_fingerprints",
+            "session_ids",
+            "label_interval_ids",
+            "confirmed_session_ids",
+            "rejected_session_ids",
+        ):
+            values = target.setdefault(key, [])
+            for value in _clean_string_list(source.get(key)):
+                _append_unique(values, value)
+        target["confirmed_sessions"] = len(
+            _clean_string_list(target.get("confirmed_session_ids"))
+        )
+        target["rejected_sessions"] = len(
+            _clean_string_list(target.get("rejected_session_ids"))
+        )
+        target["confidence"] = max(
+            _nonnegative_float_value(target.get("confidence"), default=0.0),
+            _nonnegative_float_value(source.get("confidence"), default=0.0),
+        )
+        target["publish_entities"] = bool(
+            target.get("publish_entities") or source.get("publish_entities")
+        )
+        target["created_device"] = bool(
+            target.get("created_device") or source.get("created_device")
+        )
+        if source.get("lifecycle_state") == "published":
+            target["lifecycle_state"] = "published"
+        target["updated_at"] = self._now_fn().isoformat()
+
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        self.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = [
+            assignment
+            for assignment in assignments
+            if assignment.get("assignment_id") != source_id
+        ]
+        for signature in self.store_data.nilm_signatures.get(circuit_id, []):
+            if signature.get("assignment_id") == source_id:
+                signature["assignment_id"] = target_id
+        for interval in self.store_data.nilm_label_intervals_by_circuit.get(
+            circuit_id,
+            [],
+        ):
+            if interval.get("assignment_id") == source_id:
+                interval["assignment_id"] = target_id
+        await self._async_save_nilm_assignment_change()
+        return dict(target)
+
+    async def _async_record_nilm_session_validation(
+        self: Self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None,
+        correct: bool,
+    ) -> dict[str, Any]:
+        session_id_text = str(session_id or "").strip()
+        assignment = self._nilm_assignment_for_session(
+            circuit_id,
+            session_id_text,
+            assignment_id=assignment_id,
+        )
+        _append_unique(assignment.setdefault("session_ids", []), session_id_text)
+        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
+        current_confidence = _nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        now_dt = self._now_fn()
+        now = now_dt.isoformat()
+        if correct:
+            already_confirmed = session_id_text in confirmed
+            _append_unique(confirmed, session_id_text)
+            rejected = [value for value in rejected if value != session_id_text]
+            if not already_confirmed:
+                assignment["confidence"] = min(
+                    1.0,
+                    round(current_confidence + 0.05, 3),
+                )
+            if assignment.get("lifecycle_state") not in {"published", "retired"}:
+                assignment["lifecycle_state"] = "validated"
+            assignment["last_validation"] = "correct"
+            assignment["last_validated_at"] = now
+        else:
+            already_rejected = session_id_text in rejected
+            _append_unique(rejected, session_id_text)
+            confirmed = [value for value in confirmed if value != session_id_text]
+            if not already_rejected:
+                assignment["confidence"] = max(
+                    0.0,
+                    round(current_confidence - 0.15, 3),
+                )
+            if assignment.get("lifecycle_state") != "retired":
+                assignment["lifecycle_state"] = "needs_validation"
+            assignment["last_validation"] = "wrong_appliance"
+            assignment["last_rejected_at"] = now
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["false_negative_rate"] = _nonnegative_float_value(
+            assignment.get("false_negative_rate"),
+            default=0.0,
+        )
+        assignment["median_power_error"] = _round_optional_number(
+            assignment.get("median_power_error"),
+        )
+        assignment["energy_estimate_error"] = _round_optional_number(
+            assignment.get("energy_estimate_error"),
+        )
+        assignment["updated_at"] = now
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now_dt)
+        return dict(assignment)
+
     def _upsert_nilm_assignment(
         self: Self,
         circuit_id: str,
@@ -3595,6 +4008,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             }
             assignments.append(assignment)
         else:
+            assignments[:] = [item for item in assignments if item is not assignment]
+            assignments.append(assignment)
             assignment["display_name"] = label_text
             if appliance_profile:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
@@ -3618,7 +4033,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             float(assignment.get("confidence") or 0.0),
             max(min(confidence_value, 1.0), 0.0),
         )
+        del assignments[:-NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT]
         return assignment
+
+    def _nilm_assignment_for_session(
+        self: Self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        session_id_text = str(session_id or "").strip()
+        if not session_id_text:
+            raise ValueError("Missing session_id.")
+        assignment_id_text = str(assignment_id or "").strip()
+        if assignment_id_text:
+            assignment = self._nilm_assignment_for_id(circuit_id, assignment_id_text)
+            _append_unique(assignment.setdefault("session_ids", []), session_id_text)
+            return assignment
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        for assignment in assignments:
+            if session_id_text in assignment.get("session_ids", ()):
+                return assignment
+        raise ValueError(
+            f"Assign NILM session '{session_id_text}' to an appliance before "
+            "validating it."
+        )
 
     def _remove_nilm_signature_from_other_assignments(
         self: Self,
@@ -6339,15 +6782,42 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment.get("confidence"),
             default=0.0,
         )
+        session_id = ""
+        if _alert_feature(alert) == "nilm_appliance_finished":
+            notification_key = str(alert.features.get("notification_key") or "").strip()
+            notification_key_parts = notification_key.split(":", 1)
+            if len(notification_key_parts) == 2:
+                session_id = notification_key_parts[1].strip()
+        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
         if action == "correct":
             assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
             assignment["last_validation"] = "correct"
+            if session_id:
+                _append_unique(confirmed, session_id)
+                rejected = [value for value in rejected if value != session_id]
         elif action == "wrong_appliance":
             assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
             assignment["last_validation"] = "wrong_appliance"
             assignment["lifecycle_state"] = "needs_validation"
+            if session_id:
+                _append_unique(rejected, session_id)
+                confirmed = [value for value in confirmed if value != session_id]
         else:
             return
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
         assignment["updated_at"] = now.isoformat()
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
@@ -6485,7 +6955,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._prune_water_context(now)
         self._prune_contextual_baseline_state(now)
         self._prune_alert_history(now)
-        self._prune_nilm_history()
+        self._prune_nilm_history(now)
         self._prune_alert_feedback(now)
         self._prune_recommendation_history(now)
 
@@ -6652,7 +7122,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             reverse=True,
         )[:ALERT_HISTORY_MAX_ITEMS]
 
-    def _prune_nilm_history(self: Self) -> None:
+    def _prune_nilm_history(self: Self, now: datetime) -> None:
         for circuit_id, signatures in self.store_data.nilm_signatures.items():
             self.store_data.nilm_signatures[circuit_id] = _newest_mapping_items(
                 signatures,
@@ -6665,6 +7135,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     unknown_loads,
                     NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
                 )
+        cutoff = now - NILM_SESSION_HISTORY_MAX_AGE
+        for circuit_id, sessions in list(
+            self.store_data.nilm_session_history_by_circuit.items()
+        ):
+            retained = [
+                dict(session)
+                for session in sessions
+                if isinstance(session, Mapping)
+                and _mapping_time(
+                    session,
+                    "end",
+                    "start",
+                    "updated_at",
+                    "created_at",
+                    "timestamp",
+                )
+                >= cutoff
+            ]
+            self.store_data.nilm_session_history_by_circuit[circuit_id] = sorted(
+                retained,
+                key=lambda session: _mapping_time(
+                    session,
+                    "end",
+                    "start",
+                    "updated_at",
+                    "created_at",
+                    "timestamp",
+                ),
+                reverse=True,
+            )[:NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT]
 
     def _prune_alert_feedback(self: Self, now: datetime) -> None:
         cutoff = now - ALERT_FEEDBACK_MAX_AGE
@@ -8127,6 +8627,63 @@ def _nilm_signature_assignment_label(
     )
 
 
+def _nilm_assignment_interval_matches(
+    interval: Mapping[str, Any],
+    assignment: Mapping[str, Any],
+) -> bool:
+    interval_id = str(interval.get("interval_id") or "").strip()
+    if interval_id and interval_id in _clean_string_list(
+        assignment.get("label_interval_ids")
+    ):
+        return True
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if (
+        assignment_id
+        and str(interval.get("assignment_id") or "").strip() == assignment_id
+    ):
+        return True
+    interval_appliance = str(
+        interval.get("appliance_id") or interval.get("label") or ""
+    ).strip().casefold()
+    if not interval_appliance:
+        return False
+    return interval_appliance in {
+        str(assignment.get("appliance_id") or "").strip().casefold(),
+        str(assignment.get("display_name") or "").strip().casefold(),
+    }
+
+
+def _nilm_overlap_seconds(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+) -> float:
+    first_start = _datetime_or_none(first.get("start"))
+    first_end = _datetime_or_none(first.get("end"))
+    second_start = _datetime_or_none(second.get("start"))
+    second_end = _datetime_or_none(second.get("end"))
+    if not all((first_start, first_end, second_start, second_end)):
+        return 0.0
+    overlap_start = max(first_start, second_start)
+    overlap_end = min(first_end, second_end)
+    if overlap_end <= overlap_start:
+        return 0.0
+    return (overlap_end - overlap_start).total_seconds()
+
+
+def _nilm_validation_coverage_overlap_seconds(
+    interval: Mapping[str, Any],
+    session: Mapping[str, Any],
+) -> float:
+    validation_start = interval.get("validation_start")
+    validation_end = interval.get("validation_end")
+    if not validation_start or not validation_end:
+        return 0.0
+    return _nilm_overlap_seconds(
+        {"start": validation_start, "end": validation_end},
+        session,
+    )
+
+
 def _nilm_assignment_appliance_id(label: str) -> str:
     slug = "".join(
         character.lower() if character.isalnum() else "_"
@@ -8146,6 +8703,21 @@ def _append_unique(values: Any, value: Any) -> None:
     if not text or text in values:
         return
     values.append(text)
+
+
+def _clean_string_list(values: Any) -> list[str]:
+    if isinstance(values, (str, bytes)):
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    cleaned: list[str] = []
+    for value in iterator:
+        text = str(value or "").strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
 
 
 def _positive_int_from_raw(

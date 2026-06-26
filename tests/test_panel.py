@@ -1026,9 +1026,16 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.pool_pump_power", SensorRole.REAL_POWER),),
     )
+    solar_config = CircuitConfig(
+        circuit_id="solar",
+        name="Solar Inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.solar_power", SensorRole.REAL_POWER),),
+    )
     coordinator = _coordinator(
         config=mains_config,
-        configs=(mains_config, known_config),
+        configs=(mains_config, known_config, solar_config),
     )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
         "mains": [
@@ -1109,6 +1116,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "sensor.mains_power",
         "sensor.mains_reactive_power",
         "sensor.pool_pump_power",
+        "sensor.solar_power",
     ]
     assert payload["history"]["api_path"].startswith(
         "circuitsetup_energy_analyzer/nilm_workspace_history?"
@@ -1125,16 +1133,75 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             "entity_ids": ["sensor.pool_pump_power"],
         }
     ]
+    assert payload["solar_overlays"] == [
+        {
+            "circuit_id": "solar",
+            "name": "Solar Inverter",
+            "entity_ids": ["sensor.solar_power"],
+        }
+    ]
     assert payload["signatures"][0]["signature_id"] == "signature_1"
-    assert "actions" not in payload["signatures"][0]
+    assert payload["signatures"][0]["actions"]["label"]["service"] == (
+        "label_nilm_signature"
+    )
+    assert payload["signatures"][0]["actions"]["ignore"]["service"] == (
+        "ignore_nilm_signature"
+    )
+    assert payload["signatures"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_signature_to_appliance",
+        "data": {"circuit_id": "mains", "signature_id": "signature_1"},
+        "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
+    }
     assert payload["label_intervals"][0]["label"] == "Dishwasher"
     assert payload["label_intervals"][0]["actions"]["delete"] == {
         "domain": DOMAIN,
         "service": "delete_nilm_label_interval",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
     }
+    assert payload["label_intervals"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_interval_to_appliance",
+        "data": {"circuit_id": "mains", "interval_id": "label-1"},
+        "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
+    }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assert payload["assignments"][0]["actions"]["rename"] == {
+        "domain": DOMAIN,
+        "service": "rename_nilm_appliance",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["label"],
+    }
+    change_profile = payload["assignments"][0]["actions"]["change_profile"]
+    assert change_profile == {
+        "domain": DOMAIN,
+        "service": "change_nilm_appliance_profile",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["appliance_profile"],
+        "profile_options": change_profile["profile_options"],
+    }
+    assert {"value": "dishwasher", "label": "Dishwasher"} in change_profile[
+        "profile_options"
+    ]
+    assert {"value": "mixed", "label": "Mixed"} in change_profile["profile_options"]
+    assert payload["assignments"][0]["actions"]["publish"] == {
+        "domain": DOMAIN,
+        "service": "publish_nilm_appliance_assignment",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+    }
+    assert "unpublish" not in payload["assignments"][0]["actions"]
+    assert payload["assignments"][0]["actions"]["retire"] == {
+        "domain": DOMAIN,
+        "service": "retire_nilm_appliance_assignment",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+    }
     assert payload["virtual_appliance_count"] == 1
     assert payload["virtual_appliances"][0]["assignment_id"] == (
         "assignment-dishwasher"
@@ -1157,8 +1224,115 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         },
         "requires": ["start", "end", "label"],
     }
+    assert payload["actions"]["sensor_label_interval"] == {
+        "domain": DOMAIN,
+        "service": "generate_nilm_sensor_label_intervals",
+        "data": {
+            "circuit_id": "mains",
+            "mains_entity_id": "sensor.mains_power",
+        },
+        "requires": ["start", "end", "label", "ground_truth_entity_id"],
+        "ground_truth_options": [
+            {"value": "sensor.pool_pump_power", "label": "Pool Pump"}
+        ],
+    }
     assert payload["edges"][0]["direction"] == "on"
+    assert payload["sessions"][0]["actions"]["assign"] == {
+        "domain": DOMAIN,
+        "service": "assign_session_to_appliance",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "signature_fingerprint": payload["sessions"][0]["signature_fingerprint"],
+        },
+        "requires": ["label"],
+        "assignment_options": [
+            {"value": "assignment-dishwasher", "label": "Dishwasher"}
+        ],
+    }
+    assert payload["sessions"][0]["actions"]["validate"] == {
+        "domain": DOMAIN,
+        "service": "validate_nilm_session",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "assignment_id": "assignment-dishwasher",
+        },
+    }
+    assert payload["sessions"][0]["actions"]["reject"] == {
+        "domain": DOMAIN,
+        "service": "reject_nilm_session",
+        "data": {
+            "circuit_id": "mains",
+            "session_id": payload["sessions"][0]["session_id"],
+            "assignment_id": "assignment-dishwasher",
+        },
+    }
     assert payload["sessions"][0]["off_edge_id"] is not None
+
+
+def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config)
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-source",
+                "appliance_id": "dishwasher_old",
+                "display_name": "Dishwasher old",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["source-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.7,
+            },
+            {
+                "assignment_id": "assignment-target",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["target-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            },
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["assignments"][0]["actions"]["merge"] == {
+        "domain": DOMAIN,
+        "service": "merge_nilm_assignments",
+        "data": {
+            "circuit_id": "mains",
+            "source_assignment_id": "assignment-source",
+        },
+        "requires": ["target_assignment_id"],
+        "target_options": [
+            {"value": "assignment-target", "label": "Dishwasher"},
+        ],
+    }
+    assert payload["assignments"][0]["actions"]["validate_history"] == {
+        "domain": DOMAIN,
+        "service": "validate_nilm_assignment_history",
+        "data": {
+            "circuit_id": "mains",
+            "assignment_id": "assignment-source",
+        },
+    }
 
 
 def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
@@ -1523,6 +1697,181 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
     assert appliances["assignment-dryer"]["estimated_power_w"] == 420.0
 
 
+def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["stable-dishwasher-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "learning",
+                "confidence": 0.8,
+            }
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature_cluster_1",
+                    "feedback_fingerprint": "stable-dishwasher-fingerprint",
+                    "typical_watts": 820.0,
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 0, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=20.0,
+                delta_va=821.0,
+                delta_pf=-0.01,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 30, tzinfo=UTC),
+                delta_w=-815.0,
+                delta_var=-20.0,
+                delta_va=-816.0,
+                delta_pf=0.01,
+                direction="off",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+                delta_w=420.0,
+                delta_var=15.0,
+                delta_va=421.0,
+                delta_pf=-0.01,
+                direction="on",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["session_count"] == 1
+    assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
+    assert payload["sessions"][0]["signature_fingerprint"] == (
+        "stable-dishwasher-fingerprint"
+    )
+
+
+def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "on_edge_id": "edge-on",
+                "off_edge_id": "edge-off",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.615,
+                "confidence": 0.9,
+                "overlap_count": 0,
+                "ambiguous": False,
+                "alternate_match_count": 0,
+                "known_load_masked": False,
+                "known_load_confidence": None,
+                "assignment_id": "assignment-dishwasher",
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["session_count"] == 1
+    assert payload["sessions"][0]["session_id"] == "session-dishwasher"
+    assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
+
+
+def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": ["session-dishwasher"],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.8,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.615,
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    virtual = payload["virtual_appliances"][0]
+    assert virtual["assignment_id"] == "assignment-dishwasher"
+    assert virtual["estimated_energy_kwh_today"] == 0.615
+    assert virtual["last_seen"] == "2026-06-06T08:45:00+00:00"
+
+
 def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (
@@ -1664,6 +2013,36 @@ async def test_nilm_workspace_history_uses_recorder_executor(monkeypatch) -> Non
 
     assert len(recorder.jobs) == 1
     assert rows[0][0]["state"] == "12"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_handles_missing_recorder_or_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    monkeypatch.setattr(panel, "_history_get_significant_states", lambda: None)
+
+    rows = await panel._async_history_rows(
+        SimpleNamespace(),
+        "2026-06-06T08:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        ["sensor.mains_power"],
+    )
+
+    assert rows == []
+
+    monkeypatch.setattr(panel, "_history_get_significant_states", lambda: object())
+    monkeypatch.setattr(panel, "_recorder_get_instance", lambda hass: None)
+
+    rows = await panel._async_history_rows(
+        SimpleNamespace(),
+        "2026-06-06T08:00:00+00:00",
+        "2026-06-06T09:00:00+00:00",
+        ["sensor.mains_power"],
+    )
+
+    assert rows == []
 
 
 def test_alert_evidence_payload_falls_back_to_latest_alert_for_circuit() -> None:
@@ -1956,6 +2335,51 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
 
     assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
     assert DOMAIN in hass.data
+
+
+@pytest.mark.asyncio
+async def test_panel_setup_supports_bound_panel_custom_helper() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_URL_PATH,
+        async_setup_panel,
+        async_unload_panel,
+    )
+
+    class FakeHttp:
+        async def async_register_static_paths(self, paths) -> None:
+            return None
+
+        def register_view(self, view) -> None:
+            return None
+
+    class FakePanelCustom:
+        def __init__(self) -> None:
+            self.panels = []
+
+        async def async_register_panel(self, **kwargs) -> None:
+            self.panels.append(kwargs)
+
+    class FakeFrontend:
+        def __init__(self) -> None:
+            self.removed = []
+
+        def async_remove_panel(self, frontend_url_path, **kwargs) -> None:
+            self.removed.append((frontend_url_path, kwargs))
+
+    panel_custom = FakePanelCustom()
+    frontend = FakeFrontend()
+    hass = SimpleNamespace(
+        data={},
+        http=FakeHttp(),
+        components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
+    )
+
+    assert await async_setup_panel(hass) is True
+    assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
+
+    await async_unload_panel(hass)
+
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
 
 
 @pytest.mark.asyncio

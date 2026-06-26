@@ -355,6 +355,28 @@ def test_dashboard_uses_nilm_signature_count_key_for_signature_card() -> None:
     assert "sensor.mains_nilm_discovered_signatures" not in refs
 
 
+def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+
+    review_card = next(
+        card
+        for card in _dashboard_cards(mains_section)
+        if card.get("name") == "Open NILM Graph & Review"
+    )
+
+    assert review_card["type"] == "button"
+    assert review_card["tap_action"] == {
+        "action": "navigate",
+        "navigation_path": (
+            "/circuitsetup-energy-analyzer-evidence?circuit_id=mains"
+        ),
+    }
+
+
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
     dashboard = build_recommended_dashboard(
         (

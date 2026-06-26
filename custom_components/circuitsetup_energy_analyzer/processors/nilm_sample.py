@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, MutableMapping, MutableSet
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
 from typing import Any
 
@@ -11,11 +11,14 @@ from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
     NilmEdge,
     NilmEdgeDetector,
+    NilmSession,
     NilmSignature,
     classify_signature,
     cluster_recurring_signatures,
     mask_known_loads,
+    nilm_session_to_dict,
     nilm_signature_fingerprint,
+    pair_nilm_sessions,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -138,6 +141,31 @@ class NilmSampleProcessor:
                     inventory
                 )
                 store_dirty = True
+            session_payloads = _nilm_session_history_payloads(
+                circuit_id,
+                self.unmatched_edges_by_circuit[circuit_id],
+                payloads,
+                context.store_data.nilm_appliance_assignments_by_circuit.get(
+                    circuit_id,
+                    [],
+                ),
+            )
+            if session_payloads:
+                existing_sessions = (
+                    context.store_data.nilm_session_history_by_circuit.get(
+                        circuit_id,
+                        [],
+                    )
+                )
+                next_sessions = _merge_nilm_session_history(
+                    existing_sessions,
+                    session_payloads,
+                )
+                if next_sessions != existing_sessions:
+                    context.store_data.nilm_session_history_by_circuit[circuit_id] = (
+                        next_sessions
+                    )
+                    store_dirty = True
 
         return FeatureResult(
             alerts=alerts,
@@ -297,6 +325,160 @@ def nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
     else:
         payload["review_state"] = "new"
     return payload
+
+
+def _nilm_session_history_payloads(
+    circuit_id: str,
+    edges: Iterable[NilmEdge],
+    signatures: list[dict[str, Any]],
+    assignments: Iterable[Any],
+) -> list[dict[str, Any]]:
+    edge_list = list(edges)
+    if not edge_list:
+        return []
+    signatures_by_key = _nilm_signatures_by_key(signatures)
+    payloads: list[dict[str, Any]] = []
+    for signature_fingerprint, assignment_id in _nilm_session_specs(
+        signatures,
+        assignments,
+    ):
+        signature = signatures_by_key.get(signature_fingerprint)
+        payloads.extend(
+            nilm_session_to_dict(session)
+            for session in pair_nilm_sessions(
+                edge_list,
+                mains_circuit_id=circuit_id,
+                signature_fingerprint=signature_fingerprint,
+                assignment_id=assignment_id,
+            )
+            if signature is None or _nilm_session_matches_signature(session, signature)
+        )
+    return payloads
+
+
+def _nilm_signatures_by_key(
+    signatures: Iterable[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    values: dict[str, Mapping[str, Any]] = {}
+    for signature in signatures:
+        for key in ("signature_id", "feedback_fingerprint", "signature_fingerprint"):
+            value = str(signature.get(key) or "").strip()
+            if value:
+                values[value] = signature
+    return values
+
+
+def _nilm_session_specs(
+    signatures: Iterable[Mapping[str, Any]],
+    assignments: Iterable[Any],
+) -> list[tuple[str, str | None]]:
+    specs: list[tuple[str, str | None]] = []
+    seen: set[tuple[str, str | None]] = set()
+    seen_fingerprints: set[str] = set()
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping):
+            continue
+        assignment_id = str(assignment.get("assignment_id") or "").strip() or None
+        for value in _list_items(assignment.get("signature_fingerprints")):
+            fingerprint = str(value or "").strip()
+            key = (fingerprint, assignment_id)
+            if fingerprint and key not in seen:
+                specs.append(key)
+                seen.add(key)
+                seen_fingerprints.add(fingerprint)
+    for signature in signatures:
+        fingerprint = _nilm_signature_session_fingerprint(signature)
+        key = (fingerprint, None)
+        if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
+            specs.append(key)
+            seen.add(key)
+    return specs
+
+
+def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
+    return str(
+        signature.get("feedback_fingerprint")
+        or signature.get("signature_fingerprint")
+        or signature.get("signature_id")
+        or ""
+    ).strip()
+
+
+def _nilm_session_matches_signature(
+    session: NilmSession,
+    signature: Mapping[str, Any],
+) -> bool:
+    typical_watts = _optional_float(
+        signature.get("typical_watts"),
+        signature.get("median_delta_w"),
+    )
+    if typical_watts is None:
+        return True
+    return abs(session.median_power_w - abs(typical_watts)) <= max(
+        abs(typical_watts) * 0.25,
+        50.0,
+    )
+
+
+def _merge_nilm_session_history(
+    existing: Iterable[Any],
+    updates: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for session in existing:
+        if isinstance(session, Mapping):
+            session_id = str(session.get("session_id") or "").strip()
+            if session_id:
+                merged[session_id] = dict(session)
+    for update in updates:
+        session_id = str(update.get("session_id") or "").strip()
+        if not session_id:
+            continue
+        if update.get("off_edge_id"):
+            _remove_open_nilm_session(
+                merged,
+                signature_fingerprint=str(
+                    update.get("signature_fingerprint") or ""
+                ).strip(),
+                on_edge_id=str(update.get("on_edge_id") or "").strip(),
+            )
+        merged[session_id] = dict(update)
+    return sorted(
+        merged.values(),
+        key=lambda session: str(session.get("end") or session.get("start") or ""),
+        reverse=True,
+    )
+
+
+def _remove_open_nilm_session(
+    sessions: dict[str, dict[str, Any]],
+    *,
+    signature_fingerprint: str,
+    on_edge_id: str,
+) -> None:
+    if not signature_fingerprint or not on_edge_id:
+        return
+    for session_id, session in list(sessions.items()):
+        if (
+            str(session.get("signature_fingerprint") or "").strip()
+            == signature_fingerprint
+            and str(session.get("on_edge_id") or "").strip() == on_edge_id
+            and not str(session.get("off_edge_id") or "").strip()
+        ):
+            sessions.pop(session_id, None)
+
+
+def _optional_float(*values: Any) -> float | None:
+    for value in values:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _list_items(values: Any) -> Iterable[Any]:
+    return values if isinstance(values, list) else ()
 
 
 def _nilm_signature_metadata_compatible(

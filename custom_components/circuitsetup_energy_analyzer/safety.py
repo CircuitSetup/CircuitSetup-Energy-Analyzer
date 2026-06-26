@@ -12,6 +12,7 @@ ELECTRICAL_SAFETY_NOTICE = (
 _ELECTRICAL_SAFETY_FEATURE_TOKENS = (
     "capacity",
     "demand",
+    "nilm",
 )
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 from . import notifications
@@ -31,9 +32,16 @@ SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_LABEL_NILM_INTERVAL = "label_nilm_interval"
 SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
+SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS = "generate_nilm_sensor_label_intervals"
 SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE = "assign_signature_to_appliance"
 SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
 SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
+SERVICE_VALIDATE_NILM_SESSION = "validate_nilm_session"
+SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
+SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY = "validate_nilm_assignment_history"
+SERVICE_RENAME_NILM_APPLIANCE = "rename_nilm_appliance"
+SERVICE_CHANGE_NILM_APPLIANCE_PROFILE = "change_nilm_appliance_profile"
+SERVICE_MERGE_NILM_ASSIGNMENTS = "merge_nilm_assignments"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
 SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
@@ -84,6 +92,7 @@ ATTR_MAINS_ENTITY_ID = "mains_entity_id"
 ATTR_GROUND_TRUTH_ENTITY_ID = "ground_truth_entity_id"
 ATTR_SOURCE = "source"
 ATTR_CONFIDENCE = "confidence"
+ATTR_THRESHOLD_W = "threshold_w"
 ATTR_PRESET = "preset"
 ATTR_WINDOW_DAYS = "window_days"
 ATTR_DAILY_SPIKE_RATIO = "daily_spike_ratio"
@@ -127,6 +136,8 @@ ATTR_RELEARN = "relearn"
 ATTR_RELEARN_ON_END = "relearn_on_end"
 ATTR_SOURCE_SIGNATURE_ID = "source_signature_id"
 ATTR_TARGET_SIGNATURE_ID = "target_signature_id"
+ATTR_SOURCE_ASSIGNMENT_ID = "source_assignment_id"
+ATTR_TARGET_ASSIGNMENT_ID = "target_assignment_id"
 ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
@@ -321,6 +332,17 @@ NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_INTERVAL_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
+NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
+    required=(ATTR_LABEL, ATTR_START, ATTR_END, ATTR_GROUND_TRUTH_ENTITY_ID),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_APPLIANCE_ID,
+        ATTR_MAINS_ENTITY_ID,
+        ATTR_THRESHOLD_W,
+        ATTR_CONFIDENCE,
+    ),
+)
 NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
     optional=(
@@ -351,6 +373,22 @@ NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
         ATTR_APPLIANCE_ID,
         ATTR_APPLIANCE_PROFILE,
     ),
+)
+NILM_SESSION_VALIDATION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SESSION_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_ASSIGNMENT_ID),
+)
+NILM_RENAME_APPLIANCE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID, ATTR_LABEL),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
+NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID, ATTR_APPLIANCE_PROFILE),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
+NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA = _schema(
+    required=(ATTR_SOURCE_ASSIGNMENT_ID, ATTR_TARGET_ASSIGNMENT_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
 NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID,),
@@ -402,9 +440,20 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_LABEL_NILM_INTERVAL: NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
     SERVICE_DELETE_NILM_LABEL_INTERVAL: NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS: (
+        NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA
+    ),
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE: NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE: NILM_ASSIGN_SESSION_SERVICE_SCHEMA,
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_VALIDATE_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
+    SERVICE_REJECT_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
+    SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY: NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA,
+    SERVICE_RENAME_NILM_APPLIANCE: NILM_RENAME_APPLIANCE_SERVICE_SCHEMA,
+    SERVICE_CHANGE_NILM_APPLIANCE_PROFILE: (
+        NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA
+    ),
+    SERVICE_MERGE_NILM_ASSIGNMENTS: NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
@@ -702,6 +751,51 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         )
         return
 
+    if service == SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS:
+        circuit_id = _service_circuit_id(hass, data)
+        start_dt = _service_datetime(data.get(ATTR_START), ATTR_START)
+        end_dt = _service_datetime(data.get(ATTR_END), ATTR_END)
+        if end_dt <= start_dt:
+            raise HomeAssistantError("NILM sensor label end must be after start")
+        ground_truth_entity_id = str(
+            data.get(ATTR_GROUND_TRUTH_ENTITY_ID) or ""
+        ).strip()
+        rows = await _async_nilm_sensor_history_rows(
+            hass,
+            ground_truth_entity_id,
+            start_dt,
+            end_dt,
+        )
+        intervals = _nilm_sensor_label_intervals_from_history(
+            rows,
+            ground_truth_entity_id,
+            start=start_dt.isoformat(),
+            end=end_dt.isoformat(),
+            threshold_w=data.get(ATTR_THRESHOLD_W, 0.0),
+        )
+        if not intervals:
+            raise HomeAssistantError(
+                "No active ground-truth sensor intervals were found."
+            )
+        for coordinator in _target_coordinators(hass, circuit_id):
+            for interval in intervals:
+                await _call_if_present(
+                    coordinator,
+                    "async_label_nilm_interval",
+                    circuit_id,
+                    label=data.get(ATTR_LABEL),
+                    start=interval[ATTR_START],
+                    end=interval[ATTR_END],
+                    appliance_id=data.get(ATTR_APPLIANCE_ID),
+                    mains_entity_id=data.get(ATTR_MAINS_ENTITY_ID),
+                    ground_truth_entity_id=ground_truth_entity_id,
+                    validation_start=interval.get("validation_start"),
+                    validation_end=interval.get("validation_end"),
+                    source="sensor",
+                    confidence=data.get(ATTR_CONFIDENCE, 1.0),
+                )
+        return
+
     if service == SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE:
         circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
@@ -753,6 +847,83 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 appliance_id=data.get(ATTR_APPLIANCE_ID),
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_VALIDATE_NILM_SESSION:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_validate_nilm_session",
+                circuit_id,
+                data.get(ATTR_SESSION_ID),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_REJECT_NILM_SESSION:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_reject_nilm_session",
+                circuit_id,
+                data.get(ATTR_SESSION_ID),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_validate_nilm_assignment_history",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_RENAME_NILM_APPLIANCE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_rename_nilm_appliance",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+                label=data.get(ATTR_LABEL),
+            )
+        return
+
+    if service == SERVICE_CHANGE_NILM_APPLIANCE_PROFILE:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_change_nilm_appliance_profile",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+            )
+        return
+
+    if service == SERVICE_MERGE_NILM_ASSIGNMENTS:
+        source_assignment_id = str(data.get(ATTR_SOURCE_ASSIGNMENT_ID) or "").strip()
+        target_assignment_id = str(data.get(ATTR_TARGET_ASSIGNMENT_ID) or "").strip()
+        if source_assignment_id == target_assignment_id:
+            raise HomeAssistantError(
+                "source_assignment_id and target_assignment_id must be different"
+            )
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_merge_nilm_assignments",
+                circuit_id,
+                source_assignment_id,
+                target_assignment_id,
             )
         return
 
@@ -1681,6 +1852,153 @@ def _recommendation_is_pending(coordinator: Any, recommendation: Any) -> bool:
     if expires_at.tzinfo is None and now.tzinfo is not None:
         now = now.replace(tzinfo=None)
     return expires_at > now
+
+
+def _nilm_sensor_label_intervals_from_history(
+    rows: Any,
+    ground_truth_entity_id: str,
+    *,
+    start: Any,
+    end: Any,
+    threshold_w: Any = 0.0,
+) -> list[dict[str, str]]:
+    entity_id = str(ground_truth_entity_id or "").strip()
+    start_dt = _service_datetime(start, ATTR_START)
+    end_dt = _service_datetime(end, ATTR_END)
+    try:
+        threshold = float(threshold_w)
+    except (TypeError, ValueError):
+        threshold = 0.0
+
+    samples: list[tuple[datetime, float]] = []
+    for state in _iter_history_states(rows):
+        state_entity_id = _state_value(state, "entity_id")
+        if entity_id and state_entity_id and str(state_entity_id) != entity_id:
+            continue
+        timestamp = _state_timestamp(state)
+        value = _float_or_none(_state_value(state, "state"))
+        if timestamp is not None and value is not None:
+            samples.append((timestamp, value))
+    samples.sort(key=lambda item: item[0])
+
+    intervals: list[dict[str, str]] = []
+    active_start: datetime | None = None
+    for timestamp, value in samples:
+        if timestamp < start_dt or timestamp > end_dt:
+            continue
+        active = value > threshold
+        if active and active_start is None:
+            active_start = timestamp
+        elif not active and active_start is not None:
+            if timestamp > active_start:
+                intervals.append(
+                    {
+                        ATTR_START: active_start.isoformat(),
+                        ATTR_END: timestamp.isoformat(),
+                        "validation_start": start_dt.isoformat(),
+                        "validation_end": end_dt.isoformat(),
+                    }
+                )
+            active_start = None
+    if active_start is not None and end_dt > active_start:
+        intervals.append(
+            {
+                ATTR_START: active_start.isoformat(),
+                ATTR_END: end_dt.isoformat(),
+                "validation_start": start_dt.isoformat(),
+                "validation_end": end_dt.isoformat(),
+            }
+        )
+    return intervals
+
+
+async def _async_nilm_sensor_history_rows(
+    hass: Any,
+    entity_id: str,
+    start: datetime,
+    end: datetime,
+) -> Any:
+    history_helper = _history_get_significant_states()
+    recorder = _recorder_get_instance(hass)
+    if history_helper is None or recorder is None:
+        return []
+    job = partial(
+        history_helper,
+        hass,
+        start,
+        end_time=end,
+        entity_ids=[entity_id],
+        minimal_response=True,
+        no_attributes=True,
+    )
+    try:
+        rows = recorder.async_add_executor_job(job)
+        if inspect.isawaitable(rows):
+            rows = await rows
+        return rows
+    except Exception:
+        return []
+
+
+def _history_get_significant_states() -> Any:
+    try:
+        from homeassistant.components.recorder.history import get_significant_states
+    except ModuleNotFoundError:
+        return None
+    return get_significant_states
+
+
+def _recorder_get_instance(hass: Any) -> Any:
+    try:
+        from homeassistant.components.recorder import get_instance
+    except ModuleNotFoundError:
+        return None
+    try:
+        return get_instance(hass)
+    except Exception:
+        return None
+
+
+def _iter_history_states(rows: Any) -> Iterable[Any]:
+    if isinstance(rows, Mapping):
+        rows = rows.values()
+    for series in _iter_items(rows):
+        yield from _iter_items(series)
+
+
+def _state_value(state: Any, key: str) -> Any:
+    if isinstance(state, Mapping):
+        return state.get(key)
+    return getattr(state, key, None)
+
+
+def _state_timestamp(state: Any) -> datetime | None:
+    for key in ("last_changed", "last_updated"):
+        value = _state_value(state, key)
+        if value is None:
+            continue
+        try:
+            return _service_datetime(value, key)
+        except HomeAssistantError:
+            continue
+    return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _service_datetime(value: Any, field_name: str) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as err:
+        raise HomeAssistantError(f"Invalid {field_name}") from err
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _iter_items(value: Any) -> Iterable[Any]:

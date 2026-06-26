@@ -104,7 +104,8 @@ async def async_create_compact_entity_model_issue(
             "reason": str(issue_data["reason"]),
         }
 
-    create_issue(
+    _call_issue_registry(
+        create_issue,
         hass,
         DOMAIN,
         issue_id_for_compact_entity_model(entry_id),
@@ -126,7 +127,12 @@ async def async_delete_compact_entity_model_issue(
     if delete_issue is None:
         return
 
-    delete_issue(hass, DOMAIN, issue_id_for_compact_entity_model(entry_id))
+    _call_issue_registry(
+        delete_issue,
+        hass,
+        DOMAIN,
+        issue_id_for_compact_entity_model(entry_id),
+    )
 
 
 async def async_sync_compact_entity_model_issue(
@@ -202,7 +208,8 @@ async def async_create_circuit_issue(
             issue_data
         )
 
-    create_issue(
+    _call_issue_registry(
+        create_issue,
         hass,
         DOMAIN,
         issue_id_for_circuit_problem(circuit_id, problem),
@@ -234,7 +241,21 @@ async def async_delete_circuit_issue(
     if delete_issue is None:
         return
 
-    delete_issue(hass, DOMAIN, issue_id_for_circuit_problem(circuit_id, problem))
+    _call_issue_registry(
+        delete_issue,
+        hass,
+        DOMAIN,
+        issue_id_for_circuit_problem(circuit_id, problem),
+    )
+
+
+def _call_issue_registry(call: Any, hass: Any, *args: Any, **kwargs: Any) -> None:
+    try:
+        call(hass, *args, **kwargs)
+    except (AttributeError, TypeError):
+        if getattr(hass, "config", None) is None:
+            return
+        raise
 
 
 def _ha_issue_severity(issue_registry: Any, severity: Severity | str) -> Any:

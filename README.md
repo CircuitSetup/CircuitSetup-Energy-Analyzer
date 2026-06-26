@@ -619,6 +619,8 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges into likely sessions, show known-load overlays, and keep manual interval labels for review.
 
+On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace graph and review actions.
+
 Unknown load estimates may include:
 
 - Likely load type
@@ -633,7 +635,7 @@ Unknown load estimates may include:
 
 These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
 
-Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and publish that confirmed assignment as estimated Home Assistant appliance entities. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy.
+Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and publish that confirmed assignment as estimated Home Assistant appliance entities. Use **Adjust Label** to correct saved intervals and **Validate History** after adding manual or sensor labels; assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace passes NILM IDs internally, offers appliance-profile choices, and uses known-load sensors as selectable ground-truth sources when they are available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Disable Publishing** or **Retire** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
 
 ## Suggested settings
 
@@ -776,7 +778,7 @@ The service actions below are optional. They are useful when you want to call an
 | Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
 | Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_unhelpful` |
 | Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
-| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
+| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `merge_nilm_assignments`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
 | Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
 

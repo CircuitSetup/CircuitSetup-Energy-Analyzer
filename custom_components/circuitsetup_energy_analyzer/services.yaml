@@ -299,6 +299,85 @@ delete_nilm_label_interval:
       example: label-abc123def456
       selector:
         text:
+generate_nilm_sensor_label_intervals:
+  name: Generate NILM sensor label intervals
+  description: "Advanced/script action: create NILM label intervals from a directly metered appliance power sensor history. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    label:
+      name: Label
+      description: Friendly appliance name for generated ground-truth intervals.
+      required: true
+      example: Dishwasher
+      selector:
+        text:
+    start:
+      name: Start
+      description: ISO timestamp for the start of the sensor history range.
+      required: true
+      example: "2026-06-02T12:00:00+00:00"
+      selector:
+        text:
+    end:
+      name: End
+      description: ISO timestamp for the end of the sensor history range.
+      required: true
+      example: "2026-06-02T14:00:00+00:00"
+      selector:
+        text:
+    ground_truth_entity_id:
+      name: Ground Truth Entity
+      description: Directly metered appliance power entity used to generate labels.
+      required: true
+      example: sensor.dishwasher_power
+      selector:
+        entity:
+          domain:
+            - sensor
+    threshold_w:
+      name: Threshold W
+      description: Sensor watts above this threshold are treated as appliance running. Defaults to greater than zero.
+      required: false
+      example: 25
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    appliance_id:
+      name: Appliance ID
+      description: Optional stable appliance/profile identifier for generated intervals.
+      required: false
+      example: dishwasher
+      selector:
+        text:
+    mains_entity_id:
+      name: Mains Entity
+      description: Optional mains power entity associated with generated intervals.
+      required: false
+      example: sensor.mains_power
+      selector:
+        entity:
+          domain:
+            - sensor
 assign_signature_to_appliance:
   name: Assign signature to appliance
   description: "Advanced/script action: assign a NILM signature to an appliance. The normal user path is the NILM workspace panel."
@@ -478,6 +557,221 @@ assign_interval_to_appliance:
       description: Optional existing NILM appliance assignment identifier to update.
       required: false
       example: assignment-abc123def456
+      selector:
+        text:
+validate_nilm_session:
+  name: Validate NILM session
+  description: "Advanced/script action: confirm that a NILM session matched its assigned appliance. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    session_id:
+      name: Session ID
+      description: NILM session identifier to confirm.
+      required: true
+      example: session_1
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
+      required: false
+      example: assignment-abc123def456
+      selector:
+        text:
+reject_nilm_session:
+  name: Reject NILM session
+  description: "Advanced/script action: mark a NILM session as the wrong appliance so the assignment needs review. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    session_id:
+      name: Session ID
+      description: NILM session identifier to reject.
+      required: true
+      example: session_1
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
+      required: false
+      example: assignment-abc123def456
+      selector:
+        text:
+validate_nilm_assignment_history:
+  name: Validate NILM assignment history
+  description: "Advanced/script action: confirm stored NILM sessions that overlap saved ground-truth intervals for an assignment. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to validate against saved ground-truth intervals. The NILM workspace passes this internally.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+rename_nilm_appliance:
+  name: Rename NILM appliance
+  description: "Advanced/script action: rename a NILM appliance assignment without changing its stable entity identifiers. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to rename. The NILM workspace passes this internally.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+    label:
+      name: Label
+      description: New friendly appliance name.
+      required: true
+      example: Kitchen Dishwasher
+      selector:
+        text:
+change_nilm_appliance_profile:
+  name: Change NILM appliance profile
+  description: "Advanced/script action: change the appliance profile hint for a NILM assignment. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to update. The NILM workspace passes this internally.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+    appliance_profile:
+      name: Appliance Profile
+      description: New appliance profile hint, such as dishwasher or custom.
+      required: true
+      example: dishwasher_heated_dry
+      selector:
+        text:
+merge_nilm_assignments:
+  name: Merge NILM assignments
+  description: "Advanced/script action: merge one duplicate NILM appliance assignment into another. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    source_assignment_id:
+      name: Source Assignment ID
+      description: Duplicate NILM appliance assignment to merge away. The NILM workspace passes this internally.
+      required: true
+      example: assignment-source
+      selector:
+        text:
+    target_assignment_id:
+      name: Target Assignment ID
+      description: NILM appliance assignment to keep. The NILM workspace passes this internally.
+      required: true
+      example: assignment-target
       selector:
         text:
 publish_nilm_appliance_assignment:
