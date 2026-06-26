@@ -1457,6 +1457,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
     const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" ? "disabled" : "";
+    const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     return `
       <h3>Manual Labels</h3>
       <div class="metric">
@@ -1485,6 +1486,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
           <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>Generate From Sensor</button>
         </div>
+        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">Estimated energy ${this._escape(this._formatNumber(intervalPreview.energy_kwh))} kWh over ${this._escape(this._formatNumber(intervalPreview.duration_minutes))} minutes from ${this._escape(intervalPreview.source_name)}.</p>` : ""}
       </div>
       ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `
         <div class="metric">
@@ -1517,6 +1519,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       `).join("")}</div>` : `<p class="muted">No manual NILM labels are saved yet.</p>`}
     `;
+  }
+
+  _nilmLabelIntervalEnergyPreview() {
+    const draft = this._nilmLabelIntervalDraft || {};
+    const start = new Date(draft.start || "").getTime();
+    const end = new Date(draft.end || "").getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return null;
+    }
+    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
+    const powerSeries = series.find((item) => {
+      const label = `${item.entity_id || ""} ${item.name || ""}`;
+      return /power|watt|(?:^|[_\s-])w(?:$|[_\s-])/i.test(label);
+    });
+    const points = powerSeries && Array.isArray(powerSeries.points)
+      ? powerSeries.points.filter((point) => point.time >= start && point.time <= end)
+      : [];
+    if (points.length < 2) {
+      return null;
+    }
+    let wattHours = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const hours = (current.time - previous.time) / 3600000;
+      if (hours > 0) {
+        wattHours += ((previous.value + current.value) / 2) * hours;
+      }
+    }
+    if (!Number.isFinite(wattHours)) {
+      return null;
+    }
+    return {
+      energy_kwh: Math.max(wattHours / 1000, 0),
+      duration_minutes: (end - start) / 60000,
+      source_name: powerSeries.name || powerSeries.entity_id || "displayed power samples",
+    };
   }
 
   _renderNilmSessionAssignField(session, index) {
