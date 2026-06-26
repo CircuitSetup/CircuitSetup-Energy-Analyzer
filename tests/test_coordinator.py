@@ -3990,6 +3990,11 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     assert validated["rejected_session_ids"] == []
     assert validated["confirmed_sessions"] == 1
     assert validated["rejected_sessions"] == 0
+    assert validated["adjusted_sessions"] == 0
+    assert validated["false_positive_rate"] == pytest.approx(0.0)
+    assert validated["false_negative_rate"] == pytest.approx(0.0)
+    assert validated["median_power_error"] is None
+    assert validated["energy_estimate_error"] is None
     assert validated["last_validation"] == "correct"
     assert validated["last_validated_at"] == "2026-06-02T14:00:00+00:00"
 
@@ -4010,6 +4015,11 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     assert rejected["rejected_session_ids"] == ["session_1"]
     assert rejected["confirmed_sessions"] == 0
     assert rejected["rejected_sessions"] == 1
+    assert rejected["adjusted_sessions"] == 0
+    assert rejected["false_positive_rate"] == pytest.approx(1.0)
+    assert rejected["false_negative_rate"] == pytest.approx(0.0)
+    assert rejected["median_power_error"] is None
+    assert rejected["energy_estimate_error"] is None
     assert rejected["last_validation"] == "wrong_appliance"
     assert rejected["last_rejected_at"] == "2026-06-02T14:05:00+00:00"
 

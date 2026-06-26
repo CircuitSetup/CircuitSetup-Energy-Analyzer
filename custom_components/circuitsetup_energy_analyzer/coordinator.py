@@ -3916,6 +3916,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment["rejected_session_ids"] = rejected
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["false_negative_rate"] = _nonnegative_float_value(
+            assignment.get("false_negative_rate"),
+            default=0.0,
+        )
+        assignment["median_power_error"] = _round_optional_number(
+            assignment.get("median_power_error"),
+        )
+        assignment["energy_estimate_error"] = _round_optional_number(
+            assignment.get("energy_estimate_error"),
+        )
         assignment["updated_at"] = now
         self._mark_store_dirty()
         self.async_set_updated_data(self.state)
