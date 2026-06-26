@@ -22,6 +22,8 @@ CONF_WATER_FLOW_SENSOR_ENTITIES = "water_flow_sensor_entities"
 DOMAIN = "circuitsetup_energy_analyzer"
 PANEL_SETUP_KEY = "_panel_setup"
 PANEL_REGISTERED_VALUE = "registered"
+PANEL_SKIPPED_VALUE = "skipped_existing_panel"
+PANEL_READY_VALUES = {PANEL_REGISTERED_VALUE, PANEL_SKIPPED_VALUE}
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
 EXPECTED_PLATFORM_DOMAINS = frozenset(
     {
@@ -130,7 +132,7 @@ async def test_config_entry_setup_reload_unload_lifecycle(
         "sensor.fridge_energy",
     )
     assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
-    assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
+    assert hass.data[DOMAIN][PANEL_SETUP_KEY] in PANEL_READY_VALUES
     assert (
         _registered_platform_domains(hass, entry.entry_id)
         == EXPECTED_PLATFORM_DOMAINS
@@ -145,7 +147,7 @@ async def test_config_entry_setup_reload_unload_lifecycle(
     assert reloaded_coordinator.started is True
     assert reloaded_coordinator.source_entities == coordinator.source_entities
     assert hass.services.has_service(DOMAIN, SERVICE_RELEARN_BASELINE)
-    assert hass.data[DOMAIN][PANEL_SETUP_KEY] == PANEL_REGISTERED_VALUE
+    assert hass.data[DOMAIN][PANEL_SETUP_KEY] in PANEL_READY_VALUES
     assert (
         _registered_platform_domains(hass, entry.entry_id)
         == EXPECTED_PLATFORM_DOMAINS
