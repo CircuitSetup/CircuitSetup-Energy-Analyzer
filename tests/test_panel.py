@@ -1026,9 +1026,16 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.pool_pump_power", SensorRole.REAL_POWER),),
     )
+    solar_config = CircuitConfig(
+        circuit_id="solar",
+        name="Solar Inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.solar_power", SensorRole.REAL_POWER),),
+    )
     coordinator = _coordinator(
         config=mains_config,
-        configs=(mains_config, known_config),
+        configs=(mains_config, known_config, solar_config),
     )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
         "mains": [
@@ -1109,6 +1116,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "sensor.mains_power",
         "sensor.mains_reactive_power",
         "sensor.pool_pump_power",
+        "sensor.solar_power",
     ]
     assert payload["history"]["api_path"].startswith(
         "circuitsetup_energy_analyzer/nilm_workspace_history?"
@@ -1123,6 +1131,13 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             "circuit_id": "pool_pump",
             "name": "Pool Pump",
             "entity_ids": ["sensor.pool_pump_power"],
+        }
+    ]
+    assert payload["solar_overlays"] == [
+        {
+            "circuit_id": "solar",
+            "name": "Solar Inverter",
+            "entity_ids": ["sensor.solar_power"],
         }
     ]
     assert payload["signatures"][0]["signature_id"] == "signature_1"

@@ -1168,6 +1168,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderNilmWorkspace",
         "NILM Workspace",
         "Known Load Overlays",
+        "Solar/Net Overlays",
         "Estimated Appliances",
         "Appliance Assignments",
         "estimated_daily_energy",

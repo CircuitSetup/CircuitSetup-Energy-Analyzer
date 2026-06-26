@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-assignment-select-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-solar-overlay-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -395,6 +395,7 @@ def nilm_workspace_payload(
         coordinator,
         config.circuit_id,
     )
+    solar_overlays = _nilm_solar_overlays(coordinator, config.circuit_id)
     all_label_intervals = _nilm_label_intervals_for_circuit(
         coordinator,
         config.circuit_id,
@@ -446,9 +447,11 @@ def nilm_workspace_payload(
         "history": _nilm_workspace_history_payload(
             config,
             known_load_overlays,
+            solar_overlays,
             hours=hours,
         ),
         "known_load_overlays": known_load_overlays,
+        "solar_overlays": solar_overlays,
         "signatures": signatures,
         "signature_count": len(signatures),
         "label_intervals": label_intervals,
@@ -1146,9 +1149,11 @@ async def nilm_workspace_history_payload(
         coordinator,
         config.circuit_id,
     )
+    solar_overlays = _nilm_solar_overlays(coordinator, config.circuit_id)
     history = _nilm_workspace_history_payload(
         config,
         known_load_overlays,
+        solar_overlays,
         hours=hours,
     )
     return await _async_history_rows(
@@ -1775,9 +1780,36 @@ def _nilm_known_load_overlays(
     return overlays
 
 
+def _nilm_solar_overlays(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    overlays: list[dict[str, Any]] = []
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        if (
+            not isinstance(config, CircuitConfig)
+            or config.circuit_id == circuit_id
+            or str(config.appliance_profile) != ApplianceProfile.SOLAR_INVERTER.value
+        ):
+            continue
+        entity_ids = _sensor_entity_ids(config)
+        if entity_ids:
+            overlays.append(
+                {
+                    "circuit_id": config.circuit_id,
+                    "name": config.name,
+                    "entity_ids": entity_ids,
+                }
+            )
+        if len(overlays) >= MAX_NILM_WORKSPACE_KNOWN_LOADS:
+            break
+    return overlays
+
+
 def _nilm_workspace_history_payload(
     config: CircuitConfig,
     known_load_overlays: list[dict[str, Any]],
+    solar_overlays: list[dict[str, Any]],
     *,
     hours: Any,
 ) -> dict[str, Any]:
@@ -1788,7 +1820,11 @@ def _nilm_workspace_history_payload(
     )
     end = datetime.now(UTC)
     start = end - timedelta(hours=requested_hours)
-    entities = _nilm_workspace_history_entities(config, known_load_overlays)
+    entities = _nilm_workspace_history_entities(
+        config,
+        known_load_overlays,
+        solar_overlays,
+    )
     history_query = urlencode(
         {
             "circuit_id": config.circuit_id,
@@ -1823,9 +1859,10 @@ def _nilm_workspace_history_payload(
 def _nilm_workspace_history_entities(
     config: CircuitConfig,
     known_load_overlays: list[dict[str, Any]],
+    solar_overlays: list[dict[str, Any]],
 ) -> list[str]:
     entity_ids = [*_sensor_entity_ids(config)]
-    for overlay in known_load_overlays:
+    for overlay in [*known_load_overlays, *solar_overlays]:
         entity_ids.extend(
             str(entity_id)
             for entity_id in _iter_items(overlay.get("entity_ids"))

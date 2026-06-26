@@ -1463,6 +1463,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
           </div>
         `)}
+        ${this._renderNilmWorkspaceList("Solar/Net Overlays", workspace.solar_overlays, "No solar or net-flow overlays are configured.", (item) => `
+          <div class="metric">
+            <span>${this._escape(item.circuit_id)}</span>
+            <strong>${this._escape(item.name || item.circuit_id)}</strong>
+            <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
+          </div>
+        `)}
         ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.start || "")}</span>
