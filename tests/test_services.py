@@ -431,6 +431,43 @@ def test_nilm_label_interval_schema_raises_for_missing_required_field() -> None:
         )
 
 
+def test_nilm_assignment_service_schemas_validate_required_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
+        NILM_ASSIGN_SESSION_SERVICE_SCHEMA,
+        NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
+    )
+
+    assert NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "signature_id": "signature_1",
+            "label": "Dishwasher",
+            "appliance_id": "dishwasher",
+        }
+    )["label"] == "Dishwasher"
+    assert NILM_ASSIGN_SESSION_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "session_id": "session_1",
+            "signature_fingerprint": "fingerprint_1",
+            "label": "Dishwasher",
+        }
+    )["session_id"] == "session_1"
+    assert NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "interval_id": "label-1",
+            "label": "Dishwasher",
+        }
+    )["interval_id"] == "label-1"
+
+    with pytest.raises(vol.Invalid):
+        NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
+            {"circuit_id": "mains", "label": "Dishwasher"}
+        )
+
+
 def test_user_experience_service_schemas_validate_required_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         _SERVICE_SCHEMAS,
@@ -438,6 +475,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         CAPACITY_SETTINGS_SERVICE_SCHEMA,
         MAINTENANCE_END_SERVICE_SCHEMA,
         MAINTENANCE_START_SERVICE_SCHEMA,
+        NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
         NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
         NILM_MERGE_SERVICE_SCHEMA,
         NILM_SIGNATURE_SERVICE_SCHEMA,
@@ -500,6 +538,17 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         "label": "Dishwasher",
         "start": "2026-06-02T12:00:00+00:00",
         "end": "2026-06-02T12:45:00+00:00",
+    }
+    assert NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "signature_id": "signature_1",
+            "label": "Dishwasher",
+        }
+    ) == {
+        "circuit_id": "mains",
+        "signature_id": "signature_1",
+        "label": "Dishwasher",
     }
     assert UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA(
         {
@@ -2046,6 +2095,192 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
             ),
         ),
         ("async_delete_nilm_label_interval", ("mains", "label-1")),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_services_dispatch_to_matching_coordinator() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+        SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+        SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_signatures={"mains": [{"signature_id": "signature_1"}]},
+                nilm_label_intervals_by_circuit={
+                    "mains": [{"interval_id": "label-1"}]
+                },
+            )
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_assign_nilm_signature(
+            self,
+            circuit_id: str,
+            signature_id: str,
+            *,
+            label: str,
+            appliance_id: str | None = None,
+            appliance_profile: str | None = None,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_assign_nilm_signature",
+                    (
+                        circuit_id,
+                        signature_id,
+                        label,
+                        appliance_id,
+                        appliance_profile,
+                        assignment_id,
+                    ),
+                )
+            )
+
+        async def async_assign_nilm_session(
+            self,
+            circuit_id: str,
+            session_id: str,
+            *,
+            label: str,
+            signature_fingerprint: str | None = None,
+            appliance_id: str | None = None,
+            appliance_profile: str | None = None,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_assign_nilm_session",
+                    (
+                        circuit_id,
+                        session_id,
+                        label,
+                        signature_fingerprint,
+                        appliance_id,
+                        appliance_profile,
+                        assignment_id,
+                    ),
+                )
+            )
+
+        async def async_assign_nilm_interval(
+            self,
+            circuit_id: str,
+            interval_id: str,
+            *,
+            label: str,
+            appliance_id: str | None = None,
+            appliance_profile: str | None = None,
+            assignment_id: str | None = None,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_assign_nilm_interval",
+                    (
+                        circuit_id,
+                        interval_id,
+                        label,
+                        appliance_id,
+                        appliance_profile,
+                        assignment_id,
+                    ),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "signature_id": "signature_1",
+                "label": "Dishwasher",
+                "appliance_id": "dishwasher",
+                "appliance_profile": "dishwasher",
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_ASSIGN_SESSION_TO_APPLIANCE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "session_id": "session_1",
+                "signature_fingerprint": "fingerprint_1",
+                "label": "Dishwasher",
+                "appliance_id": "dishwasher",
+            }
+        )
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "interval_id": "label-1",
+                "label": "Dishwasher",
+                "appliance_id": "dishwasher",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_assign_nilm_signature",
+            (
+                "mains",
+                "signature_1",
+                "Dishwasher",
+                "dishwasher",
+                "dishwasher",
+                None,
+            ),
+        ),
+        (
+            "async_assign_nilm_session",
+            (
+                "mains",
+                "session_1",
+                "Dishwasher",
+                "fingerprint_1",
+                "dishwasher",
+                None,
+                None,
+            ),
+        ),
+        (
+            "async_assign_nilm_interval",
+            (
+                "mains",
+                "label-1",
+                "Dishwasher",
+                "dishwasher",
+                None,
+                None,
+            ),
+        ),
     ]
 
 

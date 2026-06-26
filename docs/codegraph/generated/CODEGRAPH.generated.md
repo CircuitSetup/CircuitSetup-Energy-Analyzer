@@ -1,15 +1,15 @@
 # Generated Codegraph
 
-**Commit:** `23571b701cc6f57a5f3be1cdd5e4c44f9bcff322`
-**Branch:** `feature/nilm-label-intervals`
-**Generated:** `2026-06-26T02:05:13.723475+00:00`
+**Commit:** `31c8a091ffe64da3b759859fa45976660470d837`
+**Branch:** `feature/nilm-assignment-registry`
+**Generated:** `2026-06-26T02:21:42.411901+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **168**
 - Python modules: **154**
-- Symbols: **3371**
+- Symbols: **3397**
 - Internal import edges: **461**
 - External import edges: **508**
 
@@ -54,8 +54,8 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.water_context.WaterContextAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py:26` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.select.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/select.py:372` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3189` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:393` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:410` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:434` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:451` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/switch.py:152` | Home Assistant lifecycle/API entrypoint |
 
 ## Most connected internal modules

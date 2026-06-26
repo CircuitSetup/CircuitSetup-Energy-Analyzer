@@ -163,7 +163,9 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "ground_truth_entity_id": "Ground Truth Entity",
     "label": "Label",
     "interval_id": "Interval ID",
+    "assignment_id": "Assignment ID",
     "appliance_id": "Appliance ID",
+    "appliance_profile": "Appliance Profile",
     "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
     "end": "End",
     "export_tolerance_w": "Export Tolerance W",
@@ -185,6 +187,8 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "signature_id": "Signature ID",
     "source_signature_id": "Source Signature ID",
     "solar_surplus_threshold_w": "Solar Surplus Threshold W",
+    "session_id": "Session ID",
+    "signature_fingerprint": "Signature Fingerprint",
     "start": "Start",
     "standby_threshold_w": "Standby Threshold W",
     "target_signature_id": "Target Signature ID",
@@ -1492,6 +1496,9 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         "merge_nilm_signatures",
         "label_nilm_interval",
         "delete_nilm_label_interval",
+        "assign_signature_to_appliance",
+        "assign_session_to_appliance",
+        "assign_interval_to_appliance",
     ):
         fields = services[service_name]["fields"]
         assert fields["circuit_id"]["required"] is False

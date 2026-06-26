@@ -3717,6 +3717,7 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
 
     await coordinator.async_mark_nilm_signature_expected("mains", "on-1")
     await coordinator.async_merge_nilm_signatures("mains", "on-2", "on-1")
+    await coordinator.async_ignore_nilm_signature("mains", "on-3")
 
     signatures = {
         signature["signature_id"]: signature
@@ -3731,6 +3732,13 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
         signature["review_state"]
         for signature in coordinator.state.nilm_review_by_circuit["mains"]
     } == {"expected", "merged", "ignored"}
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ]
+    assert {assignment["lifecycle_state"] for assignment in assignments} >= {
+        "expected",
+        "ignored",
+    }
 
 
 @pytest.mark.asyncio
@@ -3779,6 +3787,145 @@ async def test_nilm_label_interval_create_update_and_delete() -> None:
     assert updated["updated_at"] == "2026-06-02T13:05:00+00:00"
     assert deleted is True
     assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"] == []
+
+
+@pytest.mark.asyncio
+async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 13, 0, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "signature_1",
+                        "feedback_fingerprint": "fingerprint_1",
+                    }
+                ]
+            },
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-1",
+                        "label": "Dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:45:00+00:00",
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now["value"],
+    )
+
+    signature_assignment = await coordinator.async_assign_nilm_signature(
+        "mains",
+        "signature_1",
+        label="Dishwasher",
+        appliance_id="dishwasher",
+        appliance_profile="dishwasher",
+    )
+    now["value"] = datetime(2026, 6, 2, 13, 5, tzinfo=UTC)
+    session_assignment = await coordinator.async_assign_nilm_session(
+        "mains",
+        "session_1",
+        label="Dishwasher",
+        signature_fingerprint="fingerprint_1",
+        appliance_id="dishwasher",
+    )
+    now["value"] = datetime(2026, 6, 2, 13, 10, tzinfo=UTC)
+    interval_assignment = await coordinator.async_assign_nilm_interval(
+        "mains",
+        "label-1",
+        label="Dishwasher",
+        appliance_id="dishwasher",
+    )
+
+    assert signature_assignment["assignment_id"] == session_assignment[
+        "assignment_id"
+    ]
+    assert interval_assignment["assignment_id"] == signature_assignment[
+        "assignment_id"
+    ]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["display_name"] == "Dishwasher"
+    assert assignment["lifecycle_state"] == "assigned"
+    assert assignment["signature_fingerprints"] == ["fingerprint_1"]
+    assert assignment["session_ids"] == ["session_1"]
+    assert assignment["label_interval_ids"] == ["label-1"]
+    assert assignment["created_device"] is False
+    assert assignment["publish_entities"] is False
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assert signature["assignment_id"] == assignment["assignment_id"]
+    assert signature["review_state"] == "assigned"
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+        "assignment_id"
+    ] == assignment["assignment_id"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_signature_merge_tracks_assignment_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "source",
+                        "feedback_fingerprint": "source-fingerprint",
+                    },
+                    {
+                        "signature_id": "target",
+                        "feedback_fingerprint": "target-fingerprint",
+                    },
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-target",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["target-fingerprint"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "assigned",
+                        "confidence": 1.0,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    }
+                ]
+            },
+        ),
+    )
+
+    await coordinator.async_merge_nilm_signatures("mains", "source", "target")
+
+    signatures = {
+        signature["signature_id"]: signature
+        for signature in coordinator.store_data.nilm_signatures["mains"]
+    }
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert signatures["source"]["assignment_id"] == "assignment-target"
+    assert assignment["signature_fingerprints"] == [
+        "target-fingerprint",
+        "source-fingerprint",
+    ]
 
 
 @pytest.mark.asyncio

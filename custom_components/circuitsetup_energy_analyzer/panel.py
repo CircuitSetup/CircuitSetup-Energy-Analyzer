@@ -368,6 +368,7 @@ def nilm_workspace_payload(
         coordinator,
         config.circuit_id,
     )
+    assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -381,6 +382,8 @@ def nilm_workspace_payload(
         "signature_count": len(signatures),
         "label_intervals": label_intervals,
         "label_interval_count": len(label_intervals),
+        "assignments": assignments,
+        "assignment_count": len(assignments),
         "actions": {
             "label_interval": _nilm_label_interval_action(config)
         },
@@ -1148,6 +1151,27 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "data": data,
         "requires": [ATTR_START, ATTR_END, "label"],
     }
+
+
+def _nilm_assignments_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    return (
+        [
+            dict(item)
+            for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
+            if isinstance(item, dict)
+        ]
+        if isinstance(assignments_by_circuit, Mapping)
+        else []
+    )
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:

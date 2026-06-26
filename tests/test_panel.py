@@ -1047,6 +1047,26 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             }
         ]
     }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "appliance_profile": "dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": ["session_1"],
+                "label_interval_ids": ["label-1"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+                "created_at": "2026-06-06T09:00:00+00:00",
+                "updated_at": "2026-06-06T09:00:00+00:00",
+                "created_device": False,
+                "publish_entities": False,
+            }
+        ]
+    }
     coordinator._known_load_circuit_ids = frozenset({"pool_pump"})
     coordinator.state.nilm_unknown_loads_by_circuit = {
         "mains": {
@@ -1113,6 +1133,8 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "service": "delete_nilm_label_interval",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
     }
+    assert payload["assignments"][0]["display_name"] == "Dishwasher"
+    assert payload["assignments"][0]["lifecycle_state"] == "assigned"
     assert payload["actions"]["label_interval"] == {
         "domain": DOMAIN,
         "service": "label_nilm_interval",
