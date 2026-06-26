@@ -1002,6 +1002,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
       band.addEventListener("click", () => this._selectNilmSessionInterval(band));
     }
+    for (const marker of this.shadowRoot.querySelectorAll("[data-nilm-edge-time]")) {
+      marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -1215,6 +1218,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       end: this._datetimeLocalFromMillis(end),
     });
     this._lastActionMessage = "Loaded NILM session interval.";
+    this._renderAndScrollToTop();
+  }
+
+  _selectNilmEdgeTime(marker) {
+    const time = Date.parse(marker && marker.dataset.nilmEdgeTime || "");
+    if (!Number.isFinite(time)) {
+      return;
+    }
+    const field = String(marker.dataset.nilmEdgeDirection || "").toLowerCase() === "off"
+      ? "end"
+      : "start";
+    this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+      [field]: this._datetimeLocalFromMillis(time),
+    });
+    this._lastActionMessage = "Loaded NILM edge time.";
     this._renderAndScrollToTop();
   }
 
@@ -1838,7 +1856,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const markerTime = edge.time;
       const markerX = x(markerTime).toFixed(1);
       const direction = this._friendlyFeature(edge.direction);
-      return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}"><title>${this._escape(direction)}</title></line>`;
+      return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}" data-nilm-edge-time="${this._escape(new Date(markerTime).toISOString())}" data-nilm-edge-direction="${this._escape(edge.direction)}"><title>${this._escape(direction)}</title></line>`;
     }).join("");
     const sessionBands = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
       const start = Date.parse(session && session.start || "");
