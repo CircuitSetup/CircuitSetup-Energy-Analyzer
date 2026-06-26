@@ -4022,6 +4022,10 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
 
     low_confidence_state = SimpleNamespace(**{**state.__dict__, "confidence": 0.7})
     assert finished_builder(low_confidence_state, now=now) is None
+    pending_validation_state = SimpleNamespace(
+        **{**state.__dict__, "model_status": "needs_validation"}
+    )
+    assert finished_builder(pending_validation_state, now=now) is None
 
     running_state = SimpleNamespace(
         **{
@@ -4160,6 +4164,12 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
     assert sent_notifications[0].feature == "nilm_appliance_finished"
     assert "Estimated from mains power by NILM" in sent_notifications[0].message
     assert coordinator.store_data.alerts[-1] == sent_notifications[0]
+
+    active_alerts = await notify_virtual(now)
+
+    assert len(sent_notifications) == 1
+    assert active_alerts
+    assert active_alerts[0].feature == "nilm_appliance_finished"
 
 
 @pytest.mark.asyncio

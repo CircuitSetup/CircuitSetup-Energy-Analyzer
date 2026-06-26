@@ -7068,10 +7068,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for alert in nilm_virtual_appliance_alerts(self, now=now):
             alert = self._alert_with_feedback(alert)
             alert_id = notifications.notification_id_for_alert(alert)
-            if alert_id in self._notified_alert_ids:
-                continue
             if alert.feedback_status != "expected":
                 active_alerts.append(alert)
+            if alert_id in self._notified_alert_ids:
+                continue
             self.store_data.alerts.append(alert)
             self._mark_store_dirty()
             await self._notify_alert(alert)

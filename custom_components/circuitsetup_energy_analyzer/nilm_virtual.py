@@ -129,9 +129,11 @@ def nilm_virtual_finished_alert(
     """Return a finished-running notification for a confident NILM appliance."""
     confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
     session_id = str(getattr(state, "latest_session_id", "") or "").strip()
+    model_status = str(getattr(state, "model_status", "") or "").strip()
     if (
         getattr(state, "is_running", False)
         or confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
+        or model_status not in NILM_VALIDATED_MODEL_STATES
         or not session_id
     ):
         return None
