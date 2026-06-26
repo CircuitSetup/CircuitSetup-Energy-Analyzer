@@ -1,0 +1,90 @@
+schema_version: 1
+id: normal_sump_pump_cycle
+description: Normal sump pump cycle and steady daily energy use stays quiet.
+scenario_type: normal
+appliance_profile: sump_pump
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: sump_pump
+    name: Sump Pump
+    appliance_profile: sump_pump
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.5
+    sources:
+      power: sensor.sump_pump_power
+      energy: sensor.sump_pump_energy
+      current: sensor.sump_pump_current
+      voltage: sensor.sump_pump_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.sump_pump_power: 0
+      sensor.sump_pump_energy: 40.0
+      sensor.sump_pump_current: 0.0
+      sensor.sump_pump_voltage: 120.0
+  - t: 60
+    states:
+      sensor.sump_pump_power: 620
+      sensor.sump_pump_energy: 40.0
+      sensor.sump_pump_current: 5.2
+      sensor.sump_pump_voltage: 119.9
+  - t: 120
+    states:
+      sensor.sump_pump_power: 610
+      sensor.sump_pump_energy: 40.01
+      sensor.sump_pump_current: 5.1
+      sensor.sump_pump_voltage: 120.1
+  - t: 180
+    states:
+      sensor.sump_pump_power: 0
+      sensor.sump_pump_energy: 40.02
+      sensor.sump_pump_current: 0.0
+      sensor.sump_pump_voltage: 120.0
+  - t: 240
+    states:
+      sensor.sump_pump_power: 0
+      sensor.sump_pump_energy: 40.02
+      sensor.sump_pump_current: 0.0
+      sensor.sump_pump_voltage: 120.1
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 40.02
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 120.0
+    daily_usage_kwh: [0.35, 0.32, 0.34, 0.36, 0.33, 0.35, 0.32, 0.34, 0.36, 0.33]
+
+labels:
+  expected_events:
+    - circuit_id: sump_pump
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: sump_pump
+      event_type: stop
+      around_t: 180
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: sump_pump
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

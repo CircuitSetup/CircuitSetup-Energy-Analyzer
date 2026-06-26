@@ -49,6 +49,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_washer_cycle",
         "normal_dishwasher_cycle",
         "normal_microwave_cycle",
+        "normal_sump_pump_cycle",
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
@@ -138,6 +139,22 @@ def test_microwave_fixture_exercises_short_heat_cycle_without_alerts() -> None:
     ]
 
     assert fixture.circuits[0].appliance_profile == "microwave"
+    assert event_offsets == [60, 180]
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_sump_pump_fixture_exercises_short_pump_cycle_without_alerts() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_sump_pump_cycle.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    event_offsets = [
+        int((event.timestamp - fixture.start_time).total_seconds())
+        for event in result.events
+        if event.circuit_id == "sump_pump"
+    ]
+
+    assert fixture.circuits[0].appliance_profile == "sump_pump"
     assert event_offsets == [60, 180]
     assert result.alerts == []
     assert metrics.false_positive_alerts == 0
@@ -300,12 +317,13 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 10 |" in report
+    assert "| Fixtures | 11 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
     assert "normal_dishwasher_cycle" in report
     assert "normal_microwave_cycle" in report
+    assert "normal_sump_pump_cycle" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report
