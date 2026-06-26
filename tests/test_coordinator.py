@@ -3949,6 +3949,33 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_appliance_assignments_are_bounded_per_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    for index in range(NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT + 1):
+        await coordinator.async_assign_nilm_session(
+            "mains",
+            f"session-{index}",
+            label=f"Load {index}",
+            appliance_id=f"load-{index}",
+        )
+
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    assert len(assignments) == NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT
+    assert assignments[0]["display_name"] == "Load 1"
+    assert assignments[-1]["display_name"] == "Load 64"
+
+
+@pytest.mark.asyncio
 async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

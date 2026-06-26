@@ -272,6 +272,7 @@ ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
+NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT = 500
 NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
 NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
@@ -4007,6 +4008,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             }
             assignments.append(assignment)
         else:
+            assignments[:] = [item for item in assignments if item is not assignment]
+            assignments.append(assignment)
             assignment["display_name"] = label_text
             if appliance_profile:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
@@ -4030,6 +4033,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             float(assignment.get("confidence") or 0.0),
             max(min(confidence_value, 1.0), 0.0),
         )
+        del assignments[:-NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT]
         return assignment
 
     def _nilm_assignment_for_session(
