@@ -1351,6 +1351,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <span>${this._escape(item.lifecycle_state || "assigned")}</span>
             <strong>${this._escape(item.display_name || item.appliance_id || "Assigned appliance")}</strong>
             <p class="muted">Confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+            <p class="muted">False positives ${this._escape(Math.round(Number(item.false_positive_rate || 0) * 100))}%, False negatives ${this._escape(Math.round(Number(item.false_negative_rate || 0) * 100))}%</p>
+            <p class="muted">Median power error ${this._escape(this._formatMetricValue(item.median_power_error))} W, Energy error ${this._escape(this._formatMetricValue(item.energy_estimate_error))} kWh</p>
             ${this._renderNilmAssignmentEditFields(item, index)}
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
