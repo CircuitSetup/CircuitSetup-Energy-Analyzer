@@ -4927,12 +4927,22 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     ][0]
     assert assignment["confidence"] == pytest.approx(0.75)
     assert assignment["lifecycle_state"] == "needs_validation"
+    assert assignment["confirmed_session_ids"] == []
+    assert assignment["rejected_session_ids"] == ["session-1"]
+    assert assignment["confirmed_sessions"] == 0
+    assert assignment["rejected_sessions"] == 1
+    assert assignment["false_positive_rate"] == pytest.approx(1.0)
 
     coordinator.store_data.alerts.append(alert)
     assert await mark_correct(alert_id) is True
 
     assert assignment["confidence"] == pytest.approx(0.8)
     assert assignment["last_validation"] == "correct"
+    assert assignment["confirmed_session_ids"] == ["session-1"]
+    assert assignment["rejected_session_ids"] == []
+    assert assignment["confirmed_sessions"] == 1
+    assert assignment["rejected_sessions"] == 0
+    assert assignment["false_positive_rate"] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

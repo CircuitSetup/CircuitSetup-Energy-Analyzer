@@ -6778,15 +6778,41 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment.get("confidence"),
             default=0.0,
         )
+        session_id = ""
+        notification_key = str(alert.features.get("notification_key") or "").strip()
+        notification_key_parts = notification_key.split(":", 1)
+        if len(notification_key_parts) == 2:
+            session_id = notification_key_parts[1].strip()
+        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
         if action == "correct":
             assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
             assignment["last_validation"] = "correct"
+            if session_id:
+                _append_unique(confirmed, session_id)
+                rejected = [value for value in rejected if value != session_id]
         elif action == "wrong_appliance":
             assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
             assignment["last_validation"] = "wrong_appliance"
             assignment["lifecycle_state"] = "needs_validation"
+            if session_id:
+                _append_unique(rejected, session_id)
+                confirmed = [value for value in confirmed if value != session_id]
         else:
             return
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            _clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
         assignment["updated_at"] = now.isoformat()
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
