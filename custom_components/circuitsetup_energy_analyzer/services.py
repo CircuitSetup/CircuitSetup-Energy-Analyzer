@@ -34,6 +34,9 @@ SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
 SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE = "assign_signature_to_appliance"
 SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
 SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
+SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
+SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
+SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
@@ -52,6 +55,8 @@ SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
+SERVICE_MARK_NILM_APPLIANCE_CORRECT = "mark_nilm_appliance_correct"
+SERVICE_MARK_NILM_APPLIANCE_WRONG = "mark_nilm_appliance_wrong"
 SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
 SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
 SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendations"
@@ -347,6 +352,10 @@ NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
         ATTR_APPLIANCE_PROFILE,
     ),
 )
+NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -396,6 +405,15 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE: NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE: NILM_ASSIGN_SESSION_SERVICE_SCHEMA,
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE: NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
+    SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
+    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (
+        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
+    ),
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
@@ -418,6 +436,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_WRONG: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
     SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS: (
@@ -503,6 +523,22 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             data,
             method_name="async_mark_alert_unhelpful",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_CORRECT:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_correct",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_WRONG:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_wrong",
         )
         return
 
@@ -717,6 +753,39 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 appliance_id=data.get(ATTR_APPLIANCE_ID),
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_publish_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_unpublish_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_retire_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
             )
         return
 
@@ -1022,7 +1091,10 @@ def _circuit_id_from_entity_registry(hass: Any, entity_id: str) -> str | None:
     async_get = getattr(er, "async_get", None)
     if async_get is None:
         return None
-    registry = async_get(hass)
+    try:
+        registry = async_get(hass)
+    except TypeError:
+        return None
     entry = getattr(registry, "async_get", lambda _entity_id: None)(entity_id)
     if entry is None or getattr(entry, "platform", None) != DOMAIN:
         return None

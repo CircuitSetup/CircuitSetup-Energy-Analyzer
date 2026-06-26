@@ -1221,6 +1221,226 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
     assert virtual["model_status"] == "learning"
 
 
+def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [
+            {
+                "interval_id": "label-dishwasher",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dishwasher",
+                "label": "Dishwasher",
+                "start": "2026-06-06T08:10:00+00:00",
+                "end": "2026-06-06T08:40:00+00:00",
+                "source": "sensor",
+                "confidence": 0.95,
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dishwasher_power",
+            },
+            {
+                "interval_id": "label-dryer",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dryer",
+                "label": "Dryer",
+                "start": "2026-06-06T10:00:00+00:00",
+                "end": "2026-06-06T10:30:00+00:00",
+                "source": "sensor",
+                "confidence": 0.95,
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dryer_power",
+            },
+            {
+                "interval_id": "label-dishwasher-duplicate",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dishwasher",
+                "label": "Dishwasher",
+                "start": "2026-06-06T08:15:00+00:00",
+                "end": "2026-06-06T08:35:00+00:00",
+                "source": "sensor",
+                "confidence": 0.95,
+                "mains_entity_id": "sensor.mains_power",
+                "ground_truth_entity_id": "sensor.dishwasher_power_2",
+            },
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "label_interval_ids": ["label-dishwasher"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 12, tzinfo=UTC),
+                delta_w=820.0,
+                delta_var=120.0,
+                delta_va=830.0,
+                delta_pf=-0.05,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=datetime(2026, 6, 6, 8, 37, tzinfo=UTC),
+                delta_w=-815.0,
+                delta_var=-118.0,
+                delta_va=-825.0,
+                delta_pf=0.04,
+                direction="off",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    validation = payload["validation"]
+    assert validation["metrics"] == {
+        "ground_truth_interval_count": 3,
+        "prediction_count": 1,
+        "matched_ground_truth_count": 1,
+        "matched_prediction_count": 1,
+        "missed_ground_truth_count": 2,
+        "precision": 1.0,
+        "recall": 0.333,
+    }
+    assert validation["prediction_preview"][0] == {
+        "interval_id": "label-dishwasher",
+        "label": "Dishwasher",
+        "ground_truth_entity_id": "sensor.dishwasher_power",
+        "source": "sensor",
+        "prediction_status": "matched",
+        "matched_assignment_id": "assignment-dishwasher",
+        "matched_session_id": payload["sessions"][0]["session_id"],
+        "overlap_seconds": 1500.0,
+        "prediction_confidence": payload["sessions"][0]["confidence"],
+    }
+    assert validation["prediction_preview"][1] == {
+        "interval_id": "label-dryer",
+        "label": "Dryer",
+        "ground_truth_entity_id": "sensor.dryer_power",
+        "source": "sensor",
+        "prediction_status": "missed",
+        "matched_assignment_id": None,
+        "matched_session_id": None,
+        "overlap_seconds": 0.0,
+        "prediction_confidence": None,
+    }
+    assert validation["prediction_preview"][2] == {
+        "interval_id": "label-dishwasher-duplicate",
+        "label": "Dishwasher",
+        "ground_truth_entity_id": "sensor.dishwasher_power_2",
+        "source": "sensor",
+        "prediction_status": "missed",
+        "matched_assignment_id": None,
+        "matched_session_id": None,
+        "overlap_seconds": 0.0,
+        "prediction_confidence": None,
+    }
+
+def test_nilm_workspace_validation_uses_uncapped_data() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        MAX_NILM_WORKSPACE_LABEL_INTERVALS,
+        MAX_NILM_WORKSPACE_SESSIONS,
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [
+            {
+                "interval_id": f"label-{index}",
+                "mains_circuit_id": "mains",
+                "appliance_id": f"load-{index}",
+                "label": f"Load {index}",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:10:00+00:00",
+                "source": "sensor",
+                "ground_truth_entity_id": f"sensor.load_{index}",
+            }
+            for index in range(MAX_NILM_WORKSPACE_LABEL_INTERVALS + 1)
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            },
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {"unknown_loads": [{"signature_id": "signature_1"}]}
+    }
+    start_at = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            edge
+            for index in range(MAX_NILM_WORKSPACE_SESSIONS + 1)
+            for edge in (
+                NilmEdge(
+                    timestamp=start_at + timedelta(hours=index * 13),
+                    delta_w=820.0,
+                    delta_var=120.0,
+                    delta_va=830.0,
+                    delta_pf=-0.05,
+                    direction="on",
+                ),
+                NilmEdge(
+                    timestamp=start_at + timedelta(hours=index * 13, minutes=5),
+                    delta_w=-815.0,
+                    delta_var=-118.0,
+                    delta_va=-825.0,
+                    delta_pf=0.04,
+                    direction="off",
+                ),
+            )
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert len(payload["label_intervals"]) == MAX_NILM_WORKSPACE_LABEL_INTERVALS
+    assert len(payload["sessions"]) == MAX_NILM_WORKSPACE_SESSIONS
+    assert payload["validation"]["metrics"]["ground_truth_interval_count"] == (
+        MAX_NILM_WORKSPACE_LABEL_INTERVALS + 1
+    )
+    assert payload["validation"]["metrics"]["prediction_count"] == (
+        MAX_NILM_WORKSPACE_SESSIONS + 1
+    )
+
+
 def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (
