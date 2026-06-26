@@ -4946,6 +4946,67 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
 
 
 @pytest.mark.asyncio
+async def test_nilm_non_session_notification_feedback_keeps_session_counts_empty() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "published",
+                        "confidence": 0.9,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher runtime looks unusual. Estimated from mains power by NILM.",
+        feature="nilm_appliance_unusual_runtime",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_type": "runtime",
+            "notification_key": "assignment-dishwasher:runtime:2026-06-02",
+        },
+    )
+    alert_id = notification_id_for_alert(alert)
+    coordinator.store_data.alerts.append(alert)
+
+    assert await coordinator.async_mark_nilm_appliance_wrong(alert_id) is True
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["confidence"] == pytest.approx(0.75)
+    assert assignment["confirmed_session_ids"] == []
+    assert assignment["rejected_session_ids"] == []
+    assert assignment["confirmed_sessions"] == 0
+    assert assignment["rejected_sessions"] == 0
+    assert assignment["false_positive_rate"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
 async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

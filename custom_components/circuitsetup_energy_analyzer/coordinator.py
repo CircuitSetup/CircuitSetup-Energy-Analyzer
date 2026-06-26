@@ -6779,10 +6779,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             default=0.0,
         )
         session_id = ""
-        notification_key = str(alert.features.get("notification_key") or "").strip()
-        notification_key_parts = notification_key.split(":", 1)
-        if len(notification_key_parts) == 2:
-            session_id = notification_key_parts[1].strip()
+        if _alert_feature(alert) == "nilm_appliance_finished":
+            notification_key = str(alert.features.get("notification_key") or "").strip()
+            notification_key_parts = notification_key.split(":", 1)
+            if len(notification_key_parts) == 2:
+                session_id = notification_key_parts[1].strip()
         confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = _clean_string_list(assignment.get("rejected_session_ids"))
         if action == "correct":
