@@ -52,6 +52,8 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
         "normal_kettle_cycle",
         "normal_sump_pump_cycle",
         "normal_solar_overlap_cycle",
+        "normal_overlapping_unknown_loads",
+        "normal_direct_meter_validation",
         "normal_ev_charger_session",
         "normal_dryer_heat_cycle",
         "refrigerator_non_finite_power",
@@ -196,6 +198,62 @@ def test_solar_overlap_fixture_exercises_load_and_generation_without_alerts() ->
     assert events_by_circuit == {"kettle": [60, 240], "rooftop_solar": [60, 300]}
     assert result.alerts == []
     assert result.setup_issues == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_overlapping_unknown_load_fixture_reconstructs_nilm_sessions() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "normal_overlapping_unknown_loads.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+    sessions = result.store_data.nilm_session_history_by_circuit["mains"]
+    overlapping_sessions = [
+        session
+        for session in sessions
+        if session.get("end") is not None and session.get("overlap_count") == 1
+    ]
+
+    assert len(result.nilm_signatures) >= 4
+    signature_watts = {
+        round(abs(signature["median_delta_w"])) for signature in result.nilm_signatures
+    }
+
+    assert signature_watts >= {
+        450,
+        800,
+    }
+    assert {
+        round(float(session["median_power_w"]) / 50.0) * 50
+        for session in overlapping_sessions
+    } >= {450, 800}
+    assert result.alerts == []
+    assert metrics.false_positive_alerts == 0
+
+
+def test_direct_meter_validation_fixture_masks_known_load_from_nilm() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "normal_direct_meter_validation.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+    dishwasher_events = [
+        event.event_type
+        for event in result.events
+        if event.circuit_id == "dishwasher"
+    ]
+
+    assert dishwasher_events == [
+        EventType.START,
+        EventType.STOP,
+        EventType.START,
+        EventType.STOP,
+        EventType.START,
+        EventType.STOP,
+    ]
+    assert result.nilm_signatures == []
+    assert result.store_data.nilm_session_history_by_circuit.get("mains", []) == []
+    assert result.alerts == []
     assert metrics.false_positive_alerts == 0
 
 
@@ -356,7 +414,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 13 |" in report
+    assert "| Fixtures | 15 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
@@ -365,6 +423,8 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "normal_kettle_cycle" in report
     assert "normal_sump_pump_cycle" in report
     assert "normal_solar_overlap_cycle" in report
+    assert "normal_overlapping_unknown_loads" in report
+    assert "normal_direct_meter_validation" in report
     assert "normal_ev_charger_session" in report
     assert "normal_dryer_heat_cycle" in report
     assert "refrigerator_non_finite_power" in report

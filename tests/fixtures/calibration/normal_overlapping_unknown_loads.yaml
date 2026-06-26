@@ -1,0 +1,130 @@
+schema_version: 1
+id: normal_overlapping_unknown_loads
+description: Two recurring unknown mains loads overlap and should replay into NILM sessions.
+scenario_type: normal
+appliance_profile: mains_nilm
+circuit_mode: mains_nilm
+power_flow: mains_net
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: diagnostic
+
+circuits:
+  - circuit_id: mains
+    name: Mains NILM
+    appliance_profile: mains_nilm
+    circuit_mode: mains_nilm
+    power_flow: mains_net
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.45
+    sources:
+      power: sensor.mains_power
+      energy: sensor.mains_energy
+      current: sensor.mains_current
+      voltage: sensor.mains_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.0
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
+  - t: 60
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.0
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 120
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.02
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
+  - t: 300
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.07
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 360
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.08
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
+  - t: 720
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.09
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 780
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.11
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
+  - t: 960
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.16
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 1020
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.17
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
+  - t: 1380
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.18
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 1440
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.2
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
+  - t: 1620
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.25
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 1680
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.26
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 100.26
+    power_w: 100
+    current_a: 0.8
+    voltage_v: 120.0
+    daily_usage_kwh: [2.1, 2.0, 2.2, 2.1, 2.0, 2.2, 2.1, 2.0, 2.2, 2.1]
+
+labels:
+  expected_events: []
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: mains
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -43,6 +44,9 @@ from custom_components.circuitsetup_energy_analyzer.processors.energy_usage impo
 )
 from custom_components.circuitsetup_energy_analyzer.processors.events import (
     CircuitEventProcessor,
+)
+from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+    NilmSampleProcessor,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
@@ -151,6 +155,7 @@ class ReplayResult:
     setup_issues: list[dict[str, Any]]
     nilm_signatures: list[dict[str, Any]]
     final_state: AnalyzerState
+    store_data: FeatureStoreData
     metrics: CalibrationMetrics | None = None
 
 
@@ -219,6 +224,19 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     state = AnalyzerState()
     store_data = FeatureStoreData()
     event_processor = CircuitEventProcessor()
+    nilm_processor = NilmSampleProcessor(
+        nilm_enabled=lambda config: config.mode is CircuitMode.MAINS_NILM,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda circuit_id, event_list: (
+            event for event in event_list if event.circuit_id != circuit_id
+        ),
+        observe_topology=lambda _config, _match, _context: [],
+    )
     alert_policies: dict[str, ConservativeAlertPolicy] = {}
     energy_usage_processor = EnergyUsageProcessor(
         settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
@@ -281,7 +299,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 for issue in normalized_sample.quality_issues
             )
 
-            for result in (
+            results = [
                 event_processor.process(
                     normalized_sample,
                     circuit_config,
@@ -292,7 +310,17 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                     circuit_config,
                     context,
                 ),
-            ):
+            ]
+            if circuit_config.mode is CircuitMode.MAINS_NILM:
+                results.append(
+                    nilm_processor.process(
+                        normalized_sample,
+                        circuit_config,
+                        context,
+                        events=tuple(events),
+                    )
+                )
+            for result in results:
                 new_events, new_alerts = _apply_feature_result(
                     result,
                     state,
@@ -307,8 +335,13 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
         alerts=alerts,
         state_snapshots=snapshots,
         setup_issues=setup_issues,
-        nilm_signatures=[],
+        nilm_signatures=[
+            signature
+            for signatures in store_data.nilm_signatures.values()
+            for signature in signatures
+        ],
         final_state=state,
+        store_data=store_data,
     )
     result.metrics = evaluate_replay_result(fixture, result)
     return result

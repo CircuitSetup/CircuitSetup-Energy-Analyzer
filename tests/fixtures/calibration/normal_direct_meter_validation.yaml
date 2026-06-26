@@ -1,0 +1,262 @@
+schema_version: 1
+id: normal_direct_meter_validation
+description: A directly metered dishwasher explains matching mains NILM edges.
+scenario_type: normal
+appliance_profile: resistive_load
+circuit_mode: mixed
+power_flow: mains_net
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: diagnostic
+
+circuits:
+  - circuit_id: dishwasher
+    name: Dishwasher
+    appliance_profile: resistive_load
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.45
+    sources:
+      power: sensor.dishwasher_power
+      energy: sensor.dishwasher_energy
+      current: sensor.dishwasher_current
+      voltage: sensor.dishwasher_voltage
+  - circuit_id: mains
+    name: Mains NILM
+    appliance_profile: mains_nilm
+    circuit_mode: mains_nilm
+    power_flow: mains_net
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.45
+    sources:
+      power: sensor.mains_power
+      energy: sensor.mains_energy
+      current: sensor.mains_current
+      voltage: sensor.mains_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.0
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.0
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
+  - t: 60
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.0
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.0
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 119.9
+  - t: 120
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.02
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.02
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 180
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.04
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.04
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 240
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.05
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.06
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+  - t: 300
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.05
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.06
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+  - t: 720
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.05
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.06
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 119.9
+  - t: 780
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.07
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.08
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 840
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.09
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.1
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 900
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.1
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.12
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+  - t: 960
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.1
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.12
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+  - t: 1380
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.1
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.12
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 119.9
+  - t: 1440
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.12
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.14
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 1500
+    states:
+      sensor.dishwasher_power: 820
+      sensor.dishwasher_energy: 25.14
+      sensor.dishwasher_current: 6.8
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 920
+      sensor.mains_energy: 300.16
+      sensor.mains_current: 7.7
+      sensor.mains_voltage: 120.0
+  - t: 1560
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.15
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.18
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+  - t: 1620
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 25.15
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+      sensor.mains_power: 100
+      sensor.mains_energy: 300.18
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.1
+
+segments:
+  - pattern: daily_energy_deltas
+    circuit_id: dishwasher
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 25.15
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 120.0
+    daily_usage_kwh: [0.7, 0.72, 0.68, 0.7, 0.72, 0.68, 0.7, 0.72, 0.68, 0.7]
+  - pattern: daily_energy_deltas
+    circuit_id: mains
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 300.18
+    power_w: 100
+    current_a: 0.8
+    voltage_v: 120.0
+    daily_usage_kwh: [12.0, 12.2, 11.9, 12.0, 12.2, 11.9, 12.0, 12.2, 11.9, 12.0]
+
+labels:
+  expected_events:
+    - circuit_id: dishwasher
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: stop
+      around_t: 240
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: start
+      around_t: 720
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: stop
+      around_t: 900
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: start
+      around_t: 1380
+      tolerance_seconds: 60
+    - circuit_id: dishwasher
+      event_type: stop
+      around_t: 1560
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: dishwasher
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+    - circuit_id: mains
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null

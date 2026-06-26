@@ -11,6 +11,7 @@ from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
     NilmEdge,
     NilmEdgeDetector,
+    NilmSession,
     NilmSignature,
     classify_signature,
     cluster_recurring_signatures,
@@ -342,19 +343,15 @@ def _nilm_session_history_payloads(
         assignments,
     ):
         signature = signatures_by_key.get(signature_fingerprint)
-        session_edges = (
-            _nilm_edges_matching_signature(edge_list, signature)
-            if signature is not None
-            else edge_list
-        )
         payloads.extend(
             nilm_session_to_dict(session)
             for session in pair_nilm_sessions(
-                session_edges,
+                edge_list,
                 mains_circuit_id=circuit_id,
                 signature_fingerprint=signature_fingerprint,
                 assignment_id=assignment_id,
             )
+            if signature is None or _nilm_session_matches_signature(session, signature)
         )
     return payloads
 
@@ -407,29 +404,20 @@ def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
     ).strip()
 
 
-def _nilm_edges_matching_signature(
-    edges: Iterable[NilmEdge],
+def _nilm_session_matches_signature(
+    session: NilmSession,
     signature: Mapping[str, Any],
-) -> list[NilmEdge]:
+) -> bool:
     typical_watts = _optional_float(
         signature.get("typical_watts"),
         signature.get("median_delta_w"),
     )
-    split_phase_type = str(signature.get("split_phase_type") or "").strip()
-    return [
-        edge
-        for edge in edges
-        if (
-            typical_watts is None
-            or abs(abs(edge.delta_w) - abs(typical_watts))
-            <= max(abs(typical_watts) * 0.25, 50.0)
-        )
-        and (
-            not split_phase_type
-            or split_phase_type == "unknown"
-            or edge.split_phase_type in {split_phase_type, "unknown"}
-        )
-    ]
+    if typical_watts is None:
+        return True
+    return abs(session.median_power_w - abs(typical_watts)) <= max(
+        abs(typical_watts) * 0.25,
+        50.0,
+    )
 
 
 def _merge_nilm_session_history(

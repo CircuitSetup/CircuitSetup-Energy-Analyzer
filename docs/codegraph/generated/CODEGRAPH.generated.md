@@ -1,17 +1,17 @@
 # Generated Codegraph
 
-**Commit:** `d016054dec4920487f9008efbb4549ca9f84b4c7`
+**Commit:** `2433f6a09ef2382a3d339f4bf23b9797e8edcf2e`
 **Branch:** `fix/nilm-dashboard-graph-link`
-**Generated:** `2026-06-26T16:44:06.483273+00:00`
+**Generated:** `2026-06-26T21:22:50.109187+00:00`
 **Tests included:** `True`
 
 ## Scope
 
-- Files: **169**
+- Files: **176**
 - Python modules: **155**
-- Symbols: **3555**
-- Internal import edges: **469**
-- External import edges: **517**
+- Symbols: **3572**
+- Internal import edges: **470**
+- External import edges: **518**
 
 ## Entrypoints
 
@@ -45,7 +45,7 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.leg_imbalance.LegImbalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/leg_imbalance.py:22` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.mains_balance.MainsBalanceProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/mains_balance.py:21` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.metric_consistency.MetricConsistencyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/metric_consistency.py:19` | Feature processor |
-| `custom_components.circuitsetup_energy_analyzer.processors.nilm_sample.NilmSampleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py:40` | Feature processor |
+| `custom_components.circuitsetup_energy_analyzer.processors.nilm_sample.NilmSampleProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py:41` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.nilm_topology.NilmTopologyProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/nilm_topology.py:20` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.power_quality.PowerQualityProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/power_quality.py:39` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.processors.solar_flow.SolarFlowProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/solar_flow.py:55` | Feature processor |
@@ -77,11 +77,11 @@
 | `custom_components.circuitsetup_energy_analyzer.contextual_baseline` | 14 | 10 | 4 | `custom_components/circuitsetup_energy_analyzer/contextual_baseline.py` |
 | `custom_components.circuitsetup_energy_analyzer.demo` | 13 | 12 | 1 | `custom_components/circuitsetup_energy_analyzer/demo.py` |
 | `custom_components.circuitsetup_energy_analyzer.recommendation_guidance` | 12 | 3 | 9 | `custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py` |
+| `tests.helpers.calibration` | 12 | 1 | 11 | `tests/helpers/calibration.py` |
 | `custom_components.circuitsetup_energy_analyzer.entity_catalog` | 11 | 10 | 1 | `custom_components/circuitsetup_energy_analyzer/entity_catalog.py` |
 | `custom_components.circuitsetup_energy_analyzer.operating_detection` | 11 | 9 | 2 | `custom_components/circuitsetup_energy_analyzer/operating_detection.py` |
 | `custom_components.circuitsetup_energy_analyzer.entity` | 11 | 8 | 3 | `custom_components/circuitsetup_energy_analyzer/entity.py` |
 | `custom_components.circuitsetup_energy_analyzer.notifications` | 11 | 5 | 6 | `custom_components/circuitsetup_energy_analyzer/notifications.py` |
-| `tests.helpers.calibration` | 11 | 1 | 10 | `tests/helpers/calibration.py` |
 | `custom_components.circuitsetup_energy_analyzer.nilm` | 10 | 9 | 1 | `custom_components/circuitsetup_energy_analyzer/nilm.py` |
 | `custom_components.circuitsetup_energy_analyzer` | 10 | 2 | 8 | `custom_components/circuitsetup_energy_analyzer/__init__.py` |
 | `custom_components.circuitsetup_energy_analyzer.processors.cycles` | 10 | 1 | 9 | `custom_components/circuitsetup_energy_analyzer/processors/cycles.py` |
@@ -378,6 +378,7 @@ flowchart LR
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_processors_base
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_processors_energy_usage
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_processors_events
+  n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_processors_nilm_sample
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_storage
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_usage
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_alerting
