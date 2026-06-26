@@ -6,8 +6,13 @@ from datetime import datetime
 from typing import Any
 
 from .const import DOMAIN
-from .models import SensorRole
+from .models import AlertEvidence, SensorRole, Severity
 from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
+
+NILM_FINISHED_CONFIDENCE_THRESHOLD = 0.8
+NILM_UNUSUAL_CONFIDENCE_THRESHOLD = 0.8
+NILM_UNUSUAL_MIN_REPEATED = 2
+NILM_VALIDATED_MODEL_STATES = frozenset({"published", "validated"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +29,7 @@ class NilmVirtualApplianceState:
     last_seen: datetime | None
     active_signature_id: str | None
     active_session_id: str | None
+    latest_session_id: str | None
     model_status: str
     mains_circuit_id: str
     mains_source: str | None = None
@@ -98,6 +104,165 @@ def nilm_virtual_device_info(
     }
 
 
+def nilm_virtual_appliance_alerts(
+    coordinator: Any,
+    *,
+    now: datetime,
+) -> tuple[AlertEvidence, ...]:
+    """Return eligible estimated-appliance notification alerts."""
+    alerts: list[AlertEvidence] = []
+    for state in published_nilm_virtual_appliance_states(coordinator):
+        assignment = _assignment_for_state(coordinator, state)
+        for alert in (
+            nilm_virtual_finished_alert(state, now=now),
+            nilm_virtual_unusual_runtime_alert(state, assignment, now=now),
+            nilm_virtual_unusual_energy_alert(state, assignment, now=now),
+        ):
+            if alert is not None:
+                alerts.append(alert)
+    return tuple(alerts)
+
+
+def nilm_virtual_finished_alert(
+    state: Any,
+    *,
+    now: datetime,
+) -> AlertEvidence | None:
+    """Return a finished-running notification for a confident NILM appliance."""
+    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    session_id = str(getattr(state, "latest_session_id", "") or "").strip()
+    model_status = str(getattr(state, "model_status", "") or "").strip()
+    if (
+        getattr(state, "is_running", False)
+        or confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
+        or model_status not in NILM_VALIDATED_MODEL_STATES
+        or not session_id
+    ):
+        return None
+    assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
+    if not assignment_id:
+        return None
+    return AlertEvidence(
+        timestamp=now,
+        circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
+        severity=Severity.INFO,
+        message=_nilm_alert_message(
+            state,
+            "appears finished",
+            confidence=confidence,
+        ),
+        feature="nilm_appliance_finished",
+        observed_value=_clamped_float(
+            getattr(state, "estimated_energy_kwh_today", None),
+        ),
+        baseline_value=NILM_FINISHED_CONFIDENCE_THRESHOLD,
+        repeated_count=1,
+        last_seen=getattr(state, "last_seen", None),
+        features=_nilm_alert_features(
+            state,
+            "finished",
+            f"{assignment_id}:{session_id}",
+        ),
+    )
+
+
+def nilm_virtual_unusual_runtime_alert(
+    state: Any,
+    assignment: Mapping[str, Any] | None,
+    *,
+    now: datetime,
+) -> AlertEvidence | None:
+    """Return an unusual-runtime notification after repeated confident evidence."""
+    if assignment is None or not getattr(state, "is_running", False):
+        return None
+    if not _nilm_unusual_alert_allowed(state):
+        return None
+    started_at = getattr(state, "last_seen", None)
+    if not isinstance(started_at, datetime):
+        return None
+    baseline_minutes = _optional_positive_float(
+        assignment.get("expected_runtime_minutes"),
+    )
+    observed_minutes = max(0.0, (now - started_at).total_seconds() / 60.0)
+    repeated_count = _positive_int(assignment.get("unusual_runtime_repeated_count"))
+    if (
+        baseline_minutes is None
+        or observed_minutes <= baseline_minutes
+        or repeated_count < NILM_UNUSUAL_MIN_REPEATED
+    ):
+        return None
+    assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
+    session_id = (
+        str(getattr(state, "active_session_id", "") or "").strip()
+        or str(getattr(state, "latest_session_id", "") or "").strip()
+        or "current"
+    )
+    return AlertEvidence(
+        timestamp=now,
+        circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
+        severity=Severity.WARNING,
+        message=_nilm_alert_message(
+            state,
+            "appears to be running longer than usual",
+            confidence=_clamped_float(getattr(state, "confidence", None), upper=1.0),
+        ),
+        feature="nilm_appliance_unusual_runtime",
+        observed_value=round(observed_minutes, 3),
+        baseline_value=round(baseline_minutes, 3),
+        change_ratio=_change_ratio(observed_minutes, baseline_minutes),
+        repeated_count=repeated_count,
+        first_seen=started_at,
+        last_seen=now,
+        features=_nilm_alert_features(
+            state,
+            "unusual_runtime",
+            f"{assignment_id}:runtime:{session_id}",
+        ),
+    )
+
+
+def nilm_virtual_unusual_energy_alert(
+    state: Any,
+    assignment: Mapping[str, Any] | None,
+    *,
+    now: datetime,
+) -> AlertEvidence | None:
+    """Return an unusual-energy notification after repeated confident evidence."""
+    if assignment is None or not _nilm_unusual_alert_allowed(state):
+        return None
+    baseline_kwh = _optional_positive_float(assignment.get("expected_daily_energy_kwh"))
+    observed_kwh = _clamped_float(getattr(state, "estimated_energy_kwh_today", None))
+    repeated_count = _positive_int(assignment.get("unusual_energy_repeated_count"))
+    if (
+        baseline_kwh is None
+        or observed_kwh <= baseline_kwh
+        or repeated_count < NILM_UNUSUAL_MIN_REPEATED
+    ):
+        return None
+    assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
+    return AlertEvidence(
+        timestamp=now,
+        circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
+        severity=Severity.WARNING,
+        message=_nilm_alert_message(
+            state,
+            "appears to be using more energy than usual today",
+            confidence=_clamped_float(getattr(state, "confidence", None), upper=1.0),
+        ),
+        feature="nilm_appliance_unusual_energy",
+        observed_value=round(observed_kwh, 3),
+        baseline_value=round(baseline_kwh, 3),
+        change_ratio=_change_ratio(observed_kwh, baseline_kwh),
+        repeated_count=repeated_count,
+        last_seen=getattr(state, "last_seen", None),
+        features=_nilm_alert_features(
+            state,
+            "unusual_energy",
+            f"{assignment_id}:energy:{now.date().isoformat()}",
+        ),
+    )
+
+
 def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
     """Return common attributes for estimated NILM entities."""
     return {
@@ -151,6 +316,7 @@ def _nilm_virtual_appliance_state(
             open_session.signature_fingerprint if open_session else None
         ),
         active_session_id=open_session.session_id if open_session else None,
+        latest_session_id=latest_session.session_id if latest_session else None,
         model_status=str(assignment.get("lifecycle_state") or "candidate"),
         mains_circuit_id=circuit_id,
         mains_source=_mains_source_entity_id(coordinator, circuit_id),
@@ -172,6 +338,66 @@ def _published_assignment(assignment: Mapping[str, Any]) -> bool:
         assignment.get("publish_entities") is True
         and str(assignment.get("lifecycle_state") or "") != "retired"
     )
+
+
+def _assignment_for_state(
+    coordinator: Any,
+    state: Any,
+) -> Mapping[str, Any] | None:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return None
+    circuit_id = str(getattr(state, "mains_circuit_id", "") or "")
+    assignment_id = str(getattr(state, "assignment_id", "") or "")
+    for assignment in _iter_items(assignments_by_circuit.get(circuit_id)):
+        if (
+            isinstance(assignment, Mapping)
+            and str(assignment.get("assignment_id") or "") == assignment_id
+        ):
+            return assignment
+    return None
+
+
+def _nilm_unusual_alert_allowed(state: Any) -> bool:
+    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    model_status = str(getattr(state, "model_status", "") or "").strip()
+    return (
+        confidence >= NILM_UNUSUAL_CONFIDENCE_THRESHOLD
+        and model_status in NILM_VALIDATED_MODEL_STATES
+    )
+
+
+def _nilm_alert_message(
+    state: Any,
+    phrase: str,
+    *,
+    confidence: float,
+) -> str:
+    return (
+        f"{getattr(state, 'display_name', 'NILM appliance')} {phrase}. "
+        "Estimated from mains power by NILM. "
+        f"Confidence: {round(confidence * 100)}%."
+    )
+
+
+def _nilm_alert_features(
+    state: Any,
+    notification_type: str,
+    notification_key: str,
+) -> dict[str, Any]:
+    return {
+        "source": "nilm",
+        "estimated": True,
+        "assignment_id": str(getattr(state, "assignment_id", "") or ""),
+        "appliance_id": str(getattr(state, "appliance_id", "") or ""),
+        "notification_type": notification_type,
+        "notification_key": notification_key,
+    }
 
 
 def _nilm_assignment_sessions(
@@ -347,6 +573,28 @@ def _clamped_float(value: Any, *, upper: float | None = None) -> float:
     if upper is not None:
         return min(number, upper)
     return number
+
+
+def _optional_positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def _change_ratio(observed_value: float, baseline_value: float) -> float:
+    if baseline_value == 0:
+        return 0.0
+    return round((observed_value - baseline_value) / baseline_value, 3)
 
 
 def _iter_items(value: Any) -> Iterable[Any]:

@@ -4003,6 +4003,262 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
     assert hass.config_entries.reloaded == ["entry-1", "entry-1", "entry-1"]
 
 
+def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer import nilm_virtual
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    state = SimpleNamespace(
+        assignment_id="assignment-dishwasher",
+        display_name="Dishwasher",
+        is_running=False,
+        estimated_energy_kwh_today=0.45,
+        confidence=0.82,
+        last_seen=now - timedelta(minutes=5),
+        active_session_id=None,
+        latest_session_id="session-1",
+        model_status="published",
+        mains_circuit_id="mains",
+    )
+
+    finished_builder = getattr(nilm_virtual, "nilm_virtual_finished_alert", None)
+    assert finished_builder is not None
+    finished_alert = finished_builder(state, now=now)
+
+    assert finished_alert is not None
+    assert finished_alert.feature == "nilm_appliance_finished"
+    assert finished_alert.circuit_id == "mains"
+    assert "Estimated from mains power by NILM" in finished_alert.message
+    assert "Confidence: 82%" in finished_alert.message
+    assert finished_alert.features["assignment_id"] == "assignment-dishwasher"
+    assert finished_alert.features["notification_key"] == (
+        "assignment-dishwasher:session-1"
+    )
+
+    low_confidence_state = SimpleNamespace(**{**state.__dict__, "confidence": 0.7})
+    assert finished_builder(low_confidence_state, now=now) is None
+    pending_validation_state = SimpleNamespace(
+        **{**state.__dict__, "model_status": "needs_validation"}
+    )
+    assert finished_builder(pending_validation_state, now=now) is None
+
+    running_state = SimpleNamespace(
+        **{
+            **state.__dict__,
+            "is_running": True,
+            "confidence": 0.86,
+            "last_seen": now - timedelta(minutes=45),
+            "active_session_id": "session-open",
+            "latest_session_id": "session-open",
+            "estimated_energy_kwh_today": 1.2,
+        }
+    )
+    runtime_builder = getattr(
+        nilm_virtual,
+        "nilm_virtual_unusual_runtime_alert",
+        None,
+    )
+    energy_builder = getattr(nilm_virtual, "nilm_virtual_unusual_energy_alert", None)
+    assert runtime_builder is not None
+    assert energy_builder is not None
+
+    assert (
+        runtime_builder(
+            running_state,
+            {"expected_runtime_minutes": 30, "unusual_runtime_repeated_count": 1},
+            now=now,
+        )
+        is None
+    )
+    runtime_alert = runtime_builder(
+        running_state,
+        {"expected_runtime_minutes": 30, "unusual_runtime_repeated_count": 2},
+        now=now,
+    )
+
+    assert runtime_alert is not None
+    assert runtime_alert.feature == "nilm_appliance_unusual_runtime"
+    assert runtime_alert.repeated_count == 2
+    assert "estimated" in runtime_alert.message.lower()
+
+    unvalidated_state = SimpleNamespace(
+        **{**running_state.__dict__, "model_status": "assigned"}
+    )
+    assert (
+        runtime_builder(
+            unvalidated_state,
+            {"expected_runtime_minutes": 30, "unusual_runtime_repeated_count": 2},
+            now=now,
+        )
+        is None
+    )
+
+    energy_alert = energy_builder(
+        state,
+        {"expected_daily_energy_kwh": 0.3, "unusual_energy_repeated_count": 2},
+        now=now,
+    )
+
+    assert energy_alert is not None
+    assert energy_alert.feature == "nilm_appliance_unusual_energy"
+    assert energy_alert.repeated_count == 2
+    assert "Estimated from mains power by NILM" in energy_alert.message
+
+
+@pytest.mark.asyncio
+async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    sent_notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        sent_notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["signature_1"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "published",
+                        "confidence": 0.91,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator._nilm_unmatched_edges["mains"] = [
+        NilmEdge(
+            timestamp=now - timedelta(minutes=45),
+            delta_w=650.0,
+            delta_var=20.0,
+            delta_va=650.0,
+            delta_pf=0.0,
+            direction="on",
+        ),
+        NilmEdge(
+            timestamp=now - timedelta(minutes=5),
+            delta_w=-640.0,
+            delta_var=-18.0,
+            delta_va=-640.0,
+            delta_pf=0.0,
+            direction="off",
+        ),
+    ]
+
+    notify_virtual = getattr(coordinator, "_notify_nilm_virtual_appliances", None)
+    assert notify_virtual is not None
+    active_alerts = await notify_virtual(now)
+
+    assert sent_notifications
+    assert active_alerts == sent_notifications
+    assert sent_notifications[0].feature == "nilm_appliance_finished"
+    assert "Estimated from mains power by NILM" in sent_notifications[0].message
+    assert coordinator.store_data.alerts[-1] == sent_notifications[0]
+
+    active_alerts = await notify_virtual(now)
+
+    assert len(sent_notifications) == 1
+    assert active_alerts
+    assert active_alerts[0].feature == "nilm_appliance_finished"
+
+
+@pytest.mark.asyncio
+async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["signature_1"],
+                        "session_ids": [],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "published",
+                        "confidence": 0.9,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message=(
+            "Dishwasher appears finished. Estimated from mains power by NILM. "
+            "Confidence: 90%."
+        ),
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_key": "assignment-dishwasher:session-1",
+        },
+    )
+    alert_id = notification_id_for_alert(alert)
+    coordinator.store_data.alerts.append(alert)
+
+    mark_wrong = getattr(coordinator, "async_mark_nilm_appliance_wrong", None)
+    mark_correct = getattr(coordinator, "async_mark_nilm_appliance_correct", None)
+    assert mark_wrong is not None
+    assert mark_correct is not None
+    assert await mark_wrong(alert_id) is True
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["confidence"] == pytest.approx(0.75)
+    assert assignment["lifecycle_state"] == "needs_validation"
+
+    coordinator.store_data.alerts.append(alert)
+    assert await mark_correct(alert_id) is True
+
+    assert assignment["confidence"] == pytest.approx(0.8)
+    assert assignment["last_validation"] == "correct"
+
+
 @pytest.mark.asyncio
 async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
