@@ -77,6 +77,39 @@ def test_notification_id_for_alert_does_not_collide_on_underscores() -> None:
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
 
 
+def test_notification_id_for_alert_uses_nilm_notification_key() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        notification_id_for_alert,
+    )
+
+    first = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished.",
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_key": "assignment-dishwasher:session-1",
+        },
+    )
+    second = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished.",
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_key": "assignment-dishwasher:session-2",
+        },
+    )
+
+    assert notification_id_for_alert(first) != notification_id_for_alert(second)
+
+
 def test_alert_notification_message_includes_evidence_link_and_graph_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
@@ -2285,6 +2318,112 @@ async def test_nilm_assignment_services_dispatch_to_matching_coordinator() -> No
 
 
 @pytest.mark.asyncio
+async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+        SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+        SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [{"assignment_id": "assignment-dishwasher"}]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_publish_nilm_appliance_assignment(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_publish_nilm_appliance_assignment",
+                    (circuit_id, assignment_id),
+                )
+            )
+
+        async def async_unpublish_nilm_appliance_assignment(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_unpublish_nilm_appliance_assignment",
+                    (circuit_id, assignment_id),
+                )
+            )
+
+        async def async_retire_nilm_appliance_assignment(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_retire_nilm_appliance_assignment",
+                    (circuit_id, assignment_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    for service in (
+        SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+        SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
+        SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    ):
+        await hass.services.registered[(DOMAIN, service)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "assignment_id": "assignment-dishwasher",
+                }
+            )
+        )
+
+    assert coordinator.calls == [
+        (
+            "async_publish_nilm_appliance_assignment",
+            ("mains", "assignment-dishwasher"),
+        ),
+        (
+            "async_unpublish_nilm_appliance_assignment",
+            ("mains", "assignment-dishwasher"),
+        ),
+        (
+            "async_retire_nilm_appliance_assignment",
+            ("mains", "assignment-dishwasher"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_services_reject_self_merge() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_MERGE_NILM_SIGNATURES,
@@ -2344,13 +2483,22 @@ async def test_nilm_signature_services_reject_self_merge() -> None:
 
 @pytest.mark.asyncio
 async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
-    from custom_components.circuitsetup_energy_analyzer.services import (
-        SERVICE_ACKNOWLEDGE_ALERT,
-        SERVICE_MARK_ALERT_EXPECTED,
-        SERVICE_MARK_ALERT_UNHELPFUL,
-        HomeAssistantError,
-        async_setup_services,
+    from custom_components.circuitsetup_energy_analyzer import (
+        services as services_module,
     )
+
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT = getattr(
+        services_module,
+        "SERVICE_MARK_NILM_APPLIANCE_CORRECT",
+        None,
+    )
+    SERVICE_MARK_NILM_APPLIANCE_WRONG = getattr(
+        services_module,
+        "SERVICE_MARK_NILM_APPLIANCE_WRONG",
+        None,
+    )
+    assert SERVICE_MARK_NILM_APPLIANCE_CORRECT is not None
+    assert SERVICE_MARK_NILM_APPLIANCE_WRONG is not None
 
     class FakeServices:
         def __init__(self) -> None:
@@ -2372,20 +2520,31 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
         async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
             return False
 
+        async def async_mark_nilm_appliance_correct(self, alert_id: str) -> bool:
+            return False
+
+        async def async_mark_nilm_appliance_wrong(self, alert_id: str) -> bool:
+            return False
+
     hass = SimpleNamespace(
         data={DOMAIN: {"entry-1": FakeCoordinator()}},
         services=FakeServices(),
         bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
     )
 
-    await async_setup_services(hass)
+    await services_module.async_setup_services(hass)
 
     for service in (
-        SERVICE_ACKNOWLEDGE_ALERT,
-        SERVICE_MARK_ALERT_EXPECTED,
-        SERVICE_MARK_ALERT_UNHELPFUL,
+        services_module.SERVICE_ACKNOWLEDGE_ALERT,
+        services_module.SERVICE_MARK_ALERT_EXPECTED,
+        services_module.SERVICE_MARK_ALERT_UNHELPFUL,
+        SERVICE_MARK_NILM_APPLIANCE_CORRECT,
+        SERVICE_MARK_NILM_APPLIANCE_WRONG,
     ):
-        with pytest.raises(HomeAssistantError, match="Unknown alert_id 'stale-alert'"):
+        with pytest.raises(
+            services_module.HomeAssistantError,
+            match="Unknown alert_id 'stale-alert'",
+        ):
             await hass.services.registered[(DOMAIN, service)](
                 SimpleNamespace(data={"alert_id": "stale-alert"})
             )
@@ -2393,15 +2552,25 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_alert_feedback_services_accept_single_alert_entity_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        services as services_module,
+    )
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         notification_id_for_alert,
     )
-    from custom_components.circuitsetup_energy_analyzer.services import (
-        SERVICE_ACKNOWLEDGE_ALERT,
-        SERVICE_MARK_ALERT_EXPECTED,
-        SERVICE_MARK_ALERT_UNHELPFUL,
-        async_setup_services,
+
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT = getattr(
+        services_module,
+        "SERVICE_MARK_NILM_APPLIANCE_CORRECT",
+        None,
     )
+    SERVICE_MARK_NILM_APPLIANCE_WRONG = getattr(
+        services_module,
+        "SERVICE_MARK_NILM_APPLIANCE_WRONG",
+        None,
+    )
+    assert SERVICE_MARK_NILM_APPLIANCE_CORRECT is not None
+    assert SERVICE_MARK_NILM_APPLIANCE_WRONG is not None
 
     class FakeServices:
         def __init__(self) -> None:
@@ -2446,6 +2615,14 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
             self.calls.append(("async_mark_alert_unhelpful", alert_id))
             return True
 
+        async def async_mark_nilm_appliance_correct(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_nilm_appliance_correct", alert_id))
+            return True
+
+        async def async_mark_nilm_appliance_wrong(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_nilm_appliance_wrong", alert_id))
+            return True
+
     coordinator = FakeCoordinator()
     hass = SimpleNamespace(
         data={DOMAIN: {"entry-1": coordinator}},
@@ -2453,12 +2630,14 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
         bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
     )
 
-    await async_setup_services(hass)
+    await services_module.async_setup_services(hass)
 
     for service in (
-        SERVICE_ACKNOWLEDGE_ALERT,
-        SERVICE_MARK_ALERT_EXPECTED,
-        SERVICE_MARK_ALERT_UNHELPFUL,
+        services_module.SERVICE_ACKNOWLEDGE_ALERT,
+        services_module.SERVICE_MARK_ALERT_EXPECTED,
+        services_module.SERVICE_MARK_ALERT_UNHELPFUL,
+        SERVICE_MARK_NILM_APPLIANCE_CORRECT,
+        SERVICE_MARK_NILM_APPLIANCE_WRONG,
     ):
         await hass.services.registered[(DOMAIN, service)](
             SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
@@ -2469,6 +2648,8 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
         ("async_acknowledge_alert", expected_alert_id),
         ("async_mark_alert_expected", expected_alert_id),
         ("async_mark_alert_unhelpful", expected_alert_id),
+        ("async_mark_nilm_appliance_correct", expected_alert_id),
+        ("async_mark_nilm_appliance_wrong", expected_alert_id),
     ]
 
 

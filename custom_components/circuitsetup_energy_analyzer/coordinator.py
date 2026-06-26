@@ -140,6 +140,7 @@ from .nilm import (
     NilmEdge,
     NilmEdgeDetector,
 )
+from .nilm_virtual import nilm_virtual_appliance_alerts
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
@@ -1394,6 +1395,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
+        alerts.extend(await self._notify_nilm_virtual_appliances(now))
         self._refresh_balance_state(samples, now)
         self._refresh_solar_flow_state(samples, now)
         alerts.extend(await self._observe_utility_comparisons(now))
@@ -2866,6 +2868,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Mark an alert pattern as unhelpful for future notifications."""
         return await self._store_alert_feedback(alert_id, "unhelpful")
 
+    async def async_mark_nilm_appliance_correct(self: Self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as correct."""
+        return await self._store_alert_feedback(alert_id, "correct")
+
+    async def async_mark_nilm_appliance_wrong(self: Self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as the wrong appliance."""
+        return await self._store_alert_feedback(alert_id, "wrong_appliance")
+
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
         self.last_exported_diagnostics = {
@@ -3649,6 +3659,73 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             None,
         )
+
+    async def async_publish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Publish estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = True
+        assignment["created_device"] = True
+        assignment["lifecycle_state"] = "published"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_unpublish_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Stop publishing estimated HA entities for a NILM assignment."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        if assignment.get("lifecycle_state") == "published":
+            assignment["lifecycle_state"] = "validated"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    async def async_retire_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Retire a NILM assignment and stop publishing entities."""
+        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
+        assignment["publish_entities"] = False
+        assignment["lifecycle_state"] = "retired"
+        assignment["updated_at"] = self._now_fn().isoformat()
+        await self._async_save_nilm_assignment_change()
+        return dict(assignment)
+
+    def _nilm_assignment_for_id(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        assignment_id_text = str(assignment_id or "").strip()
+        if not assignment_id_text:
+            raise ValueError("Missing assignment_id.")
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        for assignment in assignments:
+            if assignment.get("assignment_id") == assignment_id_text:
+                return assignment
+        raise ValueError(
+            f"Unknown assignment_id '{assignment_id_text}' for circuit_id "
+            f"'{circuit_id}'."
+        )
+
+    async def _async_save_nilm_assignment_change(self: Self) -> None:
+        self._mark_store_dirty()
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(self._now_fn())
+        await self._async_reload_config_entry()
 
     async def async_ignore_nilm_signature(
         self: Self,
@@ -6235,12 +6312,43 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             "baseline_value": alert.baseline_value,
             "evidence_count": evidence_count,
         }
+        self._apply_nilm_alert_feedback(alert, action, now)
         self._retire_alert_id(alert_id)
         self._mark_store_dirty()
         self._refresh_all_ux_state(now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
         return True
+
+    def _apply_nilm_alert_feedback(
+        self: Self,
+        alert: AlertEvidence,
+        action: str,
+        now: datetime,
+    ) -> None:
+        if alert.features.get("source") != "nilm":
+            return
+        assignment_id = str(alert.features.get("assignment_id") or "").strip()
+        if not assignment_id:
+            return
+        try:
+            assignment = self._nilm_assignment_for_id(alert.circuit_id, assignment_id)
+        except ValueError:
+            return
+        current_confidence = _nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        if action == "correct":
+            assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
+            assignment["last_validation"] = "correct"
+        elif action == "wrong_appliance":
+            assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
+            assignment["last_validation"] = "wrong_appliance"
+            assignment["lifecycle_state"] = "needs_validation"
+        else:
+            return
+        assignment["updated_at"] = now.isoformat()
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
@@ -6985,6 +7093,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert,
             config=self._config_for_circuit(alert.circuit_id),
         )
+
+    async def _notify_nilm_virtual_appliances(
+        self: Self,
+        now: datetime,
+    ) -> list[AlertEvidence]:
+        active_alerts: list[AlertEvidence] = []
+        for alert in nilm_virtual_appliance_alerts(self, now=now):
+            alert = self._alert_with_feedback(alert)
+            alert_id = notifications.notification_id_for_alert(alert)
+            if alert.feedback_status != "expected":
+                active_alerts.append(alert)
+            if alert_id in self._notified_alert_ids:
+                continue
+            self.store_data.alerts.append(alert)
+            self._mark_store_dirty()
+            await self._notify_alert(alert)
+        return active_alerts
 
 
 def _numeric_items(

@@ -480,6 +480,96 @@ assign_interval_to_appliance:
       example: assignment-abc123def456
       selector:
         text:
+publish_nilm_appliance_assignment:
+  name: Publish NILM appliance assignment
+  description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to publish.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+unpublish_nilm_appliance_assignment:
+  name: Unpublish NILM appliance assignment
+  description: "Advanced/script action: stop creating estimated Home Assistant appliance entities for a NILM assignment. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to unpublish.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+retire_nilm_appliance_assignment:
+  name: Retire NILM appliance assignment
+  description: "Advanced/script action: retire a NILM appliance assignment and stop creating estimated Home Assistant entities for it. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to retire.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
 set_circuit_sensitivity:
   name: Set circuit sensitivity
   description: "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity."
@@ -1320,6 +1410,52 @@ mark_alert_unhelpful:
       description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for a circuit with exactly one active alert.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+mark_nilm_appliance_correct:
+  name: Mark NILM appliance correct
+  description: "Advanced/script action: mark an estimated NILM appliance notification as correct. The normal user path is the evidence panel button."
+  fields:
+    alert_id:
+      name: Alert ID
+      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
+      required: false
+      example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for a circuit with exactly one active alert.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+mark_nilm_appliance_wrong:
+  name: Mark NILM appliance wrong
+  description: "Advanced/script action: mark an estimated NILM appliance notification as the wrong appliance. The normal user path is the evidence panel button."
+  fields:
+    alert_id:
+      name: Alert ID
+      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
+      required: false
+      example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
       selector:
         text:
     entity_id:
