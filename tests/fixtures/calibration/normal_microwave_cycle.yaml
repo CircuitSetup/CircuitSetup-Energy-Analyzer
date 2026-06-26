@@ -1,0 +1,90 @@
+schema_version: 1
+id: normal_microwave_cycle
+description: Normal microwave heat cycle and steady daily energy use stays quiet.
+scenario_type: normal
+appliance_profile: microwave
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-01-01T00:00:00+00:00"
+sample_interval_seconds: 60
+retention_mode: standard
+
+circuits:
+  - circuit_id: microwave
+    name: Microwave
+    appliance_profile: microwave
+    circuit_mode: single_phase
+    power_flow: load
+    energy_usage_window_days: 7
+    daily_energy_spike_ratio: 0.4
+    sources:
+      power: sensor.microwave_power
+      energy: sensor.microwave_energy
+      current: sensor.microwave_current
+      voltage: sensor.microwave_voltage
+
+samples:
+  - t: 0
+    states:
+      sensor.microwave_power: 0
+      sensor.microwave_energy: 20.0
+      sensor.microwave_current: 0.0
+      sensor.microwave_voltage: 120.0
+  - t: 60
+    states:
+      sensor.microwave_power: 1250
+      sensor.microwave_energy: 20.0
+      sensor.microwave_current: 10.4
+      sensor.microwave_voltage: 120.1
+  - t: 120
+    states:
+      sensor.microwave_power: 1240
+      sensor.microwave_energy: 20.02
+      sensor.microwave_current: 10.3
+      sensor.microwave_voltage: 119.9
+  - t: 180
+    states:
+      sensor.microwave_power: 0
+      sensor.microwave_energy: 20.04
+      sensor.microwave_current: 0.0
+      sensor.microwave_voltage: 120.0
+  - t: 240
+    states:
+      sensor.microwave_power: 0
+      sensor.microwave_energy: 20.04
+      sensor.microwave_current: 0.0
+      sensor.microwave_voltage: 120.1
+
+segments:
+  - pattern: daily_energy_deltas
+    start_t: 86400
+    interval_seconds: 86400
+    energy_start_kwh: 20.04
+    power_w: 0
+    current_a: 0.0
+    voltage_v: 120.0
+    daily_usage_kwh: [0.22, 0.21, 0.23, 0.22, 0.21, 0.23, 0.22, 0.21, 0.23, 0.22]
+
+labels:
+  expected_events:
+    - circuit_id: microwave
+      event_type: start
+      around_t: 60
+      tolerance_seconds: 60
+    - circuit_id: microwave
+      event_type: stop
+      around_t: 180
+      tolerance_seconds: 60
+  expected_alerts: []
+  expected_no_alerts:
+    - circuit_id: microwave
+      feature: "*"
+      start_t: 0
+      end_t: 950400
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 0
+  max_false_negative_alerts: 0
+  expected_precision_at_least: null
+  expected_recall_at_least: null
