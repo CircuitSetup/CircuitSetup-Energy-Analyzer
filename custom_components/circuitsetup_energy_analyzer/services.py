@@ -55,6 +55,8 @@ SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
+SERVICE_MARK_NILM_APPLIANCE_CORRECT = "mark_nilm_appliance_correct"
+SERVICE_MARK_NILM_APPLIANCE_WRONG = "mark_nilm_appliance_wrong"
 SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
 SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
 SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendations"
@@ -434,6 +436,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_NILM_APPLIANCE_WRONG: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
     SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS: (
@@ -519,6 +523,22 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             data,
             method_name="async_mark_alert_unhelpful",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_CORRECT:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_correct",
+        )
+        return
+
+    if service == SERVICE_MARK_NILM_APPLIANCE_WRONG:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_nilm_appliance_wrong",
         )
         return
 
@@ -1071,7 +1091,10 @@ def _circuit_id_from_entity_registry(hass: Any, entity_id: str) -> str | None:
     async_get = getattr(er, "async_get", None)
     if async_get is None:
         return None
-    registry = async_get(hass)
+    try:
+        registry = async_get(hass)
+    except TypeError:
+        return None
     entry = getattr(registry, "async_get", lambda _entity_id: None)(entity_id)
     if entry is None or getattr(entry, "platform", None) != DOMAIN:
         return None

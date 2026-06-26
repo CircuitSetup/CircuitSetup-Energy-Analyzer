@@ -1424,6 +1424,52 @@ mark_alert_unhelpful:
             - button
             - select
             - number
+mark_nilm_appliance_correct:
+  name: Mark NILM appliance correct
+  description: "Advanced/script action: mark an estimated NILM appliance notification as correct. The normal user path is the evidence panel button."
+  fields:
+    alert_id:
+      name: Alert ID
+      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
+      required: false
+      example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for a circuit with exactly one active alert.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+mark_nilm_appliance_wrong:
+  name: Mark NILM appliance wrong
+  description: "Advanced/script action: mark an estimated NILM appliance notification as the wrong appliance. The normal user path is the evidence panel button."
+  fields:
+    alert_id:
+      name: Alert ID
+      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
+      required: false
+      example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for a circuit with exactly one active alert.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 mark_nilm_signature_expected:
   name: Mark NILM signature expected
   description: "Advanced/script action: mark an experimental NILM signature as an expected load pattern. The normal user path is the NILM/evidence panel button."

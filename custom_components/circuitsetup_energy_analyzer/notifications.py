@@ -15,6 +15,14 @@ def notification_id_for_alert(alert: AlertEvidence) -> str:
     feature = alert.feature or (
         alert.event_type.value if alert.event_type is not None else "alert"
     )
+    notification_key = alert.features.get("notification_key")
+    if isinstance(notification_key, str) and notification_key.strip():
+        return _tuple_id(
+            f"{DOMAIN}_alert",
+            alert.circuit_id,
+            feature,
+            notification_key.strip(),
+        )
     return _tuple_id(f"{DOMAIN}_alert", alert.circuit_id, feature)
 
 

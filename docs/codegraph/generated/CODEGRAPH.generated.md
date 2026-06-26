@@ -1,16 +1,16 @@
 # Generated Codegraph
 
-**Commit:** `e2976eda10a8be930dd374a37dad431dde076d86`
-**Branch:** `feature/nilm-virtual-entities`
-**Generated:** `2026-06-26T03:01:15.457674+00:00`
+**Commit:** `aad299cef29fbbeb1025322347d19e35a59e2999`
+**Branch:** `feature/nilm-notifications`
+**Generated:** `2026-06-26T03:29:02.578660+00:00`
 **Tests included:** `True`
 
 ## Scope
 
 - Files: **169**
 - Python modules: **155**
-- Symbols: **3452**
-- Internal import edges: **468**
+- Symbols: **3471**
+- Internal import edges: **469**
 - External import edges: **514**
 
 ## Entrypoints
@@ -54,8 +54,8 @@
 | `custom_components.circuitsetup_energy_analyzer.processors.water_context.WaterContextAlertProcessor` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py:26` | Feature processor |
 | `custom_components.circuitsetup_energy_analyzer.select.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/select.py:372` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.sensor.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/sensor.py:3306` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:450` | Home Assistant lifecycle/API entrypoint |
-| `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:467` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.services.async_setup_services` | `custom_components/circuitsetup_energy_analyzer/services.py:454` | Home Assistant lifecycle/API entrypoint |
+| `custom_components.circuitsetup_energy_analyzer.services.async_unload_services` | `custom_components/circuitsetup_energy_analyzer/services.py:471` | Home Assistant lifecycle/API entrypoint |
 | `custom_components.circuitsetup_energy_analyzer.switch.async_setup_entry` | `custom_components/circuitsetup_energy_analyzer/switch.py:152` | Home Assistant lifecycle/API entrypoint |
 
 ## Most connected internal modules
@@ -63,7 +63,7 @@
 | Module | Total degree | Incoming imports | Outgoing imports | Path |
 |---|---:|---:|---:|---|
 | `custom_components.circuitsetup_energy_analyzer.models` | 84 | 84 | 0 | `custom_components/circuitsetup_energy_analyzer/models.py` |
-| `custom_components.circuitsetup_energy_analyzer.coordinator` | 52 | 7 | 45 | `custom_components/circuitsetup_energy_analyzer/coordinator.py` |
+| `custom_components.circuitsetup_energy_analyzer.coordinator` | 53 | 7 | 46 | `custom_components/circuitsetup_energy_analyzer/coordinator.py` |
 | `custom_components.circuitsetup_energy_analyzer.const` | 36 | 36 | 0 | `custom_components/circuitsetup_energy_analyzer/const.py` |
 | `custom_components.circuitsetup_energy_analyzer.normalize` | 29 | 28 | 1 | `custom_components/circuitsetup_energy_analyzer/normalize.py` |
 | `custom_components.circuitsetup_energy_analyzer.processors.base` | 24 | 21 | 3 | `custom_components/circuitsetup_energy_analyzer/processors/base.py` |
@@ -107,7 +107,6 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_balance["balance.py"]
   n_custom_components_circuitsetup_energy_analyzer_baseline["baseline.py"]
   n_custom_components_circuitsetup_energy_analyzer_binary_sensor["binary_sensor.py"]
-  n_custom_components_circuitsetup_energy_analyzer_capacity["capacity.py"]
   n_custom_components_circuitsetup_energy_analyzer_config_flow["config_flow.py"]
   n_custom_components_circuitsetup_energy_analyzer_const["const.py"]
   n_custom_components_circuitsetup_energy_analyzer_contextual_baseline["contextual_baseline.py"]
@@ -123,6 +122,7 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_metric_consistency["metric_consistency.py"]
   n_custom_components_circuitsetup_energy_analyzer_models["models.py"]
   n_custom_components_circuitsetup_energy_analyzer_nilm["nilm.py"]
+  n_custom_components_circuitsetup_energy_analyzer_nilm_virtual["nilm_virtual.py"]
   n_custom_components_circuitsetup_energy_analyzer_normalize["normalize.py"]
   n_custom_components_circuitsetup_energy_analyzer_notifications["notifications.py"]
   n_custom_components_circuitsetup_energy_analyzer_operating_detection["operating_detection.py"]
@@ -172,6 +172,7 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_binary_sensor --> n_custom_components_circuitsetup_energy_analyzer_entity
   n_custom_components_circuitsetup_energy_analyzer_binary_sensor --> n_custom_components_circuitsetup_energy_analyzer_entity_catalog
   n_custom_components_circuitsetup_energy_analyzer_binary_sensor --> n_custom_components_circuitsetup_energy_analyzer_models
+  n_custom_components_circuitsetup_energy_analyzer_binary_sensor --> n_custom_components_circuitsetup_energy_analyzer_nilm_virtual
   n_custom_components_circuitsetup_energy_analyzer_binary_sensor --> n_custom_components_circuitsetup_energy_analyzer_operating_detection
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_balance
   n_custom_components_circuitsetup_energy_analyzer_config_flow --> n_custom_components_circuitsetup_energy_analyzer_const
@@ -194,7 +195,6 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_activity_timeline
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_alerting
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_balance
-  n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_capacity
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_const
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_cycles
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_dashboard
@@ -203,6 +203,7 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_metric_consistency
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_models
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_nilm
+  n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_nilm_virtual
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_normalize
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_operating_detection
   n_custom_components_circuitsetup_energy_analyzer_coordinator --> n_custom_components_circuitsetup_energy_analyzer_phase_balance
@@ -228,6 +229,9 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_entity --> n_custom_components_circuitsetup_energy_analyzer_models
   n_custom_components_circuitsetup_energy_analyzer_entity_catalog --> n_custom_components_circuitsetup_energy_analyzer_const
   n_custom_components_circuitsetup_energy_analyzer_nilm --> n_custom_components_circuitsetup_energy_analyzer_models
+  n_custom_components_circuitsetup_energy_analyzer_nilm_virtual --> n_custom_components_circuitsetup_energy_analyzer_const
+  n_custom_components_circuitsetup_energy_analyzer_nilm_virtual --> n_custom_components_circuitsetup_energy_analyzer_models
+  n_custom_components_circuitsetup_energy_analyzer_nilm_virtual --> n_custom_components_circuitsetup_energy_analyzer_nilm
   n_custom_components_circuitsetup_energy_analyzer_normalize --> n_custom_components_circuitsetup_energy_analyzer_models
   n_custom_components_circuitsetup_energy_analyzer_notifications --> n_custom_components_circuitsetup_energy_analyzer_alert_links
   n_custom_components_circuitsetup_energy_analyzer_notifications --> n_custom_components_circuitsetup_energy_analyzer_const
@@ -269,7 +273,6 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_processors_billing --> n_custom_components_circuitsetup_energy_analyzer_normalize
   n_custom_components_circuitsetup_energy_analyzer_processors_billing --> n_custom_components_circuitsetup_energy_analyzer_processors_base
   n_custom_components_circuitsetup_energy_analyzer_processors_capacity --> n_custom_components_circuitsetup_energy_analyzer_alerting
-  n_custom_components_circuitsetup_energy_analyzer_processors_capacity --> n_custom_components_circuitsetup_energy_analyzer_capacity
   n_custom_components_circuitsetup_energy_analyzer_processors_capacity --> n_custom_components_circuitsetup_energy_analyzer_models
   n_custom_components_circuitsetup_energy_analyzer_processors_capacity --> n_custom_components_circuitsetup_energy_analyzer_normalize
   n_custom_components_circuitsetup_energy_analyzer_processors_capacity --> n_custom_components_circuitsetup_energy_analyzer_processors_base
@@ -327,7 +330,6 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_processors_standby --> n_custom_components_circuitsetup_energy_analyzer_standby
   n_custom_components_circuitsetup_energy_analyzer_processors_standby --> n_custom_components_circuitsetup_energy_analyzer_processors_base
   n_custom_components_circuitsetup_energy_analyzer_recommendation_guidance --> n_custom_components_circuitsetup_energy_analyzer_balance
-  n_custom_components_circuitsetup_energy_analyzer_recommendation_guidance --> n_custom_components_circuitsetup_energy_analyzer_capacity
   n_custom_components_circuitsetup_energy_analyzer_recommendation_guidance --> n_custom_components_circuitsetup_energy_analyzer_metric_consistency
   n_custom_components_circuitsetup_energy_analyzer_recommendation_guidance --> n_custom_components_circuitsetup_energy_analyzer_phase_balance
   n_custom_components_circuitsetup_energy_analyzer_recommendation_guidance --> n_custom_components_circuitsetup_energy_analyzer_standby
@@ -345,6 +347,7 @@ flowchart LR
   n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_entity
   n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_entity_catalog
   n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_models
+  n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_nilm_virtual
   n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_operating_detection
   n_custom_components_circuitsetup_energy_analyzer_sensor --> n_custom_components_circuitsetup_energy_analyzer_ux
   n_custom_components_circuitsetup_energy_analyzer_settings_advisor --> n_custom_components_circuitsetup_energy_analyzer_balance
@@ -379,7 +382,6 @@ flowchart LR
   n_tests_helpers_calibration --> n_custom_components_circuitsetup_energy_analyzer_usage
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_alerting
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_balance
-  n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_capacity
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_const
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_models
   n_tests_test_processors --> n_custom_components_circuitsetup_energy_analyzer_normalize
