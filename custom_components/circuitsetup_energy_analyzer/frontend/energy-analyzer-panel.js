@@ -1686,6 +1686,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const maxLabel = this._formatNumber(maxValue);
     const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
     const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
+    const timeZoneLabel = this._timeZone();
     const selectAttrs = alert.nilm_select_interval
       ? ` data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"`
       : "";
@@ -1702,6 +1703,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${lines}
       </svg>
       <div class="legend">${legend}</div>
+      <p class="muted">Graph times shown in ${this._escape(timeZoneLabel)}.</p>
     `;
   }
 
@@ -1927,11 +1929,34 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (Number.isNaN(date.getTime())) {
       return String(value);
     }
-    const year = String(date.getFullYear());
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const minute = String(date.getMinutes()).padStart(2, "0");
-    return this._formatDateParts(year, month, day, date.getHours(), minute);
+    try {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat(undefined, {
+          timeZone: this._timeZone(),
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }).formatToParts(date).map((part) => [part.type, part.value]),
+      );
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}${String(parts.dayPeriod || "").toUpperCase()}`;
+    } catch (_error) {
+      const year = String(date.getFullYear());
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+      return this._formatDateParts(year, month, day, date.getHours(), minute);
+    }
+  }
+
+  _timeZone() {
+    return (
+      (this._hass && this._hass.config && this._hass.config.time_zone)
+      || Intl.DateTimeFormat().resolvedOptions().timeZone
+      || "local time"
+    );
   }
 
   _formatDateParts(year, month, day, hour, minute) {

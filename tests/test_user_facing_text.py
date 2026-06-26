@@ -1227,6 +1227,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
         "Alert evidence chart",
+        "Graph times shown in",
+        "_timeZone",
         "data-nilm-chart-select",
         "_startNilmChartSelection",
         "_chartEventTime",
@@ -1463,11 +1465,9 @@ def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> Non
 
     assert "new Date(value)" in asset
     assert "raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T" not in asset
-    assert "const year = String(date.getFullYear());" in asset
-    assert (
-        "return this._formatDateParts(year, month, day, date.getHours(), minute);"
-        in asset
-    )
+    assert "new Intl.DateTimeFormat(undefined, {" in asset
+    assert "timeZone: this._timeZone()," in asset
+    assert "this._hass.config.time_zone" in asset
 
 
 def test_daily_action_services_document_entity_targets() -> None:
