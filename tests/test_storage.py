@@ -21,6 +21,8 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
     feature_store_data_from_dict,
     feature_store_data_to_dict,
     migrate_v1_to_v2,
+    migrate_v2_to_v3,
+    migrate_v3_to_v4,
     prune_events,
 )
 
@@ -48,6 +50,43 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     sensitivity_by_circuit = {"fridge": "quiet"}
     maintenance_by_circuit = {"fridge": {"active": True}}
     alert_feedback = {"fridge:reactive_power": {"action": "expected"}}
+    nilm_label_intervals = {
+        "mains": [
+            {
+                "interval_id": "label-1",
+                "mains_circuit_id": "mains",
+                "appliance_id": "dishwasher",
+                "label": "Dishwasher",
+                "start": (now - timedelta(hours=2)).isoformat(),
+                "end": (now - timedelta(hours=1)).isoformat(),
+                "source": "manual",
+                "confidence": 1.0,
+                "mains_entity_id": "sensor.mains_power",
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+        ]
+    }
+    nilm_assignments = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "appliance_profile": "dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["signature_1"],
+                "session_ids": ["session_1"],
+                "label_interval_ids": ["label-1"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+                "created_device": False,
+                "publish_entities": False,
+            }
+        ]
+    }
     energy_usage_settings_by_circuit = {
         "fridge": {"window_days": 14, "daily_spike_ratio": 0.2}
     }
@@ -108,6 +147,8 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         baselines={"fridge:startup_power_w": baseline},
         alerts=[alert],
         nilm_signatures=signatures,
+        nilm_label_intervals_by_circuit=nilm_label_intervals,
+        nilm_appliance_assignments_by_circuit=nilm_assignments,
         sensitivity_by_circuit=sensitivity_by_circuit,
         maintenance_by_circuit=maintenance_by_circuit,
         alert_feedback=alert_feedback,
@@ -133,6 +174,14 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     assert pruned.baselines is data.baselines
     assert pruned.alerts is data.alerts
     assert pruned.nilm_signatures is data.nilm_signatures
+    assert (
+        pruned.nilm_label_intervals_by_circuit
+        is data.nilm_label_intervals_by_circuit
+    )
+    assert (
+        pruned.nilm_appliance_assignments_by_circuit
+        is data.nilm_appliance_assignments_by_circuit
+    )
     assert pruned.sensitivity_by_circuit is data.sensitivity_by_circuit
     assert pruned.maintenance_by_circuit is data.maintenance_by_circuit
     assert pruned.alert_feedback is data.alert_feedback
@@ -265,6 +314,49 @@ async def test_storage_v1_migrates_context_and_expires_legacy_feedback() -> None
     assert migrated["sensitivity_by_circuit"] == {"fridge": "quiet"}
 
 
+async def test_storage_v2_migrates_nilm_label_interval_storage() -> None:
+    raw = {
+        "schema_version": 2,
+        "events": [],
+        "nilm_signatures": {"mains": [{"signature_id": "signature_1"}]},
+    }
+
+    migrated = await migrate_v2_to_v3(raw)
+
+    assert migrated["schema_version"] == STORAGE_VERSION
+    assert migrated["nilm_label_intervals_by_circuit"] == {}
+
+
+async def test_storage_v3_migrates_nilm_review_states_to_assignments() -> None:
+    raw = {
+        "schema_version": 3,
+        "nilm_signatures": {
+            "mains": [
+                {
+                    "signature_id": "signature_1",
+                    "feedback_fingerprint": "fingerprint_1",
+                    "user_label": "Dishwasher",
+                    "likely_type": "dishwasher",
+                },
+                {
+                    "signature_id": "signature_2",
+                    "ignored": True,
+                },
+            ]
+        },
+    }
+
+    migrated = await migrate_v3_to_v4(raw)
+    assignments = migrated["nilm_appliance_assignments_by_circuit"]["mains"]
+
+    assert migrated["schema_version"] == STORAGE_VERSION
+    assert assignments[0]["display_name"] == "Dishwasher"
+    assert assignments[0]["lifecycle_state"] == "assigned"
+    assert assignments[0]["signature_fingerprints"] == ["fingerprint_1"]
+    assert assignments[1]["lifecycle_state"] == "ignored"
+    assert assignments[1]["signature_fingerprints"] == ["signature_2"]
+
+
 def test_feature_store_resets_malformed_optional_sections_safely() -> None:
     restored = feature_store_data_from_dict(
         {
@@ -277,6 +369,7 @@ def test_feature_store_resets_malformed_optional_sections_safely() -> None:
                 "bad-feedback": "not-a-dict",
             },
             "energy_usage_by_circuit": {"fridge": "not-a-dict"},
+            "nilm_appliance_assignments_by_circuit": {"mains": "not-a-list"},
             "sensitivity_by_circuit": "not-a-dict",
             "settings_recommendations": {
                 "valid": {
@@ -317,6 +410,7 @@ def test_feature_store_resets_malformed_optional_sections_safely() -> None:
 
     assert restored.weather_context_history_by_circuit == {}
     assert restored.energy_usage_by_circuit == {}
+    assert restored.nilm_appliance_assignments_by_circuit == {}
     assert restored.alert_feedback == {
         "alert:v2|fridge|daily_energy_spike": {"action": "expected"}
     }
@@ -964,6 +1058,64 @@ def test_feature_store_round_trips_fingerprint_alert_feedback() -> None:
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
     assert restored.alert_feedback[fingerprint] == data.alert_feedback[fingerprint]
+
+
+def test_feature_store_round_trips_nilm_label_intervals() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    interval = {
+        "interval_id": "mains-dishwasher-20260602T120000Z",
+        "mains_circuit_id": "mains",
+        "appliance_id": "dishwasher",
+        "label": "Dishwasher",
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=45)).isoformat(),
+        "source": "manual",
+        "confidence": 1.0,
+        "mains_entity_id": "sensor.mains_power",
+        "ground_truth_entity_id": "sensor.dishwasher_power",
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    data = FeatureStoreData(
+        nilm_label_intervals_by_circuit={"mains": [interval]},
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+
+    assert raw["nilm_label_intervals_by_circuit"] == {"mains": [interval]}
+    assert restored.nilm_label_intervals_by_circuit == {"mains": [interval]}
+
+
+def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-dishwasher",
+        "appliance_id": "dishwasher",
+        "display_name": "Dishwasher",
+        "appliance_profile": "dishwasher",
+        "mains_circuit_id": "mains",
+        "signature_fingerprints": ["signature_1"],
+        "session_ids": ["session_1"],
+        "label_interval_ids": ["label-1"],
+        "lifecycle_state": "assigned",
+        "confidence": 0.9,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+        "created_device": False,
+        "publish_entities": False,
+    }
+    data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+
+    assert raw["nilm_appliance_assignments_by_circuit"] == {"mains": [assignment]}
+    assert restored.nilm_appliance_assignments_by_circuit == {
+        "mains": [assignment]
+    }
 
 
 def test_feature_store_preserves_settings_recommendations() -> None:
