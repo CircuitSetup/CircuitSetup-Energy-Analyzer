@@ -431,7 +431,7 @@ Suggested settings remember apply, deny, and dismiss decisions. Denying a sugges
 | **Solar flow** | Shows solar generation, grid import/export, site consumption, surplus, and flexible-load hints. | Signed mains/net source plus solar generation circuit. |
 | **Utility / Opower comparison** | Compares utility-reported kWh with measured kWh for the same period. | Utility/Opower entity or statistic plus measured energy. |
 | **Always On and standby** | Estimates the low-power always-on load and current standby/on/off state. | Real-power data. |
-| **Experimental NILM** | Looks for recurring unknown whole-home load signatures. | Mains aggregate source; optional known-load circuits improve results. |
+| **Experimental NILM** | Looks for recurring unknown whole-home load signatures, pairs likely on/off sessions, and lets you review or publish user-confirmed estimated appliances. | Mains aggregate source; optional known-load circuits improve results. |
 
 ## Feature notes
 
@@ -617,7 +617,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 ### Experimental NILM
 
-Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out.
+Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges into likely sessions, show known-load overlays, and keep manual interval labels for review.
 
 Unknown load estimates may include:
 
@@ -632,6 +632,8 @@ Unknown load estimates may include:
 - Estimated runtime and kWh
 
 These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
+
+Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and publish that confirmed assignment as estimated Home Assistant appliance entities. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy.
 
 ## Suggested settings
 
@@ -774,7 +776,7 @@ The service actions below are optional. They are useful when you want to call an
 | Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
 | Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_unhelpful` |
 | Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
-| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures` |
+| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
 | Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
 
