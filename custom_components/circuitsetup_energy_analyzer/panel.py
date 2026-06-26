@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-label-adjust-v1"
+PANEL_MODULE_VERSION = "20260626-nilm-profile-select-v1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -1311,6 +1311,24 @@ def _nilm_assignment_payload(
             "data": dict(action_data),
             "requires": [ATTR_APPLIANCE_PROFILE],
         }
+        profile_options = []
+        seen_profiles: set[str] = set()
+        current_profile = str(payload.get(ATTR_APPLIANCE_PROFILE) or "").strip()
+        for profile in (
+            current_profile,
+            *(
+                item.value
+                for item in ApplianceProfile
+                if item is not ApplianceProfile.MAINS_NILM
+            ),
+        ):
+            if not profile or profile in seen_profiles:
+                continue
+            seen_profiles.add(profile)
+            profile_options.append(
+                {"value": profile, "label": friendly_feature_name(profile)},
+            )
+        actions["change_profile"]["profile_options"] = profile_options
         actions["validate_history"] = {
             "domain": DOMAIN,
             "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,

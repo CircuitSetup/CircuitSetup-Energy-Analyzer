@@ -1516,6 +1516,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const draftKey = this._nilmAssignmentDraftKey(item);
     const label = this._nilmAssignmentDraftValue(draftKey, "label", item.display_name || "");
     const profile = this._nilmAssignmentDraftValue(draftKey, "appliance_profile", item.appliance_profile || "");
+    const profileOptions = actions.change_profile && Array.isArray(actions.change_profile.profile_options)
+      ? actions.change_profile.profile_options
+      : [];
     return `
       <div class="grid">
         ${actions.rename ? `<label class="nilm-label-field" for="nilm_assignment_label_${index}">
@@ -1524,7 +1527,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </label>` : ""}
         ${actions.change_profile ? `<label class="nilm-label-field" for="nilm_assignment_profile_${index}">
           <span class="muted">Appliance type</span>
-          <input id="nilm_assignment_profile_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile" value="${this._escape(profile)}" placeholder="dishwasher">
+          <select id="nilm_assignment_profile_${index}" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile">
+            ${profileOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(profile) ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
+          </select>
         </label>` : ""}
         ${actions.merge ? `<label class="nilm-label-field" for="nilm_assignment_merge_target_${index}">
           <span class="muted">Merge into</span>

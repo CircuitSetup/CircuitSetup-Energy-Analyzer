@@ -1195,6 +1195,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-session-action",
         "data-nilm-assignment-action",
         "data-nilm-assignment-merge-target",
+        "profile_options",
+        "<select id=\"nilm_assignment_profile_",
         "Assign Appliance",
         "Publish Entities",
         "Disable Publishing",
