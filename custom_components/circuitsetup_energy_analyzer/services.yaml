@@ -628,6 +628,43 @@ change_nilm_appliance_profile:
       example: dishwasher_heated_dry
       selector:
         text:
+merge_nilm_assignments:
+  name: Merge NILM assignments
+  description: "Advanced/script action: merge one duplicate NILM appliance assignment into another. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    source_assignment_id:
+      name: Source Assignment ID
+      description: Duplicate NILM appliance assignment to merge away. The NILM workspace passes this internally.
+      required: true
+      example: assignment-source
+      selector:
+        text:
+    target_assignment_id:
+      name: Target Assignment ID
+      description: NILM appliance assignment to keep. The NILM workspace passes this internally.
+      required: true
+      example: assignment-target
+      selector:
+        text:
 publish_nilm_appliance_assignment:
   name: Publish NILM appliance assignment
   description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."

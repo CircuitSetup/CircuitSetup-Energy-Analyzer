@@ -453,6 +453,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.appliance_profile = profile;
     }
+    if (action.requires && action.requires.includes("target_assignment_id")) {
+      const targetInput = this.shadowRoot.querySelector(`#nilm_assignment_merge_target_${index}`);
+      const target = targetInput ? targetInput.value.trim() : "";
+      if (!target) {
+        this._error = "Choose an assignment to merge into.";
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.target_assignment_id = target;
+    }
     const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -629,6 +639,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (actionKey === "change_profile") {
       return "Changed appliance type.";
+    }
+    if (actionKey === "merge") {
+      return `Merged ${name}.`;
     }
     if (actionKey === "validate") {
       return `Confirmed ${name}.`;
@@ -1450,7 +1463,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmAssignmentEditFields(item, index) {
     const actions = item && item.actions;
-    if (!actions || (!actions.rename && !actions.change_profile)) {
+    if (!actions || (!actions.rename && !actions.change_profile && !actions.merge)) {
       return "";
     }
     const draftKey = this._nilmAssignmentDraftKey(item);
@@ -1465,6 +1478,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${actions.change_profile ? `<label class="nilm-label-field" for="nilm_assignment_profile_${index}">
           <span class="muted">Appliance type</span>
           <input id="nilm_assignment_profile_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile" value="${this._escape(profile)}" placeholder="dishwasher">
+        </label>` : ""}
+        ${actions.merge ? `<label class="nilm-label-field" for="nilm_assignment_merge_target_${index}">
+          <span class="muted">Merge into</span>
+          <select id="nilm_assignment_merge_target_${index}" data-nilm-assignment-merge-target>
+            ${(actions.merge.target_options || []).map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
+          </select>
         </label>` : ""}
       </div>
     `;
@@ -1490,6 +1509,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <div class="actions">
         ${actions.rename ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="rename" ${this._busyAction === `nilm_assignments_${index}_rename` ? "disabled" : ""}>Rename Appliance</button>` : ""}
         ${actions.change_profile ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="change_profile" ${this._busyAction === `nilm_assignments_${index}_change_profile` ? "disabled" : ""}>Change Type</button>` : ""}
+        ${actions.merge ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="merge" ${this._busyAction === `nilm_assignments_${index}_merge` ? "disabled" : ""}>Merge Assignment</button>` : ""}
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Publish Entities</button>` : ""}
         ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Disable Publishing</button>` : ""}
         ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Retire</button>` : ""}

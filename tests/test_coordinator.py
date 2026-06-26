@@ -3996,6 +3996,108 @@ async def test_nilm_assignment_rename_and_profile_update() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_merge_moves_references_to_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 16, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "source-sig",
+                        "assignment_id": "assignment-source",
+                    }
+                ]
+            },
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-source",
+                        "assignment_id": "assignment-source",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-source",
+                        "appliance_id": "dishwasher_old",
+                        "display_name": "Dishwasher old",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["source-fingerprint"],
+                        "session_ids": ["source-session"],
+                        "label_interval_ids": ["label-source"],
+                        "confirmed_session_ids": ["source-session"],
+                        "rejected_session_ids": [],
+                        "lifecycle_state": "validated",
+                        "confidence": 0.72,
+                        "created_at": "2026-06-02T12:00:00+00:00",
+                        "updated_at": "2026-06-02T12:00:00+00:00",
+                        "created_device": False,
+                        "publish_entities": False,
+                    },
+                    {
+                        "assignment_id": "assignment-target",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["target-fingerprint"],
+                        "session_ids": ["target-session"],
+                        "label_interval_ids": [],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": ["target-session"],
+                        "lifecycle_state": "published",
+                        "confidence": 0.9,
+                        "created_at": "2026-06-02T13:00:00+00:00",
+                        "updated_at": "2026-06-02T13:00:00+00:00",
+                        "created_device": True,
+                        "publish_entities": True,
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    merged = await coordinator.async_merge_nilm_assignments(
+        "mains",
+        "assignment-source",
+        "assignment-target",
+    )
+
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ]
+    assert [assignment["assignment_id"] for assignment in assignments] == [
+        "assignment-target"
+    ]
+    assert merged["signature_fingerprints"] == [
+        "target-fingerprint",
+        "source-fingerprint",
+    ]
+    assert merged["session_ids"] == ["target-session", "source-session"]
+    assert merged["label_interval_ids"] == ["label-source"]
+    assert merged["confirmed_session_ids"] == ["source-session"]
+    assert merged["rejected_session_ids"] == ["target-session"]
+    assert merged["confidence"] == 0.9
+    assert merged["lifecycle_state"] == "published"
+    assert merged["publish_entities"] is True
+    assert merged["updated_at"] == "2026-06-02T16:00:00+00:00"
+    assert coordinator.store_data.nilm_signatures["mains"][0]["assignment_id"] == (
+        "assignment-target"
+    )
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+        "assignment_id"
+    ] == "assignment-target"
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_assignment_clears_ignored_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

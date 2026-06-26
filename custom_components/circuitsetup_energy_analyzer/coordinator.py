@@ -3596,6 +3596,74 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self._async_save_nilm_assignment_change()
         return dict(assignment)
 
+    async def async_merge_nilm_assignments(
+        self: Self,
+        circuit_id: str,
+        source_assignment_id: str,
+        target_assignment_id: str,
+    ) -> dict[str, Any]:
+        """Merge one NILM appliance assignment into another."""
+        source_id = str(source_assignment_id or "").strip()
+        target_id = str(target_assignment_id or "").strip()
+        if not source_id or not target_id:
+            raise ValueError("Missing source_assignment_id or target_assignment_id.")
+        if source_id == target_id:
+            raise ValueError(
+                "source_assignment_id and target_assignment_id must be different."
+            )
+        source = self._nilm_assignment_for_id(circuit_id, source_id)
+        target = self._nilm_assignment_for_id(circuit_id, target_id)
+        for key in (
+            "signature_fingerprints",
+            "session_ids",
+            "label_interval_ids",
+            "confirmed_session_ids",
+            "rejected_session_ids",
+        ):
+            values = target.setdefault(key, [])
+            for value in _clean_string_list(source.get(key)):
+                _append_unique(values, value)
+        target["confirmed_sessions"] = len(
+            _clean_string_list(target.get("confirmed_session_ids"))
+        )
+        target["rejected_sessions"] = len(
+            _clean_string_list(target.get("rejected_session_ids"))
+        )
+        target["confidence"] = max(
+            _nonnegative_float_value(target.get("confidence"), default=0.0),
+            _nonnegative_float_value(source.get("confidence"), default=0.0),
+        )
+        target["publish_entities"] = bool(
+            target.get("publish_entities") or source.get("publish_entities")
+        )
+        target["created_device"] = bool(
+            target.get("created_device") or source.get("created_device")
+        )
+        if source.get("lifecycle_state") == "published":
+            target["lifecycle_state"] = "published"
+        target["updated_at"] = self._now_fn().isoformat()
+
+        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        self.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = [
+            assignment
+            for assignment in assignments
+            if assignment.get("assignment_id") != source_id
+        ]
+        for signature in self.store_data.nilm_signatures.get(circuit_id, []):
+            if signature.get("assignment_id") == source_id:
+                signature["assignment_id"] = target_id
+        for interval in self.store_data.nilm_label_intervals_by_circuit.get(
+            circuit_id,
+            [],
+        ):
+            if interval.get("assignment_id") == source_id:
+                interval["assignment_id"] = target_id
+        await self._async_save_nilm_assignment_change()
+        return dict(target)
+
     async def _async_record_nilm_session_validation(
         self: Self,
         circuit_id: str,

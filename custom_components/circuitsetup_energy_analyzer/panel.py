@@ -33,7 +33,9 @@ from .services import (
     ATTR_SESSION_ID,
     ATTR_SIGNATURE_FINGERPRINT,
     ATTR_SIGNATURE_ID,
+    ATTR_SOURCE_ASSIGNMENT_ID,
     ATTR_START,
+    ATTR_TARGET_ASSIGNMENT_ID,
     SERVICE_ACKNOWLEDGE_ALERT,
     SERVICE_APPLY_SETTING_RECOMMENDATION,
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
@@ -49,6 +51,7 @@ from .services import (
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
+    SERVICE_MERGE_NILM_ASSIGNMENTS,
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PAUSE_ALERTS,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -1235,20 +1238,23 @@ def _nilm_assignments_for_circuit(
         "nilm_appliance_assignments_by_circuit",
         {},
     )
-    return (
-        [
-            _nilm_assignment_payload(circuit_id, item)
-            for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
-            if isinstance(item, dict)
-        ]
-        if isinstance(assignments_by_circuit, Mapping)
-        else []
-    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return []
+    assignments = [
+        item
+        for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
+        if isinstance(item, dict)
+    ]
+    return [
+        _nilm_assignment_payload(circuit_id, item, assignments)
+        for item in assignments
+    ]
 
 
 def _nilm_assignment_payload(
     circuit_id: str,
     assignment: Mapping[str, Any],
+    assignments: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     payload = {
         str(key): value
@@ -1275,6 +1281,18 @@ def _nilm_assignment_payload(
             "data": dict(action_data),
             "requires": [ATTR_APPLIANCE_PROFILE],
         }
+        target_options = _nilm_assignment_target_options(assignment_id, assignments)
+        if target_options:
+            actions["merge"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MERGE_NILM_ASSIGNMENTS,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_SOURCE_ASSIGNMENT_ID: assignment_id,
+                },
+                "requires": [ATTR_TARGET_ASSIGNMENT_ID],
+                "target_options": target_options,
+            }
         if payload.get("publish_entities") is True or state == "published":
             actions["unpublish"] = {
                 "domain": DOMAIN,
@@ -1295,6 +1313,26 @@ def _nilm_assignment_payload(
     if actions:
         payload["actions"] = actions
     return payload
+
+
+def _nilm_assignment_target_options(
+    assignment_id: str,
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for assignment in assignments:
+        target_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not target_id or target_id == assignment_id:
+            continue
+        if str(assignment.get("lifecycle_state") or "").strip().lower() == "retired":
+            continue
+        label = str(
+            assignment.get("display_name")
+            or assignment.get("appliance_id")
+            or target_id
+        ).strip()
+        options.append({"value": target_id, "label": label})
+    return options
 
 
 def _nilm_virtual_appliances_for_assignments(

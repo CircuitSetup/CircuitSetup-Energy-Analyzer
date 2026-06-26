@@ -2617,6 +2617,78 @@ async def test_nilm_assignment_edit_services_dispatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_merge_service_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_MERGE_NILM_ASSIGNMENTS,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [
+                        {"assignment_id": "assignment-source"},
+                        {"assignment_id": "assignment-target"},
+                    ]
+                },
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        async def async_merge_nilm_assignments(
+            self,
+            circuit_id: str,
+            source_assignment_id: str,
+            target_assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_merge_nilm_assignments",
+                    (circuit_id, source_assignment_id, target_assignment_id),
+                )
+            )
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_ASSIGNMENTS)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "source_assignment_id": "assignment-source",
+                "target_assignment_id": "assignment-target",
+            }
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "async_merge_nilm_assignments",
+            ("mains", "assignment-source", "assignment-target"),
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_services_reject_self_merge() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_MERGE_NILM_SIGNATURES,

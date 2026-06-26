@@ -1229,6 +1229,62 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["sessions"][0]["off_edge_id"] is not None
 
 
+def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config)
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-source",
+                "appliance_id": "dishwasher_old",
+                "display_name": "Dishwasher old",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["source-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.7,
+            },
+            {
+                "assignment_id": "assignment-target",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": ["target-fingerprint"],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            },
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["assignments"][0]["actions"]["merge"] == {
+        "domain": DOMAIN,
+        "service": "merge_nilm_assignments",
+        "data": {
+            "circuit_id": "mains",
+            "source_assignment_id": "assignment-source",
+        },
+        "requires": ["target_assignment_id"],
+        "target_options": [
+            {"value": "assignment-target", "label": "Dishwasher"},
+        ],
+    }
+
+
 def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel import (
