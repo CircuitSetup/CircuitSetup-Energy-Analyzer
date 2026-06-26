@@ -243,6 +243,29 @@ def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() ->
     assert ELECTRICAL_SAFETY_NOTICE in message
 
 
+def test_alert_notification_message_marks_nilm_as_not_safety_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished. Estimated from mains power by NILM.",
+        feature="nilm_appliance_finished",
+        observed_value=0.8,
+        baseline_value=0.8,
+    )
+
+    message = alert_notification_message(alert)
+
+    assert ELECTRICAL_SAFETY_NOTICE in message
+
+
 def test_repair_issue_id_for_circuit_problem_is_stable() -> None:
     from custom_components.circuitsetup_energy_analyzer.repairs import (
         issue_id_for_circuit_problem,
