@@ -1773,6 +1773,20 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "Advanced diagnostic, hidden by default." not in readme_text
 
 
+def test_readme_describes_current_nilm_workspace_flow() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for expected in (
+        "NILM workspace can also pair compatible on/off edges into likely sessions",
+        "label signatures, save graph intervals, merge duplicate signatures",
+        "assign a signature/session/interval to an appliance",
+        "Published NILM appliances are marked as estimated",
+        "`assign_session_to_appliance`",
+        "`publish_nilm_appliance_assignment`",
+    ):
+        assert expected in readme_text
+
+
 def test_readme_describes_bounded_settings_suggestion_attributes() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
