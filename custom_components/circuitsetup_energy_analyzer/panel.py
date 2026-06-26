@@ -352,6 +352,9 @@ def nilm_workspace_payload(
 
     coordinator, config = target
     edges = _nilm_edges_for_circuit(coordinator, config.circuit_id)
+    recent_edges = sorted(edges, key=lambda edge: edge.timestamp)[
+        -MAX_NILM_WORKSPACE_EDGES:
+    ]
     signatures = _nilm_workspace_signatures(coordinator, config.circuit_id)
     known_load_overlays = _nilm_known_load_overlays(
         coordinator,
@@ -370,11 +373,11 @@ def nilm_workspace_payload(
         "signature_count": len(signatures),
         "edges": [
             _nilm_edge_payload(edge)
-            for edge in edges[:MAX_NILM_WORKSPACE_EDGES]
+            for edge in recent_edges
         ],
         "edge_count": len(edges),
         "sessions": _nilm_workspace_sessions(
-            edges,
+            recent_edges,
             config.circuit_id,
             signature_fingerprint=_nilm_workspace_signature_fingerprint(signatures),
         ),

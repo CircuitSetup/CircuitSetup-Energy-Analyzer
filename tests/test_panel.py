@@ -1092,6 +1092,82 @@ def test_nilm_workspace_payload_is_read_only_and_bounded() -> None:
     assert payload["sessions"][0]["off_edge_id"] is not None
 
 
+def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        MAX_NILM_WORKSPACE_EDGES,
+        MAX_NILM_WORKSPACE_SESSIONS,
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    old_edges = []
+    for index in range(MAX_NILM_WORKSPACE_SESSIONS + 1):
+        start = index * 120
+        old_edges.extend(
+            [
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+                    + timedelta(seconds=start),
+                    delta_w=800.0,
+                    delta_var=0.0,
+                    delta_va=800.0,
+                    delta_pf=0.0,
+                    direction="on",
+                ),
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+                    + timedelta(seconds=start + 60),
+                    delta_w=-800.0,
+                    delta_var=0.0,
+                    delta_va=-800.0,
+                    delta_pf=0.0,
+                    direction="off",
+                ),
+            ]
+        )
+    recent_start = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            *old_edges,
+            NilmEdge(
+                timestamp=recent_start,
+                delta_w=900.0,
+                delta_var=0.0,
+                delta_va=900.0,
+                delta_pf=0.0,
+                direction="on",
+            ),
+            NilmEdge(
+                timestamp=recent_start + timedelta(minutes=30),
+                delta_w=-900.0,
+                delta_var=0.0,
+                delta_va=-900.0,
+                delta_pf=0.0,
+                direction="off",
+            ),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["edge_count"] == len(old_edges) + 2
+    assert len(payload["edges"]) == MAX_NILM_WORKSPACE_EDGES
+    assert payload["edges"][-1]["timestamp"] == (
+        recent_start + timedelta(minutes=30)
+    ).isoformat()
+    assert payload["sessions"][-1]["end"] == (
+        recent_start + timedelta(minutes=30)
+    ).isoformat()
+
+
 def test_nilm_workspace_history_rows_are_capped() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
