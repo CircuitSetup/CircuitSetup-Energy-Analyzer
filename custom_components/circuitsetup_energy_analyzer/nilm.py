@@ -338,10 +338,26 @@ def pair_nilm_sessions(
     used_off_indices: set[int] = set()
     sessions: list[NilmSession] = []
 
-    for on_edge in on_edges:
+    for on_position, on_edge in enumerate(on_edges):
+        next_on = next(
+            (
+                later_on.timestamp
+                for later_on in on_edges[on_position + 1 :]
+                if _nilm_magnitude_score(
+                    later_on.delta_w,
+                    on_edge.delta_w,
+                    tolerance_ratio=0.25,
+                    floor=50.0,
+                )
+                is not None
+            ),
+            None,
+        )
         candidates: list[tuple[float, datetime, int, NilmEdge]] = []
         for off_index, off_edge in enumerate(off_edges):
             if off_index in used_off_indices:
+                continue
+            if next_on is not None and off_edge.timestamp > next_on:
                 continue
             score = _nilm_session_pair_score(
                 on_edge,
@@ -741,6 +757,10 @@ def _nilm_session_pair_score(
             tolerance_ratio=tolerance_ratio,
             floor=floor,
         )
+        if score is None and (
+            abs(float(value)) >= floor or abs(float(reference)) >= floor
+        ):
+            return None
         if score is not None:
             scores.append(score)
 

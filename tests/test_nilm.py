@@ -712,6 +712,21 @@ def test_pair_nilm_sessions_rejects_low_confidence_watt_mismatch() -> None:
     assert sessions[0].confidence < 0.5
 
 
+def test_pair_nilm_sessions_rejects_present_reactive_mismatch() -> None:
+    sessions = pair_nilm_sessions(
+        [
+            edge(0, 800.0, delta_var=500.0, delta_va=943.0),
+            edge(1800, -800.0, delta_var=0.0, delta_va=-943.0),
+        ],
+        mains_circuit_id="mains",
+        signature_fingerprint="reactive-mismatch",
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].off_edge_id is None
+    assert sessions[0].confidence < 0.5
+
+
 def test_pair_nilm_sessions_rejects_watt_boundary_without_optional_support() -> None:
     sessions = pair_nilm_sessions(
         [
@@ -725,6 +740,24 @@ def test_pair_nilm_sessions_rejects_watt_boundary_without_optional_support() -> 
     assert len(sessions) == 1
     assert sessions[0].off_edge_id is None
     assert sessions[0].confidence < 0.5
+
+
+def test_pair_nilm_sessions_prefers_close_before_next_on() -> None:
+    sessions = pair_nilm_sessions(
+        [
+            edge(0, 800.0),
+            edge(300, -780.0),
+            edge(600, 800.0),
+            edge(900, -800.0),
+        ],
+        mains_circuit_id="mains",
+        signature_fingerprint="repeated-cycle",
+    )
+
+    assert len(sessions) == 2
+    assert sessions[0].end == BASE_TIME + timedelta(seconds=300)
+    assert sessions[1].end == BASE_TIME + timedelta(seconds=900)
+    assert all(session.off_edge_id is not None for session in sessions)
 
 
 def test_pair_nilm_sessions_requires_compatible_split_phase_topology() -> None:
