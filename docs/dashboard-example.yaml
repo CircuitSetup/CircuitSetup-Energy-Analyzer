@@ -142,6 +142,12 @@ views:
                 name: Signatures
               - entity: sensor.mains_nilm_monitored_coverage
                 name: Known Load Share
+          - type: button
+            name: Open NILM Graph & Review
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=mains
           - type: conditional
             conditions:
               - entity: sensor.mains_nilm_solar_flow_status

@@ -330,6 +330,20 @@ def _mains_section(
                 }
             )
 
+        cards.append(
+            {
+                "type": "button",
+                "name": "Open NILM Graph & Review",
+                "icon": "mdi:chart-line",
+                "tap_action": {
+                    "action": "navigate",
+                    "navigation_path": (
+                        f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}"
+                    ),
+                },
+            }
+        )
+
         if solar_card := _conditional_entities_card(
             circuit_id,
             SOLAR_FLOW_ENTITY_SPECS,

@@ -619,6 +619,8 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges into likely sessions, show known-load overlays, and keep manual interval labels for review.
 
+On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace graph and review actions.
+
 Unknown load estimates may include:
 
 - Likely load type
