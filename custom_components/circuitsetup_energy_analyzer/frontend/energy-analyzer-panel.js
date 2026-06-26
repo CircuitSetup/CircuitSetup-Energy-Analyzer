@@ -999,6 +999,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
     }
+    for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
+      band.addEventListener("click", () => this._selectNilmSessionInterval(band));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -1199,6 +1202,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     chart.addEventListener("pointerup", finish, { once: true });
     chart.addEventListener("pointercancel", cancel, { once: true });
+  }
+
+  _selectNilmSessionInterval(band) {
+    const start = Date.parse(band && band.dataset.nilmSessionStart || "");
+    const end = Date.parse(band && band.dataset.nilmSessionEnd || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return;
+    }
+    this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
+      start: this._datetimeLocalFromMillis(start),
+      end: this._datetimeLocalFromMillis(end),
+    });
+    this._lastActionMessage = "Loaded NILM session interval.";
+    this._renderAndScrollToTop();
   }
 
   _snapNilmChartTimeToEdge(time, chart) {
@@ -1831,7 +1848,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       const left = x(Math.max(start, minTime));
       const right = x(Math.min(end, maxTime));
-      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}"><title>${this._escape(session.session_id || "NILM session")}</title></rect>`;
+      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"><title>${this._escape(session.session_id || "NILM session")}</title></rect>`;
     }).join("");
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
