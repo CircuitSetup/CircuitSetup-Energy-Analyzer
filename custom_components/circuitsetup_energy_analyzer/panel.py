@@ -1118,8 +1118,6 @@ def _nilm_workspace_target(
                 continue
             if _is_nilm_config(config):
                 return coordinator, config
-            if requested_circuit_id:
-                return None
     return None
 
 

@@ -1348,6 +1348,34 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["sessions"][0]["off_edge_id"] is not None
 
 
+def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    regular_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=regular_mains, configs=(regular_mains, nilm_mains))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["circuit"]["name"] == "Mains NILM"
+
+
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,
