@@ -2324,6 +2324,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
     ]
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
@@ -2333,7 +2334,10 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
 
     await async_unload_panel(hass)
 
-    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
+    assert frontend.removed == [
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+    ]
     assert DOMAIN in hass.data
 
 
@@ -2376,10 +2380,14 @@ async def test_panel_setup_supports_bound_panel_custom_helper() -> None:
 
     assert await async_setup_panel(hass) is True
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
 
     await async_unload_panel(hass)
 
-    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
+    assert frontend.removed == [
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+    ]
 
 
 @pytest.mark.asyncio
@@ -2441,7 +2449,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert await async_unload_entry(hass, entry) is True
 
-    assert frontend.removed == [PANEL_URL_PATH]
+    assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
 
 
 @pytest.mark.asyncio
@@ -2499,10 +2507,10 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     ]
 
     assert await async_unload_entry(hass, first) is True
-    assert frontend.removed == []
+    assert frontend.removed == [PANEL_URL_PATH]
 
     assert await async_unload_entry(hass, second) is True
-    assert frontend.removed == [PANEL_URL_PATH]
+    assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
 
 
 @pytest.mark.asyncio

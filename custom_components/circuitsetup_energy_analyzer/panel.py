@@ -2491,9 +2491,13 @@ async def _async_remove_existing_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     panel_exists = getattr(frontend, "async_panel_exists", None)
     remove_panel = getattr(frontend, "async_remove_panel", None)
-    if panel_exists is None or remove_panel is None:
+    if remove_panel is None:
         return
-    if not await _async_call_component_helper(panel_exists, hass, PANEL_URL_PATH):
+    if panel_exists is not None and not await _async_call_component_helper(
+        panel_exists,
+        hass,
+        PANEL_URL_PATH,
+    ):
         return
     await _async_call_component_helper(
         remove_panel,
