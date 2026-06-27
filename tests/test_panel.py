@@ -247,6 +247,60 @@ def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
     assert _panel_custom_component(hass) is panel_custom_module
 
 
+@pytest.mark.asyncio
+async def test_panel_registers_via_frontend_when_panel_custom_helper_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_ELEMENT_NAME,
+        PANEL_MODULE_VERSION,
+        PANEL_URL_PATH,
+        STATIC_URL_PATH,
+    )
+
+    class FakeFrontend:
+        def __init__(self) -> None:
+            self.panels = []
+
+        def async_register_built_in_panel(self, hass, **kwargs) -> None:
+            self.panels.append(kwargs)
+
+    frontend = FakeFrontend()
+    monkeypatch.setattr(
+        panel,
+        "_panel_custom_component",
+        lambda hass: SimpleNamespace(),
+    )
+    monkeypatch.setattr(panel, "_frontend_component", lambda hass: frontend)
+
+    assert await panel._async_register_panel(SimpleNamespace()) is True
+
+    assert frontend.panels == [
+        {
+            "component_name": "custom",
+            "sidebar_title": None,
+            "sidebar_icon": None,
+            "frontend_url_path": PANEL_URL_PATH,
+            "config": {
+                "api_path": "/api/circuitsetup_energy_analyzer/alert_evidence",
+                "domain": "circuitsetup_energy_analyzer",
+                "_panel_custom": {
+                    "name": PANEL_ELEMENT_NAME,
+                    "embed_iframe": False,
+                    "trust_external": False,
+                    "module_url": (
+                        f"{STATIC_URL_PATH}/energy-analyzer-panel.js"
+                        f"?v={PANEL_MODULE_VERSION}"
+                    ),
+                },
+            },
+            "require_admin": False,
+            "config_panel_domain": None,
+        }
+    ]
+
+
 def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

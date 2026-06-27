@@ -2460,28 +2460,53 @@ def _register_view(hass: Any) -> None:
 
 
 async def _async_register_panel(hass: Any) -> bool:
+    module_url = f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
+    config = {
+        "api_path": EVIDENCE_API_PATH,
+        "domain": DOMAIN,
+    }
+    custom_panel_config = {
+        "name": PANEL_ELEMENT_NAME,
+        "embed_iframe": False,
+        "trust_external": False,
+        "module_url": module_url,
+    }
     panel_custom = _panel_custom_component(hass)
     register_panel = getattr(panel_custom, "async_register_panel", None)
-    if register_panel is None:
-        return False
     try:
-        await _async_call_component_helper(
-            register_panel,
-            hass,
-            frontend_url_path=PANEL_URL_PATH,
-            webcomponent_name=PANEL_ELEMENT_NAME,
-            # Keep the evidence page available for notification links without
-            # adding a standalone entry to the Home Assistant sidebar.
-            module_url=(
-                f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
-            ),
-            config={
-                "api_path": EVIDENCE_API_PATH,
-                "domain": DOMAIN,
-            },
-            embed_iframe=False,
-            require_admin=False,
-        )
+        if register_panel is not None:
+            await _async_call_component_helper(
+                register_panel,
+                hass,
+                frontend_url_path=PANEL_URL_PATH,
+                webcomponent_name=PANEL_ELEMENT_NAME,
+                # Keep the evidence page available for notification links without
+                # adding a standalone entry to the Home Assistant sidebar.
+                module_url=module_url,
+                config=config,
+                embed_iframe=False,
+                require_admin=False,
+            )
+        else:
+            frontend = _frontend_component(hass)
+            register_built_in_panel = getattr(
+                frontend,
+                "async_register_built_in_panel",
+                None,
+            )
+            if register_built_in_panel is None:
+                return False
+            await _async_call_component_helper(
+                register_built_in_panel,
+                hass,
+                component_name="custom",
+                sidebar_title=None,
+                sidebar_icon=None,
+                frontend_url_path=PANEL_URL_PATH,
+                config={**config, "_panel_custom": custom_panel_config},
+                require_admin=False,
+                config_panel_domain=None,
+            )
     except ValueError:
         return False
     return True
