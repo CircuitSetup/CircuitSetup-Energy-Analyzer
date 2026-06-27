@@ -1752,6 +1752,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <section class="panel">
         <h2>NILM Workspace</h2>
+        <p class="muted">Review mains load changes, labels, and assignments used by NILM.</p>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmOverlayToggles(workspace)}
@@ -1765,7 +1766,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <strong>${this._escape(item.display_name || item.appliance_id || "Estimated appliance")} - ${this._escape(item.is_running ? "running" : "idle")}</strong>
             <p class="muted" data-field="estimated_daily_energy">${this._escape(this._formatMetricValue(item.estimated_power_w))} W, ${this._escape(this._formatMetricValue(item.estimated_energy_kwh_today))} kWh today, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
           </div>
-        `)}
+        `, "Estimated appliances are NILM's current best grouped load guesses.")}
         ${this._renderNilmWorkspaceList("Appliance Assignments", workspace.assignments, "No appliance assignments are saved yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.lifecycle_state || "assigned")}</span>
@@ -1776,21 +1777,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             ${this._renderNilmAssignmentEditFields(item, index)}
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
-        `)}
+        `, "Assignments save a signature as a named appliance for future review.")}
         ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
             <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
-        `)}
+        `, "Known loads mark configured circuits so NILM can separate expected usage.")}
         ${this._renderNilmWorkspaceList("Solar/Net Overlays", workspace.solar_overlays, "No solar or net-flow overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
             <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
-        `)}
+        `, "Solar and net-flow overlays help explain import/export changes on mains.")}
         ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.start || "")}</span>
@@ -1803,21 +1804,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong Appliance</button>` : ""}
             </div>` : ""}
           </div>
-        `)}
+        `, "Sessions pair on/off edges into likely appliance runs.")}
         ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
             <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
             ${this._renderNilmSignatureReview(item, index)}
           </div>
-        `)}
+        `, "Signatures group similar sessions that may be the same appliance.")}
         ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
           <div class="metric">
             <span>${this._escape(item.timestamp || "")}</span>
             <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatMetricValue(item.delta_w))} W</strong>
             <p class="muted">${this._escape(item.split_phase_type || "unknown")}</p>
           </div>
-        `)}
+        `, "Edges are detected power changes before they are paired into sessions.")}
       </section>
     `;
   }
@@ -1836,6 +1837,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     return `
       <h3>Manual Labels</h3>
+      <p class="muted">Manual labels teach NILM which appliance was running during a time range.</p>
       <div class="metric">
         <div class="nilm-interval-form">
           <label>
@@ -2032,6 +2034,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : [];
     return `
       <h3>Validation</h3>
+      <p class="muted">Validation compares saved labels with NILM's predicted sessions.</p>
       <div class="summary">
         <div class="metric">
           <span>Ground truth</span>
@@ -2052,14 +2055,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <strong>${this._escape(item.label || "Ground truth")} - ${this._escape(item.prediction_status || "missed")}</strong>
           <p class="muted">${this._escape(item.matched_assignment_id || "No matching NILM prediction")} ${this._escape(this._formatMetricValue(item.overlap_seconds))} seconds overlap</p>
         </div>
-      `)}
+      `, "Preview compares saved labels with NILM's predicted sessions.")}
     `;
   }
 
-  _renderNilmWorkspaceList(title, items, emptyText, renderItem) {
+  _renderNilmWorkspaceList(title, items, emptyText, renderItem, description = "") {
     const safeItems = Array.isArray(items) ? items : [];
     return `
       <h3>${this._escape(title)}</h3>
+      ${description ? `<p class="muted">${this._escape(description)}</p>` : ""}
       ${safeItems.length ? `<div class="entity-list">${safeItems.map(renderItem).join("")}</div>` : `<p class="muted">${this._escape(emptyText)}</p>`}
     `;
   }
