@@ -640,6 +640,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `${window.location.pathname}${window.location.search}`;
   }
 
+  _routeRequestsNilmWorkspace() {
+    const routeUrl = new URL(this._routeKey(), window.location.origin);
+    return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1";
+  }
+
   _actionRefreshRouteKey(actionKey) {
     const routeUrl = new URL(this._routeKey(), window.location.origin);
     const alert = this._payload && this._payload.alert;
@@ -739,7 +744,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const payload = this._payload;
     const alert = payload && payload.alert;
     const circuit = payload && payload.circuit;
-    const statusText = this._statusText(payload && payload.status);
+    const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
+    const statusText = nilmWorkspaceRoute
+      ? "NILM Workspace"
+      : this._statusText(payload && payload.status);
+    const headerTitle = nilmWorkspaceRoute
+      ? "NILM Workspace"
+      : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
+    const headerMessage = nilmWorkspaceRoute
+      ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
+      : (alert && alert.message) || "Historical alert not found";
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -966,14 +980,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <main class="shell">
         <section class="panel">
           <p class="status">${this._escape(statusText)}</p>
-          <h1>${this._escape((circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence")}</h1>
-          <p class="muted">${this._escape((alert && alert.message) || "Historical alert not found")}</p>
+          <h1>${this._escape(headerTitle)}</h1>
+          <p class="muted">${this._escape(headerMessage)}</p>
         </section>
       ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
-      ${alert ? this._renderAlert(alert, circuit) : this._renderNotFound()}
+      ${this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)}
       </main>
     `;
 
@@ -1059,6 +1073,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
       });
     }
+  }
+
+  _renderEvidenceBody(alert, circuit) {
+    return alert ? this._renderAlert(alert, circuit) : this._renderNotFound();
+  }
+
+  _renderNilmWorkspaceBody() {
+    return `${this._renderNilmWorkspace()}${this._renderRecommendations()}`;
   }
 
   _renderAlert(alert, circuit) {
@@ -1537,6 +1559,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (this._nilmWorkspaceError && (!workspace || workspace.status !== "ok")) {
       return `<section class="panel error"><h2>NILM Workspace</h2><p>${this._escape(this._nilmWorkspaceError)}</p></section>`;
     }
+    if (workspace && workspace.status !== "ok") {
+      return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">${this._escape(workspace.message || "No NILM workspace is available for this circuit.")}</p></section>`;
+    }
     if (!workspace || workspace.status !== "ok") {
       return "";
     }
@@ -1581,14 +1606,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
-            <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
+            <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
         `)}
         ${this._renderNilmWorkspaceList("Solar/Net Overlays", workspace.solar_overlays, "No solar or net-flow overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
-            <p class="muted">${this._escape((item.entity_ids || []).join(", "))}</p>
+            <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
         `)}
         ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item, index) => `
@@ -1864,6 +1889,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
+  _overlayEntitySummary(item) {
+    const count = (item.entity_ids || []).filter((entityId) => String(entityId || "").trim()).length;
+    return count === 1 ? "1 sensor" : `${count} sensors`;
+  }
+
   _renderSafetyNotice(alert) {
     if (!alert.safety_notice) {
       return "";
@@ -1928,8 +1958,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }).join("");
     const minLabel = this._formatNumber(minValue);
     const maxLabel = this._formatNumber(maxValue);
-    const startLabel = this._formatDateTime(alert.graph_window_start || minTime);
-    const endLabel = this._formatDateTime(alert.graph_window_end || maxTime);
+    const timeTicks = this._chartTimeTicks(minTime, maxTime, x);
+    const timeGridLines = timeTicks.slice(1, -1).map((tick) => `<line class="grid time-grid" x1="${tick.x}" y1="${padTop}" x2="${tick.x}" y2="${height - padBottom}"></line>`).join("");
+    const timeTickLabels = timeTicks.map((tick) => `<text x="${tick.x}" y="${height - 12}" text-anchor="${tick.anchor}">${this._escape(tick.label)}</text>`).join("");
     const timeZoneLabel = this._timeZone();
     const edgeItems = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
       const markerTime = Date.parse(edge && edge.timestamp || "");
@@ -1971,17 +2002,48 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
+        ${timeGridLines}
         ${sessionBands}
         <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
         <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
-        <text x="${padLeft}" y="${height - 12}">${this._escape(startLabel)}</text>
-        <text x="${width - padRight}" y="${height - 12}" text-anchor="end">${this._escape(endLabel)}</text>
+        ${timeTickLabels}
         ${edgeMarkers}
         ${lines}
       </svg>
       <div class="legend">${legend}</div>
       <p class="muted">Graph times shown in ${this._escape(timeZoneLabel)}.</p>
     `;
+  }
+
+  _chartTimeTicks(minTime, maxTime, x) {
+    const count = 5;
+    const includeDate = new Date(minTime).toDateString() !== new Date(maxTime).toDateString();
+    return Array.from({ length: count }, (_item, index) => {
+      const ratio = count === 1 ? 0 : index / (count - 1);
+      const time = minTime + (maxTime - minTime) * ratio;
+      return {
+        x: x(time).toFixed(1),
+        label: this._formatAxisTime(time, includeDate),
+        anchor: index === 0 ? "start" : index === count - 1 ? "end" : "middle",
+      };
+    });
+  }
+
+  _formatAxisTime(value, includeDate = false) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: this._timeZone(),
+        ...(includeDate ? { month: "short", day: "numeric" } : {}),
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    } catch (_error) {
+      return this._formatDateTime(value);
+    }
   }
 
   _renderNilmOverlayToggles(workspace) {

@@ -1159,7 +1159,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "NILM_WORKSPACE_QUERY_PARAM",
         "routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM)",
         "_loadNilmWorkspace",
+        "_routeRequestsNilmWorkspace",
+        "this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody()",
         "_renderNilmWorkspace",
+        "_renderNilmWorkspaceBody",
         "NILM Workspace",
         "Known Load Overlays",
         "Solar/Net Overlays",
@@ -1253,6 +1256,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Alert evidence chart",
         "Graph times shown in",
         "_timeZone",
+        "_chartTimeTicks",
+        "_formatAxisTime",
+        "time-grid",
+        'text-anchor="${tick.anchor}"',
         "data-nilm-chart-select",
         "nilm_edges",
         "nilm-edge-marker",
@@ -1312,6 +1319,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_friendlyEntityName",
         "friendly_name",
         "item.name",
+        "_overlayEntitySummary",
     ):
         assert expected in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset
@@ -1337,6 +1345,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "Source Entities" not in asset
     assert "source-entity-chip" not in asset
     assert "data-source-entity" not in asset
+    assert '(item.entity_ids || []).join(", ")' not in asset
     assert "data-nilm-workspace-action" not in asset
     assert "_openSourceEntity" not in asset
     assert "${this._escape(item.entity_id)}" not in asset

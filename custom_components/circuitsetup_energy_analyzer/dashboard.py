@@ -229,15 +229,13 @@ def _mains_section(
     circuit_id = _circuit_id(circuit)
     cards: list[dict[str, Any]] = []
 
-    rollup_rows, rollup_notes = _resolved_entity_rows(
+    rollup_rows, _ = _resolved_entity_rows(
         circuit_id,
         MAINS_ROLLUP_ENTITY_SPECS,
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
     )
-    if rollup_notes:
-        cards.append(_markdown_card(_note_content("Mains rollups note", rollup_notes)))
     if rollup_rows:
         cards.append(
             {
@@ -267,28 +265,23 @@ def _mains_section(
                     "severity": {"red": 0, "yellow": 40, "green": 70},
                 }
             )
+            cards.append(
+                _markdown_card(
+                    "Known Load Share is how much of current mains power is explained "
+                    "by the circuits you selected. Low values usually mean normal "
+                    "unmonitored loads, not necessarily a problem."
+                )
+            )
 
-        load_rows, load_notes = _resolved_entity_rows(
+        load_rows, _ = _resolved_entity_rows(
             circuit_id,
             MAINS_LOAD_MATCH_ENTITY_SPECS,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
         )
-        if load_notes:
-            cards.append(
-                _markdown_card(_note_content("Mains load match note", load_notes))
-            )
         if load_rows:
             cards.append(_entities_card("Mains Load Match", load_rows))
-
-        cards.append(
-            _markdown_card(
-                "Known Load Share is how much of current mains power is explained "
-                "by the circuits you selected. Low values usually mean normal "
-                "unmonitored loads, not necessarily a problem."
-            )
-        )
 
         unknown_inventory = _resolved_entity_id(
             circuit_id,
@@ -307,19 +300,13 @@ def _mains_section(
                 }
             )
 
-        unknown_rows, unknown_notes = _resolved_entity_rows(
+        unknown_rows, _ = _resolved_entity_rows(
             circuit_id,
             UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
         )
-        if unknown_notes:
-            cards.append(
-                _markdown_card(
-                    _note_content("Unknown load signals note", unknown_notes)
-                )
-            )
         if unknown_rows:
             cards.append(
                 {

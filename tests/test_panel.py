@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -222,6 +223,82 @@ def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
 
     assert 'new CustomEvent("location-changed"' in panel_script
     assert "detail: { replace: false }" in panel_script
+
+
+def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _panel_custom_component,
+    )
+
+    components_module = ModuleType("homeassistant.components")
+    panel_custom_module = ModuleType("homeassistant.components.panel_custom")
+    panel_custom_module.async_register_panel = object()
+    components_module.panel_custom = panel_custom_module
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.panel_custom",
+        panel_custom_module,
+    )
+    hass = SimpleNamespace(components=SimpleNamespace(panel_custom=SimpleNamespace()))
+
+    assert _panel_custom_component(hass) is panel_custom_module
+
+
+@pytest.mark.asyncio
+async def test_panel_registers_via_frontend_when_panel_custom_helper_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_ELEMENT_NAME,
+        PANEL_MODULE_VERSION,
+        PANEL_URL_PATH,
+        STATIC_URL_PATH,
+    )
+
+    class FakeFrontend:
+        def __init__(self) -> None:
+            self.panels = []
+
+        def async_register_built_in_panel(self, hass, **kwargs) -> None:
+            self.panels.append(kwargs)
+
+    frontend = FakeFrontend()
+    monkeypatch.setattr(
+        panel,
+        "_panel_custom_component",
+        lambda hass: SimpleNamespace(),
+    )
+    monkeypatch.setattr(panel, "_frontend_component", lambda hass: frontend)
+
+    assert await panel._async_register_panel(SimpleNamespace()) is True
+
+    assert frontend.panels == [
+        {
+            "component_name": "custom",
+            "sidebar_title": None,
+            "sidebar_icon": None,
+            "frontend_url_path": PANEL_URL_PATH,
+            "config": {
+                "api_path": "/api/circuitsetup_energy_analyzer/alert_evidence",
+                "domain": "circuitsetup_energy_analyzer",
+                "_panel_custom": {
+                    "name": PANEL_ELEMENT_NAME,
+                    "embed_iframe": False,
+                    "trust_external": False,
+                    "module_url": (
+                        f"{STATIC_URL_PATH}/energy-analyzer-panel.js"
+                        f"?v={PANEL_MODULE_VERSION}"
+                    ),
+                },
+            },
+            "require_admin": False,
+            "config_panel_domain": None,
+        }
+    ]
 
 
 def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
@@ -781,6 +858,42 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     )
 
 
+def test_alert_evidence_payload_links_explicit_nilm_duplicate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="nilm_unknown_load")
+    regular_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        alert,
+        config=regular_mains,
+        configs=(regular_mains, nilm_mains),
+    )
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {"unknown_loads": [{"signature_id": "signature_1"}]}
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["nilm"]["workspace_call_api_path"].endswith("circuit_id=mains")
+
+
 def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
@@ -1269,6 +1382,113 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         },
     }
     assert payload["sessions"][0]["off_edge_id"] is not None
+
+
+def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    regular_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=regular_mains, configs=(regular_mains, nilm_mains))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["circuit"]["name"] == "Mains NILM"
+
+
+def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=mains_config, configs=(mains_config,))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["history"]["entities"] == ["sensor.mains_power"]
+
+
+def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    sensor_backed_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.nilm_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [
+            _coordinator(
+                config=sensor_backed_mains,
+                configs=(sensor_backed_mains, nilm_mains),
+            )
+        ],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["circuit"]["name"] == "Mains NILM"
+    assert payload["history"]["entities"] == ["sensor.nilm_power"]
+
+
+def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = SimpleNamespace(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile="mixed",
+        mode="mixed",
+        sensors=(SimpleNamespace(entity_id="sensor.mains_power"),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=mains_config, configs=(mains_config,))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["history"]["entities"] == ["sensor.mains_power"]
 
 
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
@@ -2324,6 +2544,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
     ]
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert panel_custom.panels[0]["webcomponent_name"] == PANEL_ELEMENT_NAME
@@ -2333,7 +2554,10 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
 
     await async_unload_panel(hass)
 
-    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
+    assert frontend.removed == [
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+    ]
     assert DOMAIN in hass.data
 
 
@@ -2376,10 +2600,14 @@ async def test_panel_setup_supports_bound_panel_custom_helper() -> None:
 
     assert await async_setup_panel(hass) is True
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
+    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
 
     await async_unload_panel(hass)
 
-    assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
+    assert frontend.removed == [
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+        (PANEL_URL_PATH, {"warn_if_unknown": False}),
+    ]
 
 
 @pytest.mark.asyncio
@@ -2441,7 +2669,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert await async_unload_entry(hass, entry) is True
 
-    assert frontend.removed == [PANEL_URL_PATH]
+    assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
 
 
 @pytest.mark.asyncio
@@ -2499,10 +2727,10 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     ]
 
     assert await async_unload_entry(hass, first) is True
-    assert frontend.removed == []
+    assert frontend.removed == [PANEL_URL_PATH]
 
     assert await async_unload_entry(hass, second) is True
-    assert frontend.removed == [PANEL_URL_PATH]
+    assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
 
 
 @pytest.mark.asyncio

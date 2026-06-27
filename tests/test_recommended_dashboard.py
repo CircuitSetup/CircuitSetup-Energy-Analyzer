@@ -476,25 +476,21 @@ def test_simple_dashboard_layout_omits_feature_level_mains_gap_notes() -> None:
     assert "Unknown load signals note" not in markdown
 
 
-def test_standard_dashboard_layout_surfaces_feature_level_mains_gap_notes() -> None:
+def test_standard_dashboard_layout_omits_missing_mains_gap_notes() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
-        hass=SimpleNamespace(
-            entity_registry=SimpleNamespace(entities=_summary_only_registry_entries())
-        ),
+        hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
         entry_id="entry-1",
     )
-    markdown = "\n".join(_markdown_contents(dashboard))
+    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    markdown = "\n".join(_markdown_contents(mains_section))
 
     assert "Mains rollups note" not in markdown
-    assert "Mains load match note" in markdown
-    assert "Unknown load signals note" in markdown
-    assert (
-        "Missing entities: Known Appliance Load, Unassigned Mains Load, "
-        "Known Load Share"
-    ) in markdown
-    assert "Missing entities: Known Load Share" in markdown
+    assert "Mains load match note" not in markdown
+    assert "Unknown load signals note" not in markdown
+    assert "Missing entities:" not in markdown
+    assert "how much of current mains power is explained" not in markdown
 
 
 def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> None:

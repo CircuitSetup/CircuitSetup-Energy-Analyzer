@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260626-nilm-workspace-route-v2"
+PANEL_MODULE_VERSION = "20260627-nilm-axis-summary"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -1108,27 +1108,42 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
 def _nilm_workspace_target(
     coordinators: Iterable[Any],
     circuit_id: str | None,
-) -> tuple[Any, CircuitConfig] | None:
+) -> tuple[Any, Any] | None:
     requested_circuit_id = str(circuit_id or "").strip()
+    sensor_fallback: tuple[Any, Any] | None = None
     for coordinator in coordinators:
         for config in getattr(coordinator, "circuit_configs", ()) or ():
-            if not isinstance(config, CircuitConfig):
+            config_circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
+            if not config_circuit_id:
                 continue
-            if requested_circuit_id and config.circuit_id != requested_circuit_id:
+            if requested_circuit_id and config_circuit_id != requested_circuit_id:
                 continue
-            if _is_nilm_config(config):
+            if _is_explicit_nilm_config(config):
                 return coordinator, config
-            if requested_circuit_id:
-                return None
-    return None
+            if sensor_fallback is None and _is_sensor_backed_mains_config(config):
+                sensor_fallback = (coordinator, config)
+    return sensor_fallback
 
 
-def _is_nilm_config(config: CircuitConfig) -> bool:
+def _is_nilm_config(config: Any) -> bool:
+    return _is_explicit_nilm_config(config) or _is_sensor_backed_mains_config(config)
+
+
+def _is_explicit_nilm_config(config: Any) -> bool:
+    mode = getattr(config, "mode", None)
+    appliance_profile = getattr(config, "appliance_profile", None)
     return (
-        config.mode is CircuitMode.MAINS_NILM
-        or config.appliance_profile is ApplianceProfile.MAINS_NILM
-        or str(config.mode) == CircuitMode.MAINS_NILM.value
-        or str(config.appliance_profile) == ApplianceProfile.MAINS_NILM.value
+        mode is CircuitMode.MAINS_NILM
+        or appliance_profile is ApplianceProfile.MAINS_NILM
+        or str(mode) == CircuitMode.MAINS_NILM.value
+        or str(appliance_profile) == ApplianceProfile.MAINS_NILM.value
+    )
+
+
+def _is_sensor_backed_mains_config(config: Any) -> bool:
+    return (
+        str(getattr(config, "circuit_id", "") or "").strip() == "mains"
+        and bool(_sensor_entity_ids(config))
     )
 
 
@@ -1747,10 +1762,11 @@ def _clamped_float(value: Any, *, default: float, upper: float | None = None) ->
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:
-    config = _config_for_circuit(coordinator, circuit_id)
-    if config is None or not _is_nilm_config(config):
+    target = _nilm_workspace_target((coordinator,), circuit_id)
+    if target is None:
         return {}
-    query = urlencode({"circuit_id": circuit_id})
+    _target_coordinator, config = target
+    query = urlencode({"circuit_id": config.circuit_id})
     return {
         "workspace_api_path": f"{NILM_WORKSPACE_API_PATH}?{query}",
         "workspace_call_api_path": f"{DOMAIN}/nilm_workspace?{query}",
@@ -1877,10 +1893,10 @@ def _nilm_workspace_history_entities(
     return _unique_strings(entity_ids)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
 
 
-def _sensor_entity_ids(config: CircuitConfig) -> list[str]:
+def _sensor_entity_ids(config: Any) -> list[str]:
     return _unique_strings(
         sensor.entity_id
-        for sensor in config.sensors
+        for sensor in getattr(config, "sensors", ()) or ()
         if getattr(sensor, "entity_id", None)
     )
 
@@ -2460,11 +2476,45 @@ def _register_view(hass: Any) -> None:
 
 
 async def _async_register_panel(hass: Any) -> bool:
-    panel_custom = _panel_custom_component(hass)
-    register_panel = getattr(panel_custom, "async_register_panel", None)
-    if register_panel is None:
-        return False
+    module_url = f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
+    config = {
+        "api_path": EVIDENCE_API_PATH,
+        "domain": DOMAIN,
+    }
+    custom_panel_config = {
+        "name": PANEL_ELEMENT_NAME,
+        "embed_iframe": False,
+        "trust_external": False,
+        "module_url": module_url,
+    }
     try:
+        frontend = _frontend_registration_component(hass)
+        register_built_in_panel = getattr(
+            frontend,
+            "async_register_built_in_panel",
+            None,
+        )
+        if register_built_in_panel is not None:
+            try:
+                await _async_call_component_helper(
+                    register_built_in_panel,
+                    hass,
+                    component_name="custom",
+                    sidebar_title=None,
+                    sidebar_icon=None,
+                    frontend_url_path=PANEL_URL_PATH,
+                    config={**config, "_panel_custom": custom_panel_config},
+                    require_admin=False,
+                    config_panel_domain=None,
+                )
+                return True
+            except AttributeError:
+                pass
+
+        panel_custom = _panel_custom_component(hass)
+        register_panel = getattr(panel_custom, "async_register_panel", None)
+        if register_panel is None:
+            return False
         await _async_call_component_helper(
             register_panel,
             hass,
@@ -2472,13 +2522,8 @@ async def _async_register_panel(hass: Any) -> bool:
             webcomponent_name=PANEL_ELEMENT_NAME,
             # Keep the evidence page available for notification links without
             # adding a standalone entry to the Home Assistant sidebar.
-            module_url=(
-                f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
-            ),
-            config={
-                "api_path": EVIDENCE_API_PATH,
-                "domain": DOMAIN,
-            },
+            module_url=module_url,
+            config=config,
             embed_iframe=False,
             require_admin=False,
         )
@@ -2487,13 +2532,29 @@ async def _async_register_panel(hass: Any) -> bool:
     return True
 
 
+def _frontend_registration_component(hass: Any) -> Any:
+    frontend = _frontend_component(hass)
+    if getattr(frontend, "async_register_built_in_panel", None) is not None:
+        return frontend
+    try:
+        from homeassistant.components import frontend as frontend_module
+
+        return frontend_module
+    except ModuleNotFoundError:
+        return frontend
+
+
 async def _async_remove_existing_panel(hass: Any) -> None:
     frontend = _frontend_component(hass)
     panel_exists = getattr(frontend, "async_panel_exists", None)
     remove_panel = getattr(frontend, "async_remove_panel", None)
-    if panel_exists is None or remove_panel is None:
+    if remove_panel is None:
         return
-    if not await _async_call_component_helper(panel_exists, hass, PANEL_URL_PATH):
+    if panel_exists is not None and not await _async_call_component_helper(
+        panel_exists,
+        hass,
+        PANEL_URL_PATH,
+    ):
         return
     await _async_call_component_helper(
         remove_panel,
@@ -2530,7 +2591,7 @@ async def _maybe_await(value: Any) -> Any:
 def _panel_custom_component(hass: Any) -> Any:
     components = getattr(hass, "components", None)
     component = getattr(components, "panel_custom", None)
-    if component is not None:
+    if getattr(component, "async_register_panel", None) is not None:
         return component
     if components is None:
         return None
