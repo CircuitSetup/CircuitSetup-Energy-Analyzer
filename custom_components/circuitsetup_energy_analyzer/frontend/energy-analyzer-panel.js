@@ -853,6 +853,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           fill: var(--warning-color, #f59e0b);
           opacity: 0.12;
         }
+        .chart .nilm-session-label {
+          fill: var(--primary-text-color, #1f2937);
+          font-size: 11px;
+          font-weight: 700;
+          paint-order: stroke;
+          pointer-events: none;
+          stroke: var(--card-background-color, #fff);
+          stroke-width: 3px;
+        }
         .legend {
           display: grid;
           gap: 6px;
@@ -1988,7 +1997,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const confidenceLabel = confidenceValue !== null ? `, confidence ${Math.round(confidenceValue * 100)}%` : "";
       const left = x(Math.max(start, minTime));
       const right = x(Math.min(end, maxTime));
-      return `<rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${confidenceStyle}><title>${this._escape(session.session_id || "NILM session")}${confidenceLabel}</title></rect>`;
+      const bandWidth = Math.max(right - left, 1);
+      const label = this._nilmSessionGraphLabel(session);
+      const visibleLabel = bandWidth >= 56 ? this._truncateNilmGraphLabel(label, Math.floor((bandWidth - 10) / 7)) : "";
+      const title = label ? `${label} (${session.session_id || "NILM session"})` : session.session_id || "NILM session";
+      const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
+      return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
     }).join("");
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
@@ -2013,6 +2027,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <div class="legend">${legend}</div>
       <p class="muted">Graph times shown in ${this._escape(timeZoneLabel)}.</p>
     `;
+  }
+
+  _nilmSessionGraphLabel(session) {
+    const label = session && (session.display_label || session.display_name || session.appliance_id || session.assignment_id || session.session_id);
+    return String(label || "").trim();
+  }
+
+  _truncateNilmGraphLabel(label, maxLength) {
+    const text = String(label || "").trim();
+    if (!text || maxLength < 4 || text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(1, maxLength - 3))}...`;
   }
 
   _chartTimeTicks(minTime, maxTime, x) {
