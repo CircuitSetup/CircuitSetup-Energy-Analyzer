@@ -1,7 +1,7 @@
 """Feature processors for CircuitSetup Energy Analyzer."""
 
 from .activity import ActivityAlertProcessor
-from .base import FeatureProcessor, FeatureResult, ProcessingContext, StateUpdate
+from .base import FeatureResult, ProcessingContext, StateUpdate
 from .billing import BillingCycleProcessor
 from .capacity import CapacityProcessor
 from .cost import CostProcessor
@@ -30,7 +30,6 @@ __all__ = [
     "DemandProcessor",
     "EnergyGoalProcessor",
     "EnergyUsageProcessor",
-    "FeatureProcessor",
     "FeatureResult",
     "LegImbalanceProcessor",
     "MainsBalanceProcessor",

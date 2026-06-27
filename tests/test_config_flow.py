@@ -5484,11 +5484,12 @@ def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
         / "circuitsetup_energy_analyzer"
         / "manifest.json"
     )
-    strings_path = (
+    translations_path = (
         Path(__file__).parents[1]
         / "custom_components"
         / "circuitsetup_energy_analyzer"
-        / "strings.json"
+        / "translations"
+        / "en.json"
     )
 
     assert config_flow.CircuitSetupEnergyAnalyzerConfigFlow.VERSION == 1
@@ -5505,6 +5506,6 @@ def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
         manifest["issue_tracker"]
         == "https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer/issues"
     )
-    assert json.loads(strings_path.read_text(encoding="utf-8"))["title"] == (
+    assert json.loads(translations_path.read_text(encoding="utf-8"))["title"] == (
         "CircuitSetup Energy Analyzer"
     )

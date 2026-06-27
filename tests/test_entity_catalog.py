@@ -18,19 +18,15 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
-    CORE_DUPLICATE_REMOVAL_PHASE,
-    ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     LEGACY_ENTITY_REPLACEMENTS,
-    MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     EntityCreationRule,
     EntityExposure,
     EntityGroup,
     compact_creation_rule_for_entity,
     compact_creation_rules_by_key,
+    compact_descriptions_for_setup,
     compact_entity_count_preview,
     compact_migration_preview_for_registry,
-    compact_rule_is_setup_managed,
-    compact_sensor_rule_is_setup_managed,
     desired_compact_entity_rules,
     legacy_compatibility_keys_for_registry_entries,
     legacy_entity_registry_entries,
@@ -444,120 +440,33 @@ def test_solar_flexible_load_detail_uses_evidence_without_new_entities() -> None
     )
 
 
-def test_core_duplicate_rules_are_marked_for_phase_two_removal() -> None:
+def test_compact_rules_do_not_keep_completed_migration_phase_metadata() -> None:
     rules = compact_creation_rules_by_key()
 
-    core_duplicate_sensor_keys = {
-        key
-        for (domain, key), rule in rules.items()
-        if domain == "sensor" and rule.removal_phase == CORE_DUPLICATE_REMOVAL_PHASE
-    }
-
-    assert core_duplicate_sensor_keys == {
-        "sensitivity",
-        "readiness",
-        "learning_progress",
-        "data_quality_checklist",
-        "alert_evidence",
-        "last_event",
-        "recent_activity_count",
-    }
-    assert rules[("sensor", "recent_activity")].removal_phase is None
-    assert rules[("sensor", "always_on_power")].removal_phase is None
-    assert rules[("sensor", "weather_context")].removal_phase is None
+    assert rules[("sensor", "sensitivity")].legacy
+    assert rules[("sensor", "run_cycle_status")].legacy
+    assert rules[("button", "start_maintenance")].legacy
+    assert all(not hasattr(rule, "removal_phase") for rule in rules.values())
 
 
-def test_electrical_cycle_rules_are_marked_for_phase_three_creation() -> None:
-    rules = compact_creation_rules_by_key()
-
-    phase_three_legacy_sensor_keys = {
-        key
-        for (domain, key), rule in rules.items()
-        if domain == "sensor"
-        and rule.removal_phase == ELECTRICAL_CYCLE_CONDENSATION_PHASE
-    }
-
-    assert phase_three_legacy_sensor_keys == {
-        "power_quality_evidence",
-        "metric_consistency_status",
-        "leg_imbalance_status",
-        "run_cycle_status",
-    }
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "run_cycle_count")],
+def test_compact_descriptions_for_setup_filters_entity_descriptions() -> None:
+    descriptions = (
+        SimpleNamespace(key="health_summary"),
+        SimpleNamespace(key="billing_cycle_forecast"),
+        SimpleNamespace(key="sensitivity"),
     )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "reactive_power_drift")],
-    )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "leg_imbalance")],
-    )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "always_on_power")],
+    coordinator = SimpleNamespace(options={}, entry_data={})
+
+    filtered = compact_descriptions_for_setup(
+        "sensor",
+        descriptions,
+        None,
+        coordinator,
+        hass=SimpleNamespace(),
+        entry_id="entry-1",
     )
 
-
-def test_billing_standby_weather_rules_are_marked_for_phase_four_creation() -> None:
-    rules = compact_creation_rules_by_key()
-
-    phase_four_sensor_keys = {
-        key
-        for (domain, key), rule in rules.items()
-        if domain == "sensor"
-        and rule.removal_phase == "billing_standby_weather_condensation"
-    }
-
-    assert phase_four_sensor_keys == {
-        "billing_cycle_budget_usage",
-        "billing_cycle_status",
-        "cost_current_rate",
-        "cost_status",
-        "standby_threshold",
-        "outdoor_temperature",
-    }
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "billing_cycle_forecast")],
-    )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "cost_cycle_forecast")],
-    )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "billing_cycle_usage")],
-    )
-    assert compact_sensor_rule_is_setup_managed(
-        rules[("sensor", "cost_cycle")],
-    )
-
-
-def test_maintenance_button_rules_are_marked_for_phase_five_creation() -> None:
-    rules = compact_creation_rules_by_key()
-
-    phase_five_button_keys = {
-        key
-        for (domain, key), rule in rules.items()
-        if domain == "button"
-        and rule.removal_phase == MAINTENANCE_SWITCH_CONDENSATION_PHASE
-    }
-
-    assert phase_five_button_keys == {
-        "start_maintenance",
-        "end_maintenance",
-    }
-    assert compact_rule_is_setup_managed(rules[("button", "start_maintenance")])
-    assert compact_rule_is_setup_managed(rules[("button", "end_maintenance")])
-    assert compact_rule_is_setup_managed(rules[("button", "relearn_baseline")])
-
-
-def test_phase_six_manages_creation_for_every_catalog_rule() -> None:
-    rules = compact_creation_rules_by_key()
-
-    unmanaged = {
-        (domain, key)
-        for (domain, key), rule in rules.items()
-        if not compact_rule_is_setup_managed(rule)
-    }
-
-    assert unmanaged == set()
+    assert [description.key for description in filtered] == ["health_summary"]
 
 
 def test_compact_creation_catalog_covers_every_current_entity_description() -> None:

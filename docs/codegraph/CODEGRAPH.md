@@ -4,9 +4,7 @@
 > **Repository:** https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer  
 > **Primary source:** `custom_components/circuitsetup_energy_analyzer`
 
-This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact.
-
-The bundled `codegraph.json` contains the same graph in machine-readable form. The bundled `generate_codegraph.py` should be run inside a checkout to produce exact AST-derived import and symbol graphs for the checked-out commit.
+This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact. Run `generate_codegraph.py` inside a checkout when exact AST-derived import and symbol graphs are needed for that commit.
 
 ## How Codex should use this
 
@@ -19,9 +17,8 @@ The bundled `codegraph.json` contains the same graph in machine-readable form. T
    python generate_codegraph.py . --output-dir docs/codegraph/generated
    ```
 3. Read this file for semantic ownership and runtime flow.
-4. Read `docs/codegraph/generated/CODEGRAPH.generated.md` for exact imports, symbols, entrypoints and cycles.
-5. Query the JSON graph before changing cross-cutting code.
-6. Update/regenerate the graph in the same PR whenever modules, imports, entrypoints, processor registration or platform surfaces change.
+4. Inspect the generated local graph for exact imports, symbols, entrypoints and cycles when a change is cross-cutting.
+5. Generated graph output is local-only and should not be committed.
 
 ## Graph trust model
 
@@ -213,7 +210,6 @@ Evidence panel or HA control
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py` | See generated AST graph for symbols/imports. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entities/setup_health.py` | See generated AST graph for symbols/imports. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js` | Browser-side evidence, NILM review and suggested-setting action interface. |
-| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/strings.json` | See generated AST graph for symbols/imports. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/translations/en.json` | See generated AST graph for symbols/imports. |
 
 ## Processor-to-feature adapters
@@ -277,7 +273,6 @@ Shared processor contract:
 - `ProcessingContext`
 - `FeatureResult`
 - `StateUpdate`
-- `FeatureProcessor`
 
 All feature processors should return results rather than causing scattered Home Assistant side effects.
 
@@ -362,7 +357,7 @@ Changes to these features should inspect coordinator ordering, source selection 
   - `custom_components/circuitsetup_energy_analyzer/<feature>.py`
   - `custom_components/circuitsetup_energy_analyzer/processors/<feature>.py`
   - `custom_components/circuitsetup_energy_analyzer/sensor.py`
-  - `custom_components/circuitsetup_energy_analyzer/strings.json`
+  - `custom_components/circuitsetup_energy_analyzer/translations/en.json`
   - `tests/test_processors.py`
 ### Change operating/running/cycle behavior
 
@@ -426,7 +421,6 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Usually touched**
 
   - `custom_components/circuitsetup_energy_analyzer/dashboard.py`
-  - `custom_components/circuitsetup_energy_analyzer/strings.json`
   - `custom_components/circuitsetup_energy_analyzer/translations/en.json`
   - `tests/test_entities.py`
   - `tests/test_profiles.py`
@@ -508,37 +502,14 @@ Changes to these features should inspect coordinator ordering, source selection 
 
 ## JSON queries
 
-List outgoing semantic edges for the coordinator:
-
-```bash
-python - <<'PY'
-import json
-g = json.load(open("codegraph.json"))
-node = "file:custom_components/circuitsetup_energy_analyzer/coordinator.py"
-for e in g["edges"]:
-    if e["source"] == node:
-        print(e["relation"], "->", e["target"])
-PY
-```
-
-Find all modules in one layer:
-
-```bash
-python - <<'PY'
-import json
-g = json.load(open("codegraph.json"))
-for n in g["nodes"]:
-    if n.get("layer") == "persistence_feedback" and n["kind"].endswith("module"):
-        print(n.get("path"))
-PY
-```
-
 Find inbound dependencies after running the AST generator:
 
 ```bash
 python - <<'PY'
 import json
-g = json.load(open("docs/codegraph/generated/codegraph.generated.json"))
+from pathlib import Path
+
+g = json.loads(Path("docs/codegraph/generated/codegraph.generated.json").read_text())
 target = "custom_components.circuitsetup_energy_analyzer.alerting"
 for e in g["edges"]:
     if e["relation"] == "imports" and e["target"] == target:

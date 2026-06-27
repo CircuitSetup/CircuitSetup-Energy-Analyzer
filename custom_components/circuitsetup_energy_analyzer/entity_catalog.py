@@ -15,13 +15,6 @@ from .const import (
     ENTITY_DETAIL_STANDARD,
 )
 
-CORE_DUPLICATE_REMOVAL_PHASE = "core_duplicate_condensation"
-ELECTRICAL_CYCLE_CONDENSATION_PHASE = "electrical_cycle_condensation"
-BILLING_STANDBY_WEATHER_CONDENSATION_PHASE = (
-    "billing_standby_weather_condensation"
-)
-MAINTENANCE_SWITCH_CONDENSATION_PHASE = "maintenance_switch_condensation"
-
 LEGACY_ENTITY_REPLACEMENTS: Mapping[str, str] = {
     "sensitivity": "select:alert_sensitivity",
     "readiness": "sensor:health_summary#readiness",
@@ -103,7 +96,6 @@ class EntityCreationRule:
     create_in_expert: bool = False
     replacement: str | None = None
     legacy: bool = False
-    removal_phase: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,15 +440,41 @@ def selected_entity_groups_for_coordinator(coordinator: Any) -> set[EntityGroup]
     return set()
 
 
-def compact_sensor_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
-    """Return whether current compact phases manage this sensor's creation."""
-    return compact_rule_is_setup_managed(rule)
+def compact_descriptions_for_setup(
+    domain: str,
+    descriptions: Collection[Any],
+    circuit: Any,
+    coordinator: Any,
+    *,
+    hass: Any,
+    entry_id: str,
+) -> tuple[Any, ...]:
+    """Return compact-model descriptions that should be created for setup."""
+    from .entity import entity_detail_level_for_coordinator
 
-
-def compact_rule_is_setup_managed(rule: EntityCreationRule) -> bool:
-    """Return whether current compact phases manage this entity's creation."""
-    del rule
-    return True
+    compatibility_keys = legacy_compatibility_keys_for_setup(
+        hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
+    detail_level = entity_detail_level_for_coordinator(coordinator)
+    selected_groups = selected_entity_groups_for_coordinator(coordinator)
+    compact_descriptions: list[Any] = []
+    for description in descriptions:
+        key = str(getattr(description, "key", "")).strip()
+        if not key:
+            continue
+        if should_create_entity(
+            rule=compact_creation_rule_for_entity(domain, key),
+            circuit=circuit,
+            coordinator=coordinator,
+            detail_level=detail_level,
+            selected_groups=selected_groups,
+            legacy_compatibility_keys=compatibility_keys,
+            applicability_already_checked=True,
+        ):
+            compact_descriptions.append(description)
+    return tuple(compact_descriptions)
 
 
 def desired_compact_entity_rules(
@@ -724,7 +742,6 @@ def _rule(
     expert: bool = False,
     replacement: str | None = None,
     legacy: bool = False,
-    removal_phase: str | None = None,
 ) -> EntityCreationRule:
     return EntityCreationRule(
         key=key,
@@ -737,35 +754,16 @@ def _rule(
         create_in_expert=expert,
         replacement=replacement,
         legacy=legacy,
-        removal_phase=removal_phase,
     )
 
 
 _COUNT_DOMAINS = ("sensor", "binary_sensor", "button", "select", "number", "switch")
-_SETUP_MANAGED_REMOVAL_PHASES = frozenset(
-    {
-        CORE_DUPLICATE_REMOVAL_PHASE,
-        ELECTRICAL_CYCLE_CONDENSATION_PHASE,
-        BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
-        MAINTENANCE_SWITCH_CONDENSATION_PHASE,
-    },
-)
-_SETUP_MANAGED_GRAPH_GROUPS = frozenset(
-    {
-        EntityGroup.BILLING_FORECASTS,
-        EntityGroup.CYCLE_METRICS,
-        EntityGroup.ELECTRICAL_SCORES,
-        EntityGroup.POWER_QUALITY_DRIFT,
-    },
-)
 
 
 def _legacy_sensor(
     key: str,
     replacement: str,
     group: EntityGroup,
-    *,
-    removal_phase: str | None = None,
 ) -> EntityCreationRule:
     return _rule(
         "sensor",
@@ -775,7 +773,6 @@ def _legacy_sensor(
         ENTITY_DETAIL_EXPERT,
         replacement=replacement,
         legacy=True,
-        removal_phase=removal_phase,
     )
 
 
@@ -1051,27 +1048,23 @@ _RULES: tuple[EntityCreationRule, ...] = (
         "billing_cycle_budget_usage",
         "sensor.<circuit>_billing_cycle_usage",
         EntityGroup.BILLING_COST,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _graph_sensor("billing_cycle_forecast", EntityGroup.BILLING_FORECASTS),
     _legacy_sensor(
         "billing_cycle_status",
         "sensor.<circuit>_billing_cycle_usage",
         EntityGroup.BILLING_COST,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "cost_current_rate",
         "sensor.<circuit>_cost_cycle",
         EntityGroup.BILLING_COST,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _graph_sensor("cost_cycle_forecast", EntityGroup.BILLING_FORECASTS),
     _legacy_sensor(
         "cost_status",
         "sensor.<circuit>_cost_cycle",
         EntityGroup.BILLING_COST,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _graph_sensor("always_on_limit_usage", EntityGroup.STANDBY),
     _graph_sensor("monitored_power", EntityGroup.MAINS_SOLAR),
@@ -1199,79 +1192,66 @@ _RULES: tuple[EntityCreationRule, ...] = (
         "sensitivity",
         "select.<circuit>_alert_sensitivity",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "readiness",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "learning_progress",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "data_quality_checklist",
         "sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "alert_evidence",
         "Evidence panel and sensor.<circuit>_health_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "last_event",
         "Evidence panel or sensor.<circuit>_activity_summary",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "recent_activity_count",
         "Evidence panel or optional recent activity timeline",
         EntityGroup.DEVELOPER_DIAGNOSTICS,
-        removal_phase=CORE_DUPLICATE_REMOVAL_PHASE,
     ),
     _legacy_sensor(
         "power_quality_evidence",
         "sensor.<circuit>_electrical_health",
         EntityGroup.POWER_QUALITY_DRIFT,
-        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "metric_consistency_status",
         "sensor.<circuit>_electrical_health",
         EntityGroup.ELECTRICAL_SCORES,
-        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "leg_imbalance_status",
         "sensor.<circuit>_electrical_health",
         EntityGroup.ELECTRICAL_SCORES,
-        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "run_cycle_status",
         "sensor.<circuit>_activity_summary",
         EntityGroup.CYCLE_METRICS,
-        removal_phase=ELECTRICAL_CYCLE_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "standby_threshold",
         "Advanced Circuit Settings",
         EntityGroup.STANDBY,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _legacy_sensor(
         "outdoor_temperature",
         "Configured outdoor temperature source entity",
         EntityGroup.WEATHER,
-        removal_phase=BILLING_STANDBY_WEATHER_CONDENSATION_PHASE,
     ),
     _rule(
         "button",
@@ -1281,7 +1261,6 @@ _RULES: tuple[EntityCreationRule, ...] = (
         ENTITY_DETAIL_EXPERT,
         replacement="switch.<circuit>_maintenance",
         legacy=True,
-        removal_phase=MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     ),
     _rule(
         "button",
@@ -1291,7 +1270,6 @@ _RULES: tuple[EntityCreationRule, ...] = (
         ENTITY_DETAIL_EXPERT,
         replacement="switch.<circuit>_maintenance",
         legacy=True,
-        removal_phase=MAINTENANCE_SWITCH_CONDENSATION_PHASE,
     ),
 )
 

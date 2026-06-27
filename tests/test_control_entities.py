@@ -539,7 +539,11 @@ async def test_switch_setup_entry_filters_controls_through_catalog(
     from custom_components.circuitsetup_energy_analyzer import switch
 
     _disable_registry_pruning(monkeypatch, switch)
-    monkeypatch.setattr(switch, "should_create_entity", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        switch,
+        "compact_descriptions_for_setup",
+        lambda *_args, **_kwargs: (),
+    )
     coordinator = _FakeCoordinator()
     added_entities = []
 
@@ -681,7 +685,11 @@ async def test_select_setup_entry_filters_circuit_controls_through_catalog(
     from custom_components.circuitsetup_energy_analyzer import select
 
     _disable_registry_pruning(monkeypatch, select)
-    monkeypatch.setattr(select, "should_create_entity", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        select,
+        "compact_descriptions_for_setup",
+        lambda *_args, **_kwargs: (),
+    )
     coordinator = _FakeCoordinator()
     added_entities = []
 
@@ -864,7 +872,11 @@ async def test_number_setup_entry_filters_controls_through_catalog(
     from custom_components.circuitsetup_energy_analyzer import number
 
     _disable_registry_pruning(monkeypatch, number)
-    monkeypatch.setattr(number, "should_create_entity", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        number,
+        "compact_descriptions_for_setup",
+        lambda *_args, **_kwargs: (),
+    )
     coordinator = _FakeCoordinator()
     added_entities = []
 

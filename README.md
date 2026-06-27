@@ -857,10 +857,7 @@ entities instead of every intermediate calculation as a standalone entity.
 - **Standard** adds canonical status and graph entities for features you configured.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
 
-See `docs/entity-model.md` and `docs/entity-model-migration.md` for the full
-model and migration notes. Local count reports can be regenerated with
-`python scripts/report_entity_inventory.py` when needed; generated development
-artifacts are not checked in.
+See `docs/entity-model.md` for the full compact model and migration notes.
 
 Existing installs can keep enabled legacy entities for one compatibility release
 so dashboards and automations do not break during upgrade. To migrate explicitly,

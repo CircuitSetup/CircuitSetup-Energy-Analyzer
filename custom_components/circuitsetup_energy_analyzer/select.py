@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +16,8 @@ from .dashboard import normalize_dashboard_layout
 from .entity import (
     ENTITY_DETAIL_LEVELS,
     CircuitAnalyzerEntity,
+    HomeAssistantError,
+    async_call_or_raise,
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
@@ -25,25 +26,16 @@ from .entity import (
     prune_stale_entity_registry_entries,
     supports_daily_circuit_controls,
 )
-from .entity_catalog import (
-    compact_creation_rule_for_entity,
-    legacy_compatibility_keys_for_setup,
-    selected_entity_groups_for_coordinator,
-    should_create_entity,
-)
+from .entity_catalog import compact_descriptions_for_setup
 from .sensor import sensitivity_value
 from .ux import friendly_sensitivity_label
 
 try:
     from homeassistant.components.select import SelectEntity
-    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class SelectEntity:
         """Fallback select base for tests without Home Assistant."""
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 SENSITIVITY_OPTIONS = ["Quiet", "Balanced", "Sensitive"]
@@ -179,10 +171,10 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
             action_label=self.entity_description.name_suffix,
             valid_options=SENSITIVITY_OPTIONS,
         )
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             "async_set_circuit_sensitivity",
-            self.entity_description.name_suffix,
+            f"set {self.entity_description.name_suffix}",
             self.circuit_id,
             preset,
         )
@@ -267,10 +259,10 @@ class EntityDetailLevelSelect(SelectEntity):
             action_label="entity detail level",
             valid_options=ENTITY_DETAIL_LEVELS,
         )
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             "async_set_entity_detail_level",
-            "entity detail level",
+            "set entity detail level",
             detail_level,
         )
 
@@ -361,10 +353,10 @@ class DashboardLayoutSelect(SelectEntity):
             action_label="dashboard layout",
             valid_options=DASHBOARD_LAYOUT_OPTIONS,
         )
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             "async_set_dashboard_layout",
-            "dashboard layout",
+            "set dashboard layout",
             layout,
         )
 
@@ -384,7 +376,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in CIRCUIT_SELECT_DESCRIPTIONS
             if select_description_applies(description, raw_circuit, coordinator)
         )
-        descriptions = _compact_select_descriptions_for_setup(
+        descriptions = compact_descriptions_for_setup(
+            "select",
             descriptions,
             raw_circuit,
             coordinator,
@@ -422,38 +415,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     async_add_entities(entities)
 
 
-def _compact_select_descriptions_for_setup(
-    descriptions: tuple[CircuitSelectDescription, ...],
-    circuit: Any,
-    coordinator: Any,
-    *,
-    hass: Any,
-    entry_id: str,
-) -> tuple[CircuitSelectDescription, ...]:
-    compatibility_keys = legacy_compatibility_keys_for_setup(
-        hass,
-        entry_id=entry_id,
-        coordinator=coordinator,
-    )
-    selected_groups = selected_entity_groups_for_coordinator(coordinator)
-    detail_level = entity_detail_level_for_coordinator(coordinator)
-    compact_descriptions: list[CircuitSelectDescription] = []
-    for description in descriptions:
-        rule = compact_creation_rule_for_entity("select", description.key)
-        if not should_create_entity(
-            rule=rule,
-            circuit=circuit,
-            coordinator=coordinator,
-            detail_level=detail_level,
-            selected_groups=selected_groups,
-            legacy_compatibility_keys=compatibility_keys,
-            applicability_already_checked=True,
-        ):
-            continue
-        compact_descriptions.append(description)
-    return tuple(compact_descriptions)
-
-
 def select_description_applies(
     description: CircuitSelectDescription,
     circuit: Any,
@@ -476,23 +437,6 @@ def _action_unavailable_attributes() -> dict[str, str]:
         "availability_label": "The analyzer action is unavailable.",
         "next_step": "Reload the integration or check the system log.",
     }
-
-
-async def _call_or_raise(
-    target: Any,
-    method_name: str,
-    action_label: str,
-    *args: Any,
-) -> None:
-    method = getattr(target, method_name, None)
-    if not callable(method):
-        raise HomeAssistantError(
-            f"Cannot set {action_label.strip().lower()} right now because the "
-            "analyzer action is unavailable."
-        )
-    result = method(*args)
-    if inspect.isawaitable(result):
-        await result
 
 
 def _select_option_value(

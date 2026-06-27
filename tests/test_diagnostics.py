@@ -231,9 +231,9 @@ def test_diagnostics_reraises_nested_homeassistant_import_failures(
 
 def test_strings_include_service_repair_problem_keys() -> None:
     strings = json.loads(
-        Path("custom_components/circuitsetup_energy_analyzer/strings.json").read_text(
-            encoding="utf-8"
-        )
+        Path(
+            "custom_components/circuitsetup_energy_analyzer/translations/en.json"
+        ).read_text(encoding="utf-8")
     )
 
     assert "missing_source_entities" in strings["issues"]

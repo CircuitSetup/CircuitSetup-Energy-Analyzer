@@ -11,6 +11,12 @@ ROOT = Path(__file__).parents[1]
 INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 
 
+def _translations() -> dict:
+    return json.loads(
+        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
+    )
+
+
 EXPECTED_FLOW_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
@@ -213,7 +219,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
 
 
 def test_config_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
     data = strings["config"]["step"]["user"]["data"]
     descriptions = strings["config"]["step"]["user"]["data_description"]
 
@@ -242,7 +248,7 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
     init_step = strings["options"]["step"]["init"]
     data = strings["options"]["step"]["sources"]["data"]
     descriptions = strings["options"]["step"]["sources"]["data_description"]
@@ -339,7 +345,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
 
     for section in ("config", "options"):
         utility_data = strings[section]["step"]["utility"]["data"]
@@ -367,7 +373,7 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
 
 
 def test_advanced_settings_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
     picker_step = strings["options"]["step"]["select_advanced_circuit"]
     settings_step = strings["options"]["step"]["advanced_settings"]
     section_data = {}
@@ -421,7 +427,7 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
 
     for section in ("config", "options"):
         data = strings[section]["step"]["assign"]["data"]
@@ -451,7 +457,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
 
 
 def test_assignment_picker_text_is_human_readable() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
+    strings = _translations()
 
     data = strings["options"]["step"]["select_assignment"]["data"]
     descriptions = strings["options"]["step"]["select_assignment"]["data_description"]
@@ -470,11 +476,10 @@ def test_assignment_picker_text_is_human_readable() -> None:
     )
 
 
-def test_runtime_english_translations_include_setup_and_options_text() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
-    )
+def test_runtime_english_translation_is_the_single_source() -> None:
+    translations = _translations()
+
+    assert not (INTEGRATION_DIR / "strings.json").exists()
 
     for section, step in (
         ("config", "user"),
@@ -492,42 +497,33 @@ def test_runtime_english_translations_include_setup_and_options_text() -> None:
         ("options", "advanced_settings"),
         ("options", "assign"),
     ):
-        strings_step = strings[section]["step"][step]
         translated_step = translations[section]["step"][step]
-        assert translated_step["data"] == strings_step["data"]
-        assert translated_step["data_description"] == strings_step["data_description"]
-        assert translated_step["title"] == strings_step["title"]
-        assert translated_step["description"] == strings_step["description"]
-        if "sections" in strings_step:
-            assert translated_step["sections"] == strings_step["sections"]
+        assert translated_step["title"]
+        assert translated_step["description"]
+        assert translated_step.get("data") or translated_step.get("sections")
 
-    strings_init = strings["options"]["step"]["init"]
     translated_init = translations["options"]["step"]["init"]
-    assert translated_init["title"] == strings_init["title"]
-    assert translated_init["description"] == strings_init["description"]
-    assert translated_init["menu_options"] == strings_init["menu_options"]
+    assert translated_init["title"]
+    assert translated_init["description"]
+    assert translated_init["menu_options"]
 
 
 def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
     None
 ):
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
-    )
+    translations = _translations()
 
-    for payload in (strings, translations):
-        descriptions = (
-            payload["config"]["step"]["user"]["description"],
-            payload["config"]["step"]["utility"]["description"],
-            payload["options"]["step"]["init"]["description"],
-            payload["options"]["step"]["sources"]["description"],
-            payload["options"]["step"]["mains"]["description"],
-            payload["options"]["step"]["utility"]["description"],
-        )
-        for description in descriptions:
-            assert "{mapping_suggestions}" not in description
-            assert "dual-phase channel pairs" not in description.lower()
+    descriptions = (
+        translations["config"]["step"]["user"]["description"],
+        translations["config"]["step"]["utility"]["description"],
+        translations["options"]["step"]["init"]["description"],
+        translations["options"]["step"]["sources"]["description"],
+        translations["options"]["step"]["mains"]["description"],
+        translations["options"]["step"]["utility"]["description"],
+    )
+    for description in descriptions:
+        assert "{mapping_suggestions}" not in description
+        assert "dual-phase channel pairs" not in description.lower()
 
 
 def test_service_fields_have_human_readable_names_and_descriptions() -> None:
@@ -551,14 +547,10 @@ def test_services_are_labeled_as_advanced_script_paths() -> None:
 
 
 def test_maintenance_switch_label_describes_mode_not_power_control() -> None:
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
-    )
+    translations = _translations()
 
-    for payload in (strings, translations):
-        label = payload["entity"]["switch"]["maintenance"]["name"]
-        assert label == "Maintenance mode"
+    label = translations["entity"]["switch"]["maintenance"]["name"]
+    assert label == "Maintenance mode"
 
 
 def test_readme_documents_normal_user_action_paths() -> None:
@@ -578,15 +570,11 @@ def test_readme_documents_normal_user_action_paths() -> None:
 
 def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-    strings = json.loads((INTEGRATION_DIR / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
-    )
+    translations = _translations()
 
     combined = "\n".join(
         [
             readme_text,
-            json.dumps(strings, sort_keys=True),
             json.dumps(translations, sort_keys=True),
         ]
     )
@@ -1694,11 +1682,7 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
 
 
 def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
-    translations = json.loads(
-        (
-            INTEGRATION_DIR / "translations" / "en.json"
-        ).read_text(encoding="utf-8")
-    )
+    translations = _translations()
     issues = translations["issues"]
 
     for key in (
@@ -1819,7 +1803,7 @@ def test_readme_documents_compact_entity_model_and_migration() -> None:
     assert "Compact entity model" in readme_text
     assert "Migrate To Compact Entity Model" in readme_text
     assert "docs/entity-model.md" in readme_text
-    assert "docs/entity-model-migration.md" in readme_text
+    assert "docs/entity-model-migration.md" not in readme_text
     assert "`switch.<circuit>_maintenance`" in readme_text
     assert "`button.<circuit>_start_maintenance`" not in readme_text
     assert "`button.<circuit>_end_maintenance`" not in readme_text
@@ -1831,13 +1815,15 @@ def test_readme_documents_compact_entity_model_and_migration() -> None:
     assert "configured outdoor temperature source entity" in readme_text
 
 
-def test_entity_model_docs_document_local_count_report_generation() -> None:
+def test_entity_model_docs_keep_counts_without_inventory_scripts() -> None:
     entity_model = (ROOT / "docs" / "entity-model.md").read_text(encoding="utf-8")
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_readme = " ".join(readme_text.lower().split())
 
-    assert "python scripts/report_entity_inventory.py" in entity_model
-    assert "generated development artifacts are not checked in" in normalized_readme
+    assert not (ROOT / "scripts" / "report_entity_inventory.py").exists()
+    assert not (ROOT / "scripts" / "entity_inventory.py").exists()
+    assert "python scripts/report_entity_inventory.py" not in entity_model
+    assert "generated development artifacts" not in normalized_readme
     assert "Simple creates 10 or fewer" in entity_model
     assert "`switch.<circuit>_maintenance`" in entity_model
 

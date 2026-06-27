@@ -68,10 +68,7 @@ from .entity import (
     sync_entity_registry_categories,
 )
 from .entity_catalog import (
-    compact_creation_rule_for_entity,
-    legacy_compatibility_keys_for_setup,
-    selected_entity_groups_for_coordinator,
-    should_create_entity,
+    compact_descriptions_for_setup,
 )
 from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from .nilm_virtual import (
@@ -2671,38 +2668,6 @@ def _applicable_sensor_descriptions(
     )
 
 
-def _compact_sensor_descriptions_for_setup(
-    descriptions: Iterable[DiagnosticSensorDescription],
-    circuit: Any,
-    coordinator: Any,
-    *,
-    hass: Any,
-    entry_id: str,
-) -> tuple[DiagnosticSensorDescription, ...]:
-    compatibility_keys = legacy_compatibility_keys_for_setup(
-        hass,
-        entry_id=entry_id,
-        coordinator=coordinator,
-    )
-    selected_groups = selected_entity_groups_for_coordinator(coordinator)
-    detail_level = entity_detail_level_for_coordinator(coordinator)
-    compact_descriptions: list[DiagnosticSensorDescription] = []
-    for description in descriptions:
-        rule = compact_creation_rule_for_entity("sensor", description.key)
-        if not should_create_entity(
-            rule=rule,
-            circuit=circuit,
-            coordinator=coordinator,
-            detail_level=detail_level,
-            selected_groups=selected_groups,
-            legacy_compatibility_keys=compatibility_keys,
-            applicability_already_checked=True,
-        ):
-            continue
-        compact_descriptions.append(description)
-    return tuple(compact_descriptions)
-
-
 def _sensor_roles(circuit: Any) -> set[SensorRole]:
     sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
         circuit,
@@ -3328,7 +3293,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             coordinator,
             configured_circuits,
         )
-        descriptions = _compact_sensor_descriptions_for_setup(
+        descriptions = compact_descriptions_for_setup(
+            "sensor",
             descriptions,
             raw_circuit,
             coordinator,
