@@ -1398,6 +1398,28 @@ def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
     assert payload["history"]["entities"] == ["sensor.mains_power"]
 
 
+def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = SimpleNamespace(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile="mixed",
+        mode="mixed",
+        sensors=(SimpleNamespace(entity_id="sensor.mains_power"),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=mains_config, configs=(mains_config,))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["history"]["entities"] == ["sensor.mains_power"]
+
+
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,

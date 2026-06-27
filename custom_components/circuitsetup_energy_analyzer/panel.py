@@ -1108,26 +1108,32 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
 def _nilm_workspace_target(
     coordinators: Iterable[Any],
     circuit_id: str | None,
-) -> tuple[Any, CircuitConfig] | None:
+) -> tuple[Any, Any] | None:
     requested_circuit_id = str(circuit_id or "").strip()
     for coordinator in coordinators:
         for config in getattr(coordinator, "circuit_configs", ()) or ():
-            if not isinstance(config, CircuitConfig):
+            config_circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
+            if not config_circuit_id:
                 continue
-            if requested_circuit_id and config.circuit_id != requested_circuit_id:
+            if requested_circuit_id and config_circuit_id != requested_circuit_id:
                 continue
             if _is_nilm_config(config):
                 return coordinator, config
     return None
 
 
-def _is_nilm_config(config: CircuitConfig) -> bool:
+def _is_nilm_config(config: Any) -> bool:
+    mode = getattr(config, "mode", None)
+    appliance_profile = getattr(config, "appliance_profile", None)
     return (
-        config.mode is CircuitMode.MAINS_NILM
-        or config.appliance_profile is ApplianceProfile.MAINS_NILM
-        or str(config.mode) == CircuitMode.MAINS_NILM.value
-        or str(config.appliance_profile) == ApplianceProfile.MAINS_NILM.value
-        or (config.circuit_id == "mains" and bool(_sensor_entity_ids(config)))
+        mode is CircuitMode.MAINS_NILM
+        or appliance_profile is ApplianceProfile.MAINS_NILM
+        or str(mode) == CircuitMode.MAINS_NILM.value
+        or str(appliance_profile) == ApplianceProfile.MAINS_NILM.value
+        or (
+            str(getattr(config, "circuit_id", "") or "").strip() == "mains"
+            and bool(_sensor_entity_ids(config))
+        )
     )
 
 
@@ -1876,10 +1882,10 @@ def _nilm_workspace_history_entities(
     return _unique_strings(entity_ids)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
 
 
-def _sensor_entity_ids(config: CircuitConfig) -> list[str]:
+def _sensor_entity_ids(config: Any) -> list[str]:
     return _unique_strings(
         sensor.entity_id
-        for sensor in config.sensors
+        for sensor in getattr(config, "sensors", ()) or ()
         if getattr(sensor, "entity_id", None)
     )
 
