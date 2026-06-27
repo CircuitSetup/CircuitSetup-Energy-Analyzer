@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import struct
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -1257,6 +1258,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Graph times shown in",
         "_timeZone",
         "_chartTimeTicks",
+        "_chartDateKey",
         "_formatAxisTime",
         "time-grid",
         'text-anchor="${tick.anchor}"',
@@ -1526,6 +1528,74 @@ def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> Non
     assert "new Intl.DateTimeFormat(undefined, {" in asset
     assert "timeZone: this._timeZone()," in asset
     assert "this._hass.config.time_zone" in asset
+
+
+def test_chart_time_ticks_include_date_for_displayed_timezone_boundary() -> None:
+    asset = (
+        ROOT
+        / "custom_components"
+        / "circuitsetup_energy_analyzer"
+        / "frontend"
+        / "energy-analyzer-panel.js"
+    )
+    script = f"""
+const fs = require("fs");
+const vm = require("vm");
+class BrowserDate extends Date {{
+  toDateString() {{
+    return new Intl.DateTimeFormat("en-CA", {{
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }}).format(this);
+  }}
+}}
+const context = {{
+  console,
+  Date: BrowserDate,
+  Intl,
+  URLSearchParams,
+  Event: class {{}},
+  HTMLElement: class {{
+    attachShadow() {{
+      return {{ innerHTML: "", querySelectorAll() {{ return []; }} }};
+    }}
+  }},
+  customElements: {{
+    get() {{ return undefined; }},
+    define() {{}},
+  }},
+  history: {{
+    pushState() {{}},
+    replaceState() {{}},
+  }},
+  window: {{
+    addEventListener() {{}},
+    dispatchEvent() {{}},
+  }},
+}};
+vm.createContext(context);
+const source = fs.readFileSync({json.dumps(str(asset))}, "utf8");
+vm.runInContext(
+  `${{source}}\\nthis.Panel = CircuitSetupEnergyAnalyzerPanel;`,
+  context
+);
+const panel = new context.Panel();
+panel._hass = {{ config: {{ time_zone: "America/New_York" }} }};
+const ticks = panel._chartTimeTicks(
+  Date.parse("2026-06-02T03:30:00Z"),
+  Date.parse("2026-06-02T04:30:00Z"),
+  () => 0
+);
+if (!ticks.some((tick) => /Jun|6\\//.test(tick.label))) {{
+  const labels = ticks.map((tick) => tick.label).join(" | ");
+  throw new Error(
+    `expected a displayed date in HA timezone labels: ${{labels}}`
+  );
+}}
+"""
+    subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
 
 
 def test_daily_action_services_document_entity_targets() -> None:
