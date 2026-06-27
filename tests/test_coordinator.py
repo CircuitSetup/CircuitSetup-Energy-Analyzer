@@ -6362,11 +6362,22 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     assert all(session["median_power_w"] > 0 for session in sessions)
     assert all(session["confidence"] > 0 for session in sessions)
     workspace = nilm_workspace_payload([coordinator], circuit_id=circuit_id)
+    assert workspace["edge_count"] >= 4
+    assert {edge["direction"] for edge in workspace["edges"]} == {"on", "off"}
+    assert workspace["label_interval_count"] >= 1
+    assert workspace["assignment_count"] >= 1
+    assert workspace["virtual_appliance_count"] >= 1
+    assert workspace["validation"]["metrics"]["ground_truth_interval_count"] >= 1
+    assert workspace["validation"]["metrics"]["prediction_count"] >= 1
     assert workspace["session_count"] >= 2
     assert {session["session_id"] for session in workspace["sessions"]} >= {
         "demo_motor_load_l1_open",
         "demo_resistive_load_240v_session",
     }
+    assert any(
+        session.get("display_label") == "Demo Pool Pump"
+        for session in workspace["sessions"]
+    )
 
 
 def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:

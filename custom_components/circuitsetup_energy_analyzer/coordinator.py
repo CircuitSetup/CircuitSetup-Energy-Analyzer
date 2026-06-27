@@ -6128,7 +6128,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     "median_leg_b_delta_w": 20.0,
                     "leg_balance_ratio": 0.956,
                     "dominant_leg": "a",
-                    "split_phase_type": "single_leg",
+                    "split_phase_type": "single_leg_a",
                     "occurrence_count": 8,
                     "confidence": 0.82,
                     "classification": "motor",
@@ -6144,7 +6144,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     "median_leg_b_delta_w": 2050.0,
                     "leg_balance_ratio": 0.0,
                     "dominant_leg": "balanced",
-                    "split_phase_type": "split_phase",
+                    "split_phase_type": "balanced_240v",
                     "occurrence_count": 5,
                     "confidence": 0.78,
                     "classification": "resistive",
@@ -6173,7 +6173,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                         "display_name": "Motor-like 120 V load",
                         "likely_type": "motor",
                         "voltage_class": "120 V",
-                        "split_phase_type": "single_leg",
+                        "split_phase_type": "single_leg_a",
                         "dominant_leg": "a",
                         "typical_watts": 920.0,
                         "typical_var": 510.0,
@@ -6206,7 +6206,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                         "display_name": "Resistive 240 V load",
                         "likely_type": "resistive",
                         "voltage_class": "240 V",
-                        "split_phase_type": "split_phase",
+                        "split_phase_type": "balanced_240v",
                         "dominant_leg": "balanced",
                         "typical_watts": 4100.0,
                         "typical_var": 180.0,
@@ -6243,6 +6243,25 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             resistive_start = now - timedelta(hours=5)
             resistive_end = now - timedelta(hours=4)
             self.store_data.nilm_session_history_by_circuit[config.circuit_id] = [
+                {
+                    "session_id": "demo_motor_load_l1_session_recent",
+                    "mains_circuit_id": config.circuit_id,
+                    "signature_fingerprint": "demo_motor_load_l1",
+                    "on_edge_id": "demo_motor_load_l1_on_recent",
+                    "off_edge_id": "demo_motor_load_l1_off_recent",
+                    "start": (now - timedelta(hours=2, minutes=15)).isoformat(),
+                    "end": (now - timedelta(hours=1, minutes=10)).isoformat(),
+                    "duration_seconds": 3900.0,
+                    "median_power_w": 920.0,
+                    "estimated_energy_kwh": 0.997,
+                    "confidence": 0.82,
+                    "overlap_count": 0,
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                    "known_load_masked": False,
+                    "known_load_confidence": None,
+                    "assignment_id": "demo_pool_pump_assignment",
+                },
                 {
                     "session_id": "demo_resistive_load_240v_session",
                     "mains_circuit_id": config.circuit_id,
@@ -6284,13 +6303,132 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ]
             self._mark_store_dirty()
 
+        if not self.store_data.nilm_label_intervals_by_circuit.get(config.circuit_id):
+            interval_start = now - timedelta(hours=2, minutes=10)
+            interval_end = now - timedelta(hours=1, minutes=15)
+            self.store_data.nilm_label_intervals_by_circuit[config.circuit_id] = [
+                {
+                    "interval_id": "demo_pool_pump_interval",
+                    "mains_circuit_id": config.circuit_id,
+                    "appliance_id": "demo_pool_pump",
+                    "label": "Demo Pool Pump",
+                    "start": interval_start.isoformat(),
+                    "end": interval_end.isoformat(),
+                    "source": "demo_ground_truth",
+                    "confidence": 0.9,
+                    "mains_entity_id": (
+                        "sensor.cs_energy_analyzer_demo_mains_l1_active_power"
+                    ),
+                    "ground_truth_entity_id": (
+                        "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
+                    ),
+                    "created_at": now.isoformat(),
+                    "updated_at": now.isoformat(),
+                }
+            ]
+            self._mark_store_dirty()
+
+        if not self.store_data.nilm_appliance_assignments_by_circuit.get(
+            config.circuit_id
+        ):
+            self.store_data.nilm_appliance_assignments_by_circuit[config.circuit_id] = [
+                {
+                    "assignment_id": "demo_pool_pump_assignment",
+                    "appliance_id": "demo_pool_pump",
+                    "display_name": "Demo Pool Pump",
+                    "appliance_profile": "pool_pump",
+                    "mains_circuit_id": config.circuit_id,
+                    "signature_fingerprints": ["demo_motor_load_l1"],
+                    "session_ids": [
+                        "demo_motor_load_l1_session_recent",
+                        "demo_motor_load_l1_open",
+                    ],
+                    "label_interval_ids": ["demo_pool_pump_interval"],
+                    "lifecycle_state": "assigned",
+                    "confidence": 0.82,
+                    "created_at": now.isoformat(),
+                    "updated_at": now.isoformat(),
+                    "created_device": False,
+                    "publish_entities": False,
+                }
+            ]
+            self._mark_store_dirty()
+
         self._nilm_total_events_by_circuit[config.circuit_id] = max(
             self._nilm_total_events_by_circuit[config.circuit_id],
             12,
         )
+        if not self._nilm_unmatched_edges[config.circuit_id]:
+            self._nilm_unmatched_edges[config.circuit_id] = [
+                NilmEdge(
+                    timestamp=now - timedelta(hours=5),
+                    delta_w=4100.0,
+                    delta_var=180.0,
+                    delta_va=4104.0,
+                    delta_pf=0.0,
+                    direction="on",
+                    leg_a_delta_w=2050.0,
+                    leg_b_delta_w=2050.0,
+                    leg_balance_ratio=0.0,
+                    dominant_leg="balanced",
+                    split_phase_type="balanced_240v",
+                ),
+                NilmEdge(
+                    timestamp=now - timedelta(hours=4),
+                    delta_w=-4100.0,
+                    delta_var=-180.0,
+                    delta_va=-4104.0,
+                    delta_pf=0.0,
+                    direction="off",
+                    leg_a_delta_w=-2050.0,
+                    leg_b_delta_w=-2050.0,
+                    leg_balance_ratio=0.0,
+                    dominant_leg="balanced",
+                    split_phase_type="balanced_240v",
+                ),
+                NilmEdge(
+                    timestamp=now - timedelta(hours=2, minutes=15),
+                    delta_w=920.0,
+                    delta_var=510.0,
+                    delta_va=1052.0,
+                    delta_pf=-0.05,
+                    direction="on",
+                    leg_a_delta_w=910.0,
+                    leg_b_delta_w=20.0,
+                    leg_balance_ratio=0.956,
+                    dominant_leg="a",
+                    split_phase_type="single_leg_a",
+                ),
+                NilmEdge(
+                    timestamp=now - timedelta(hours=1, minutes=10),
+                    delta_w=-920.0,
+                    delta_var=-510.0,
+                    delta_va=-1052.0,
+                    delta_pf=0.05,
+                    direction="off",
+                    leg_a_delta_w=-910.0,
+                    leg_b_delta_w=-20.0,
+                    leg_balance_ratio=0.956,
+                    dominant_leg="a",
+                    split_phase_type="single_leg_a",
+                ),
+                NilmEdge(
+                    timestamp=now - timedelta(minutes=38),
+                    delta_w=920.0,
+                    delta_var=510.0,
+                    delta_va=1052.0,
+                    delta_pf=-0.05,
+                    direction="on",
+                    leg_a_delta_w=910.0,
+                    leg_b_delta_w=20.0,
+                    leg_balance_ratio=0.956,
+                    dominant_leg="a",
+                    split_phase_type="single_leg_a",
+                ),
+            ]
         self._nilm_unmatched_edges[config.circuit_id] = self._nilm_unmatched_edges[
             config.circuit_id
-        ][:4]
+        ][:8]
 
     def _refresh_balance_state(
         self: Self,
