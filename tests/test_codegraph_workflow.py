@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
@@ -24,5 +25,14 @@ def test_codegraph_is_wired_into_codex_workflow() -> None:
     assert "docs\\codegraph\\generate_codegraph.py" in update_script_text
     assert "--output-dir docs/codegraph/generated" in update_script_text
 
-    assert not (ROOT / "docs" / "codegraph" / "codegraph.json").exists()
-    assert not (ROOT / "docs" / "codegraph" / "generated").exists()
+    tracked_generated_files = subprocess.check_output(
+        [
+            "git",
+            "ls-files",
+            "docs/codegraph/codegraph.json",
+            "docs/codegraph/generated",
+        ],
+        cwd=ROOT,
+        text=True,
+    ).splitlines()
+    assert tracked_generated_files == []
