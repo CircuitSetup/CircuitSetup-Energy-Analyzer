@@ -1115,7 +1115,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-focus]")) {
-      button.addEventListener("click", () => this._focusNilmSignatureOnGraph(button.dataset.nilmSignatureFocus));
+      button.addEventListener("click", () => {
+        void this._focusNilmSignatureOnGraph(button.dataset.nilmSignatureFocus);
+      });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-zoom]")) {
       button.addEventListener("click", () => this._zoomNilmGraph(Number(button.dataset.nilmGraphZoom)));
@@ -1373,14 +1375,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._renderAndScrollToTop();
   }
 
-  _focusNilmSignatureOnGraph(signatureFingerprint) {
+  async _focusNilmSignatureOnGraph(signatureFingerprint) {
     if (this._nilmFocusedSignature === signatureFingerprint) {
       this._nilmFocusedSignature = "";
+      this._nilmGraphWindow = null;
       this._lastActionMessage = "Showing all NILM graph sessions.";
       this._renderAndScrollToTop();
       return;
     }
     this._nilmFocusedSignature = signatureFingerprint;
+    const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
+    if (targetWindow) {
+      await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
+    }
     const focused = this._focusNilmGraphWindowForSignature(signatureFingerprint);
     this._lastActionMessage = focused
       ? "Showing graph sessions for selected signature."
@@ -1389,24 +1396,82 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _focusNilmGraphWindowForSignature(signatureFingerprint) {
-    const workspace = this._nilmWorkspace;
-    const history = (workspace && workspace.history) || {};
-    const min = Date.parse(history.start || "");
-    const max = Date.parse(history.end || "");
-    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
+    if (!targetWindow) {
       return false;
     }
-    const sessions = (workspace.sessions || []).filter((session) => session.signature_fingerprint === signatureFingerprint);
+    const bounds = this._nilmWorkspaceGraphWindow(this._nilmWorkspace) || {
+      min: targetWindow.start,
+      max: targetWindow.end,
+    };
+    this._setNilmGraphWindow(targetWindow.start, targetWindow.end, bounds);
+    return true;
+  }
+
+  _nilmSignatureGraphWindow(signatureFingerprint) {
+    const workspace = this._nilmWorkspace;
+    const sessions = ((workspace && workspace.sessions) || [])
+      .filter((session) => session.signature_fingerprint === signatureFingerprint);
     const starts = sessions.map((session) => Date.parse(session.start || "")).filter(Number.isFinite);
     const ends = sessions.map((session) => Date.parse(session.end || session.start || "")).filter(Number.isFinite);
     if (!starts.length || !ends.length) {
-      return false;
+      return null;
     }
     const start = Math.min(...starts);
     const end = Math.max(...ends, start + 15 * 60 * 1000);
     const padding = Math.max((end - start) * 0.25, 15 * 60 * 1000);
-    this._setNilmGraphWindow(start - padding, end + padding, { min, max });
-    return true;
+    return { start: start - padding, end: end + padding };
+  }
+
+  async _loadNilmWorkspaceHistoryForWindow(window) {
+    const workspace = this._nilmWorkspace;
+    const history = workspace && workspace.history;
+    if (!history || !history.api_path) {
+      return false;
+    }
+    const historyEnd = Date.parse(history.end || "");
+    const end = Math.max(
+      Number.isFinite(historyEnd) ? historyEnd : Date.now(),
+      window.end,
+    );
+    const maxHours = Number(history.max_hours);
+    const neededHours = Math.max(
+      1,
+      Math.ceil((end - window.start) / (60 * 60 * 1000)),
+    );
+    const hours = Number.isFinite(maxHours) ? Math.min(maxHours, neededHours) : neededHours;
+    const start = end - hours * 60 * 60 * 1000;
+    const apiPath = this._nilmWorkspaceHistoryPathWithHours(history.api_path, hours);
+    const fetchPath = this._nilmWorkspaceHistoryPathWithHours(
+      history.fetch_path || `/api/${history.api_path}`,
+      hours,
+    );
+    try {
+      const rows = await this._requestJson(apiPath, fetchPath);
+      this._nilmWorkspaceHistorySeries = Array.isArray(rows) ? rows : [];
+      this._nilmWorkspaceError = "";
+      Object.assign(history, {
+        api_path: apiPath,
+        fetch_path: fetchPath,
+        hours,
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+      });
+      return true;
+    } catch (error) {
+      this._nilmWorkspaceError = `Could not load NILM workspace history: ${error.message}`;
+      return false;
+    }
+  }
+
+  _nilmWorkspaceHistoryPathWithHours(path, hours) {
+    const url = new URL(
+      path.startsWith("/") ? path : `/${path}`,
+      window.location.origin,
+    );
+    url.searchParams.set("hours", String(hours));
+    const nextPath = `${url.pathname}${url.search}`;
+    return path.startsWith("/") ? nextPath : nextPath.replace(/^\//, "");
   }
 
   _zoomNilmGraph(factor) {

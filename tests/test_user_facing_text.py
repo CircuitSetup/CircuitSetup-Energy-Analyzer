@@ -31,6 +31,7 @@ const context = {{
   console,
   Date: BrowserDate,
   Intl,
+  URL,
   URLSearchParams,
   requestAnimationFrame(callback) {{ callback(); }},
   Event: class {{}},
@@ -1618,13 +1619,28 @@ if (!ticks.some((tick) => /Jun|6\\//.test(tick.label))) {
 def test_show_on_graph_focuses_matching_nilm_session_window() -> None:
     _run_panel_node_script(
         """
+(async () => {
+const requests = [];
+const historyPath = "circuitsetup_energy_analyzer/nilm_workspace_history"
+  + "?circuit_id=mains&hours=1";
 const panel = new context.Panel();
 panel._render = () => {};
+panel._requestJson = async (apiPath, fetchPath) => {
+  requests.push({ apiPath, fetchPath });
+  return [[{
+    entity_id: "sensor.mains_power",
+    state: "350",
+    last_changed: "2026-06-06T02:05:00Z",
+  }]];
+};
 panel._nilmWorkspace = {
   status: "ok",
   history: {
-    start: "2026-06-06T00:00:00Z",
+    start: "2026-06-06T03:00:00Z",
     end: "2026-06-06T04:00:00Z",
+    max_hours: 24,
+    api_path: historyPath,
+    fetch_path: `/api/${historyPath}`,
   },
   sessions: [
     {
@@ -1634,7 +1650,7 @@ panel._nilmWorkspace = {
     },
   ],
 };
-panel._focusNilmSignatureOnGraph("signature-1");
+await panel._focusNilmSignatureOnGraph("signature-1");
 const sessionStart = Date.parse("2026-06-06T02:00:00Z");
 const sessionEnd = Date.parse("2026-06-06T02:30:00Z");
 if (!panel._nilmGraphWindow) {
@@ -1646,10 +1662,66 @@ if (missesSession) {
   const graphWindow = JSON.stringify(panel._nilmGraphWindow);
   throw new Error(`expected graph window to include session: ${graphWindow}`);
 }
+if (!requests[0] || !/hours=3/.test(requests[0].apiPath)) {
+  const requestsJson = JSON.stringify(requests);
+  throw new Error(`expected Show on Graph to reload history: ${requestsJson}`);
+}
+if (!panel._nilmWorkspaceHistorySeries.length) {
+  throw new Error("expected Show on Graph to store focused history rows");
+}
 if (!/graph sessions/.test(panel._lastActionMessage || "")) {
   const message = panel._lastActionMessage;
   throw new Error(`expected visible Show on Graph message, got ${message}`);
 }
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_show_on_graph_toggle_off_restores_full_nilm_window() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const historyPath = "circuitsetup_energy_analyzer/nilm_workspace_history"
+  + "?circuit_id=mains&hours=4";
+const panel = new context.Panel();
+panel._render = () => {};
+panel._requestJson = async () => [];
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-06T00:00:00Z",
+    end: "2026-06-06T04:00:00Z",
+    max_hours: 24,
+    api_path: historyPath,
+    fetch_path: `/api/${historyPath}`,
+  },
+  sessions: [
+    {
+      signature_fingerprint: "signature-1",
+      start: "2026-06-06T02:00:00Z",
+      end: "2026-06-06T02:30:00Z",
+    },
+  ],
+};
+await panel._focusNilmSignatureOnGraph("signature-1");
+await panel._focusNilmSignatureOnGraph("signature-1");
+const graphWindow = panel._nilmWorkspaceGraphWindow(panel._nilmWorkspace);
+if (panel._nilmFocusedSignature) {
+  throw new Error("expected repeated Show on Graph click to clear focus");
+}
+if (graphWindow.start !== Date.parse(panel._nilmWorkspace.history.start)
+  || graphWindow.end !== Date.parse(panel._nilmWorkspace.history.end)) {
+  const graphWindowJson = JSON.stringify(graphWindow);
+  throw new Error(`expected full graph window after clear: ${graphWindowJson}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     )
 
