@@ -858,6 +858,42 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
     )
 
 
+def test_alert_evidence_payload_links_explicit_nilm_duplicate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="mains", feature="nilm_unknown_load")
+    regular_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        alert,
+        config=regular_mains,
+        configs=(regular_mains, nilm_mains),
+    )
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {"unknown_loads": [{"signature_id": "signature_1"}]}
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert payload["nilm"]["workspace_call_api_path"].endswith("circuit_id=mains")
+
+
 def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

@@ -1762,10 +1762,11 @@ def _clamped_float(value: Any, *, default: float, upper: float | None = None) ->
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:
-    config = _config_for_circuit(coordinator, circuit_id)
-    if config is None or not _is_nilm_config(config):
+    target = _nilm_workspace_target((coordinator,), circuit_id)
+    if target is None:
         return {}
-    query = urlencode({"circuit_id": circuit_id})
+    _target_coordinator, config = target
+    query = urlencode({"circuit_id": config.circuit_id})
     return {
         "workspace_api_path": f"{NILM_WORKSPACE_API_PATH}?{query}",
         "workspace_call_api_path": f"{DOMAIN}/nilm_workspace?{query}",
