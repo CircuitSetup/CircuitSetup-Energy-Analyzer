@@ -10,6 +10,62 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
+PANEL_ASSET = INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js"
+
+
+def _run_panel_node_script(body: str) -> None:
+    script = f"""
+const fs = require("fs");
+const vm = require("vm");
+class BrowserDate extends Date {{
+  toDateString() {{
+    return new Intl.DateTimeFormat("en-CA", {{
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }}).format(this);
+  }}
+}}
+const context = {{
+  console,
+  Date: BrowserDate,
+  Intl,
+  URLSearchParams,
+  requestAnimationFrame(callback) {{ callback(); }},
+  Event: class {{}},
+  CustomEvent: class {{}},
+  HTMLElement: class {{
+    attachShadow() {{
+      this.shadowRoot = {{ innerHTML: "", querySelectorAll() {{ return []; }} }};
+      return this.shadowRoot;
+    }}
+    scrollIntoView() {{}}
+  }},
+  customElements: {{
+    get() {{ return undefined; }},
+    define() {{}},
+  }},
+  history: {{
+    pushState() {{}},
+    replaceState() {{}},
+  }},
+  window: {{
+    location: {{ origin: "http://example.local", pathname: "/panel", search: "" }},
+    addEventListener() {{}},
+    dispatchEvent() {{}},
+    scrollTo() {{}},
+  }},
+}};
+vm.createContext(context);
+const source = fs.readFileSync({json.dumps(str(PANEL_ASSET))}, "utf8");
+vm.runInContext(
+  `${{source}}\\nthis.Panel = CircuitSetupEnergyAnalyzerPanel;`,
+  context
+);
+{body}
+"""
+    subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
 
 
 def _translations() -> dict:
@@ -1194,6 +1250,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Show on Graph",
         "data-nilm-signature-focus",
         "_focusNilmSignatureOnGraph",
+        "_focusNilmGraphWindowForSignature",
         "_nilmSignatureFingerprint",
         "Zoom In",
         "Zoom Out",
@@ -1201,6 +1258,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Pan Later",
         "data-nilm-graph-zoom",
         "data-nilm-graph-pan",
+        "data-nilm-workspace-graph",
+        "data-nilm-graph-window",
+        "Showing NILM graph window",
         "_zoomNilmGraph",
         "_panNilmGraph",
         "_nilmWorkspaceGraphWindow",
@@ -1217,6 +1277,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-assignment-merge-target",
         "profile_options",
         "<select id=\"nilm_assignment_profile_",
+        "<option value=\"\">Do not merge</option>",
         'collectionKey === "sessions"',
         "`#nilm_session_label_${index}`",
         "Existing appliance",
@@ -1227,10 +1288,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Assign Appliance",
         "Publish Entities",
         "Disable Publishing",
-        "Retire",
-        "Rename Appliance",
-        "Change Type",
-        "Merge Assignment",
+        "Remove Assignment",
+        "Save Assignment",
+        "_saveNilmAssignmentChanges",
+        "No assignment changes to save.",
         "Confirm Appliance",
         "Wrong Appliance",
         "Save Interval",
@@ -1511,6 +1572,10 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
         "Review state:",
     ):
         assert expected in asset
+    assert "Retire" not in asset
+    assert "Rename Appliance" not in asset
+    assert "Change Type" not in asset
+    assert "Merge Assignment" not in asset
     assert "Evidence Window" not in asset
 
 
@@ -1531,71 +1596,145 @@ def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> Non
 
 
 def test_chart_time_ticks_include_date_for_displayed_timezone_boundary() -> None:
-    asset = (
-        ROOT
-        / "custom_components"
-        / "circuitsetup_energy_analyzer"
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-    script = f"""
-const fs = require("fs");
-const vm = require("vm");
-class BrowserDate extends Date {{
-  toDateString() {{
-    return new Intl.DateTimeFormat("en-CA", {{
-      timeZone: "UTC",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }}).format(this);
-  }}
-}}
-const context = {{
-  console,
-  Date: BrowserDate,
-  Intl,
-  URLSearchParams,
-  Event: class {{}},
-  HTMLElement: class {{
-    attachShadow() {{
-      return {{ innerHTML: "", querySelectorAll() {{ return []; }} }};
-    }}
-  }},
-  customElements: {{
-    get() {{ return undefined; }},
-    define() {{}},
-  }},
-  history: {{
-    pushState() {{}},
-    replaceState() {{}},
-  }},
-  window: {{
-    addEventListener() {{}},
-    dispatchEvent() {{}},
-  }},
-}};
-vm.createContext(context);
-const source = fs.readFileSync({json.dumps(str(asset))}, "utf8");
-vm.runInContext(
-  `${{source}}\\nthis.Panel = CircuitSetupEnergyAnalyzerPanel;`,
-  context
-);
+    _run_panel_node_script(
+        """
 const panel = new context.Panel();
-panel._hass = {{ config: {{ time_zone: "America/New_York" }} }};
+panel._hass = { config: { time_zone: "America/New_York" } };
 const ticks = panel._chartTimeTicks(
   Date.parse("2026-06-02T03:30:00Z"),
   Date.parse("2026-06-02T04:30:00Z"),
   () => 0
 );
-if (!ticks.some((tick) => /Jun|6\\//.test(tick.label))) {{
+if (!ticks.some((tick) => /Jun|6\\//.test(tick.label))) {
   const labels = ticks.map((tick) => tick.label).join(" | ");
   throw new Error(
-    `expected a displayed date in HA timezone labels: ${{labels}}`
+    `expected a displayed date in HA timezone labels: ${labels}`
   );
-}}
+}
 """
-    subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
+    )
+
+
+def test_show_on_graph_focuses_matching_nilm_session_window() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._render = () => {};
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-06T00:00:00Z",
+    end: "2026-06-06T04:00:00Z",
+  },
+  sessions: [
+    {
+      signature_fingerprint: "signature-1",
+      start: "2026-06-06T02:00:00Z",
+      end: "2026-06-06T02:30:00Z",
+    },
+  ],
+};
+panel._focusNilmSignatureOnGraph("signature-1");
+const sessionStart = Date.parse("2026-06-06T02:00:00Z");
+const sessionEnd = Date.parse("2026-06-06T02:30:00Z");
+if (!panel._nilmGraphWindow) {
+  throw new Error("expected Show on Graph to set a graph window");
+}
+const missesSession = panel._nilmGraphWindow.start > sessionStart
+  || panel._nilmGraphWindow.end < sessionEnd;
+if (missesSession) {
+  const graphWindow = JSON.stringify(panel._nilmGraphWindow);
+  throw new Error(`expected graph window to include session: ${graphWindow}`);
+}
+if (!/graph sessions/.test(panel._lastActionMessage || "")) {
+  const message = panel._lastActionMessage;
+  throw new Error(`expected visible Show on Graph message, got ${message}`);
+}
+"""
+    )
+
+
+def test_save_assignment_calls_changed_assignment_services() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+  const calls = [];
+  const panel = new context.Panel();
+  panel._render = () => {};
+  panel._scrollToTop = () => {};
+  panel._loadEvidence = async () => {};
+  panel._actionRefreshRouteKey = () => "/test";
+  panel._hass = {
+    callService: async (domain, service, data) => calls.push({
+      domain,
+      service,
+      data,
+    }),
+  };
+  panel.shadowRoot.querySelector = (selector) => {
+    if (selector === "#nilm_assignment_label_0") {
+      return { value: "Dishwasher Prime" };
+    }
+    if (selector === "#nilm_assignment_profile_0") {
+      return { value: "dishwasher" };
+    }
+    if (selector === "#nilm_assignment_merge_target_0") {
+      return { value: "assignment-target" };
+    }
+    return null;
+  };
+  panel._nilmWorkspace = {
+    assignments: [{
+      assignment_id: "assignment-source",
+      display_name: "Dishwasher",
+      appliance_profile: "mixed",
+      actions: {
+        rename: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "rename_nilm_appliance",
+          data: { circuit_id: "mains", assignment_id: "assignment-source" },
+        },
+        change_profile: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "change_nilm_appliance_profile",
+          data: { circuit_id: "mains", assignment_id: "assignment-source" },
+        },
+        merge: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "merge_nilm_assignments",
+          data: {
+            circuit_id: "mains",
+            source_assignment_id: "assignment-source",
+          },
+        },
+      },
+    }],
+  };
+  await panel._saveNilmAssignmentChanges(0);
+  const services = calls.map((call) => call.service).join(",");
+  const expected = [
+    "rename_nilm_appliance",
+    "change_nilm_appliance_profile",
+    "merge_nilm_assignments",
+  ].join(",");
+  if (services !== expected) {
+    throw new Error(`unexpected services: ${services}`);
+  }
+  if (calls[0].data.label !== "Dishwasher Prime") {
+    throw new Error("rename call did not include edited label");
+  }
+  if (calls[1].data.appliance_profile !== "dishwasher") {
+    throw new Error("profile call did not include edited appliance type");
+  }
+  if (calls[2].data.target_assignment_id !== "assignment-target") {
+    throw new Error("merge call did not include selected target");
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
 
 
 def test_daily_action_services_document_entity_targets() -> None:

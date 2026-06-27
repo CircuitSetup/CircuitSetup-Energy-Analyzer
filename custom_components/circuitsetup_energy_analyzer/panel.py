@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260627-axis-ha-timezone"
+PANEL_MODULE_VERSION = "20260627-nilm-workspace-ux"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -402,7 +402,11 @@ def nilm_workspace_payload(
         limit=None,
     )
     label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
-    assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
+    assignments = _nilm_assignments_for_circuit(
+        coordinator,
+        config.circuit_id,
+        label_intervals=all_label_intervals,
+    )
     assignment_options = _nilm_assignment_options(assignments)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
     stored_sessions = _nilm_session_history_for_circuit(
@@ -1294,17 +1298,25 @@ def _nilm_sensor_label_interval_action(
         ATTR_GROUND_TRUTH_ENTITY_ID,
     ]
     ground_truth_options = []
-    seen_entities: set[str] = set()
+    seen_circuits: set[str] = set()
     for overlay in known_load_overlays:
         label = str(overlay.get("name") or overlay.get("circuit_id") or "").strip()
-        for entity_id in _iter_items(overlay.get("entity_ids")):
-            entity_text = str(entity_id or "").strip()
-            if not entity_text or entity_text in seen_entities:
-                continue
-            seen_entities.add(entity_text)
-            ground_truth_options.append(
-                {"value": entity_text, "label": label or entity_text},
-            )
+        circuit_id = str(overlay.get("circuit_id") or "").strip()
+        entity_text = next(
+            (
+                str(entity_id or "").strip()
+                for entity_id in _iter_items(overlay.get("entity_ids"))
+                if str(entity_id or "").strip()
+            ),
+            "",
+        )
+        key = circuit_id or entity_text
+        if not key or key in seen_circuits or not entity_text:
+            continue
+        seen_circuits.add(key)
+        ground_truth_options.append(
+            {"value": entity_text, "label": label or entity_text},
+        )
     if ground_truth_options:
         action["ground_truth_options"] = ground_truth_options
     return action
@@ -1313,6 +1325,8 @@ def _nilm_sensor_label_interval_action(
 def _nilm_assignments_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    label_intervals: Iterable[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     store_data = getattr(coordinator, "store_data", None)
     assignments_by_circuit = getattr(
@@ -1328,7 +1342,12 @@ def _nilm_assignments_for_circuit(
         if isinstance(item, dict)
     ]
     return [
-        _nilm_assignment_payload(circuit_id, item, assignments)
+        _nilm_assignment_payload(
+            circuit_id,
+            item,
+            assignments,
+            label_intervals=label_intervals,
+        )
         for item in assignments
     ]
 
@@ -1370,6 +1389,8 @@ def _nilm_assignment_payload(
     circuit_id: str,
     assignment: Mapping[str, Any],
     assignments: Iterable[Mapping[str, Any]] = (),
+    *,
+    label_intervals: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     payload = {
         str(key): value
@@ -1414,11 +1435,12 @@ def _nilm_assignment_payload(
                 {"value": profile, "label": friendly_feature_name(profile)},
             )
         actions["change_profile"]["profile_options"] = profile_options
-        actions["validate_history"] = {
-            "domain": DOMAIN,
-            "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
-            "data": dict(action_data),
-        }
+        if _nilm_assignment_has_ground_truth_intervals(payload, label_intervals):
+            actions["validate_history"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+                "data": dict(action_data),
+            }
         target_options = _nilm_assignment_target_options(assignment_id, assignments)
         if target_options:
             actions["merge"] = {
@@ -1451,6 +1473,18 @@ def _nilm_assignment_payload(
     if actions:
         payload["actions"] = actions
     return payload
+
+
+def _nilm_assignment_has_ground_truth_intervals(
+    assignment: Mapping[str, Any],
+    label_intervals: Iterable[Mapping[str, Any]],
+) -> bool:
+    return any(
+        isinstance(interval, Mapping)
+        and str(interval.get("ground_truth_entity_id") or "").strip()
+        and _nilm_validation_assignment_matches(interval, assignment)
+        for interval in label_intervals
+    )
 
 
 def _nilm_assignment_target_options(
