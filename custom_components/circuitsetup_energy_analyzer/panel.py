@@ -2471,10 +2471,30 @@ async def _async_register_panel(hass: Any) -> bool:
         "trust_external": False,
         "module_url": module_url,
     }
-    panel_custom = _panel_custom_component(hass)
-    register_panel = getattr(panel_custom, "async_register_panel", None)
     try:
-        if register_panel is not None:
+        frontend = _frontend_component(hass)
+        register_built_in_panel = getattr(
+            frontend,
+            "async_register_built_in_panel",
+            None,
+        )
+        if register_built_in_panel is not None:
+            await _async_call_component_helper(
+                register_built_in_panel,
+                hass,
+                component_name="custom",
+                sidebar_title=None,
+                sidebar_icon=None,
+                frontend_url_path=PANEL_URL_PATH,
+                config={**config, "_panel_custom": custom_panel_config},
+                require_admin=False,
+                config_panel_domain=None,
+            )
+        else:
+            panel_custom = _panel_custom_component(hass)
+            register_panel = getattr(panel_custom, "async_register_panel", None)
+            if register_panel is None:
+                return False
             await _async_call_component_helper(
                 register_panel,
                 hass,
@@ -2486,26 +2506,6 @@ async def _async_register_panel(hass: Any) -> bool:
                 config=config,
                 embed_iframe=False,
                 require_admin=False,
-            )
-        else:
-            frontend = _frontend_component(hass)
-            register_built_in_panel = getattr(
-                frontend,
-                "async_register_built_in_panel",
-                None,
-            )
-            if register_built_in_panel is None:
-                return False
-            await _async_call_component_helper(
-                register_built_in_panel,
-                hass,
-                component_name="custom",
-                sidebar_title=None,
-                sidebar_icon=None,
-                frontend_url_path=PANEL_URL_PATH,
-                config={**config, "_panel_custom": custom_panel_config},
-                require_admin=False,
-                config_panel_domain=None,
             )
     except ValueError:
         return False
