@@ -2534,7 +2534,7 @@ async def _maybe_await(value: Any) -> Any:
 def _panel_custom_component(hass: Any) -> Any:
     components = getattr(hass, "components", None)
     component = getattr(components, "panel_custom", None)
-    if component is not None:
+    if getattr(component, "async_register_panel", None) is not None:
         return component
     if components is None:
         return None

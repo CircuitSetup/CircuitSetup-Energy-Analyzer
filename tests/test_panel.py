@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -222,6 +223,28 @@ def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
 
     assert 'new CustomEvent("location-changed"' in panel_script
     assert "detail: { replace: false }" in panel_script
+
+
+def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _panel_custom_component,
+    )
+
+    components_module = ModuleType("homeassistant.components")
+    panel_custom_module = ModuleType("homeassistant.components.panel_custom")
+    panel_custom_module.async_register_panel = object()
+    components_module.panel_custom = panel_custom_module
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.panel_custom",
+        panel_custom_module,
+    )
+    hass = SimpleNamespace(components=SimpleNamespace(panel_custom=SimpleNamespace()))
+
+    assert _panel_custom_component(hass) is panel_custom_module
 
 
 def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
