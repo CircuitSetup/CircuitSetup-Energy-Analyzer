@@ -21,11 +21,9 @@
 ## Codegraph
 
 - Read `docs/codegraph/CODEGRAPH.md` before cross-cutting changes or unfamiliar module work.
-- Before editing a module, inspect its node in `docs/codegraph/codegraph.json`, inspect inbound and outbound imports in `docs/codegraph/generated/codegraph.generated.json`, and identify related tests in `tests/` and `tests_homeassistant/`.
-- Use `docs/codegraph/CODEGRAPH.md` for semantic ownership and `docs/codegraph/generated/CODEGRAPH.generated.md` for exact AST-derived imports, definitions, entrypoints, and import cycles.
+- Before editing a module, use the curated codegraph for semantic ownership, and run the local generator when exact AST-derived imports, definitions, entrypoints, or import cycles matter.
 - Regenerate the checked-out graph after adding, removing, or moving modules; changing imports, entrypoints, processor registration, platform surfaces, panel API endpoints, storage ownership, or coordinator pipeline structure.
-- Regenerate with `.codex/scripts/update-codegraph.ps1`, which writes to `docs/codegraph/generated`.
-- Include generated graph changes in the same commit/PR as the structural code changes that required regeneration.
+- Regenerate with `.codex/scripts/update-codegraph.ps1`; generated output is local-only and should not be committed.
 
 ## Structural Search
 

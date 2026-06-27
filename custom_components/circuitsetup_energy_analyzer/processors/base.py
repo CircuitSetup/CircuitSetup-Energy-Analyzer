@@ -8,8 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..alerting import Observation
-from ..models import AlertEvidence, CircuitConfig, CircuitEvent
-from ..normalize import NormalizedCircuitSample
+from ..models import AlertEvidence, CircuitEvent
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -66,18 +65,4 @@ class AlertPolicy(Protocol):
 
     def observe(self, observation: Observation) -> AlertEvidence | None:
         """Fold an observation into the alert policy."""
-
-
-class FeatureProcessor(Protocol):
-    """Feature processor contract."""
-
-    name: str
-
-    def process(
-        self,
-        sample: NormalizedCircuitSample,
-        circuit_config: CircuitConfig,
-        context: ProcessingContext,
-    ) -> FeatureResult:
-        """Process a circuit sample and return coordinator-applied results."""
 

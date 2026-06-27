@@ -52,14 +52,8 @@ Choose groups explicitly from the Entity Detail Level options screen.
 
 ## Count Evidence
 
-Local count reports can be regenerated with:
-
-```powershell
-python scripts/report_entity_inventory.py
-```
-
-Generated development artifacts are local-only and are not checked in.
-
 In the representative matrix, Simple creates 10 or fewer per-circuit entities
 and Standard creates 17 or fewer. Expert creates only explicitly selected
 groups; even selecting every group stays at or below 50 per-circuit entities.
+The compact model also replaces the old Start/End Maintenance buttons with the
+single maintenance switch.

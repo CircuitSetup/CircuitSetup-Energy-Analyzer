@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -8,32 +7,23 @@ from typing import Any
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
+    HomeAssistantError,
+    async_call_or_raise,
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    entity_detail_level_for_coordinator,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     supports_daily_circuit_controls,
 )
-from .entity_catalog import (
-    compact_creation_rule_for_entity,
-    compact_rule_is_setup_managed,
-    legacy_compatibility_keys_for_setup,
-    selected_entity_groups_for_coordinator,
-    should_create_entity,
-)
+from .entity_catalog import compact_descriptions_for_setup
 
 try:
     from homeassistant.components.button import ButtonEntity
-    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class ButtonEntity:
         """Fallback button base for tests without Home Assistant."""
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +181,7 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
                 f"right now because {reason.replace('_', ' ')}: "
                 f"{_availability_reason_label(reason)}"
             )
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
             self.entity_description.name_suffix,
@@ -283,7 +273,7 @@ class GlobalAnalyzerButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Run the integration-wide action."""
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
             self.entity_description.name,
@@ -296,18 +286,24 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[ButtonEntity] = []
-    compatibility_keys = legacy_compatibility_keys_for_setup(
-        hass,
-        entry_id=entry_id,
-        coordinator=coordinator,
-    )
-    detail_level = entity_detail_level_for_coordinator(coordinator)
-    selected_groups = selected_entity_groups_for_coordinator(coordinator)
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
         circuit = circuit_info_from_config(raw_circuit)
         if circuit is None:
             continue
+        descriptions = tuple(
+            description
+            for description in CIRCUIT_BUTTON_DESCRIPTIONS
+            if button_description_applies(description, raw_circuit, coordinator)
+        )
+        descriptions = compact_descriptions_for_setup(
+            "button",
+            descriptions,
+            raw_circuit,
+            coordinator,
+            hass=hass,
+            entry_id=entry_id,
+        )
         entities.extend(
             CircuitAnalyzerButton(
                 coordinator,
@@ -315,16 +311,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
                 circuit=circuit,
                 description=description,
             )
-            for description in CIRCUIT_BUTTON_DESCRIPTIONS
-            if button_description_applies(description, raw_circuit, coordinator)
-            and _button_description_should_create(
-                description,
-                circuit,
-                coordinator,
-                detail_level=detail_level,
-                selected_groups=selected_groups,
-                legacy_compatibility_keys=compatibility_keys,
-            )
+            for description in descriptions
         )
 
     entities.extend(
@@ -365,29 +352,6 @@ def button_description_applies(
     }:
         return True
     return supports_daily_circuit_controls(circuit)
-
-
-def _button_description_should_create(
-    description: CircuitButtonDescription,
-    circuit: Any,
-    coordinator: Any,
-    *,
-    detail_level: str,
-    selected_groups: set[Any],
-    legacy_compatibility_keys: set[str],
-) -> bool:
-    rule = compact_creation_rule_for_entity("button", description.key)
-    if not compact_rule_is_setup_managed(rule):
-        return True
-    return should_create_entity(
-        rule=rule,
-        circuit=circuit,
-        coordinator=coordinator,
-        detail_level=detail_level,
-        selected_groups=selected_groups,
-        legacy_compatibility_keys=legacy_compatibility_keys,
-        applicability_already_checked=True,
-    )
 
 
 def _button_availability_reason(
@@ -474,20 +438,3 @@ def _has_active_alert(state: Any, circuit_id: str) -> bool:
         return len(alerts) > 0
     except TypeError:
         return bool(alerts)
-
-
-async def _call_or_raise(
-    target: Any,
-    method_name: str,
-    action_label: str,
-    *args: Any,
-) -> None:
-    method = getattr(target, method_name, None)
-    if not callable(method):
-        raise HomeAssistantError(
-            f"Cannot {action_label.strip().lower()} right now because the "
-            "analyzer action is unavailable."
-        )
-    result = method(*args)
-    if inspect.isawaitable(result):
-        await result

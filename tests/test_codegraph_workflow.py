@@ -12,9 +12,9 @@ def test_codegraph_is_wired_into_codex_workflow() -> None:
 
     assert "## Codegraph" in agents
     assert "docs/codegraph/CODEGRAPH.md" in agents
-    assert "docs/codegraph/generated/codegraph.generated.json" in agents
     assert ".codex/scripts/update-codegraph.ps1" in agents
-    assert "docs/codegraph/generated" in agents
+    assert "docs/codegraph/codegraph.json" not in agents
+    assert "docs/codegraph/generated/codegraph.generated.json" not in agents
 
     assert "docs/codegraph/generate_codegraph.py" in codex_readme
     assert "python generate_codegraph.py" not in codex_readme
@@ -23,3 +23,6 @@ def test_codegraph_is_wired_into_codex_workflow() -> None:
     update_script_text = update_script.read_text(encoding="utf-8")
     assert "docs\\codegraph\\generate_codegraph.py" in update_script_text
     assert "--output-dir docs/codegraph/generated" in update_script_text
+
+    assert not (ROOT / "docs" / "codegraph" / "codegraph.json").exists()
+    assert not (ROOT / "docs" / "codegraph" / "generated").exists()

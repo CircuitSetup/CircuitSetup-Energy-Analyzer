@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -8,31 +7,22 @@ from typing import Any
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
+    async_call_or_raise,
     circuit_info_from_config,
     circuits_for_entities,
     device_identifiers_for_entities,
-    entity_detail_level_for_coordinator,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     supports_daily_circuit_controls,
 )
-from .entity_catalog import (
-    compact_creation_rule_for_entity,
-    legacy_compatibility_keys_for_setup,
-    selected_entity_groups_for_coordinator,
-    should_create_entity,
-)
+from .entity_catalog import compact_descriptions_for_setup
 
 try:
     from homeassistant.components.switch import SwitchEntity
-    from homeassistant.exceptions import HomeAssistantError
 except ModuleNotFoundError:
 
     class SwitchEntity:
         """Fallback switch base for tests without Home Assistant."""
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +115,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         del kwargs
         if self.is_on:
             return
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             "async_start_maintenance",
             self.entity_description.name_suffix,
@@ -140,7 +130,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         del kwargs
         if not self.is_on:
             return
-        await _call_or_raise(
+        await async_call_or_raise(
             self.coordinator,
             "async_end_maintenance",
             self.entity_description.name_suffix,
@@ -166,7 +156,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in CIRCUIT_SWITCH_DESCRIPTIONS
             if switch_description_applies(description, raw_circuit, coordinator)
         )
-        descriptions = _compact_switch_descriptions_for_setup(
+        descriptions = compact_descriptions_for_setup(
+            "switch",
             descriptions,
             raw_circuit,
             coordinator,
@@ -199,38 +190,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     async_add_entities(entities)
 
 
-def _compact_switch_descriptions_for_setup(
-    descriptions: tuple[CircuitSwitchDescription, ...],
-    circuit: Any,
-    coordinator: Any,
-    *,
-    hass: Any,
-    entry_id: str,
-) -> tuple[CircuitSwitchDescription, ...]:
-    compatibility_keys = legacy_compatibility_keys_for_setup(
-        hass,
-        entry_id=entry_id,
-        coordinator=coordinator,
-    )
-    selected_groups = selected_entity_groups_for_coordinator(coordinator)
-    detail_level = entity_detail_level_for_coordinator(coordinator)
-    compact_descriptions: list[CircuitSwitchDescription] = []
-    for description in descriptions:
-        rule = compact_creation_rule_for_entity("switch", description.key)
-        if not should_create_entity(
-            rule=rule,
-            circuit=circuit,
-            coordinator=coordinator,
-            detail_level=detail_level,
-            selected_groups=selected_groups,
-            legacy_compatibility_keys=compatibility_keys,
-            applicability_already_checked=True,
-        ):
-            continue
-        compact_descriptions.append(description)
-    return tuple(compact_descriptions)
-
-
 def switch_description_applies(
     description: CircuitSwitchDescription,
     circuit: Any,
@@ -258,20 +217,3 @@ def _maintenance_actions_available(coordinator: Any) -> bool:
     return callable(getattr(coordinator, "async_start_maintenance", None)) and callable(
         getattr(coordinator, "async_end_maintenance", None)
     )
-
-
-async def _call_or_raise(
-    target: Any,
-    method_name: str,
-    action_label: str,
-    *args: Any,
-) -> None:
-    method = getattr(target, method_name, None)
-    if not callable(method):
-        raise HomeAssistantError(
-            f"Cannot {action_label.strip().lower()} right now because the "
-            "analyzer action is unavailable."
-        )
-    result = method(*args)
-    if inspect.isawaitable(result):
-        await result

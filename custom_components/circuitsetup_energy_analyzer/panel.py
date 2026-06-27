@@ -100,8 +100,6 @@ PANEL_MODULE_VERSION = "20260626-nilm-workspace-route-v2"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
-NILM_WORKSPACE_PLAN_API_PATH = f"/api/{DOMAIN}/nilm/workspace"
-NILM_WORKSPACE_HISTORY_PLAN_API_PATH = f"/api/{DOMAIN}/nilm/history"
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
 MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
 MAX_NILM_WORKSPACE_HISTORY_ENTITIES = 8
@@ -189,20 +187,6 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
             hours=request.query.get("hours"),
         )
         return web.json_response(payload)
-
-
-class NilmWorkspacePlanView(NilmWorkspaceView):
-    """Plan-compatible alias for the NILM workspace endpoint."""
-
-    url = NILM_WORKSPACE_PLAN_API_PATH
-    name = f"api:{DOMAIN}:nilm_workspace_plan"
-
-
-class NilmWorkspaceHistoryPlanView(NilmWorkspaceHistoryView):
-    """Plan-compatible alias for the NILM history endpoint."""
-
-    url = NILM_WORKSPACE_HISTORY_PLAN_API_PATH
-    name = f"api:{DOMAIN}:nilm_workspace_history_plan"
 
 
 async def async_setup_panel(hass: Any) -> bool:
@@ -2473,8 +2457,6 @@ def _register_view(hass: Any) -> None:
         register_view(AlertEvidenceView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceHistoryView())
-        register_view(NilmWorkspacePlanView())
-        register_view(NilmWorkspaceHistoryPlanView())
 
 
 async def _async_register_panel(hass: Any) -> bool:

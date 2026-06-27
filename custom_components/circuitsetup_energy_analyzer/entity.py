@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,9 +19,13 @@ from .const import (
 from .models import ApplianceProfile, SensorRole
 
 try:
+    from homeassistant.exceptions import HomeAssistantError
     from homeassistant.helpers.entity import EntityCategory
     from homeassistant.helpers.update_coordinator import CoordinatorEntity
 except ModuleNotFoundError:
+
+    class HomeAssistantError(Exception):
+        """Fallback Home Assistant error for tests without Home Assistant."""
 
     class EntityCategory:
         """Fallback entity category constants for tests without Home Assistant."""
@@ -77,6 +82,24 @@ def entity_enabled_default_for_tier(
     if tier is EntityTier.FEATURE:
         return level in {ENTITY_DETAIL_STANDARD, ENTITY_DETAIL_EXPERT}
     return level == ENTITY_DETAIL_EXPERT
+
+
+async def async_call_or_raise(
+    target: Any,
+    method_name: str,
+    action_label: str,
+    *args: Any,
+) -> None:
+    """Call a coordinator action or raise the shared Home Assistant error."""
+    method = getattr(target, method_name, None)
+    if not callable(method):
+        raise HomeAssistantError(
+            f"Cannot {action_label.strip().lower()} right now because the "
+            "analyzer action is unavailable."
+        )
+    result = method(*args)
+    if inspect.isawaitable(result):
+        await result
 
 
 def desired_disabled_by_for_entity_tier(

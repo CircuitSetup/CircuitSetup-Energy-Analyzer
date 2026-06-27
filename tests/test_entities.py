@@ -56,6 +56,25 @@ def _use_entity_detail(
     return coordinator
 
 
+@pytest.mark.asyncio
+async def test_async_call_or_raise_awaits_action_and_reports_missing_method() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        HomeAssistantError,
+        async_call_or_raise,
+    )
+
+    calls: list[str] = []
+
+    async def action(value: str) -> None:
+        calls.append(value)
+
+    await async_call_or_raise(SimpleNamespace(action=action), "action", "Run", "ok")
+
+    assert calls == ["ok"]
+    with pytest.raises(HomeAssistantError, match="analyzer action is unavailable"):
+        await async_call_or_raise(SimpleNamespace(), "missing", "Run")
+
+
 def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import (
         stale_device_registry_device_ids,
@@ -3257,7 +3276,7 @@ def test_utility_comparison_sensors_merge_config_sources_per_circuit() -> None:
 
 def test_settings_suggestions_sensor_has_translation_entry() -> None:
     strings = json.loads(
-        (DOMAIN_PATH / "strings.json").read_text(encoding="utf-8"),
+        (DOMAIN_PATH / "translations" / "en.json").read_text(encoding="utf-8"),
     )
 
     assert strings["entity"]["sensor"]["settings_suggestions"] == {
