@@ -2472,44 +2472,60 @@ async def _async_register_panel(hass: Any) -> bool:
         "module_url": module_url,
     }
     try:
-        frontend = _frontend_component(hass)
+        frontend = _frontend_registration_component(hass)
         register_built_in_panel = getattr(
             frontend,
             "async_register_built_in_panel",
             None,
         )
         if register_built_in_panel is not None:
-            await _async_call_component_helper(
-                register_built_in_panel,
-                hass,
-                component_name="custom",
-                sidebar_title=None,
-                sidebar_icon=None,
-                frontend_url_path=PANEL_URL_PATH,
-                config={**config, "_panel_custom": custom_panel_config},
-                require_admin=False,
-                config_panel_domain=None,
-            )
-        else:
-            panel_custom = _panel_custom_component(hass)
-            register_panel = getattr(panel_custom, "async_register_panel", None)
-            if register_panel is None:
-                return False
-            await _async_call_component_helper(
-                register_panel,
-                hass,
-                frontend_url_path=PANEL_URL_PATH,
-                webcomponent_name=PANEL_ELEMENT_NAME,
-                # Keep the evidence page available for notification links without
-                # adding a standalone entry to the Home Assistant sidebar.
-                module_url=module_url,
-                config=config,
-                embed_iframe=False,
-                require_admin=False,
-            )
+            try:
+                await _async_call_component_helper(
+                    register_built_in_panel,
+                    hass,
+                    component_name="custom",
+                    sidebar_title=None,
+                    sidebar_icon=None,
+                    frontend_url_path=PANEL_URL_PATH,
+                    config={**config, "_panel_custom": custom_panel_config},
+                    require_admin=False,
+                    config_panel_domain=None,
+                )
+                return True
+            except AttributeError:
+                pass
+
+        panel_custom = _panel_custom_component(hass)
+        register_panel = getattr(panel_custom, "async_register_panel", None)
+        if register_panel is None:
+            return False
+        await _async_call_component_helper(
+            register_panel,
+            hass,
+            frontend_url_path=PANEL_URL_PATH,
+            webcomponent_name=PANEL_ELEMENT_NAME,
+            # Keep the evidence page available for notification links without
+            # adding a standalone entry to the Home Assistant sidebar.
+            module_url=module_url,
+            config=config,
+            embed_iframe=False,
+            require_admin=False,
+        )
     except ValueError:
         return False
     return True
+
+
+def _frontend_registration_component(hass: Any) -> Any:
+    frontend = _frontend_component(hass)
+    if getattr(frontend, "async_register_built_in_panel", None) is not None:
+        return frontend
+    try:
+        from homeassistant.components import frontend as frontend_module
+
+        return frontend_module
+    except ModuleNotFoundError:
+        return frontend
 
 
 async def _async_remove_existing_panel(hass: Any) -> None:
