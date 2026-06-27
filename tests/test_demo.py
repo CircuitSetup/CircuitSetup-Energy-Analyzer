@@ -10,7 +10,14 @@ def test_demo_module_exposes_shared_source_metadata() -> None:
     from custom_components.circuitsetup_energy_analyzer import demo
 
     assert demo.DEMO_SOURCE_ENTITY_PREFIX == "sensor.cs_energy_analyzer_demo_"
+    assert Path(demo.__file__).with_name("demo_sources.json").exists()
     assert "sensor.cs_energy_analyzer_demo_hvac_l1_active_power" in (
+        demo.DEMO_SOURCE_ENTITY_IDS
+    )
+    assert "sensor.cs_energy_analyzer_demo_sump_pump_active_power" in (
+        demo.DEMO_SOURCE_ENTITY_IDS
+    )
+    assert "sensor.cs_energy_analyzer_demo_oven_l2_active_power" in (
         demo.DEMO_SOURCE_ENTITY_IDS
     )
     assert "sensor.cs_energy_analyzer_demo_mains_l1_voltage" in (
@@ -20,6 +27,7 @@ def test_demo_module_exposes_shared_source_metadata() -> None:
         demo.DEMO_SOURCE_ENTITY_IDS
     )
     assert demo.DEMO_SOURCE_VALUES["washer"][SensorRole.REAL_POWER] == 420.0
+    assert demo.DEMO_SOURCE_VALUES["microwave"][SensorRole.REAL_POWER] == 1250.0
     assert demo.DEMO_SOURCE_ROLE_METADATA[SensorRole.REAL_POWER] == {
         "device_class": "power",
         "state_class": "measurement",
@@ -44,6 +52,8 @@ def test_demo_module_exposes_shared_history_seed_templates() -> None:
         28.5,
     )
     assert demo.demo_today_usage("car_charger", 151.4) == 26.0
+    assert demo.demo_prior_usage("sump_pump", 3) == (0.4, 0.9, 0.3)
+    assert demo.demo_today_usage("microwave", 3.2) == 0.8
     assert demo.demo_circuit_key_from_id(
         "cs_energy_analyzer_demo_water_heater"
     ) == "water_heater"
