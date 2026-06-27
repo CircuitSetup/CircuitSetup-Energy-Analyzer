@@ -1376,6 +1376,28 @@ def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
     assert payload["circuit"]["name"] == "Mains NILM"
 
 
+def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [_coordinator(config=mains_config, configs=(mains_config,))],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["history"]["entities"] == ["sensor.mains_power"]
+
+
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,

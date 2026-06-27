@@ -1127,6 +1127,7 @@ def _is_nilm_config(config: CircuitConfig) -> bool:
         or config.appliance_profile is ApplianceProfile.MAINS_NILM
         or str(config.mode) == CircuitMode.MAINS_NILM.value
         or str(config.appliance_profile) == ApplianceProfile.MAINS_NILM.value
+        or (config.circuit_id == "mains" and bool(_sensor_entity_ids(config)))
     )
 
 
