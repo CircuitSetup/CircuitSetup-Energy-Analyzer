@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
 from .models import (
     ApplianceProfile,
     BaselineStats,
@@ -10,151 +17,86 @@ from .models import (
 
 DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
 DEMO_HISTORY_SEED_VERSION = 1
-
-DEMO_SOURCE_METRICS = (
-    "energy",
-    "active_power",
-    "current",
-    "power_factor",
-    "reactive_power",
-    "apparent_power",
-)
-DEMO_SOURCE_ENTITY_IDS = tuple(
-    f"sensor.cs_energy_analyzer_demo_{leg}_{metric}"
-    for leg in ("mains_l1", "mains_l2")
-    for metric in (*DEMO_SOURCE_METRICS, "voltage")
-) + tuple(
-    f"sensor.cs_energy_analyzer_demo_{circuit}_{metric}"
-    for circuit in ("refrigerator", "washer", "pool_pump")
-    for metric in DEMO_SOURCE_METRICS
-) + tuple(
-    f"sensor.cs_energy_analyzer_demo_{circuit}_{leg}_{metric}"
-    for circuit in ("hvac", "water_heater", "dryer", "car_charger")
-    for leg in ("l1", "l2")
-    for metric in DEMO_SOURCE_METRICS
+DEMO_SOURCE_DATA_PATH = Path(__file__).with_name("demo_sources.json")
+DEMO_NILM_WORKSPACE_DATA_PATH = Path(__file__).with_name(
+    "demo_nilm_workspace.json",
 )
 
-DEMO_SOURCE_VALUES: dict[str, dict[SensorRole, float]] = {
-    "mains_l1": {
-        SensorRole.ENERGY: 868.4,
-        SensorRole.REAL_POWER: 1850.0,
-        SensorRole.CURRENT: 15.4,
-        SensorRole.POWER_FACTOR: 0.96,
-        SensorRole.REACTIVE_POWER: 520.0,
-        SensorRole.APPARENT_POWER: 1927.0,
-        SensorRole.VOLTAGE: 119.6,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "mains_l2": {
-        SensorRole.ENERGY: 852.7,
-        SensorRole.REAL_POWER: 1680.0,
-        SensorRole.CURRENT: 14.1,
-        SensorRole.POWER_FACTOR: 0.95,
-        SensorRole.REACTIVE_POWER: 470.0,
-        SensorRole.APPARENT_POWER: 1768.0,
-        SensorRole.VOLTAGE: 120.3,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "refrigerator": {
-        SensorRole.ENERGY: 52.6,
-        SensorRole.REAL_POWER: 285.0,
-        SensorRole.CURRENT: 2.8,
-        SensorRole.POWER_FACTOR: 0.58,
-        SensorRole.REACTIVE_POWER: 400.0,
-        SensorRole.APPARENT_POWER: 492.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "hvac_l1": {
-        SensorRole.ENERGY: 188.4,
-        SensorRole.REAL_POWER: 3300.0,
-        SensorRole.CURRENT: 28.0,
-        SensorRole.POWER_FACTOR: 0.72,
-        SensorRole.REACTIVE_POWER: 3100.0,
-        SensorRole.APPARENT_POWER: 4580.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "hvac_l2": {
-        SensorRole.ENERGY: 171.9,
-        SensorRole.REAL_POWER: 900.0,
-        SensorRole.CURRENT: 7.4,
-        SensorRole.POWER_FACTOR: 0.95,
-        SensorRole.REACTIVE_POWER: 300.0,
-        SensorRole.APPARENT_POWER: 947.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "water_heater_l1": {
-        SensorRole.ENERGY: 84.3,
-        SensorRole.REAL_POWER: 2050.0,
-        SensorRole.CURRENT: 17.2,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 210.0,
-        SensorRole.APPARENT_POWER: 2071.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "water_heater_l2": {
-        SensorRole.ENERGY: 84.1,
-        SensorRole.REAL_POWER: 2050.0,
-        SensorRole.CURRENT: 17.1,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 205.0,
-        SensorRole.APPARENT_POWER: 2071.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "washer": {
-        SensorRole.ENERGY: 14.2,
-        SensorRole.REAL_POWER: 420.0,
-        SensorRole.CURRENT: 4.2,
-        SensorRole.POWER_FACTOR: 0.83,
-        SensorRole.REACTIVE_POWER: 280.0,
-        SensorRole.APPARENT_POWER: 506.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "dryer_l1": {
-        SensorRole.ENERGY: 63.7,
-        SensorRole.REAL_POWER: 2600.0,
-        SensorRole.CURRENT: 21.8,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 260.0,
-        SensorRole.APPARENT_POWER: 2626.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "dryer_l2": {
-        SensorRole.ENERGY: 63.1,
-        SensorRole.REAL_POWER: 2550.0,
-        SensorRole.CURRENT: 21.2,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 250.0,
-        SensorRole.APPARENT_POWER: 2576.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "car_charger_l1": {
-        SensorRole.ENERGY: 151.4,
-        SensorRole.REAL_POWER: 4600.0,
-        SensorRole.CURRENT: 38.5,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 460.0,
-        SensorRole.APPARENT_POWER: 4646.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "car_charger_l2": {
-        SensorRole.ENERGY: 150.8,
-        SensorRole.REAL_POWER: 4550.0,
-        SensorRole.CURRENT: 37.9,
-        SensorRole.POWER_FACTOR: 0.99,
-        SensorRole.REACTIVE_POWER: 450.0,
-        SensorRole.APPARENT_POWER: 4596.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
-    "pool_pump": {
-        SensorRole.ENERGY: 77.6,
-        SensorRole.REAL_POWER: 950.0,
-        SensorRole.CURRENT: 10.1,
-        SensorRole.POWER_FACTOR: 0.86,
-        SensorRole.REACTIVE_POWER: 580.0,
-        SensorRole.APPARENT_POWER: 1105.0,
-        SensorRole.FREQUENCY: 60.0,
-    },
+_DEMO_SOURCE_ENTITY_SENSOR_ROLES = (
+    SensorRole.ENERGY,
+    SensorRole.REAL_POWER,
+    SensorRole.CURRENT,
+    SensorRole.POWER_FACTOR,
+    SensorRole.REACTIVE_POWER,
+    SensorRole.APPARENT_POWER,
+    SensorRole.VOLTAGE,
+)
+_DEMO_SOURCE_ENTITY_ROLE_SUFFIXES = {
+    SensorRole.REAL_POWER: "active_power",
 }
+
+
+@lru_cache(maxsize=1)
+def _demo_source_data() -> dict[str, Any]:
+    return json.loads(DEMO_SOURCE_DATA_PATH.read_text(encoding="utf-8"))
+
+
+def _demo_source_values() -> dict[str, dict[SensorRole, float]]:
+    values: dict[str, dict[SensorRole, float]] = {}
+    raw_values = _demo_source_data().get("source_values", {})
+    if not isinstance(raw_values, Mapping):
+        return values
+    for circuit_id, raw_circuit_values in raw_values.items():
+        if not isinstance(raw_circuit_values, Mapping):
+            continue
+        circuit_values: dict[SensorRole, float] = {}
+        for role_value, raw_value in raw_circuit_values.items():
+            try:
+                role = SensorRole(str(role_value))
+                circuit_values[role] = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+        if circuit_values:
+            values[str(circuit_id)] = circuit_values
+    return values
+
+
+def _demo_source_entity_ids(
+    source_values: Mapping[str, Mapping[SensorRole, float]],
+) -> tuple[str, ...]:
+    return tuple(
+        f"{DEMO_SOURCE_ENTITY_PREFIX}{circuit_id}_"
+        f"{_DEMO_SOURCE_ENTITY_ROLE_SUFFIXES.get(role, role.value)}"
+        for circuit_id, circuit_values in source_values.items()
+        for role in circuit_values
+        if role in _DEMO_SOURCE_ENTITY_SENSOR_ROLES
+    )
+
+
+def _demo_tuple_mapping(key: str) -> dict[str, tuple[float, ...]]:
+    values: dict[str, tuple[float, ...]] = {}
+    raw_values = _demo_source_data().get(key, {})
+    if not isinstance(raw_values, Mapping):
+        return values
+    for circuit_id, raw_series in raw_values.items():
+        if not isinstance(raw_series, list):
+            continue
+        values[str(circuit_id)] = tuple(float(value) for value in raw_series)
+    return values
+
+
+def _demo_float_mapping(key: str) -> dict[str, float]:
+    raw_values = _demo_source_data().get(key, {})
+    if not isinstance(raw_values, Mapping):
+        return {}
+    return {
+        str(circuit_id): float(value)
+        for circuit_id, value in raw_values.items()
+    }
+
+
+DEMO_SOURCE_VALUES = _demo_source_values()
+DEMO_SOURCE_ENTITY_IDS = _demo_source_entity_ids(DEMO_SOURCE_VALUES)
 
 DEMO_SOURCE_ROLE_METADATA: dict[SensorRole, dict[str, str]] = {
     SensorRole.ENERGY: {
@@ -207,28 +149,8 @@ DEMO_SOURCE_ROLE_METADATA: dict[SensorRole, dict[str, str]] = {
     },
 }
 
-DEMO_PRIOR_DAILY_USAGE_KWH: dict[str, tuple[float, ...]] = {
-    "refrigerator": (1.1, 1.2, 1.3, 1.1, 1.4, 1.2, 1.3),
-    "hvac": (24.0, 28.5, 31.2, 27.8, 33.1, 29.4, 30.6),
-    "water_heater": (5.8, 6.1, 5.9, 6.4, 6.0, 6.2, 5.7),
-    "washer": (0.7, 0.9, 0.6, 1.1, 0.8, 1.0, 0.7),
-    "dryer": (2.7, 3.2, 2.9, 3.5, 3.0, 3.4, 2.8),
-    "pool_pump": (4.2, 4.4, 4.1, 4.5, 4.3, 4.6, 4.2),
-    "car_charger": (9.6, 12.4, 10.1, 14.8, 8.5, 13.2, 11.1),
-    "mains_nilm": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
-    "mains": (46.0, 51.2, 49.8, 54.4, 52.1, 48.7, 50.3),
-}
-DEMO_TODAY_USAGE_KWH: dict[str, float] = {
-    "refrigerator": 2.6,
-    "hvac": 62.0,
-    "water_heater": 10.8,
-    "washer": 1.8,
-    "dryer": 6.7,
-    "pool_pump": 7.4,
-    "car_charger": 26.0,
-    "mains_nilm": 78.0,
-    "mains": 78.0,
-}
+DEMO_PRIOR_DAILY_USAGE_KWH = _demo_tuple_mapping("prior_daily_usage_kwh")
+DEMO_TODAY_USAGE_KWH = _demo_float_mapping("today_usage_kwh")
 
 
 def is_demo_source_entity_id(entity_id: str) -> bool:
@@ -313,3 +235,41 @@ def demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
+
+
+def demo_nilm_workspace_seed(
+    now: datetime,
+    *,
+    circuit_id: str = "mains_nilm",
+) -> dict[str, Any]:
+    """Return the bundled NILM demo workspace scenario for a point in time."""
+    return _resolve_demo_seed_values(
+        _demo_nilm_workspace_seed_template(),
+        now,
+        circuit_id,
+    )
+
+
+@lru_cache(maxsize=1)
+def _demo_nilm_workspace_seed_template() -> dict[str, Any]:
+    return json.loads(DEMO_NILM_WORKSPACE_DATA_PATH.read_text(encoding="utf-8"))
+
+
+def _resolve_demo_seed_values(value: Any, now: datetime, circuit_id: str) -> Any:
+    if isinstance(value, dict):
+        if set(value) == {"offset_seconds"}:
+            return (
+                now + timedelta(seconds=float(value["offset_seconds"]))
+            ).isoformat()
+        return {
+            str(key): _resolve_demo_seed_values(item, now, circuit_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _resolve_demo_seed_values(item, now, circuit_id)
+            for item in value
+        ]
+    if value == "$circuit_id":
+        return circuit_id
+    return value

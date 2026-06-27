@@ -431,6 +431,18 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
     assert "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power" in (
         car_charger["entity_ids"]
     )
+    sump_pump = next(
+        group
+        for group in groups
+        if group["group_id"] == "cs_energy_analyzer_demo_sump_pump"
+    )
+
+    assert sump_pump["name"] == "Sump Pump"
+    assert sump_pump["appliance_profile"] == "sump_pump"
+    assert sump_pump["mode"] == "single_phase"
+    assert "sensor.cs_energy_analyzer_demo_sump_pump_active_power" in (
+        sump_pump["entity_ids"]
+    )
 
 
 def test_validate_setup_input_preserves_outdoor_temperature_entity() -> None:

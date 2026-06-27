@@ -96,6 +96,9 @@ from .demo import (
     demo_circuit_key as _demo_circuit_key,
 )
 from .demo import (
+    demo_nilm_workspace_seed as _demo_nilm_workspace_seed,
+)
+from .demo import (
     demo_prior_usage as _demo_prior_usage,
 )
 from .demo import (
@@ -6116,181 +6119,53 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not _is_demo_config(config):
             return
 
+        seed = _demo_nilm_workspace_seed(now, circuit_id=config.circuit_id)
+
         if not self.store_data.nilm_signatures.get(config.circuit_id):
-            self.store_data.nilm_signatures[config.circuit_id] = [
-                {
-                    "signature_id": "demo_motor_load_l1",
-                    "median_delta_w": 920.0,
-                    "median_delta_var": 510.0,
-                    "median_delta_va": 1052.0,
-                    "median_delta_pf": -0.05,
-                    "median_leg_a_delta_w": 910.0,
-                    "median_leg_b_delta_w": 20.0,
-                    "leg_balance_ratio": 0.956,
-                    "dominant_leg": "a",
-                    "split_phase_type": "single_leg",
-                    "occurrence_count": 8,
-                    "confidence": 0.82,
-                    "classification": "motor",
-                    "review_state": "new",
-                },
-                {
-                    "signature_id": "demo_resistive_load_240v",
-                    "median_delta_w": 4100.0,
-                    "median_delta_var": 180.0,
-                    "median_delta_va": 4104.0,
-                    "median_delta_pf": 0.0,
-                    "median_leg_a_delta_w": 2050.0,
-                    "median_leg_b_delta_w": 2050.0,
-                    "leg_balance_ratio": 0.0,
-                    "dominant_leg": "balanced",
-                    "split_phase_type": "split_phase",
-                    "occurrence_count": 5,
-                    "confidence": 0.78,
-                    "classification": "resistive",
-                    "review_state": "new",
-                },
-            ]
+            self.store_data.nilm_signatures[config.circuit_id] = _demo_seed_list(
+                seed.get("signatures"),
+            )
             self._mark_store_dirty()
 
         if not self.store_data.nilm_unknown_loads_by_circuit.get(config.circuit_id):
-            first_seen = now - timedelta(days=6, hours=3)
-            last_start = now - timedelta(minutes=38)
-            self.store_data.nilm_unknown_loads_by_circuit[config.circuit_id] = {
-                "circuit_id": config.circuit_id,
-                "unknown_load_count": 2,
-                "active_unknown_load_count": 1,
-                "ambiguous_unknown_load_count": 0,
-                "simultaneous_unknown_event_count": 1,
-                "unknown_estimated_energy_today_kwh": 1.1,
-                "unknown_estimated_energy_7_days_kwh": 7.8,
-                "unknown_estimated_energy_30_days_kwh": 32.4,
-                "largest_unknown_load": "demo_resistive_load_240v",
-                "highest_unknown_energy_load": "demo_motor_load_l1",
-                "unknown_loads": [
-                    {
-                        "signature_id": "demo_motor_load_l1",
-                        "display_name": "Motor-like 120 V load",
-                        "likely_type": "motor",
-                        "voltage_class": "120 V",
-                        "split_phase_type": "single_leg",
-                        "dominant_leg": "a",
-                        "typical_watts": 920.0,
-                        "typical_var": 510.0,
-                        "typical_va": 1052.0,
-                        "typical_power_factor": 0.875,
-                        "confidence": 0.82,
-                        "occurrence_count": 8,
-                        "first_seen": first_seen.isoformat(),
-                        "last_seen": last_start.isoformat(),
-                        "review_state": "new",
-                        "separation_status": "separable",
-                        "running_state": "probably_on",
-                        "last_start": last_start.isoformat(),
-                        "last_stop": None,
-                        "current_runtime_minutes": 38.0,
-                        "runtime_today_minutes": 72.0,
-                        "runtime_7_days_minutes": 508.0,
-                        "runtime_30_days_minutes": 2110.0,
-                        "estimated_energy_today_kwh": 1.1,
-                        "estimated_energy_7_days_kwh": 7.8,
-                        "estimated_energy_30_days_kwh": 32.4,
-                        "energy_estimate_confidence": 0.82,
-                        "evidence": (
-                            "Recurring single-leg signature with motor-like VAR "
-                            "and power-factor behavior."
-                        ),
-                    },
-                    {
-                        "signature_id": "demo_resistive_load_240v",
-                        "display_name": "Resistive 240 V load",
-                        "likely_type": "resistive",
-                        "voltage_class": "240 V",
-                        "split_phase_type": "split_phase",
-                        "dominant_leg": "balanced",
-                        "typical_watts": 4100.0,
-                        "typical_var": 180.0,
-                        "typical_va": 4104.0,
-                        "typical_power_factor": 0.999,
-                        "confidence": 0.78,
-                        "occurrence_count": 5,
-                        "first_seen": first_seen.isoformat(),
-                        "last_seen": (now - timedelta(hours=4)).isoformat(),
-                        "review_state": "new",
-                        "separation_status": "separable",
-                        "running_state": "probably_off",
-                        "last_start": (now - timedelta(hours=5)).isoformat(),
-                        "last_stop": (now - timedelta(hours=4)).isoformat(),
-                        "current_runtime_minutes": 0.0,
-                        "runtime_today_minutes": 58.0,
-                        "runtime_7_days_minutes": 238.0,
-                        "runtime_30_days_minutes": 960.0,
-                        "estimated_energy_today_kwh": 0.0,
-                        "estimated_energy_7_days_kwh": 0.0,
-                        "estimated_energy_30_days_kwh": 0.0,
-                        "energy_estimate_confidence": 0.78,
-                        "evidence": (
-                            "Balanced split-phase signature with very high power "
-                            "factor, consistent with a resistive load."
-                        ),
-                    },
-                ],
-            }
+            unknown_loads = seed.get("unknown_loads")
+            if isinstance(unknown_loads, Mapping):
+                self.store_data.nilm_unknown_loads_by_circuit[config.circuit_id] = (
+                    dict(unknown_loads)
+                )
             self._mark_store_dirty()
 
         if not self.store_data.nilm_session_history_by_circuit.get(config.circuit_id):
-            motor_start = now - timedelta(minutes=38)
-            resistive_start = now - timedelta(hours=5)
-            resistive_end = now - timedelta(hours=4)
-            self.store_data.nilm_session_history_by_circuit[config.circuit_id] = [
-                {
-                    "session_id": "demo_resistive_load_240v_session",
-                    "mains_circuit_id": config.circuit_id,
-                    "signature_fingerprint": "demo_resistive_load_240v",
-                    "on_edge_id": "demo_resistive_load_240v_on",
-                    "off_edge_id": "demo_resistive_load_240v_off",
-                    "start": resistive_start.isoformat(),
-                    "end": resistive_end.isoformat(),
-                    "duration_seconds": 3600.0,
-                    "median_power_w": 4100.0,
-                    "estimated_energy_kwh": 4.1,
-                    "confidence": 0.78,
-                    "overlap_count": 0,
-                    "ambiguous": False,
-                    "alternate_match_count": 0,
-                    "known_load_masked": False,
-                    "known_load_confidence": None,
-                    "assignment_id": None,
-                },
-                {
-                    "session_id": "demo_motor_load_l1_open",
-                    "mains_circuit_id": config.circuit_id,
-                    "signature_fingerprint": "demo_motor_load_l1",
-                    "on_edge_id": "demo_motor_load_l1_on",
-                    "off_edge_id": None,
-                    "start": motor_start.isoformat(),
-                    "end": None,
-                    "duration_seconds": None,
-                    "median_power_w": 920.0,
-                    "estimated_energy_kwh": 0.583,
-                    "confidence": 0.82,
-                    "overlap_count": 0,
-                    "ambiguous": False,
-                    "alternate_match_count": 0,
-                    "known_load_masked": False,
-                    "known_load_confidence": None,
-                    "assignment_id": None,
-                },
-            ]
+            self.store_data.nilm_session_history_by_circuit[config.circuit_id] = (
+                _demo_seed_list(seed.get("sessions"))
+            )
+            self._mark_store_dirty()
+
+        if not self.store_data.nilm_label_intervals_by_circuit.get(config.circuit_id):
+            self.store_data.nilm_label_intervals_by_circuit[config.circuit_id] = (
+                _demo_seed_list(seed.get("label_intervals"))
+            )
+            self._mark_store_dirty()
+
+        if not self.store_data.nilm_appliance_assignments_by_circuit.get(
+            config.circuit_id
+        ):
+            self.store_data.nilm_appliance_assignments_by_circuit[config.circuit_id] = (
+                _demo_seed_list(seed.get("assignments"))
+            )
             self._mark_store_dirty()
 
         self._nilm_total_events_by_circuit[config.circuit_id] = max(
             self._nilm_total_events_by_circuit[config.circuit_id],
-            12,
+            int(seed.get("total_events") or 0),
         )
+        if not self._nilm_unmatched_edges[config.circuit_id]:
+            self._nilm_unmatched_edges[config.circuit_id] = _demo_nilm_edges(
+                seed.get("edges"),
+            )
         self._nilm_unmatched_edges[config.circuit_id] = self._nilm_unmatched_edges[
             config.circuit_id
-        ][:4]
+        ][:8]
 
     def _refresh_balance_state(
         self: Self,
@@ -7741,6 +7616,25 @@ def _statistics_lookback_start(now: datetime, period: str) -> datetime:
     if period == "month":
         return now - timedelta(days=400)
     return now - timedelta(days=45)
+
+
+def _demo_seed_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _demo_nilm_edges(value: Any) -> list[NilmEdge]:
+    edges: list[NilmEdge] = []
+    for raw_edge in _demo_seed_list(value):
+        timestamp = _datetime_or_none(raw_edge.pop("timestamp", None))
+        if timestamp is None:
+            continue
+        try:
+            edges.append(NilmEdge(timestamp=timestamp, **raw_edge))
+        except TypeError:
+            continue
+    return edges
 
 
 def _datetime_or_none(value: Any) -> datetime | None:
