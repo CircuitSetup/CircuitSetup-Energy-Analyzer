@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
 from .models import (
     ApplianceProfile,
     BaselineStats,
@@ -10,6 +16,9 @@ from .models import (
 
 DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
 DEMO_HISTORY_SEED_VERSION = 1
+DEMO_NILM_WORKSPACE_DATA_PATH = Path(__file__).with_name(
+    "demo_nilm_workspace.json",
+)
 
 DEMO_SOURCE_METRICS = (
     "energy",
@@ -313,3 +322,41 @@ def demo_baseline(feature: str, value: float) -> BaselineStats:
         p90=float(value) + spread,
         confidence=1.0,
     )
+
+
+def demo_nilm_workspace_seed(
+    now: datetime,
+    *,
+    circuit_id: str = "mains_nilm",
+) -> dict[str, Any]:
+    """Return the bundled NILM demo workspace scenario for a point in time."""
+    return _resolve_demo_seed_values(
+        _demo_nilm_workspace_seed_template(),
+        now,
+        circuit_id,
+    )
+
+
+@lru_cache(maxsize=1)
+def _demo_nilm_workspace_seed_template() -> dict[str, Any]:
+    return json.loads(DEMO_NILM_WORKSPACE_DATA_PATH.read_text(encoding="utf-8"))
+
+
+def _resolve_demo_seed_values(value: Any, now: datetime, circuit_id: str) -> Any:
+    if isinstance(value, dict):
+        if set(value) == {"offset_seconds"}:
+            return (
+                now + timedelta(seconds=float(value["offset_seconds"]))
+            ).isoformat()
+        return {
+            str(key): _resolve_demo_seed_values(item, now, circuit_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _resolve_demo_seed_values(item, now, circuit_id)
+            for item in value
+        ]
+    if value == "$circuit_id":
+        return circuit_id
+    return value

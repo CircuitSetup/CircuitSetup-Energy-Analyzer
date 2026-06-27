@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+
 from custom_components.circuitsetup_energy_analyzer.models import SensorRole
 
 
@@ -44,3 +47,25 @@ def test_demo_module_exposes_shared_history_seed_templates() -> None:
     assert demo.demo_circuit_key_from_id(
         "cs_energy_analyzer_demo_water_heater"
     ) == "water_heater"
+
+
+def test_demo_module_loads_nilm_workspace_seed_from_json() -> None:
+    from custom_components.circuitsetup_energy_analyzer import demo
+
+    seed = demo.demo_nilm_workspace_seed(datetime(2026, 6, 7, 12, 0, tzinfo=UTC))
+
+    assert Path(demo.__file__).with_name("demo_nilm_workspace.json").exists()
+    assert seed["assignments"][0]["display_name"] == "Demo Pool Pump"
+    assert seed["label_intervals"][0]["start"] == "2026-06-07T09:50:00+00:00"
+    assert seed["edges"][0]["timestamp"] == "2026-06-07T07:00:00+00:00"
+
+
+def test_nilm_demo_scenario_is_not_embedded_in_coordinator() -> None:
+    coordinator_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "circuitsetup_energy_analyzer"
+        / "coordinator.py"
+    ).read_text(encoding="utf-8")
+
+    assert "demo_motor_load_l1" not in coordinator_source
