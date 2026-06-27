@@ -2044,7 +2044,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _chartTimeTicks(minTime, maxTime, x) {
     const count = 5;
-    const includeDate = new Date(minTime).toDateString() !== new Date(maxTime).toDateString();
+    const includeDate = this._chartDateKey(minTime) !== this._chartDateKey(maxTime);
     return Array.from({ length: count }, (_item, index) => {
       const ratio = count === 1 ? 0 : index / (count - 1);
       const time = minTime + (maxTime - minTime) * ratio;
@@ -2054,6 +2054,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         anchor: index === 0 ? "start" : index === count - 1 ? "end" : "middle",
       };
     });
+  }
+
+  _chartDateKey(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: this._timeZone(),
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date);
+    } catch (_error) {
+      return date.toDateString();
+    }
   }
 
   _formatAxisTime(value, includeDate = false) {
