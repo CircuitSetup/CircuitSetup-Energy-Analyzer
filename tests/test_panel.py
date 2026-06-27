@@ -1350,6 +1350,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         ],
     }
     assert payload["edges"][0]["direction"] == "on"
+    assert payload["sessions"][0]["display_label"] == "Dishwasher"
     assert payload["sessions"][0]["actions"]["assign"] == {
         "domain": DOMAIN,
         "service": "assign_session_to_appliance",

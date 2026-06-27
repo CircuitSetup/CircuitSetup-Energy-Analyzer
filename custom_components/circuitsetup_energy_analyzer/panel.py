@@ -96,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260627-nilm-axis-summary"
+PANEL_MODULE_VERSION = "20260627-nilm-graph-labels"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -404,6 +404,7 @@ def nilm_workspace_payload(
     label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(coordinator, config.circuit_id)
     assignment_options = _nilm_assignment_options(assignments)
+    session_display_labels = _nilm_session_display_labels(signatures, assignments)
     stored_sessions = _nilm_session_history_for_circuit(
         coordinator,
         config.circuit_id,
@@ -419,14 +420,21 @@ def nilm_workspace_payload(
         all_generated_sessions,
         stored_sessions,
     )
-    sessions = _merge_nilm_session_payloads(
-        _nilm_workspace_sessions(
-            recent_edges,
-            config.circuit_id,
-            signatures=signatures,
-            assignments=assignments,
+    all_sessions = _add_nilm_session_display_labels(
+        all_sessions,
+        session_display_labels,
+    )
+    sessions = _add_nilm_session_display_labels(
+        _merge_nilm_session_payloads(
+            _nilm_workspace_sessions(
+                recent_edges,
+                config.circuit_id,
+                signatures=signatures,
+                assignments=assignments,
+            ),
+            stored_sessions,
         ),
-        stored_sessions,
+        session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
     _add_nilm_assignment_options(signatures, assignment_options)
     _add_nilm_assignment_options(label_intervals, assignment_options)
@@ -2024,6 +2032,61 @@ def _nilm_session_history_for_circuit(
         for session in _iter_items(sessions_by_circuit.get(circuit_id))
         if isinstance(session, Mapping)
     ]
+
+
+def _nilm_session_display_labels(
+    signatures: Iterable[Mapping[str, Any]],
+    assignments: Iterable[Mapping[str, Any]],
+) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for signature in signatures:
+        label = str(
+            signature.get("display_label")
+            or signature.get("display_name")
+            or signature.get("likely_type")
+            or signature.get(ATTR_SIGNATURE_ID)
+            or ""
+        ).strip()
+        if not label:
+            continue
+        for key in _nilm_signature_lookup_keys(signature):
+            labels.setdefault(key, label)
+    for assignment in assignments:
+        label = str(
+            assignment.get("display_name")
+            or assignment.get("appliance_id")
+            or assignment.get(ATTR_ASSIGNMENT_ID)
+            or ""
+        ).strip()
+        if not label:
+            continue
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if assignment_id:
+            labels[assignment_id] = label
+        for field in ("signature_fingerprints", "session_ids"):
+            for value in _iter_items(assignment.get(field)):
+                key = str(value or "").strip()
+                if key:
+                    labels[key] = label
+    return labels
+
+
+def _add_nilm_session_display_labels(
+    sessions: Iterable[Mapping[str, Any]],
+    labels: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    labeled: list[dict[str, Any]] = []
+    for session in sessions:
+        payload = dict(session)
+        label = str(payload.get("display_label") or "").strip()
+        for field in ("assignment_id", "signature_fingerprint", "session_id"):
+            key = str(payload.get(field) or "").strip()
+            if not label and key:
+                label = labels.get(key, "")
+        if label:
+            payload["display_label"] = label
+        labeled.append(payload)
+    return labeled
 
 
 def _merge_nilm_session_payloads(
