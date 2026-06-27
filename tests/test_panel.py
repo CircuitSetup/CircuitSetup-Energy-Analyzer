@@ -1137,7 +1137,10 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         name="Pool Pump",
         appliance_profile=ApplianceProfile.POOL_PUMP,
         mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.pool_pump_power", SensorRole.REAL_POWER),),
+        sensors=(
+            SensorRef("sensor.pool_pump_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.pool_pump_power_leg_2", SensorRole.REAL_POWER),
+        ),
     )
     solar_config = CircuitConfig(
         circuit_id="solar",
@@ -1229,6 +1232,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "sensor.mains_power",
         "sensor.mains_reactive_power",
         "sensor.pool_pump_power",
+        "sensor.pool_pump_power_leg_2",
         "sensor.solar_power",
     ]
     assert payload["history"]["api_path"].startswith(
@@ -1243,7 +1247,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         {
             "circuit_id": "pool_pump",
             "name": "Pool Pump",
-            "entity_ids": ["sensor.pool_pump_power"],
+            "entity_ids": ["sensor.pool_pump_power", "sensor.pool_pump_power_leg_2"],
         }
     ]
     assert payload["solar_overlays"] == [
@@ -1546,14 +1550,7 @@ def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
             {"value": "assignment-target", "label": "Dishwasher"},
         ],
     }
-    assert payload["assignments"][0]["actions"]["validate_history"] == {
-        "domain": DOMAIN,
-        "service": "validate_nilm_assignment_history",
-        "data": {
-            "circuit_id": "mains",
-            "assignment_id": "assignment-source",
-        },
-    }
+    assert "validate_history" not in payload["assignments"][0]["actions"]
 
 
 def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
@@ -1707,6 +1704,14 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
 
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
+    assert payload["assignments"][0]["actions"]["validate_history"] == {
+        "domain": DOMAIN,
+        "service": "validate_nilm_assignment_history",
+        "data": {
+            "circuit_id": "mains",
+            "assignment_id": "assignment-dishwasher",
+        },
+    }
     validation = payload["validation"]
     assert validation["metrics"] == {
         "ground_truth_interval_count": 3,
