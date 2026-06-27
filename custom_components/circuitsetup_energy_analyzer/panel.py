@@ -1110,6 +1110,7 @@ def _nilm_workspace_target(
     circuit_id: str | None,
 ) -> tuple[Any, Any] | None:
     requested_circuit_id = str(circuit_id or "").strip()
+    sensor_fallback: tuple[Any, Any] | None = None
     for coordinator in coordinators:
         for config in getattr(coordinator, "circuit_configs", ()) or ():
             config_circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
@@ -1117,12 +1118,18 @@ def _nilm_workspace_target(
                 continue
             if requested_circuit_id and config_circuit_id != requested_circuit_id:
                 continue
-            if _is_nilm_config(config):
+            if _is_explicit_nilm_config(config):
                 return coordinator, config
-    return None
+            if sensor_fallback is None and _is_sensor_backed_mains_config(config):
+                sensor_fallback = (coordinator, config)
+    return sensor_fallback
 
 
 def _is_nilm_config(config: Any) -> bool:
+    return _is_explicit_nilm_config(config) or _is_sensor_backed_mains_config(config)
+
+
+def _is_explicit_nilm_config(config: Any) -> bool:
     mode = getattr(config, "mode", None)
     appliance_profile = getattr(config, "appliance_profile", None)
     return (
@@ -1130,10 +1137,13 @@ def _is_nilm_config(config: Any) -> bool:
         or appliance_profile is ApplianceProfile.MAINS_NILM
         or str(mode) == CircuitMode.MAINS_NILM.value
         or str(appliance_profile) == ApplianceProfile.MAINS_NILM.value
-        or (
-            str(getattr(config, "circuit_id", "") or "").strip() == "mains"
-            and bool(_sensor_entity_ids(config))
-        )
+    )
+
+
+def _is_sensor_backed_mains_config(config: Any) -> bool:
+    return (
+        str(getattr(config, "circuit_id", "") or "").strip() == "mains"
+        and bool(_sensor_entity_ids(config))
     )
 
 

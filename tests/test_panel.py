@@ -1398,6 +1398,41 @@ def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
     assert payload["history"]["entities"] == ["sensor.mains_power"]
 
 
+def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    sensor_backed_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    nilm_mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.nilm_power", SensorRole.REAL_POWER),),
+    )
+
+    payload = nilm_workspace_payload(
+        [
+            _coordinator(
+                config=sensor_backed_mains,
+                configs=(sensor_backed_mains, nilm_mains),
+            )
+        ],
+        circuit_id="mains",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["circuit"]["name"] == "Mains NILM"
+    assert payload["history"]["entities"] == ["sensor.nilm_power"]
+
+
 def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,
