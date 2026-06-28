@@ -92,7 +92,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return whether alerts are paused for this circuit."""
-        return _maintenance_active(self.coordinator_state, self.circuit_id)
+        return _alerts_paused(self.coordinator_state, self.coordinator, self.circuit_id)
 
     @property
     def available(self) -> bool:
@@ -211,6 +211,11 @@ def _maintenance_details(state: Any, circuit_id: str) -> Mapping[str, Any]:
 
 def _maintenance_active(state: Any, circuit_id: str) -> bool:
     return _maintenance_details(state, circuit_id).get("active") is True
+
+
+def _alerts_paused(state: Any, coordinator: Any, circuit_id: str) -> bool:
+    paused_circuits = getattr(coordinator, "paused_circuits", ()) or ()
+    return circuit_id in paused_circuits or _maintenance_active(state, circuit_id)
 
 
 def _maintenance_actions_available(coordinator: Any) -> bool:

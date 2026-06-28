@@ -602,6 +602,15 @@ async def test_maintenance_switch_turns_on_and_off_idempotently(
         ("async_end_maintenance", ("fridge", False)),
     ]
 
+    coordinator.paused_circuits = {"fridge"}
+    assert maintenance.is_on is True
+    await maintenance.async_turn_off()
+    assert coordinator.calls == [
+        ("async_start_maintenance", ("fridge", "", None, False)),
+        ("async_end_maintenance", ("fridge", False)),
+        ("async_end_maintenance", ("fridge", False)),
+    ]
+
 
 @pytest.mark.asyncio
 async def test_maintenance_switch_skips_inapplicable_daily_control_circuits(
