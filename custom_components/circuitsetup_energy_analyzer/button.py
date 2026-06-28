@@ -72,17 +72,17 @@ CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (
     ),
     CircuitButtonDescription(
         key="start_maintenance",
-        name_suffix="Start Maintenance",
+        name_suffix="Pause Alerts",
         method_name="async_start_maintenance",
         args_fn=lambda circuit_id: (circuit_id, "", None, False),
-        icon="mdi:wrench-clock",
+        icon="mdi:bell-pause-outline",
     ),
     CircuitButtonDescription(
         key="end_maintenance",
-        name_suffix="End Maintenance",
+        name_suffix="Resume Alerts",
         method_name="async_end_maintenance",
         args_fn=lambda circuit_id: (circuit_id, False),
-        icon="mdi:wrench-check-outline",
+        icon="mdi:bell-ring-outline",
     ),
     CircuitButtonDescription(
         key="pause_alerts",
@@ -388,8 +388,8 @@ def _button_availability_reason(
 def _availability_reason_label(reason: str) -> str:
     return {
         "action_unavailable": "The analyzer action is unavailable.",
-        "maintenance_active": "Maintenance is already active for this circuit.",
-        "maintenance_inactive": "Maintenance is not active for this circuit.",
+        "maintenance_active": "Alerts are already paused for this circuit.",
+        "maintenance_inactive": "Alerts are not paused for this circuit.",
         "alerts_paused": "Alerts are already paused for this circuit.",
         "no_active_alert": "No active alert is available to pause.",
     }.get(reason, reason.replace("_", " "))
@@ -406,9 +406,9 @@ def _availability_attributes(reason: str) -> dict[str, str]:
 def _availability_next_step(reason: str) -> str:
     return {
         "action_unavailable": "Reload the integration or check the system log.",
-        "maintenance_active": "Use End Maintenance when work is complete.",
-        "maintenance_inactive": "Use Start Maintenance before ending maintenance.",
-        "alerts_paused": "End maintenance or wait for the alert pause to expire.",
+        "maintenance_active": "Use Resume Alerts when work is complete.",
+        "maintenance_inactive": "Use Pause Alerts before resuming alerts.",
+        "alerts_paused": "Resume alerts or wait for the alert pause to expire.",
         "no_active_alert": (
             "Review the circuit summary or evidence panel for current alerts."
         ),

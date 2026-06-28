@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -556,6 +557,8 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
     await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    now = {"value": datetime.now(UTC) + timedelta(seconds=1)}
+    coordinator._now_fn = lambda: now["value"]
 
     await _set_source_state_and_wait(
         hass,
@@ -564,10 +567,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "5",
         "W",
         "power",
+        expected_operating_state="off",
     )
 
     assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 5.0
     assert coordinator.state.operating_state_by_circuit["fridge"] == "off"
+    now["value"] += timedelta(seconds=1)
 
     await _set_source_state_and_wait(
         hass,
@@ -576,10 +581,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "84",
         "W",
         "power",
+        expected_operating_state="pending_on",
     )
 
     assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 84.0
     assert coordinator.state.operating_state_by_circuit["fridge"] == "pending_on"
+    now["value"] += timedelta(seconds=1)
 
     await _set_source_state_and_wait(
         hass,
@@ -588,10 +595,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "85",
         "W",
         "power",
+        expected_operating_state="running",
     )
 
     assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 85.0
     assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
+    now["value"] += timedelta(seconds=1)
 
     await _set_source_state_and_wait(
         hass,
@@ -600,10 +609,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "NaN",
         "W",
         "power",
+        expected_operating_state="running",
     )
 
     assert "fridge" not in coordinator.state.latest_real_power_w_by_circuit
     assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
+    now["value"] += timedelta(seconds=1)
 
     await _set_source_state_and_wait(
         hass,
@@ -612,10 +623,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "0",
         "W",
         "power",
+        expected_operating_state="pending_off",
     )
 
     assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 0.0
     assert coordinator.state.operating_state_by_circuit["fridge"] == "pending_off"
+    now["value"] += timedelta(seconds=1)
 
     await _set_source_state_and_wait(
         hass,
@@ -624,6 +637,7 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
         "1",
         "W",
         "power",
+        expected_operating_state="off",
     )
 
     assert coordinator.state.latest_real_power_w_by_circuit["fridge"] == 1.0
@@ -671,24 +685,48 @@ async def _set_source_state_and_wait(
     state: str,
     unit: str | None = None,
     device_class: str | None = None,
+    *,
+    expected_operating_state: str | None = None,
+    circuit_id: str = "fridge",
 ) -> None:
     coordinator.last_source_update_entities = ()
     _set_source_state(hass, entity_id, state, unit, device_class)
-    await _wait_for_runtime_update(hass, coordinator, (entity_id,))
+    await _wait_for_runtime_update(
+        hass,
+        coordinator,
+        (entity_id,),
+        circuit_id=circuit_id,
+        expected_operating_state=expected_operating_state,
+    )
 
 
 async def _wait_for_runtime_update(
     hass: Any,
     coordinator: Any,
     changed_entities: tuple[str, ...],
+    *,
+    circuit_id: str = "fridge",
+    expected_operating_state: str | None = None,
 ) -> None:
-    for _ in range(5):
+    for _ in range(20):
         await hass.async_block_till_done()
         await asyncio.sleep(0)
         await hass.async_block_till_done()
         if coordinator.last_source_update_entities == changed_entities:
-            return
+            task = getattr(coordinator, "_source_update_task", None)
+            state_ready = (
+                expected_operating_state is None
+                or coordinator.state.operating_state_by_circuit.get(circuit_id)
+                == expected_operating_state
+            )
+            if state_ready and (task is None or task.done()):
+                return
     assert coordinator.last_source_update_entities == changed_entities
+    if expected_operating_state is not None:
+        assert (
+            coordinator.state.operating_state_by_circuit.get(circuit_id)
+            == expected_operating_state
+        )
 
 
 def _registered_platform_domains(hass: Any, entry_id: str) -> set[str]:

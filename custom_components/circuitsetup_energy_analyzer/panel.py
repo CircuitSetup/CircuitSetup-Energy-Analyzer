@@ -55,7 +55,6 @@ from .services import (
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
     SERVICE_MERGE_NILM_SIGNATURES,
-    SERVICE_PAUSE_ALERTS,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_REJECT_NILM_SESSION,
     SERVICE_RELEARN_BASELINE,
@@ -96,7 +95,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260627-nilm-descriptions"
+PANEL_MODULE_VERSION = "20260628-alert-pause-merge"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -594,28 +593,11 @@ def _actions_for_context(
 
     if circuit_id:
         circuit_data = {ATTR_CIRCUIT_ID: circuit_id}
-        if _maintenance_active(coordinator, circuit_id):
-            maintenance_action = {
-                "end_maintenance": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_END_MAINTENANCE,
-                    "data": circuit_data,
-                }
-            }
-        else:
-            maintenance_action = {
-                "start_maintenance": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_START_MAINTENANCE,
-                    "data": circuit_data,
-                }
-            }
         actions.update(
             {
                 "pause_alerts": _pause_alerts_action(
                     coordinator,
                     circuit_id,
-                    alert_id=alert_id,
                     data=circuit_data,
                 ),
                 "relearn_baseline": {
@@ -628,7 +610,6 @@ def _actions_for_context(
                 ),
             }
         )
-        actions.update(maintenance_action)
 
     recommendations = _setting_recommendations_for_circuit(
         coordinator,
@@ -2381,76 +2362,20 @@ def _pause_alerts_action(
     coordinator: Any,
     circuit_id: str,
     *,
-    alert_id: Any,
     data: dict[str, str],
 ) -> dict[str, Any]:
-    action: dict[str, Any] = {
+    paused = _alerts_paused(coordinator, circuit_id)
+    return {
         "domain": DOMAIN,
-        "service": SERVICE_PAUSE_ALERTS,
+        "service": SERVICE_END_MAINTENANCE if paused else SERVICE_START_MAINTENANCE,
+        "label": "Resume Alerts" if paused else "Pause Alerts",
         "data": data,
     }
-    reason = _pause_alerts_unavailable_reason(
-        coordinator,
-        circuit_id,
-        alert_id=alert_id,
-    )
-    if reason is not None:
-        action.update(
-            {
-                "enabled": False,
-                "unavailable_reason": reason,
-                "unavailable_label": _unavailable_action_label(reason),
-            }
-        )
-    return action
-
-
-def _pause_alerts_unavailable_reason(
-    coordinator: Any,
-    circuit_id: str,
-    *,
-    alert_id: Any,
-) -> str | None:
-    if _alerts_paused(coordinator, circuit_id):
-        return "alerts_paused"
-    if isinstance(alert_id, str) and alert_id:
-        return None
-    if _has_active_alert(coordinator, circuit_id):
-        return None
-    return "no_active_alert"
-
-
-def _unavailable_action_label(reason: str) -> str:
-    return {
-        "alerts_paused": "Alerts are already paused for this circuit.",
-        "no_active_alert": "No active alert is available to pause.",
-    }.get(reason, reason.replace("_", " ").capitalize())
 
 
 def _alerts_paused(coordinator: Any, circuit_id: str) -> bool:
     paused_circuits = getattr(coordinator, "paused_circuits", ())
     return circuit_id in paused_circuits or _maintenance_active(coordinator, circuit_id)
-
-
-def _has_active_alert(coordinator: Any, circuit_id: str) -> bool:
-    state = getattr(coordinator, "state", None)
-    alerts_by_circuit = getattr(state, "active_alerts_by_circuit", {})
-    if isinstance(alerts_by_circuit, Mapping) and _truthy_collection(
-        alerts_by_circuit.get(circuit_id)
-    ):
-        return True
-    return _latest_alert_for_circuit(coordinator, circuit_id) is not None
-
-
-def _truthy_collection(value: Any) -> bool:
-    if isinstance(value, (int, float)):
-        return value > 0
-    if isinstance(value, Mapping):
-        return bool(value)
-    try:
-        return len(value) > 0
-    except TypeError:
-        return bool(value)
 
 
 def _maintenance_active(coordinator: Any, circuit_id: str) -> bool:

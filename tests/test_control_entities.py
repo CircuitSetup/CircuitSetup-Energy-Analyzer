@@ -438,7 +438,7 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
     assert pause_alerts.extra_state_attributes == {
         "availability_reason": "alerts_paused",
         "availability_label": "Alerts are already paused for this circuit.",
-        "next_step": "End maintenance or wait for the alert pause to expire.",
+        "next_step": "Resume alerts or wait for the alert pause to expire.",
     }
 
 
@@ -468,8 +468,8 @@ async def test_unavailable_maintenance_button_press_raises_clear_error(
     assert end_maintenance.available is False
     assert end_maintenance.extra_state_attributes == {
         "availability_reason": "maintenance_inactive",
-        "availability_label": "Maintenance is not active for this circuit.",
-        "next_step": "Use Start Maintenance before ending maintenance.",
+        "availability_label": "Alerts are not paused for this circuit.",
+        "next_step": "Use Pause Alerts before resuming alerts.",
     }
 
     with pytest.raises(button.HomeAssistantError, match="maintenance inactive"):
@@ -511,13 +511,13 @@ async def test_switch_setup_entry_adds_maintenance_switch(
     assert len(added_entities) == 1
     maintenance = added_entities[0]
     assert maintenance.unique_id == "entry-1_fridge_maintenance"
-    assert maintenance.name == "Maintenance mode"
+    assert maintenance.name == "Pause alerts"
     assert maintenance.suggested_object_id == "fridge_maintenance"
-    assert maintenance.icon == "mdi:wrench-clock"
-    assert maintenance.entity_description.name_suffix == "Maintenance mode"
+    assert maintenance.icon == "mdi:bell-pause-outline"
+    assert maintenance.entity_description.name_suffix == "Pause alerts"
     assert maintenance.entity_description.has_entity_name is True
     assert maintenance.entity_description.translation_key == "maintenance"
-    assert maintenance._attr_name == "Maintenance mode"
+    assert maintenance._attr_name == "Pause alerts"
     assert maintenance._attr_has_entity_name is True
     assert maintenance._attr_translation_key == "maintenance"
     assert maintenance.is_on is True

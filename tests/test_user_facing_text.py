@@ -604,11 +604,14 @@ def test_services_are_labeled_as_advanced_script_paths() -> None:
         assert "normal user path" in description.lower(), service_name
 
 
-def test_maintenance_switch_label_describes_mode_not_power_control() -> None:
+def test_alert_pause_switch_label_matches_pause_resume_alert_language() -> None:
     translations = _translations()
 
     label = translations["entity"]["switch"]["maintenance"]["name"]
-    assert label == "Maintenance mode"
+    assert label == "Pause alerts"
+
+    binary_label = translations["entity"]["binary_sensor"]["maintenance"]["name"]
+    assert binary_label == "Alerts paused"
 
 
 def test_readme_documents_normal_user_action_paths() -> None:
@@ -1323,7 +1326,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "mark_alert_expected",
         "mark_alert_unhelpful",
         "pause_alerts",
-        "start_maintenance",
         "relearn_baseline",
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",

@@ -115,10 +115,12 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert payload["actions"]["mark_unhelpful"]["service"] == "mark_alert_unhelpful"
     assert payload["actions"]["pause_alerts"] == {
         "domain": DOMAIN,
-        "service": "pause_alerts",
+        "service": "start_maintenance",
+        "label": "Pause Alerts",
         "data": {"circuit_id": "hvac"},
     }
-    assert payload["actions"]["start_maintenance"]["data"] == {"circuit_id": "hvac"}
+    assert "start_maintenance" not in payload["actions"]
+    assert "end_maintenance" not in payload["actions"]
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "hvac"}
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
@@ -334,7 +336,7 @@ def test_alert_evidence_payload_bounds_source_entity_previews() -> None:
     assert payload["alert"]["source_entities_omitted_count"] == 4
 
 
-def test_alert_evidence_payload_switches_to_end_maintenance_when_active() -> None:
+def test_alert_evidence_payload_switches_to_resume_alerts_when_paused() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
     )
@@ -349,22 +351,16 @@ def test_alert_evidence_payload_switches_to_end_maintenance_when_active() -> Non
     )
 
     assert "start_maintenance" not in payload["actions"]
-    assert payload["actions"]["end_maintenance"] == {
-        "domain": DOMAIN,
-        "service": "end_maintenance",
-        "data": {"circuit_id": "hvac"},
-    }
+    assert "end_maintenance" not in payload["actions"]
     assert payload["actions"]["pause_alerts"] == {
         "domain": DOMAIN,
-        "service": "pause_alerts",
+        "service": "end_maintenance",
+        "label": "Resume Alerts",
         "data": {"circuit_id": "hvac"},
-        "enabled": False,
-        "unavailable_reason": "alerts_paused",
-        "unavailable_label": "Alerts are already paused for this circuit.",
     }
 
 
-def test_alert_evidence_payload_marks_pause_alerts_unavailable_without_alert() -> None:
+def test_alert_evidence_payload_allows_pause_alerts_without_current_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
     )
@@ -384,11 +380,9 @@ def test_alert_evidence_payload_marks_pause_alerts_unavailable_without_alert() -
 
     assert payload["actions"]["pause_alerts"] == {
         "domain": DOMAIN,
-        "service": "pause_alerts",
+        "service": "start_maintenance",
+        "label": "Pause Alerts",
         "data": {"circuit_id": "hvac"},
-        "enabled": False,
-        "unavailable_reason": "no_active_alert",
-        "unavailable_label": "No active alert is available to pause.",
     }
 
 
@@ -2436,8 +2430,14 @@ def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
         "No current alert evidence is available for this circuit."
     )
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "hvac"}
-    assert payload["actions"]["start_maintenance"]["data"] == {"circuit_id": "hvac"}
-    assert payload["actions"]["pause_alerts"]["enabled"] is False
+    assert payload["actions"]["pause_alerts"] == {
+        "domain": DOMAIN,
+        "service": "start_maintenance",
+        "label": "Pause Alerts",
+        "data": {"circuit_id": "hvac"},
+    }
+    assert "start_maintenance" not in payload["actions"]
+    assert "end_maintenance" not in payload["actions"]
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )
@@ -2465,9 +2465,9 @@ def test_alert_evidence_payload_keeps_requested_circuit_after_stale_alert_id() -
     assert payload["actions"]["pause_alerts"]["data"] == {
         "circuit_id": "car_charger"
     }
-    assert payload["actions"]["start_maintenance"]["data"] == {
-        "circuit_id": "car_charger"
-    }
+    assert payload["actions"]["pause_alerts"]["service"] == "start_maintenance"
+    assert "start_maintenance" not in payload["actions"]
+    assert "end_maintenance" not in payload["actions"]
 
 
 def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback() -> (
