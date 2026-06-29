@@ -1123,6 +1123,16 @@ class _FakeLovelaceResources:
         return item
 
 
+class _FakeReadOnlyLovelaceResources:
+    loaded = True
+
+    def __init__(self, items: list[dict[str, object]] | None = None) -> None:
+        self.items = list(items or [])
+
+    def async_items(self) -> list[dict[str, object]]:
+        return list(self.items)
+
+
 class _FakeAttributeDashboardsCollection:
     def __init__(self) -> None:
         self.created: list[dict[str, object]] = []
@@ -1321,6 +1331,45 @@ async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> 
             {"res_type": resource["type"], "url": resource["url"]},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resources = _FakeReadOnlyLovelaceResources()
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {
+                        "cards": [
+                            {"type": NILM_DASHBOARD_GRAPHS_CARD},
+                            {"type": "history-graph", "title": "Native graph"},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=True,
+    )
+
+    assert saved is True
+    cards = _dashboard_cards(dashboard_store.saved[0])
+    assert [card.get("type") for card in cards] == ["history-graph"]
+    assert cards[0]["title"] == "Native graph"
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,7 @@ from .cycles import (
 from .dashboard import (
     DASHBOARD_TITLE,
     DASHBOARD_URL_PATH,
+    NILM_DASHBOARD_GRAPHS_CARD,
     dashboard_graph_module_resource,
     dashboard_includes_nilm_graph_card,
     dashboard_storage_payload,
@@ -9136,8 +9137,16 @@ async def _async_save_lovelace_dashboard_config(
     save = getattr(dashboard_store, "async_save", None)
     if not callable(save):
         return False
-    await _async_ensure_lovelace_dashboard_graph_resource(lovelace_data, config)
-    await _async_lovelace_method_result(save(dict(config)))
+    save_config = dict(config)
+    if not await _async_ensure_lovelace_dashboard_graph_resource(
+        lovelace_data,
+        save_config,
+    ):
+        save_config = _lovelace_config_without_card_type(
+            save_config,
+            NILM_DASHBOARD_GRAPHS_CARD,
+        )
+    await _async_lovelace_method_result(save(save_config))
     _register_lovelace_dashboard_panel(hass, item, update=update)
     return True
 
@@ -9145,13 +9154,13 @@ async def _async_save_lovelace_dashboard_config(
 async def _async_ensure_lovelace_dashboard_graph_resource(
     lovelace_data: Any,
     config: Mapping[str, Any],
-) -> None:
+) -> bool:
     if not dashboard_includes_nilm_graph_card(config):
-        return
+        return True
 
     resources = _lovelace_dashboard_item_value(lovelace_data, "resources")
     if resources is None:
-        return
+        return False
 
     async_load = getattr(resources, "async_load", None)
     if callable(async_load) and not getattr(resources, "loaded", True):
@@ -9160,9 +9169,8 @@ async def _async_ensure_lovelace_dashboard_graph_resource(
             resources.loaded = True
 
     items_method = getattr(resources, "async_items", None)
-    create_method = getattr(resources, "async_create_item", None)
-    if not callable(items_method) or not callable(create_method):
-        return
+    if not callable(items_method):
+        return False
 
     resource = dashboard_graph_module_resource()
     items = await _async_lovelace_method_result(items_method())
@@ -9176,11 +9184,14 @@ async def _async_ensure_lovelace_dashboard_graph_resource(
     )
     resource_payload = _lovelace_resource_update_payload(resource)
     if existing is None:
+        create_method = getattr(resources, "async_create_item", None)
+        if not callable(create_method):
+            return False
         await _async_lovelace_method_result(create_method(resource_payload))
-        return
+        return True
 
     if _lovelace_resource_has_current_values(existing, resource):
-        return
+        return True
 
     update_method = getattr(resources, "async_update_item", None)
     item_id = _lovelace_dashboard_item_value(existing, "id")
@@ -9188,6 +9199,36 @@ async def _async_ensure_lovelace_dashboard_graph_resource(
         await _async_lovelace_method_result(
             update_method(str(item_id), resource_payload)
         )
+        return True
+    return False
+
+
+def _lovelace_config_without_card_type(
+    config: Mapping[str, Any],
+    card_type: str,
+) -> dict[str, Any]:
+    remove = object()
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            if value.get("type") == card_type:
+                return remove
+            cleaned: dict[str, Any] = {}
+            for key, nested in value.items():
+                cleaned_value = clean(nested)
+                if cleaned_value is not remove:
+                    cleaned[key] = cleaned_value
+            return cleaned
+        if isinstance(value, list):
+            return [
+                cleaned_value
+                for item in value
+                if (cleaned_value := clean(item)) is not remove
+            ]
+        return value
+
+    cleaned_config = clean(config)
+    return cleaned_config if isinstance(cleaned_config, dict) else dict(config)
 
 
 def _lovelace_resource_update_payload(
