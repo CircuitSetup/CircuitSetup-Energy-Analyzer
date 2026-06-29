@@ -231,6 +231,25 @@ def _registry_entry(
     )
 
 
+def _nilm_power_registry_entry(
+    entity_id: str = "sensor.pool_pump_estimated_power",
+    *,
+    entry_id: str = "entry-1",
+    assignment_id: str = "pool_pump",
+    original_name: str = "Pool Pump Estimated Power",
+    disabled_by: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        entity_id=entity_id,
+        unique_id=f"{entry_id}_nilm_{assignment_id}_estimated_power",
+        config_entry_id=entry_id,
+        platform="circuitsetup_energy_analyzer",
+        disabled_by=disabled_by,
+        original_name=original_name,
+        name=None,
+    )
+
+
 def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     return {
         "sensor.fridge_activity": _registry_entry(
@@ -375,6 +394,103 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
             "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
         ),
     }
+
+
+def test_dashboard_hides_nilm_graph_cards_without_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
+        entry_id="entry-1",
+    )
+
+    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+
+    assert not [
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    ]
+    assert not [card for card in cards if card.get("title") == "NILM mains power"]
+    assert "resources" not in dashboard
+
+
+def test_standard_dashboard_hides_nilm_graph_cards_for_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.pool_pump_estimated_power": _nilm_power_registry_entry()
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+
+    assert not [
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    ]
+    assert not [
+        card for card in cards if card.get("title") == "Defined NILM appliance power"
+    ]
+    assert "resources" not in dashboard
+
+
+def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.pool_pump_estimated_power": _nilm_power_registry_entry()
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    cards = _dashboard_cards(mains_section)
+
+    custom_graph = next(
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    )
+    appliance_graph = _card_with_title(mains_section, "Defined NILM appliance power")
+
+    assert custom_graph == {
+        "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
+        "title": "NILM mains power",
+        "entry_id": "entry-1",
+        "circuit_id": "mains",
+        "detail_path": (
+            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+        ),
+        "appliance_power_entities": ["sensor.pool_pump_estimated_power"],
+    }
+    assert appliance_graph == {
+        "type": "history-graph",
+        "title": "Defined NILM appliance power",
+        "hours_to_show": 24,
+        "entities": [
+            {"entity": "sensor.pool_pump_estimated_power", "name": "Pool Pump"}
+        ],
+    }
+    assert dashboard["resources"] == [
+        {
+            "type": "module",
+            "url": (
+                "/circuitsetup_energy_analyzer_static/energy-analyzer-panel.js"
+                "?v=20260629-nilm-dashboard-graphs"
+            ),
+        }
+    ]
 
 
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:

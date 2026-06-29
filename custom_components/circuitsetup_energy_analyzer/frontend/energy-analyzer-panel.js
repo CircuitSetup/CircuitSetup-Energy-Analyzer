@@ -2134,6 +2134,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const timeTicks = this._chartTimeTicks(minTime, maxTime, x);
     const timeGridLines = timeTicks.slice(1, -1).map((tick) => `<line class="grid time-grid" x1="${tick.x}" y1="${padTop}" x2="${tick.x}" y2="${height - padBottom}"></line>`).join("");
     const timeTickLabels = timeTicks.map((tick) => `<text x="${tick.x}" y="${height - 12}" text-anchor="${tick.anchor}">${this._escape(tick.label)}</text>`).join("");
+    const yAxisLabel = alert.y_axis_label ? `<text class="axis-label" transform="translate(16 ${((height + padTop - padBottom) / 2).toFixed(1)}) rotate(-90)" text-anchor="middle">${this._escape(alert.y_axis_label)}</text>` : "";
     const timeZoneLabel = this._timeZone();
     const edgeItems = (Array.isArray(alert.nilm_edges) ? alert.nilm_edges : []).map((edge) => {
       const markerTime = Date.parse(edge && edge.timestamp || "");
@@ -2181,6 +2182,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
         ${timeGridLines}
+        ${yAxisLabel}
         ${sessionBands}
         <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
         <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
@@ -2607,6 +2609,216 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 }
 
+class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyzerPanel {
+  constructor() {
+    super();
+    this._dashboardConfig = {};
+  }
+
+  setConfig(config) {
+    this._dashboardConfig = config || {};
+    this._loadedRouteKey = "";
+  }
+
+  getCardSize() {
+    return 7;
+  }
+
+  _routeKey() {
+    const configuredPath = this._dashboardConfig.detail_path
+      || "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains";
+    const url = new URL(configuredPath, window.location.origin);
+    if (!url.searchParams.get("circuit_id")) {
+      url.searchParams.set("circuit_id", this._dashboardConfig.circuit_id || "mains");
+    }
+    return `${url.pathname}${url.search}`;
+  }
+
+  _routeRequestsNilmWorkspace() {
+    return true;
+  }
+
+  _render() {
+    const loaded = !this._loading && !this._nilmWorkspaceLoading;
+    if (loaded && !this._hasDashboardAppliance()) {
+      this.shadowRoot.innerHTML = "";
+      return;
+    }
+
+    const alert = this._payload && this._payload.alert;
+    const workspace = this._nilmWorkspace && this._nilmWorkspace.status === "ok"
+      ? this._nilmWorkspace
+      : null;
+    const title = this._dashboardConfig.title || "NILM mains power";
+    const body = this._loading
+      ? `<p class="muted">Loading NILM graphs...</p>`
+      : `
+        ${this._renderDashboardNotificationGraph(alert)}
+        ${this._renderDashboardNilmMainsGraph(workspace)}
+      `;
+
+    this.shadowRoot.innerHTML = `
+      <ha-card>
+        <style>
+          .dashboard-graphs {
+            display: grid;
+            gap: 16px;
+            padding: 16px;
+          }
+          h2, h3 {
+            margin: 0;
+          }
+          h2 {
+            font-size: 18px;
+          }
+          h3 {
+            font-size: 15px;
+          }
+          p {
+            margin: 8px 0 0;
+          }
+          .muted {
+            color: var(--secondary-text-color, #6b7280);
+          }
+          .dashboard-chart-link {
+            color: inherit;
+            display: block;
+            text-decoration: none;
+          }
+          .dashboard-chart-link:focus {
+            outline: 2px solid var(--primary-color, #03a9f4);
+            outline-offset: 3px;
+          }
+          .detail-link {
+            color: var(--primary-color, #03a9f4);
+            display: inline-block;
+            font-weight: 600;
+            margin-top: 8px;
+          }
+          .chart {
+            height: auto;
+            max-width: 100%;
+            width: 100%;
+          }
+          .axis,
+          .grid {
+            stroke: var(--divider-color, #d8dee6);
+          }
+          .axis-label,
+          .chart text {
+            fill: var(--secondary-text-color, #6b7280);
+            font-size: 12px;
+          }
+          .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+          }
+          .legend-item {
+            align-items: center;
+            display: inline-flex;
+            gap: 6px;
+            font-size: 12px;
+          }
+          .swatch {
+            border-radius: 999px;
+            display: inline-block;
+            height: 10px;
+            width: 10px;
+          }
+          .nilm-session-band {
+            cursor: default;
+            fill: var(--primary-color, #03a9f4);
+          }
+          .nilm-session-label {
+            fill: var(--primary-text-color, #111827);
+            font-size: 12px;
+            pointer-events: none;
+          }
+          .nilm-edge-marker {
+            stroke: var(--warning-color, #f59e0b);
+            stroke-dasharray: 4 3;
+            stroke-width: 2;
+          }
+        </style>
+        <div class="dashboard-graphs">
+          <h2>${this._escape(title)}</h2>
+          ${this._error ? `<p class="muted">${this._escape(this._error)}</p>` : ""}
+          ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
+          ${body}
+        </div>
+      </ha-card>
+    `;
+
+    for (const link of this.shadowRoot.querySelectorAll("[data-dashboard-alert-detail]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.getAttribute("href"));
+      });
+    }
+  }
+
+  _hasDashboardAppliance() {
+    const workspace = this._nilmWorkspace;
+    if (workspace && workspace.status === "ok") {
+      return Boolean(
+        Number(workspace.assignment_count || 0) > 0
+        || Number(workspace.virtual_appliance_count || 0) > 0
+        || (Array.isArray(workspace.assignments) && workspace.assignments.length)
+        || (Array.isArray(workspace.virtual_appliances) && workspace.virtual_appliances.length)
+      );
+    }
+    return (this._dashboardConfig.appliance_power_entities || []).some(
+      (entityId) => this._hass && this._hass.states && this._hass.states[entityId],
+    );
+  }
+
+  _renderDashboardNotificationGraph(alert) {
+    if (!alert) {
+      return "";
+    }
+    const detailPath = alert.evidence_path || this._dashboardConfig.detail_path || this._routeKey();
+    const description = alert.what_happened || alert.message || "Latest related notification";
+    return `
+      <section>
+        <h3>Latest related notification</h3>
+        <p>${this._escape(description)}</p>
+        <a class="dashboard-chart-link" href="${this._escape(detailPath)}" data-dashboard-alert-detail>
+          ${this._renderChart(alert)}
+          <span class="detail-link">View notification detail</span>
+        </a>
+      </section>
+    `;
+  }
+
+  _renderDashboardNilmMainsGraph(workspace) {
+    if (!workspace) {
+      return "";
+    }
+    const graphWindow = this._nilmWorkspaceGraphWindow(workspace);
+    const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
+    const graph = graphWindow && series.length
+      ? this._chartSvg(series, {
+        graph_window_start: new Date(graphWindow.start).toISOString(),
+        graph_window_end: new Date(graphWindow.end).toISOString(),
+        nilm_sessions: workspace.sessions,
+        y_axis_label: "W",
+      })
+      : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
+    return `
+      <section>
+        <h3>NILM mains power</h3>
+        ${graph}
+      </section>
+    `;
+  }
+}
+
 if (!customElements.get("circuitsetup-energy-analyzer-panel")) {
   customElements.define("circuitsetup-energy-analyzer-panel", CircuitSetupEnergyAnalyzerPanel);
+}
+
+if (!customElements.get("circuitsetup-energy-analyzer-dashboard-graphs")) {
+  customElements.define("circuitsetup-energy-analyzer-dashboard-graphs", CircuitSetupEnergyAnalyzerDashboardGraphs);
 }

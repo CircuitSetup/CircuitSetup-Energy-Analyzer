@@ -61,7 +61,9 @@ const context = {{
 vm.createContext(context);
 const source = fs.readFileSync({json.dumps(str(PANEL_ASSET))}, "utf8");
 vm.runInContext(
-  `${{source}}\\nthis.Panel = CircuitSetupEnergyAnalyzerPanel;`,
+  `${{source}}\\n`
+  + "this.Panel = CircuitSetupEnergyAnalyzerPanel;\\n"
+  + "this.DashboardGraphs = CircuitSetupEnergyAnalyzerDashboardGraphs;",
   context
 );
 {body}
@@ -1433,6 +1435,130 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
     assert "deny_setting_recommendation" not in asset
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
+
+
+def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        'customElements.get("circuitsetup-energy-analyzer-dashboard-graphs")',
+        'customElements.define("circuitsetup-energy-analyzer-dashboard-graphs"',
+        "CircuitSetupEnergyAnalyzerDashboardGraphs",
+        "Latest related notification",
+        "View notification detail",
+        "NILM mains power",
+        "data-dashboard-alert-detail",
+    ):
+        assert expected in asset
+
+
+def test_dashboard_graphs_card_hides_without_appliance_and_renders_graphs() -> None:
+    _run_panel_node_script(
+        r"""
+const hidden = new context.DashboardGraphs();
+hidden.setConfig({ appliance_power_entities: [] });
+hidden._loading = false;
+hidden._nilmWorkspaceLoading = false;
+hidden._nilmWorkspace = {
+  status: "ok",
+  assignment_count: 0,
+  virtual_appliance_count: 0,
+  assignments: [],
+  virtual_appliances: [],
+};
+hidden._render();
+if (hidden.shadowRoot.innerHTML !== "") {
+  throw new Error("dashboard graph card should hide when no NILM appliance is defined");
+}
+
+const card = new context.DashboardGraphs();
+card.setConfig({
+  title: "NILM mains power",
+  circuit_id: "mains",
+  detail_path: "/circuitsetup-energy-analyzer-evidence"
+    + "?nilm_workspace=1&circuit_id=mains",
+  appliance_power_entities: ["sensor.pool_pump_estimated_power"],
+});
+card._hass = {
+  config: { time_zone: "UTC" },
+  states: {
+    "sensor.pool_pump_estimated_power": {
+      attributes: { friendly_name: "Pool Pump Estimated Power" },
+    },
+    "sensor.mains_power": { attributes: { friendly_name: "Mains Power" } },
+  },
+};
+card._loading = false;
+card._historyLoading = false;
+card._nilmWorkspaceLoading = false;
+card._payload = {
+  alert: {
+    what_happened: "Pool pump used more power than expected.",
+    evidence_path: "/circuitsetup-energy-analyzer-evidence"
+      + "?alert_id=alert-1&circuit_id=mains",
+    graph_window_start: "2026-06-29T12:00:00Z",
+    graph_window_end: "2026-06-29T12:10:00Z",
+    graph_entities: ["sensor.mains_power"],
+  },
+};
+card._historySeries = [[
+  {
+    entity_id: "sensor.mains_power",
+    state: "120",
+    last_changed: "2026-06-29T12:00:00Z",
+  },
+  {
+    entity_id: "sensor.mains_power",
+    state: "180",
+    last_changed: "2026-06-29T12:10:00Z",
+  },
+]];
+card._nilmWorkspace = {
+  status: "ok",
+  assignment_count: 1,
+  virtual_appliance_count: 1,
+  assignments: [{ assignment_id: "pool_pump" }],
+  virtual_appliances: [{ appliance_id: "pool_pump" }],
+  history: { start: "2026-06-29T12:00:00Z", end: "2026-06-29T12:10:00Z" },
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [{
+    start: "2026-06-29T12:01:00Z",
+    end: "2026-06-29T12:09:00Z",
+    display_label: "Pool Pump",
+    confidence: 0.91,
+  }],
+};
+card._nilmWorkspaceHistorySeries = [[
+  {
+    entity_id: "sensor.mains_power",
+    state: "120",
+    last_changed: "2026-06-29T12:00:00Z",
+  },
+  {
+    entity_id: "sensor.mains_power",
+    state: "180",
+    last_changed: "2026-06-29T12:10:00Z",
+  },
+]];
+card._render();
+const html = card.shadowRoot.innerHTML;
+for (const expected of [
+  "Latest related notification",
+  "Pool pump used more power than expected.",
+  "data-dashboard-alert-detail",
+  "View notification detail",
+  "NILM mains power",
+  "Pool Pump",
+  "axis-label",
+  ">W<",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`dashboard graph card missing ${expected}`);
+  }
+}
+"""
+    )
 
 
 def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions() -> (
