@@ -14,8 +14,6 @@ const ACTION_SERVICE_NAMES = {
   mark_expected: "mark_alert_expected",
   mark_unhelpful: "mark_alert_unhelpful",
   pause_alerts: "pause_alerts",
-  start_maintenance: "start_maintenance",
-  end_maintenance: "end_maintenance",
   relearn_baseline: "relearn_baseline",
   apply_setting_recommendation: "apply_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
@@ -1073,8 +1071,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#mark_expected", () => this._callAction("mark_expected"));
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
-    this._listen("#start_maintenance", () => this._callAction("start_maintenance"));
-    this._listen("#end_maintenance", () => this._callAction("end_maintenance"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {
@@ -1205,8 +1201,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${this._actionButton("mark_expected", "Mark Expected", true)}
           ${this._actionButton("mark_unhelpful", "Not Helpful", true)}
           ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("start_maintenance", "Start Maintenance", true)}
-          ${this._actionButton("end_maintenance", "End Maintenance", true)}
           ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
           ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
         </div>
@@ -2411,8 +2405,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>Available Circuit Actions</h2>
         <div class="actions">
           ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("start_maintenance", "Start Maintenance", true)}
-          ${this._actionButton("end_maintenance", "End Maintenance", true)}
           ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
           ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
         </div>
@@ -2455,7 +2447,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const reason = action.unavailable_label || action.unavailable_reason || "";
     const title = reason ? ` title="${this._escape(reason)}"` : "";
     const hint = reason ? `<span class="action-reason">${this._escape(reason)}</span>` : "";
-    return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${this._escape(label)}</button>${hint}</span>`;
+    return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${this._escape(action.label || label)}</button>${hint}</span>`;
   }
 
   _nilmActionButton(index, actionKey, label, secondary = false, disabled = false) {

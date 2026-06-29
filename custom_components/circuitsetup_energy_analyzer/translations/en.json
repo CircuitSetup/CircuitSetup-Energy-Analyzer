@@ -204,7 +204,7 @@
       },
       "compact_migration": {
         "title": "Migrate To Compact Entity Model",
-        "description": "Review the compact entity model migration preview before removing legacy analyzer entities.\n\nRemove:\n{will_remove}\n\nRemain:\n{will_remain}\n\nNew maintenance switch:\n{new_maintenance_switch}\n\nExpected count: {before_count} before, {after_count} after. Customized row warning: {warning}",
+        "description": "Review the compact entity model migration preview before removing legacy analyzer entities.\n\nRemove:\n{will_remove}\n\nRemain:\n{will_remain}\n\nNew alert pause switch:\n{new_maintenance_switch}\n\nExpected count: {before_count} before, {after_count} after. Customized row warning: {warning}",
         "data": {
           "confirm_compact_migration": "Remove Legacy Entities"
         },
@@ -758,7 +758,7 @@
         "name": "Data quality problem"
       },
       "maintenance": {
-        "name": "Maintenance"
+        "name": "Alerts paused"
       },
       "running": {
         "name": "Running"
@@ -769,7 +769,7 @@
     },
     "switch": {
       "maintenance": {
-        "name": "Maintenance mode"
+        "name": "Pause alerts"
       }
     }
   },

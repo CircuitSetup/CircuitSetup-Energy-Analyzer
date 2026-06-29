@@ -730,7 +730,7 @@ action:
 
 ### Pause alerts during service
 
-Use maintenance mode before servicing an appliance, replacing equipment, moving CTs, or making wiring changes that could make analyzer evidence temporarily misleading.
+Use the circuit Pause alerts switch before servicing an appliance, replacing equipment, moving CTs, or making wiring changes that could make analyzer evidence temporarily misleading.
 
 ```yaml
 action: circuitsetup_energy_analyzer.start_maintenance
@@ -741,7 +741,7 @@ data:
   relearn_on_end: false
 ```
 
-End maintenance and optionally relearn:
+Resume alerts and optionally relearn:
 
 ```yaml
 action: circuitsetup_energy_analyzer.end_maintenance
@@ -879,7 +879,7 @@ Legacy replacement highlights:
 | Billing and cost forecast/status details | `sensor.<circuit>_billing_cycle_usage` and `sensor.<circuit>_cost_cycle` attributes |
 | Standby threshold | Advanced Circuit Settings and `sensor.<circuit>_standby_status` attributes |
 | Outdoor temperature mirror | configured outdoor temperature source entity and Weather Context attributes |
-| Start/End Maintenance buttons | `switch.<circuit>_maintenance` |
+| Pause/Resume Alerts controls | `switch.<circuit>_maintenance` |
 
 ## Sensor reference
 

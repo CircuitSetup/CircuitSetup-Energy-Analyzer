@@ -198,7 +198,7 @@ class DiagnosticBinarySensorDescription:
 BINARY_SENSOR_ICONS = {
     "learning": "mdi:school-outline",
     "data_quality_problem": "mdi:database-alert-outline",
-    "maintenance": "mdi:wrench-clock",
+    "maintenance": "mdi:bell-pause-outline",
     "running": "mdi:power-cycle",
     "water_flow_mismatch": "mdi:pipe-leak",
 }
@@ -221,7 +221,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
     ),
     DiagnosticBinarySensorDescription(
         key="maintenance",
-        name_suffix="Maintenance",
+        name_suffix="Alerts Paused",
         value_fn=is_maintenance_active,
         entity_registry_enabled_default=False,
         entity_registry_visible_default=False,

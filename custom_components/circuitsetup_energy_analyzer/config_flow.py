@@ -4767,7 +4767,7 @@ def _compact_migration_placeholders(flow: Any) -> dict[str, str]:
         ),
         "new_maintenance_switch": _compact_migration_lines(
             (str(unique_id) for unique_id in new_switches),
-            empty="Maintenance switch already exists where applicable.",
+            empty="Alert pause switch already exists where applicable.",
         ),
         "before_count": str(preview.get("before_count", 0)),
         "after_count": str(preview.get("after_count", 0)),

@@ -24,7 +24,7 @@ relearn_baseline:
             - switch
 pause_alerts:
   name: Pause alerts
-  description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause Alerts button entity."
+  description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -1597,8 +1597,8 @@ set_utility_comparison_settings:
           step: 0.1
           mode: box
 start_maintenance:
-  name: Start maintenance
-  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Maintenance switch entity."
+  name: Pause alerts
+  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -1622,28 +1622,28 @@ start_maintenance:
             - switch
     note:
       name: Note
-      description: Optional maintenance note stored with the circuit.
+      description: Optional pause note stored with the circuit.
       required: false
       example: Cleaned coils
       selector:
         text:
     duration:
       name: Duration
-      description: How long the circuit should stay in maintenance mode.
+      description: How long alerts should stay paused.
       required: false
       example: "02:00:00"
       selector:
         duration:
     relearn_on_end:
       name: Relearn On End
-      description: Relearn the circuit baseline when maintenance ends.
+      description: Relearn the circuit baseline when alerts resume.
       required: false
       example: false
       selector:
         boolean:
 end_maintenance:
-  name: End maintenance
-  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Maintenance switch entity."
+  name: Resume alerts
+  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
       name: Circuit ID
@@ -1667,7 +1667,7 @@ end_maintenance:
             - switch
     relearn:
       name: Relearn
-      description: Relearn the circuit baseline after ending maintenance.
+      description: Relearn the circuit baseline after resuming alerts.
       required: false
       example: false
       selector:

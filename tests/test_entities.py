@@ -3584,7 +3584,7 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
     expected_icons = {
         "learning": "mdi:school-outline",
         "data_quality_problem": "mdi:database-alert-outline",
-        "maintenance": "mdi:wrench-clock",
+        "maintenance": "mdi:bell-pause-outline",
         "running": "mdi:power-cycle",
     }
 

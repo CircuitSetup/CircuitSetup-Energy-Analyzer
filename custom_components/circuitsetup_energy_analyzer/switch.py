@@ -44,8 +44,8 @@ class CircuitSwitchDescription:
 CIRCUIT_SWITCH_DESCRIPTIONS: tuple[CircuitSwitchDescription, ...] = (
     CircuitSwitchDescription(
         key="maintenance",
-        name_suffix="Maintenance mode",
-        icon="mdi:wrench-clock",
+        name_suffix="Pause alerts",
+        icon="mdi:bell-pause-outline",
         has_entity_name=True,
         translation_key="maintenance",
     ),
@@ -53,7 +53,7 @@ CIRCUIT_SWITCH_DESCRIPTIONS: tuple[CircuitSwitchDescription, ...] = (
 
 
 class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
-    """Switch entity exposing a circuit's maintenance state."""
+    """Switch entity exposing whether circuit alerts are paused."""
 
     _attr_entity_category = None
 
@@ -91,12 +91,12 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return whether maintenance is active for this circuit."""
-        return _maintenance_active(self.coordinator_state, self.circuit_id)
+        """Return whether alerts are paused for this circuit."""
+        return _alerts_paused(self.coordinator_state, self.coordinator, self.circuit_id)
 
     @property
     def available(self) -> bool:
-        """Return whether both maintenance actions can currently run."""
+        """Return whether both pause and resume actions can currently run."""
         return _maintenance_actions_available(self.coordinator)
 
     @property
@@ -111,7 +111,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         return attributes or None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Start maintenance for this circuit."""
+        """Pause alerts for this circuit."""
         del kwargs
         if self.is_on:
             return
@@ -126,7 +126,7 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """End maintenance for this circuit."""
+        """Resume alerts for this circuit."""
         del kwargs
         if not self.is_on:
             return
@@ -211,6 +211,11 @@ def _maintenance_details(state: Any, circuit_id: str) -> Mapping[str, Any]:
 
 def _maintenance_active(state: Any, circuit_id: str) -> bool:
     return _maintenance_details(state, circuit_id).get("active") is True
+
+
+def _alerts_paused(state: Any, coordinator: Any, circuit_id: str) -> bool:
+    paused_circuits = getattr(coordinator, "paused_circuits", ()) or ()
+    return circuit_id in paused_circuits or _maintenance_active(state, circuit_id)
 
 
 def _maintenance_actions_available(coordinator: Any) -> bool:

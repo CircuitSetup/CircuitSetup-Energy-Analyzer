@@ -1045,7 +1045,7 @@ def _health_summary_next_step(
     if readiness == "learning":
         return "Let analyzer learn"
     if maintenance_active:
-        return "End maintenance when work is complete"
+        return "Resume alerts when work is complete"
     if active_alert_count:
         return "Review alert evidence"
     return "No action needed"
