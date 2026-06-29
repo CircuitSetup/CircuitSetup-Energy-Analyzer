@@ -13,7 +13,9 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.dashboard import (
     DASHBOARD_URL_PATH,
+    NILM_DASHBOARD_GRAPHS_CARD,
     build_recommended_dashboard,
+    dashboard_graph_module_resource,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -231,6 +233,25 @@ def _registry_entry(
     )
 
 
+def _nilm_power_registry_entry(
+    entity_id: str = "sensor.pool_pump_estimated_power",
+    *,
+    entry_id: str = "entry-1",
+    assignment_id: str = "pool_pump",
+    original_name: str = "Pool Pump Estimated Power",
+    disabled_by: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        entity_id=entity_id,
+        unique_id=f"{entry_id}_nilm_{assignment_id}_estimated_power",
+        config_entry_id=entry_id,
+        platform="circuitsetup_energy_analyzer",
+        disabled_by=disabled_by,
+        original_name=original_name,
+        name=None,
+    )
+
+
 def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     return {
         "sensor.fridge_activity": _registry_entry(
@@ -375,6 +396,95 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
             "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
         ),
     }
+
+
+def test_dashboard_hides_nilm_graph_cards_without_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
+        entry_id="entry-1",
+    )
+
+    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+
+    assert not [
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    ]
+    assert not [card for card in cards if card.get("title") == "NILM mains power"]
+    assert "resources" not in dashboard
+
+
+def test_standard_dashboard_hides_nilm_graph_cards_for_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.pool_pump_estimated_power": _nilm_power_registry_entry()
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+
+    assert not [
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    ]
+    assert not [
+        card for card in cards if card.get("title") == "Defined NILM appliance power"
+    ]
+    assert "resources" not in dashboard
+
+
+def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.pool_pump_estimated_power": _nilm_power_registry_entry()
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    cards = _dashboard_cards(mains_section)
+
+    custom_graph = next(
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    )
+    appliance_graph = _card_with_title(mains_section, "Defined NILM appliance power")
+
+    assert custom_graph == {
+        "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
+        "title": "NILM mains power",
+        "entry_id": "entry-1",
+        "circuit_id": "mains",
+        "detail_path": (
+            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+        ),
+        "appliance_power_entities": ["sensor.pool_pump_estimated_power"],
+    }
+    assert appliance_graph == {
+        "type": "history-graph",
+        "title": "Defined NILM appliance power",
+        "hours_to_show": 24,
+        "entities": [
+            {"entity": "sensor.pool_pump_estimated_power", "name": "Pool Pump"}
+        ],
+    }
+    assert "resources" not in dashboard
 
 
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
@@ -965,6 +1075,64 @@ class _FakeLovelaceStorage:
         self.deleted = True
 
 
+class _FakeLovelaceResources:
+    def __init__(
+        self,
+        items: list[dict[str, object]] | None = None,
+        *,
+        loaded: bool = False,
+    ) -> None:
+        self.items = list(items or [])
+        self.loaded = loaded
+        self.load_count = 0
+        self.created: list[dict[str, object]] = []
+        self.updated: list[tuple[str, dict[str, object]]] = []
+
+    async def async_load(self) -> None:
+        self.load_count += 1
+        self.loaded = True
+
+    def async_items(self) -> list[dict[str, object]]:
+        return list(self.items)
+
+    async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
+        self.created.append(data)
+        item = {
+            "id": f"resource-{len(self.items) + 1}",
+            "type": data.get("res_type"),
+            "url": data.get("url"),
+        }
+        self.items.append(item)
+        return item
+
+    async def async_update_item(
+        self,
+        item_id: str,
+        data: dict[str, object],
+    ) -> dict[str, object]:
+        self.updated.append((item_id, data))
+        item = {
+            "id": item_id,
+            "type": data.get("res_type"),
+            "url": data.get("url"),
+        }
+        for index, existing in enumerate(self.items):
+            if existing.get("id") == item_id:
+                self.items[index] = item
+                break
+        return item
+
+
+class _FakeReadOnlyLovelaceResources:
+    loaded = True
+
+    def __init__(self, items: list[dict[str, object]] | None = None) -> None:
+        self.items = list(items or [])
+
+    def async_items(self) -> list[dict[str, object]]:
+        return list(self.items)
+
+
 class _FakeAttributeDashboardsCollection:
     def __init__(self) -> None:
         self.created: list[dict[str, object]] = []
@@ -1078,6 +1246,130 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
         coordinator.last_dashboard_create_request["layout"]
         == DASHBOARD_LAYOUT_STANDARD
     )
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_save_registers_graph_card_resource() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resource = dashboard_graph_module_resource()
+    expected_resource = {"res_type": resource["type"], "url": resource["url"]}
+    resources = _FakeLovelaceResources()
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {"cards": [{"type": NILM_DASHBOARD_GRAPHS_CARD}]},
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=False,
+    )
+
+    assert saved is True
+    assert resources.loaded is True
+    assert resources.load_count == 1
+    assert resources.created == [expected_resource]
+    assert resources.updated == []
+    assert dashboard_store.saved == [config]
+    assert "resources" not in dashboard_store.saved[0]
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resource = dashboard_graph_module_resource()
+    static_url = resource["url"].split("?", 1)[0]
+    old_resource = {
+        "id": "dashboard-graph-module",
+        "type": "module",
+        "url": f"{static_url}?v=old",
+    }
+    resources = _FakeLovelaceResources([old_resource], loaded=True)
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {"cards": [{"type": NILM_DASHBOARD_GRAPHS_CARD}]},
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=True,
+    )
+
+    assert saved is True
+    assert resources.load_count == 0
+    assert resources.created == []
+    assert resources.updated == [
+        (
+            "dashboard-graph-module",
+            {"res_type": resource["type"], "url": resource["url"]},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resources = _FakeReadOnlyLovelaceResources()
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {
+                        "cards": [
+                            {"type": NILM_DASHBOARD_GRAPHS_CARD},
+                            {"type": "history-graph", "title": "Native graph"},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=True,
+    )
+
+    assert saved is True
+    cards = _dashboard_cards(dashboard_store.saved[0])
+    assert [card.get("type") for card in cards] == ["history-graph"]
+    assert cards[0]["title"] == "Native graph"
 
 
 @pytest.mark.asyncio

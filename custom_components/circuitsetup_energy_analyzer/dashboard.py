@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
+from urllib.parse import quote
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import (
@@ -15,6 +16,8 @@ from .const import (
 DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
 DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
+NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+NILM_ESTIMATED_POWER_KEY = "estimated_power"
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
     ("sensor", "activity_summary", "Activity"),
@@ -110,6 +113,7 @@ def build_recommended_dashboard(
             _mains_section(
                 mains_circuits[0],
                 include_feature_cards=include_feature_cards,
+                include_dashboard_graph_cards=include_expert_links,
                 registry_lookup=registry_lookup,
                 hass=hass,
                 entry_id=entry_id,
@@ -138,7 +142,7 @@ def build_recommended_dashboard(
     if include_expert_links:
         sections.append(_expert_evidence_section(circuit_list))
 
-    return {
+    dashboard = {
         "title": DASHBOARD_TITLE,
         "views": [
             {
@@ -152,6 +156,7 @@ def build_recommended_dashboard(
             }
         ],
     }
+    return dashboard
 
 
 def dashboard_storage_payload(
@@ -222,6 +227,7 @@ def _mains_section(
     circuit: Any,
     *,
     include_feature_cards: bool,
+    include_dashboard_graph_cards: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
@@ -331,6 +337,23 @@ def _mains_section(
                 },
             }
         )
+
+        if include_dashboard_graph_cards:
+            appliance_power_rows = _published_nilm_power_rows(
+                registry_lookup,
+                entry_id,
+            )
+            if nilm_graph_card := _nilm_dashboard_graphs_card(
+                circuit_id=circuit_id,
+                entry_id=entry_id,
+                appliance_power_rows=appliance_power_rows,
+            ):
+                cards.append(nilm_graph_card)
+
+            if appliance_power_graph := _defined_nilm_appliance_power_graph(
+                appliance_power_rows
+            ):
+                cards.append(appliance_power_graph)
 
         if solar_card := _conditional_entities_card(
             circuit_id,
@@ -605,6 +628,42 @@ def _statistics_graph_card(title: str, entity_ids: Iterable[str]) -> dict[str, A
     }
 
 
+def _defined_nilm_appliance_power_graph(
+    appliance_power_rows: Sequence[Mapping[str, str]],
+) -> dict[str, Any] | None:
+    if not appliance_power_rows:
+        return None
+    return {
+        "type": "history-graph",
+        "title": "Defined NILM appliance power",
+        "hours_to_show": 24,
+        "entities": list(appliance_power_rows),
+    }
+
+
+def _nilm_dashboard_graphs_card(
+    *,
+    circuit_id: str,
+    entry_id: str | None,
+    appliance_power_rows: Sequence[Mapping[str, str]],
+) -> dict[str, Any] | None:
+    if not appliance_power_rows:
+        return None
+    return {
+        "type": NILM_DASHBOARD_GRAPHS_CARD,
+        "title": "NILM mains power",
+        "entry_id": entry_id,
+        "circuit_id": circuit_id,
+        "detail_path": (
+            f"{DEFAULT_ALERT_EVIDENCE_PATH}?nilm_workspace=1"
+            f"&circuit_id={quote(circuit_id, safe='')}"
+        ),
+        "appliance_power_entities": [
+            row["entity"] for row in appliance_power_rows if row.get("entity")
+        ],
+    }
+
+
 def _conditional_card(
     entity_ids: Iterable[str],
     card: dict[str, Any],
@@ -696,6 +755,49 @@ def _resolved_entity_id(
     if not rows:
         return None
     return rows[0]["entity"]
+
+
+def _published_nilm_power_rows(
+    registry_lookup: Mapping[str, Any] | None,
+    entry_id: str | None,
+) -> list[dict[str, str]]:
+    if not registry_lookup or not entry_id:
+        return []
+
+    prefix = f"{entry_id}_nilm_"
+    suffix = f"_{NILM_ESTIMATED_POWER_KEY}"
+    rows: list[dict[str, str]] = []
+    for entry in registry_lookup.values():
+        unique_id = str(_entry_value(entry, "unique_id") or "").strip()
+        if not unique_id.startswith(prefix) or not unique_id.endswith(suffix):
+            continue
+        if _entry_value(entry, "disabled_by"):
+            continue
+        entity_id = str(_entry_value(entry, "entity_id") or "").strip()
+        if not entity_id.startswith("sensor."):
+            continue
+        assignment_id = unique_id[len(prefix) : -len(suffix)]
+        rows.append(
+            {
+                "entity": entity_id,
+                "name": _nilm_power_graph_label(entry, assignment_id),
+            }
+        )
+
+    return list(_dedupe_entity_rows(sorted(rows, key=lambda row: row["entity"])))
+
+
+def _nilm_power_graph_label(entry: Any, assignment_id: str) -> str:
+    raw_label = (
+        _entry_value(entry, "name")
+        or _entry_value(entry, "original_name")
+        or assignment_id
+    )
+    label = str(raw_label or "").replace("_", " ").replace("-", " ").strip()
+    suffix = " estimated power"
+    if label.lower().endswith(suffix):
+        label = label[: -len(suffix)].strip()
+    return label or assignment_id.replace("_", " ").title()
 
 
 def _resolved_entity_rows(
@@ -976,6 +1078,34 @@ def _entry_value(entry: Any, *keys: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _dashboard_contains_card_type(cards: object, card_type: str) -> bool:
+    if isinstance(cards, Mapping):
+        if cards.get("type") == card_type:
+            return True
+        return any(
+            _dashboard_contains_card_type(value, card_type)
+            for value in cards.values()
+        )
+    if isinstance(cards, list):
+        return any(_dashboard_contains_card_type(value, card_type) for value in cards)
+    return False
+
+
+def dashboard_includes_nilm_graph_card(config: object) -> bool:
+    """Return whether a dashboard config uses the custom NILM graph card."""
+    return _dashboard_contains_card_type(config, NILM_DASHBOARD_GRAPHS_CARD)
+
+
+def dashboard_graph_module_resource() -> dict[str, str]:
+    """Return the Lovelace module resource for the custom dashboard graph card."""
+    from .panel import PANEL_MODULE_NAME, PANEL_MODULE_VERSION, STATIC_URL_PATH
+
+    return {
+        "type": "module",
+        "url": f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}",
+    }
 
 
 def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> str:
