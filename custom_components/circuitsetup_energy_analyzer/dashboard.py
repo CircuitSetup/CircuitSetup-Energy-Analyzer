@@ -103,6 +103,7 @@ def build_recommended_dashboard(
     sections = [
         _appliance_status_section(
             appliance_circuits,
+            include_evidence_links=include_feature_cards,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -188,6 +189,7 @@ def dashboard_storage_payload(
 def _appliance_status_section(
     circuits: Iterable[Any],
     *,
+    include_evidence_links: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
@@ -215,6 +217,21 @@ def _appliance_status_section(
             cards.append(_markdown_card(_circuit_note(name, notes)))
         if rows:
             cards.append(_entities_card(name, rows))
+            if include_evidence_links:
+                cards.append(
+                    {
+                        "type": "button",
+                        "name": f"Open {name} Evidence",
+                        "icon": "mdi:chart-line",
+                        "tap_action": {
+                            "action": "navigate",
+                            "navigation_path": (
+                                f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
+                                f"circuit_id={circuit_id}"
+                            ),
+                        },
+                    }
+                )
 
     return {
         "type": "grid",
@@ -949,12 +966,17 @@ def _registry_entity_lookup(
 ) -> dict[str, Any] | None:
     if hass is None or not entry_id:
         return None
-    try:
-        from homeassistant.helpers import entity_registry as er
-    except ImportError:
-        registry = getattr(hass, "entity_registry", None)
-    else:
-        registry = er.async_get(hass)
+    registry = getattr(hass, "entity_registry", None)
+    if registry is None:
+        try:
+            from homeassistant.helpers import entity_registry as er
+        except ImportError:
+            registry = None
+        else:
+            try:
+                registry = er.async_get(hass)
+            except (AttributeError, TypeError):
+                registry = None
     if registry is None:
         return None
 

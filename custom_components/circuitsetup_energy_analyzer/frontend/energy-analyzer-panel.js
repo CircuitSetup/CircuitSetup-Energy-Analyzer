@@ -291,7 +291,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      this._lastActionMessage = "Action complete.";
+      this._lastActionMessage = this._alertActionMessage(actionKey);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
       this._scrollToTop();
@@ -754,6 +754,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return "Action complete.";
   }
 
+  _alertActionMessage(actionKey) {
+    const messages = {
+      acknowledge: "Alert acknowledged.",
+      mark_expected: "Marked as expected behavior.",
+      mark_unhelpful: "Marked as not helpful.",
+      pause_alerts: "Alert pause updated.",
+      relearn_baseline: "Baseline relearn requested.",
+    };
+    return messages[actionKey] || "Action complete.";
+  }
+
   _nilmWorkspaceActionMessage(actionKey, data, item) {
     const name = (data && data.label) || (item && (item.display_name || item.label)) || "appliance";
     if (actionKey === "assign") {
@@ -953,6 +964,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: flex;
           flex-wrap: wrap;
           gap: 10px;
+        }
+        .action-group {
+          display: grid;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .action-group h3 {
+          font-size: 1rem;
+          margin: 0;
         }
         .action-item {
           display: inline-flex;
@@ -1196,14 +1216,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ${this._renderNilmWorkspace()}
       <section class="panel">
         <h2>Actions</h2>
-        <div class="actions">
-          ${this._actionButton("acknowledge", "Acknowledge")}
-          ${this._actionButton("mark_expected", "Mark Expected", true)}
-          ${this._actionButton("mark_unhelpful", "Not Helpful", true)}
-          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
-          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
-        </div>
+        ${this._renderActionGroup("Respond to this alert", [
+          this._actionButton("acknowledge", "Acknowledge"),
+          this._actionButton("mark_expected", "Mark Expected", true),
+          this._actionButton("mark_unhelpful", "Not Helpful", true),
+        ])}
+        ${this._renderActionGroup("Pause alerts for maintenance", [
+          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ])}
+        ${this._renderActionGroup("Tune this circuit", [
+          this._actionButton("relearn_baseline", "Relearn Baseline", true),
+          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ])}
       </section>
       ${this._renderRecommendations()}
     `;
@@ -2405,11 +2429,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <section class="panel">
         <h2>Available Circuit Actions</h2>
-        <div class="actions">
-          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
-          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
-        </div>
+        ${this._renderActionGroup("Pause alerts for maintenance", [
+          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ])}
+        ${this._renderActionGroup("Tune this circuit", [
+          this._actionButton("relearn_baseline", "Relearn Baseline", true),
+          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ])}
       </section>
       ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
@@ -2438,6 +2464,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
+  }
+
+  _renderActionGroup(title, buttons) {
+    const renderedButtons = buttons.filter(Boolean);
+    if (!renderedButtons.length) {
+      return "";
+    }
+    return `
+      <div class="action-group">
+        <h3>${this._escape(title)}</h3>
+        <div class="actions">${renderedButtons.join("")}</div>
+      </div>
+    `;
   }
 
   _actionButton(actionKey, label, secondary = false) {
