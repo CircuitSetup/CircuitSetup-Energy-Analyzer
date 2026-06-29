@@ -80,6 +80,8 @@ from .cycles import (
 from .dashboard import (
     DASHBOARD_TITLE,
     DASHBOARD_URL_PATH,
+    dashboard_graph_module_resource,
+    dashboard_includes_nilm_graph_card,
     dashboard_storage_payload,
     normalize_dashboard_layout,
 )
@@ -9134,9 +9136,94 @@ async def _async_save_lovelace_dashboard_config(
     save = getattr(dashboard_store, "async_save", None)
     if not callable(save):
         return False
+    await _async_ensure_lovelace_dashboard_graph_resource(lovelace_data, config)
     await _async_lovelace_method_result(save(dict(config)))
     _register_lovelace_dashboard_panel(hass, item, update=update)
     return True
+
+
+async def _async_ensure_lovelace_dashboard_graph_resource(
+    lovelace_data: Any,
+    config: Mapping[str, Any],
+) -> None:
+    if not dashboard_includes_nilm_graph_card(config):
+        return
+
+    resources = _lovelace_dashboard_item_value(lovelace_data, "resources")
+    if resources is None:
+        return
+
+    async_load = getattr(resources, "async_load", None)
+    if callable(async_load) and not getattr(resources, "loaded", True):
+        await _async_lovelace_method_result(async_load())
+        if hasattr(resources, "loaded"):
+            resources.loaded = True
+
+    items_method = getattr(resources, "async_items", None)
+    create_method = getattr(resources, "async_create_item", None)
+    if not callable(items_method) or not callable(create_method):
+        return
+
+    resource = dashboard_graph_module_resource()
+    items = await _async_lovelace_method_result(items_method())
+    existing = next(
+        (
+            item
+            for item in items
+            if _lovelace_resource_matches_static_url(item, resource)
+        ),
+        None,
+    )
+    resource_payload = _lovelace_resource_update_payload(resource)
+    if existing is None:
+        await _async_lovelace_method_result(create_method(resource_payload))
+        return
+
+    if _lovelace_resource_has_current_values(existing, resource):
+        return
+
+    update_method = getattr(resources, "async_update_item", None)
+    item_id = _lovelace_dashboard_item_value(existing, "id")
+    if callable(update_method) and item_id:
+        await _async_lovelace_method_result(
+            update_method(str(item_id), resource_payload)
+        )
+
+
+def _lovelace_resource_update_payload(
+    resource: Mapping[str, str],
+) -> dict[str, str]:
+    return {
+        "res_type": resource["type"],
+        "url": resource["url"],
+    }
+
+
+def _lovelace_resource_matches_static_url(
+    item: Any,
+    resource: Mapping[str, str],
+) -> bool:
+    return _lovelace_resource_static_url(
+        _lovelace_dashboard_item_value(item, "url")
+    ) == _lovelace_resource_static_url(resource.get("url"))
+
+
+def _lovelace_resource_has_current_values(
+    item: Any,
+    resource: Mapping[str, str],
+) -> bool:
+    item_type = (
+        _lovelace_dashboard_item_value(item, "type")
+        or _lovelace_dashboard_item_value(item, "res_type")
+    )
+    return (
+        str(item_type or "") == resource["type"]
+        and str(_lovelace_dashboard_item_value(item, "url") or "") == resource["url"]
+    )
+
+
+def _lovelace_resource_static_url(value: Any) -> str:
+    return str(value or "").strip().split("?", 1)[0]
 
 
 async def _async_delete_lovelace_dashboard_config(

@@ -156,8 +156,6 @@ def build_recommended_dashboard(
             }
         ],
     }
-    if _dashboard_contains_card_type(sections, NILM_DASHBOARD_GRAPHS_CARD):
-        dashboard["resources"] = [_dashboard_graph_module_resource()]
     return dashboard
 
 
@@ -1095,7 +1093,13 @@ def _dashboard_contains_card_type(cards: object, card_type: str) -> bool:
     return False
 
 
-def _dashboard_graph_module_resource() -> dict[str, str]:
+def dashboard_includes_nilm_graph_card(config: object) -> bool:
+    """Return whether a dashboard config uses the custom NILM graph card."""
+    return _dashboard_contains_card_type(config, NILM_DASHBOARD_GRAPHS_CARD)
+
+
+def dashboard_graph_module_resource() -> dict[str, str]:
+    """Return the Lovelace module resource for the custom dashboard graph card."""
     from .panel import PANEL_MODULE_NAME, PANEL_MODULE_VERSION, STATIC_URL_PATH
 
     return {

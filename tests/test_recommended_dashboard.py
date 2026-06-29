@@ -13,7 +13,9 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.dashboard import (
     DASHBOARD_URL_PATH,
+    NILM_DASHBOARD_GRAPHS_CARD,
     build_recommended_dashboard,
+    dashboard_graph_module_resource,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -482,15 +484,7 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
             {"entity": "sensor.pool_pump_estimated_power", "name": "Pool Pump"}
         ],
     }
-    assert dashboard["resources"] == [
-        {
-            "type": "module",
-            "url": (
-                "/circuitsetup_energy_analyzer_static/energy-analyzer-panel.js"
-                "?v=20260629-nilm-dashboard-graphs"
-            ),
-        }
-    ]
+    assert "resources" not in dashboard
 
 
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
@@ -1081,6 +1075,54 @@ class _FakeLovelaceStorage:
         self.deleted = True
 
 
+class _FakeLovelaceResources:
+    def __init__(
+        self,
+        items: list[dict[str, object]] | None = None,
+        *,
+        loaded: bool = False,
+    ) -> None:
+        self.items = list(items or [])
+        self.loaded = loaded
+        self.load_count = 0
+        self.created: list[dict[str, object]] = []
+        self.updated: list[tuple[str, dict[str, object]]] = []
+
+    async def async_load(self) -> None:
+        self.load_count += 1
+        self.loaded = True
+
+    def async_items(self) -> list[dict[str, object]]:
+        return list(self.items)
+
+    async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
+        self.created.append(data)
+        item = {
+            "id": f"resource-{len(self.items) + 1}",
+            "type": data.get("res_type"),
+            "url": data.get("url"),
+        }
+        self.items.append(item)
+        return item
+
+    async def async_update_item(
+        self,
+        item_id: str,
+        data: dict[str, object],
+    ) -> dict[str, object]:
+        self.updated.append((item_id, data))
+        item = {
+            "id": item_id,
+            "type": data.get("res_type"),
+            "url": data.get("url"),
+        }
+        for index, existing in enumerate(self.items):
+            if existing.get("id") == item_id:
+                self.items[index] = item
+                break
+        return item
+
+
 class _FakeAttributeDashboardsCollection:
     def __init__(self) -> None:
         self.created: list[dict[str, object]] = []
@@ -1194,6 +1236,91 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
         coordinator.last_dashboard_create_request["layout"]
         == DASHBOARD_LAYOUT_STANDARD
     )
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_save_registers_graph_card_resource() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resource = dashboard_graph_module_resource()
+    expected_resource = {"res_type": resource["type"], "url": resource["url"]}
+    resources = _FakeLovelaceResources()
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {"cards": [{"type": NILM_DASHBOARD_GRAPHS_CARD}]},
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=False,
+    )
+
+    assert saved is True
+    assert resources.loaded is True
+    assert resources.load_count == 1
+    assert resources.created == [expected_resource]
+    assert resources.updated == []
+    assert dashboard_store.saved == [config]
+    assert "resources" not in dashboard_store.saved[0]
+
+
+@pytest.mark.asyncio
+async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator as module
+
+    resource = dashboard_graph_module_resource()
+    static_url = resource["url"].split("?", 1)[0]
+    old_resource = {
+        "id": "dashboard-graph-module",
+        "type": "module",
+        "url": f"{static_url}?v=old",
+    }
+    resources = _FakeLovelaceResources([old_resource], loaded=True)
+    dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
+    lovelace_data = SimpleNamespace(
+        dashboards={DASHBOARD_URL_PATH: dashboard_store},
+        resources=resources,
+    )
+    config = {
+        "views": [
+            {
+                "sections": [
+                    {"cards": [{"type": NILM_DASHBOARD_GRAPHS_CARD}]},
+                ],
+            }
+        ],
+    }
+
+    saved = await module._async_save_lovelace_dashboard_config(
+        SimpleNamespace(),
+        lovelace_data,
+        {"url_path": DASHBOARD_URL_PATH},
+        config,
+        update=True,
+    )
+
+    assert saved is True
+    assert resources.load_count == 0
+    assert resources.created == []
+    assert resources.updated == [
+        (
+            "dashboard-graph-module",
+            {"res_type": resource["type"], "url": resource["url"]},
+        )
+    ]
 
 
 @pytest.mark.asyncio
