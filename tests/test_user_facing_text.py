@@ -1227,6 +1227,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
         "NILM Workspace",
+        "_renderNilmReviewQueue(workspace)",
+        "Review queue",
+        "signatures need labels or decisions.",
         "Review mains load changes, labels, and assignments used by NILM.",
         "Known Load Overlays",
         "Known loads mark configured circuits so NILM can separate expected usage.",
@@ -1708,9 +1711,19 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
         "Date.parse(alert.graph_window_start)",
         "Date.parse(alert.graph_window_end)",
         "_alertActionMessage(actionKey)",
-        '_renderActionGroup("Respond to this alert"',
-        '_renderActionGroup("Pause alerts for maintenance"',
-        '_renderActionGroup("Tune this circuit"',
+        (
+            '_renderActionGroup("Respond to this alert", "Review the graph, '
+            'then choose how the analyzer should treat this alert."'
+        ),
+        (
+            '_renderActionGroup("Pause alerts for maintenance", "Use this '
+            "when the appliance is being serviced or intentionally behaving "
+            'differently."'
+        ),
+        (
+            '_renderActionGroup("Tune this circuit", "Use these when the '
+            'appliance summary looks wrong or the learned baseline is stale."'
+        ),
         "Alert acknowledged.",
         "Marked as expected behavior.",
         "Marked as not helpful.",
