@@ -18,6 +18,7 @@ class NilmController:
         label_interval_id: Callable[[str, str, str, str], str],
         signature_fingerprint_value: Callable[[Any, str], str],
         label_interval_max_items: int,
+        round_optional_number: Callable[[Any], float | None],
     ) -> None:
         self._coordinator = coordinator
         self._clean_string_list = clean_string_list
@@ -27,6 +28,7 @@ class NilmController:
         self._label_interval_id = label_interval_id
         self._signature_fingerprint_value = signature_fingerprint_value
         self._label_interval_max_items = label_interval_max_items
+        self._round_optional_number = round_optional_number
 
     async def async_label_nilm_signature(
         self,
@@ -277,6 +279,149 @@ class NilmController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(coordinator._now_fn())
         return dict(assignment)
+
+    async def async_validate_nilm_session(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record that a NILM session matched its appliance assignment."""
+        return await self.async_record_nilm_session_validation(
+            circuit_id,
+            session_id,
+            assignment_id=assignment_id,
+            correct=True,
+        )
+
+    async def async_reject_nilm_session(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record that a NILM session did not match its appliance assignment."""
+        return await self.async_record_nilm_session_validation(
+            circuit_id,
+            session_id,
+            assignment_id=assignment_id,
+            correct=False,
+        )
+
+    async def async_record_nilm_session_validation(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None,
+        correct: bool,
+    ) -> dict[str, Any]:
+        """Apply one user validation decision to a NILM appliance assignment."""
+        session_id_text = str(session_id or "").strip()
+        assignment = self.assignment_for_session(
+            circuit_id,
+            session_id_text,
+            assignment_id=assignment_id,
+        )
+        self._append_unique(assignment.setdefault("session_ids", []), session_id_text)
+        confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
+        current_confidence = self._nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        coordinator = self._coordinator
+        now_dt = coordinator._now_fn()
+        now = now_dt.isoformat()
+        if correct:
+            already_confirmed = session_id_text in confirmed
+            self._append_unique(confirmed, session_id_text)
+            rejected = [value for value in rejected if value != session_id_text]
+            if not already_confirmed:
+                assignment["confidence"] = min(
+                    1.0,
+                    round(current_confidence + 0.05, 3),
+                )
+            if assignment.get("lifecycle_state") not in {"published", "retired"}:
+                assignment["lifecycle_state"] = "validated"
+            assignment["last_validation"] = "correct"
+            assignment["last_validated_at"] = now
+        else:
+            already_rejected = session_id_text in rejected
+            self._append_unique(rejected, session_id_text)
+            confirmed = [value for value in confirmed if value != session_id_text]
+            if not already_rejected:
+                assignment["confidence"] = max(
+                    0.0,
+                    round(current_confidence - 0.15, 3),
+                )
+            if assignment.get("lifecycle_state") != "retired":
+                assignment["lifecycle_state"] = "needs_validation"
+            assignment["last_validation"] = "wrong_appliance"
+            assignment["last_rejected_at"] = now
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            self._clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["false_negative_rate"] = self._nonnegative_float_value(
+            assignment.get("false_negative_rate"),
+            default=0.0,
+        )
+        assignment["median_power_error"] = self._round_optional_number(
+            assignment.get("median_power_error"),
+        )
+        assignment["energy_estimate_error"] = self._round_optional_number(
+            assignment.get("energy_estimate_error"),
+        )
+        assignment["updated_at"] = now
+        coordinator._mark_store_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now_dt)
+        return dict(assignment)
+
+    def assignment_for_session(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the assignment that owns one NILM session."""
+        session_id_text = str(session_id or "").strip()
+        if not session_id_text:
+            raise ValueError("Missing session_id.")
+        assignment_id_text = str(assignment_id or "").strip()
+        if assignment_id_text:
+            assignment = self.assignment_for_id(circuit_id, assignment_id_text)
+            self._append_unique(
+                assignment.setdefault("session_ids", []),
+                session_id_text,
+            )
+            return assignment
+        assignments = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        for assignment in assignments:
+            if session_id_text in assignment.get("session_ids", ()):
+                return assignment
+        raise ValueError(
+            f"Assign NILM session '{session_id_text}' to an appliance before "
+            "validating it."
+        )
 
     async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
         coordinator = self._coordinator
