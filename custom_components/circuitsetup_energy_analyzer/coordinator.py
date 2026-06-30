@@ -124,6 +124,7 @@ from .local_time import local_date, local_day_time
 from .managers.dashboard_controller import DashboardController
 from .managers.entity_profile_controller import EntityProfileController
 from .managers.evidence_actions import EvidenceActionController
+from .managers.notification_controller import NotificationController
 from .managers.settings_controller import SettingsController
 from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
@@ -970,22 +971,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tuple[str, str, str],
             ConservativeAlertPolicy,
         ] = {}
-        self._notified_alert_ids: set[str] = set()
-        self._settings_recommendation_notification_episode_key = (
-            _compact_settings_recommendation_episode_key(
-                tuple(
-                    tuple(str(item) for item in part)
-                    for part in (
-                        self.store_data.settings_recommendation_notification_episode_key
-                    )
-                )
-            )
-        )
-        self.store_data.settings_recommendation_notification_episode_key = (
-            self._settings_recommendation_notification_episode_key
-        )
         self._active_repair_issues: set[tuple[str, str]] = set()
         self.store_persistence = StorePersistenceManager(self)
+        self.notification_controller = NotificationController(
+            self,
+            compact_settings_recommendation_episode_key=(
+                _compact_settings_recommendation_episode_key
+            ),
+            material_evidence_key=_material_evidence_key,
+        )
         self.paused_circuits: set[str] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
         self.last_exported_history_csv: str = ""
@@ -2191,58 +2185,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ]
 
     async def _notify_settings_recommendations_if_needed(self: Self) -> None:
-        total_pending = sum(
-            self.state.settings_recommendation_count_by_circuit.values(),
+        await (
+            self.notification_controller.async_notify_settings_recommendations_if_needed()
         )
-        if total_pending <= 0:
-            self._set_settings_recommendation_notification_episode_key(())
-            return
-        episode_key = self._settings_recommendation_episode_key()
-        if episode_key == self._settings_recommendation_notification_episode_key:
-            return
-        self._set_settings_recommendation_notification_episode_key(episode_key)
-        await notifications.async_create_settings_recommendation_notification(
-            self.hass,
-            self.entry_id,
-            total_pending=total_pending,
-        )
-        self._mark_store_dirty()
-        await self._async_save_store(self._now_fn())
 
     def _settings_recommendation_episode_key(
         self: Self,
     ) -> tuple[tuple[str, ...], ...]:
-        parts: list[tuple[str, ...]] = []
-        for recommendation in self._pending_settings_recommendations(self._now_fn()):
-            evidence_key = repr(
-                _material_evidence_key(
-                    recommendation.feature,
-                    recommendation.evidence,
-                ),
-            )
-            parts.append(
-                (
-                    str(recommendation.recommendation_id),
-                    str(recommendation.circuit_id),
-                    str(recommendation.setting_key),
-                    repr(recommendation.current_value),
-                    repr(recommendation.suggested_value),
-                    repr(sorted(dict(recommendation.apply_payload).items())),
-                    str(recommendation.reason),
-                    evidence_key,
-                )
-            )
-        return _compact_settings_recommendation_episode_key(tuple(sorted(parts)))
+        return self.notification_controller.settings_recommendation_episode_key()
 
     def _set_settings_recommendation_notification_episode_key(
         self: Self,
         episode_key: tuple[tuple[str, ...], ...],
     ) -> None:
-        if episode_key == self._settings_recommendation_notification_episode_key:
-            return
-        self._settings_recommendation_notification_episode_key = episode_key
-        self.store_data.settings_recommendation_notification_episode_key = episode_key
-        self._mark_store_dirty()
+        self.notification_controller.set_settings_recommendation_notification_episode_key(
+            episode_key
+        )
 
     async def async_set_energy_goal_settings(
         self: Self,
@@ -6619,6 +6577,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _store_dirty(self: Self, value: bool) -> None:
         self.store_persistence.dirty = bool(value)
 
+    @property
+    def _notified_alert_ids(self: Self) -> set[str]:
+        return self.notification_controller.notified_alert_ids
+
+    @property
+    def _settings_recommendation_notification_episode_key(
+        self: Self,
+    ) -> tuple[tuple[str, ...], ...]:
+        return (
+            self.notification_controller.settings_recommendation_notification_episode_key
+        )
+
     async def _apply_feature_result(
         self: Self,
         result: FeatureResult,
@@ -7285,19 +7255,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return now - first_seen >= timedelta(days=profile.minimum_learning_days)
 
     async def _notify_alert(self: Self, alert: AlertEvidence) -> None:
-        if alert.circuit_id in self.paused_circuits:
-            return
-        if self._has_suppressed_alert_feedback(alert):
-            return
-        alert_id = notifications.notification_id_for_alert(alert)
-        if alert_id in self._notified_alert_ids:
-            return
-        self._notified_alert_ids.add(alert_id)
-        await notifications.async_create_alert_notification(
-            self.hass,
-            alert,
-            config=self._config_for_circuit(alert.circuit_id),
-        )
+        await self.notification_controller.async_notify_alert(alert)
 
     async def _notify_nilm_virtual_appliances(
         self: Self,
