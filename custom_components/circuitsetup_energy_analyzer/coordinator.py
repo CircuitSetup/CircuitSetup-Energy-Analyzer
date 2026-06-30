@@ -12,7 +12,8 @@ from inspect import isawaitable
 from statistics import median
 from typing import Any, Self
 
-from . import notifications, repairs
+from . import notifications
+from . import repairs as repairs  # noqa: F401 - compatibility for test monkeypatching
 from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
@@ -126,6 +127,7 @@ from .managers.entity_profile_controller import EntityProfileController
 from .managers.evidence_actions import EvidenceActionController
 from .managers.notification_controller import NotificationController
 from .managers.settings_controller import SettingsController
+from .managers.setup_health import SetupHealthAggregator
 from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
 from .managers.store_persistence import StorePersistenceManager
@@ -239,28 +241,6 @@ from .water_correlations import (
 from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
-_DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
-    {
-        "missing_required_sensor",
-        "stale_source_sensor",
-        "unexpected_negative_real_power",
-    }
-)
-_SETUP_HEALTH_REPAIR_PROBLEMS = frozenset(
-    {
-        "missing_source_entities",
-        "missing_energy_source",
-        "missing_mains_source",
-        "missing_electrical_metrics",
-        "check_ct_direction",
-        "dual_phase_missing_leg",
-        "missing_rain_context_source",
-        "missing_water_flow_source",
-        "utility_comparison_source_mismatch",
-        "utility_comparison_missing_utility_source",
-        "utility_comparison_missing_measured_source",
-    }
-)
 _UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS = {
     "unconfigured": "utility_comparison_source_mismatch",
     "missing_utility": "utility_comparison_missing_utility_source",
@@ -971,7 +951,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tuple[str, str, str],
             ConservativeAlertPolicy,
         ] = {}
-        self._active_repair_issues: set[tuple[str, str]] = set()
         self.store_persistence = StorePersistenceManager(self)
         self.notification_controller = NotificationController(
             self,
@@ -980,6 +959,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             material_evidence_key=_material_evidence_key,
         )
+        self.setup_health = SetupHealthAggregator(self)
         self.paused_circuits: set[str] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
         self.last_exported_history_csv: str = ""
@@ -5110,49 +5090,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str,
         sample_or_problem: NormalizedCircuitSample | str,
     ) -> None:
-        desired: set[tuple[str, str]] = set()
-        if isinstance(sample_or_problem, str):
-            self.state.data_quality_by_circuit[circuit_id] = sample_or_problem
-            desired.add((circuit_id, sample_or_problem))
-        elif sample_or_problem.quality_issues:
-            issue = sample_or_problem.quality_issues[0]
-            problem = _data_quality_problem(issue)
-            self.state.data_quality_by_circuit[circuit_id] = issue
-            desired.add((circuit_id, problem))
-        else:
-            self.state.data_quality_by_circuit.pop(circuit_id, None)
-
-        current = {
-            issue
-            for issue in self._active_repair_issues
-            if issue[0] == circuit_id and issue[1] in _DATA_QUALITY_REPAIR_PROBLEMS
-        }
-        for issue in current - desired:
-            await repairs.async_delete_data_quality_issue(
-                self.hass,
-                issue[0],
-                issue[1],
-            )
-            self._active_repair_issues.discard(issue)
-
-        for issue in desired - self._active_repair_issues:
-            source_entities = (
-                sample_or_problem.source_entity_ids
-                if not isinstance(sample_or_problem, str)
-                else self._data_quality_repair_source_entities(issue[0])
-            )
-            await repairs.async_create_data_quality_issue(
-                self.hass,
-                issue[0],
-                issue[1],
-                source_entities=source_entities,
-                data=self._data_quality_repair_data(
-                    issue[0],
-                    issue[1],
-                    source_entities,
-                ),
-            )
-            self._active_repair_issues.add(issue)
+        await self.setup_health.async_sync_data_quality_repairs(
+            circuit_id,
+            sample_or_problem,
+        )
 
     def _data_quality_repair_data(
         self: Self,
@@ -5220,73 +5161,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ]
 
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
-        desired: set[tuple[str, str]] = set()
-        missing_source_entities = self._setup_health_has_missing_source_entities(
-            circuit_id,
-        )
-        if missing_source_entities:
-            desired.add((circuit_id, "missing_source_entities"))
-            utility_comparison_problem = None
-        else:
-            dashboard_status = self.state.energy_dashboard_status_by_circuit.get(
-                circuit_id
-            )
-            if dashboard_status in {"needs_energy_source", "power_ready"}:
-                desired.add((circuit_id, "missing_energy_source"))
-            if (
-                self._setup_health_has_missing_mains_status(circuit_id)
-                and not self._has_mains_source_configured()
-            ):
-                desired.add((circuit_id, "missing_mains_source"))
-            if (
-                self.state.metric_consistency_status_by_circuit.get(circuit_id)
-                == "missing_metrics"
-            ):
-                desired.add((circuit_id, "missing_electrical_metrics"))
-            if self._setup_health_has_ct_direction_status(circuit_id):
-                desired.add((circuit_id, "check_ct_direction"))
-            if (
-                self.state.leg_imbalance_status_by_circuit.get(circuit_id)
-                == "missing_leg_power"
-            ):
-                desired.add((circuit_id, "dual_phase_missing_leg"))
-            if self._setup_health_has_missing_rain_context_source(circuit_id):
-                desired.add((circuit_id, "missing_rain_context_source"))
-            if self._setup_health_has_missing_water_flow_source(circuit_id):
-                desired.add((circuit_id, "missing_water_flow_source"))
-            utility_comparison_problem = (
-                self._setup_health_utility_comparison_repair_problem(circuit_id)
-            )
-            if utility_comparison_problem is not None:
-                desired.add((circuit_id, utility_comparison_problem))
-
-        current = {
-            issue
-            for issue in self._active_repair_issues
-            if issue[0] == circuit_id and issue[1] in _SETUP_HEALTH_REPAIR_PROBLEMS
-        }
-        if (
-            utility_comparison_problem
-            in {
-                "utility_comparison_missing_utility_source",
-                "utility_comparison_missing_measured_source",
-            }
-            and (circuit_id, utility_comparison_problem)
-            not in self._active_repair_issues
-        ):
-            current.add((circuit_id, "utility_comparison_source_mismatch"))
-        for issue in sorted(current - desired):
-            await repairs.async_delete_circuit_issue(self.hass, issue[0], issue[1])
-            self._active_repair_issues.discard(issue)
-
-        for issue in sorted(desired - self._active_repair_issues):
-            await repairs.async_create_circuit_issue(
-                self.hass,
-                issue[0],
-                issue[1],
-                data=self._setup_health_repair_data(issue[0], issue[1]),
-            )
-            self._active_repair_issues.add(issue)
+        await self.setup_health.async_sync_setup_health_repairs(circuit_id)
 
     def _setup_health_repair_data(
         self: Self,
@@ -6589,6 +6464,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.notification_controller.settings_recommendation_notification_episode_key
         )
 
+    @property
+    def _active_repair_issues(self: Self) -> set[tuple[str, str]]:
+        return self.setup_health.active_repair_issues
+
     async def _apply_feature_result(
         self: Self,
         result: FeatureResult,
@@ -7765,15 +7644,6 @@ def _normalized_leg(leg: str | None) -> str | None:
     if value in {"b", "right", "l2", "line2", "2"}:
         return "b"
     return None
-
-
-def _data_quality_problem(issue: str) -> str:
-    issue_text = issue.lower()
-    if "negative_real_power_load" in issue_text:
-        return "unexpected_negative_real_power"
-    if "stale" in issue_text:
-        return "stale_source_sensor"
-    return "missing_required_sensor"
 
 
 def _string_list_from_sources(
