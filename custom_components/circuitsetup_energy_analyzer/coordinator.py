@@ -787,6 +787,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             signature_assignment_label=_nilm_signature_assignment_label,
             label_interval_max_items=NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
             round_optional_number=_round_optional_number,
+            assignment_interval_matches=_nilm_assignment_interval_matches,
+            overlap_seconds=_nilm_overlap_seconds,
+            validation_coverage_overlap_seconds=(
+                _nilm_validation_coverage_overlap_seconds
+            ),
+            float_or_none=_float_or_none,
+            datetime_or_none=_datetime_or_none,
         )
         self.settings_controller = SettingsController(self)
         self.state_reducer = StateReducer()
@@ -3183,179 +3190,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str,
     ) -> dict[str, Any]:
         """Confirm assigned NILM sessions that overlap ground-truth intervals."""
-        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
-        intervals = [
-            interval
-            for interval in self.store_data.nilm_label_intervals_by_circuit.get(
-                circuit_id,
-                (),
-            )
-            if isinstance(interval, Mapping)
-            and str(interval.get("ground_truth_entity_id") or "").strip()
-            and _nilm_assignment_interval_matches(interval, assignment)
-        ]
-        if not intervals:
-            raise ValueError(
-                "No matching ground-truth NILM label intervals were found for "
-                "this assignment."
-            )
-
-        assignment_id_text = str(assignment.get("assignment_id") or "").strip()
-        assignment_session_ids = set(_clean_string_list(assignment.get("session_ids")))
-        matched_session_ids: list[str] = []
-        conflicting_session_ids: list[str] = []
-        matched_interval_ids: set[int] = set()
-        power_errors: list[float] = []
-        energy_errors: list[float] = []
-        for session in self.store_data.nilm_session_history_by_circuit.get(
+        return await self.nilm_controller.async_validate_nilm_assignment_history(
             circuit_id,
-            (),
-        ):
-            if not isinstance(session, Mapping):
-                continue
-            session_id = str(session.get("session_id") or "").strip()
-            if not session_id:
-                continue
-            session_assignment_id = str(session.get("assignment_id") or "").strip()
-            if (
-                session_assignment_id != assignment_id_text
-                and session_id not in assignment_session_ids
-            ):
-                continue
-            if not session.get("end"):
-                continue
-            overlapping_intervals = [
-                interval
-                for interval in intervals
-                if _nilm_overlap_seconds(interval, session) > 0
-            ]
-            if overlapping_intervals:
-                _append_unique(matched_session_ids, session_id)
-                session_power = _float_or_none(session.get("median_power_w"))
-                session_energy = _float_or_none(session.get("estimated_energy_kwh"))
-                for interval in overlapping_intervals:
-                    matched_interval_ids.add(id(interval))
-                    interval_power = _float_or_none(interval.get("median_power_w"))
-                    interval_energy = _float_or_none(
-                        interval.get("estimated_energy_kwh"),
-                    )
-                    if session_power is not None and interval_power is not None:
-                        power_errors.append(abs(session_power - interval_power))
-                    if session_energy is not None and interval_energy is not None:
-                        energy_errors.append(abs(session_energy - interval_energy))
-            elif any(
-                _nilm_validation_coverage_overlap_seconds(interval, session) > 0
-                for interval in intervals
-            ):
-                _append_unique(conflicting_session_ids, session_id)
-
-        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
-        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
-        newly_confirmed = [
-            session_id
-            for session_id in matched_session_ids
-            if session_id not in confirmed
-        ]
-        newly_rejected = [
-            session_id
-            for session_id in conflicting_session_ids
-            if session_id not in rejected
-        ]
-        if not newly_confirmed and not newly_rejected:
-            raise ValueError(
-                "No matching ground-truth NILM sessions were found for this "
-                "assignment."
-            )
-
-        for session_id in newly_confirmed:
-            _append_unique(confirmed, session_id)
-            _append_unique(assignment.setdefault("session_ids", []), session_id)
-        rejected = [
-            session_id for session_id in rejected if session_id not in newly_confirmed
-        ]
-        for session_id in newly_rejected:
-            _append_unique(rejected, session_id)
-        confirmed = [
-            session_id for session_id in confirmed if session_id not in newly_rejected
-        ]
-
-        now_dt = self._now_fn()
-        now = now_dt.isoformat()
-        current_confidence = _nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
+            assignment_id,
         )
-        confidence = min(
-            1.0,
-            round(current_confidence + (0.05 * len(newly_confirmed)), 3),
-        )
-        if newly_rejected:
-            confidence = max(0.0, round(confidence - (0.15 * len(newly_rejected)), 3))
-        assignment["confidence"] = confidence
-        assignment["confirmed_session_ids"] = confirmed
-        assignment["rejected_session_ids"] = rejected
-        assignment["confirmed_sessions"] = len(confirmed)
-        assignment["rejected_sessions"] = len(rejected)
-        assignment["adjusted_sessions"] = len(
-            _clean_string_list(assignment.get("adjusted_session_ids")),
-        )
-        ground_truth_interval_count = len(intervals)
-        matched_ground_truth_count = len(matched_interval_ids)
-        missed_ground_truth_count = max(
-            ground_truth_interval_count - matched_ground_truth_count,
-            0,
-        )
-        false_positive_denominator = len(confirmed) + len(rejected)
-        assignment["ground_truth_interval_count"] = ground_truth_interval_count
-        assignment["matched_ground_truth_count"] = matched_ground_truth_count
-        assignment["missed_ground_truth_count"] = missed_ground_truth_count
-        assignment["false_positive_rate"] = (
-            round(len(rejected) / false_positive_denominator, 3)
-            if false_positive_denominator
-            else 0.0
-        )
-        assignment["false_negative_rate"] = (
-            round(missed_ground_truth_count / ground_truth_interval_count, 3)
-            if ground_truth_interval_count
-            else 0.0
-        )
-        assignment["median_power_error"] = (
-            round(median(power_errors), 3) if power_errors else None
-        )
-        assignment["energy_estimate_error"] = (
-            round(median(energy_errors), 3) if energy_errors else None
-        )
-        validation_starts: list[datetime] = []
-        validation_ends: list[datetime] = []
-        for interval in intervals:
-            validation_start = _datetime_or_none(
-                interval.get("validation_start") or interval.get("start"),
-            )
-            validation_end = _datetime_or_none(
-                interval.get("validation_end") or interval.get("end"),
-            )
-            if validation_start is not None:
-                validation_starts.append(validation_start)
-            if validation_end is not None:
-                validation_ends.append(validation_end)
-        if validation_starts and validation_ends:
-            assignment["validation_window_start"] = min(validation_starts).isoformat()
-            assignment["validation_window_end"] = max(validation_ends).isoformat()
-        if newly_rejected and assignment.get("lifecycle_state") != "retired":
-            assignment["lifecycle_state"] = "conflict"
-        elif assignment.get("lifecycle_state") not in {"published", "retired"}:
-            assignment["lifecycle_state"] = "validated"
-        assignment["last_validation"] = (
-            "direct_meter_conflict" if newly_rejected else "history"
-        )
-        assignment["last_validated_at"] = now
-        if newly_rejected:
-            assignment["last_rejected_at"] = now
-        assignment["updated_at"] = now
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now_dt)
-        return dict(assignment)
 
     async def async_rename_nilm_appliance(
         self: Self,

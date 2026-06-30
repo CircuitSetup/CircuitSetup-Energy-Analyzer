@@ -777,6 +777,18 @@ def test_nilm_controller_exposes_signature_review_actions() -> None:
     assert callable(coordinator.nilm_controller.signature_for_review)
 
 
+def test_nilm_controller_exposes_history_validation_action() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert callable(
+        coordinator.nilm_controller.async_validate_nilm_assignment_history
+    )
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
