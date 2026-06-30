@@ -776,7 +776,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.dashboard_controller = DashboardController(self)
         self.entity_profile_controller = EntityProfileController(self)
         self.evidence_actions = EvidenceActionController(self)
-        self.nilm_controller = NilmController(self)
+        self.nilm_controller = NilmController(
+            self,
+            clean_string_list=_clean_string_list,
+            append_unique=_append_unique,
+            nonnegative_float_value=_nonnegative_float_value,
+        )
         self.settings_controller = SettingsController(self)
         self.state_reducer = StateReducer()
         self._apply_config_entry_settings()
@@ -3494,14 +3499,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         label: str,
     ) -> dict[str, Any]:
         """Rename a NILM appliance assignment without changing its stable ID."""
-        label_text = str(label or "").strip()
-        if not label_text:
-            raise ValueError("Missing label.")
-        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
-        assignment["display_name"] = label_text
-        assignment["updated_at"] = self._now_fn().isoformat()
-        await self._async_save_nilm_assignment_change()
-        return dict(assignment)
+        return await self.nilm_controller.async_rename_nilm_appliance(
+            circuit_id,
+            assignment_id,
+            label=label,
+        )
 
     async def async_change_nilm_appliance_profile(
         self: Self,
@@ -3511,14 +3513,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         appliance_profile: str,
     ) -> dict[str, Any]:
         """Change the appliance profile hint for a NILM assignment."""
-        profile_text = str(appliance_profile or "").strip()
-        if not profile_text:
-            raise ValueError("Missing appliance_profile.")
-        assignment = self._nilm_assignment_for_id(circuit_id, assignment_id)
-        assignment["appliance_profile"] = profile_text
-        assignment["updated_at"] = self._now_fn().isoformat()
-        await self._async_save_nilm_assignment_change()
-        return dict(assignment)
+        return await self.nilm_controller.async_change_nilm_appliance_profile(
+            circuit_id,
+            assignment_id,
+            appliance_profile=appliance_profile,
+        )
 
     async def async_merge_nilm_assignments(
         self: Self,
@@ -3527,66 +3526,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         target_assignment_id: str,
     ) -> dict[str, Any]:
         """Merge one NILM appliance assignment into another."""
-        source_id = str(source_assignment_id or "").strip()
-        target_id = str(target_assignment_id or "").strip()
-        if not source_id or not target_id:
-            raise ValueError("Missing source_assignment_id or target_assignment_id.")
-        if source_id == target_id:
-            raise ValueError(
-                "source_assignment_id and target_assignment_id must be different."
-            )
-        source = self._nilm_assignment_for_id(circuit_id, source_id)
-        target = self._nilm_assignment_for_id(circuit_id, target_id)
-        for key in (
-            "signature_fingerprints",
-            "session_ids",
-            "label_interval_ids",
-            "confirmed_session_ids",
-            "rejected_session_ids",
-        ):
-            values = target.setdefault(key, [])
-            for value in _clean_string_list(source.get(key)):
-                _append_unique(values, value)
-        target["confirmed_sessions"] = len(
-            _clean_string_list(target.get("confirmed_session_ids"))
-        )
-        target["rejected_sessions"] = len(
-            _clean_string_list(target.get("rejected_session_ids"))
-        )
-        target["confidence"] = max(
-            _nonnegative_float_value(target.get("confidence"), default=0.0),
-            _nonnegative_float_value(source.get("confidence"), default=0.0),
-        )
-        target["publish_entities"] = bool(
-            target.get("publish_entities") or source.get("publish_entities")
-        )
-        target["created_device"] = bool(
-            target.get("created_device") or source.get("created_device")
-        )
-        if source.get("lifecycle_state") == "published":
-            target["lifecycle_state"] = "published"
-        target["updated_at"] = self._now_fn().isoformat()
-
-        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+        return await self.nilm_controller.async_merge_nilm_assignments(
             circuit_id,
-            [],
+            source_assignment_id,
+            target_assignment_id,
         )
-        self.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = [
-            assignment
-            for assignment in assignments
-            if assignment.get("assignment_id") != source_id
-        ]
-        for signature in self.store_data.nilm_signatures.get(circuit_id, []):
-            if signature.get("assignment_id") == source_id:
-                signature["assignment_id"] = target_id
-        for interval in self.store_data.nilm_label_intervals_by_circuit.get(
-            circuit_id,
-            [],
-        ):
-            if interval.get("assignment_id") == source_id:
-                interval["assignment_id"] = target_id
-        await self._async_save_nilm_assignment_change()
-        return dict(target)
 
     async def _async_record_nilm_session_validation(
         self: Self,
