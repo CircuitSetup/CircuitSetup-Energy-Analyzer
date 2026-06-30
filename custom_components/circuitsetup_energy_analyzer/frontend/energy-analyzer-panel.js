@@ -1764,6 +1764,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const graphSessions = this._nilmFocusedSignature
       ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
       : workspace.sessions;
+    const nextReviewItem = this._nilmReviewItems(workspace)[0];
+    const nextReviewIndex = nextReviewItem ? nextReviewItem.index : -1;
     const graph = graphWindow && series.length
       ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
@@ -1778,7 +1780,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
             <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
-            ${this._renderNilmSignatureReview(item, index)}
+            ${index === nextReviewIndex ? `<p class="muted">Use Needs review above for this signature's actions.</p>` : this._renderNilmSignatureReview(item, index)}
           </div>
         `, "Signatures group similar sessions that may be the same appliance.")}
         ${this._renderNilmLabelIntervals(workspace)}

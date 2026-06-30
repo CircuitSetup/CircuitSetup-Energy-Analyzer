@@ -1525,6 +1525,55 @@ for (const expected of [
     )
 
 
+def test_nilm_workspace_does_not_duplicate_review_item_control_ids() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [
+    {
+      signature_id: "sig-1",
+      display_label: "Unknown load 1",
+      confidence: 0.42,
+      actions: {
+        label: {},
+        assign: {},
+        ignore: {},
+        mark_expected: {},
+        merge: {
+          target_options: [{ value: "sig-2", label: "Unknown load 2" }]
+        }
+      }
+    },
+    {
+      signature_id: "sig-2",
+      display_label: "Unknown load 2",
+      user_label: "Dryer",
+      review_state: "confirmed",
+      actions: { label: {} }
+    }
+  ],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const id of ['id="nilm_label_0"', 'id="nilm_merge_targets_0"']) {
+  const count = (html.match(new RegExp(id, "g")) || []).length;
+  if (count !== 1) {
+    throw new Error(`${id} rendered ${count} times: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
