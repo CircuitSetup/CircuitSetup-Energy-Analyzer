@@ -41,6 +41,70 @@ ExpectationStatus = Literal[
 ]
 MetricStatus = Literal["normal", "higher", "lower", "learning", "missing_data"]
 ComparisonBaseline = tuple[float | None, float | None, float | None, float | None, str]
+ProfileExpectationRecipe = tuple[str, str, str, tuple[str, ...]]
+
+_PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] = {
+    ApplianceProfile.WASHER: (
+        "Washer cycle check",
+        "Washer activity should stay within a bounded cycle duration.",
+        "Washer cycles that do not end can waste energy or hide a stuck load.",
+        ("Check whether the washer actually finished its cycle.",),
+    ),
+    ApplianceProfile.DRYER: (
+        "Dryer cycle check",
+        "Dryers should draw high power while active, then stop.",
+        "Unexpected dryer behavior can indicate a stuck cycle or heating issue.",
+        ("Check lint path, vent airflow, and whether the cycle ended.",),
+    ),
+    ApplianceProfile.WATER_HEATER: (
+        "Water heating check",
+        "Water heating should follow household hot-water use.",
+        "Unexpected water-heater runtime can point to demand changes or leaks.",
+        ("Check recent hot-water use and water-flow context.",),
+    ),
+    ApplianceProfile.OVEN: (
+        "Oven heat check",
+        "Ovens should show high heat draw only while cooking.",
+        "Unexpected heat loads can raise demand and capacity risk.",
+        ("Check whether the oven or electric heat was intentionally on.",),
+    ),
+    ApplianceProfile.MICROWAVE: (
+        "Microwave run check",
+        "Microwaves should show short high-power runs.",
+        "Long or repeated microwave runs are usually usage context, not a fault.",
+        ("Review recent kitchen activity.",),
+    ),
+    ApplianceProfile.POOL_PUMP: (
+        "Pool pump schedule check",
+        "Pool pumps should follow scheduled pump runtime.",
+        "Schedule drift can add avoidable daily energy use.",
+        ("Check the pump schedule and recent manual overrides.",),
+    ),
+    ApplianceProfile.EV_CHARGER: (
+        "EV charging check",
+        "EV chargers should stay within configured circuit capacity.",
+        "Charging can dominate demand if it exceeds expected limits.",
+        ("Check charger current limit and charging schedule.",),
+    ),
+    ApplianceProfile.SOLAR_INVERTER: (
+        "Solar generation check",
+        "Solar generation should align with daylight and source direction.",
+        "Sign or daylight mismatches can indicate CT direction or source issues.",
+        ("Check daylight context and solar CT direction.",),
+    ),
+    ApplianceProfile.MIXED: (
+        "Mixed circuit check",
+        "Mixed circuit behavior should be treated as grouped load context.",
+        "Several appliances can change together on a mixed circuit.",
+        ("Review the largest loads sharing this circuit.",),
+    ),
+    ApplianceProfile.MAINS_NILM: (
+        "Whole-home NILM check",
+        "Whole-home mains NILM should separate known load from unknown load.",
+        "Mains estimates are context for review, not a direct appliance fault.",
+        ("Review NILM signatures before acting on appliance-level guesses.",),
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -520,7 +584,20 @@ def appliance_expectations_for_circuit(
                 ),
             )
 
+    recipe = _PROFILE_EXPECTATION_RECIPES.get(profile)
+
     if _is_higher(daily) or _is_higher(runtime):
+        expected = (
+            recipe[1]
+            if recipe
+            else "Usage should stay within the learned normal range."
+        )
+        why_it_matters = recipe[2] if recipe else "A change in use may need review."
+        first_checks = (
+            recipe[3]
+            if recipe
+            else ("Review recent activity and source data.",)
+        )
         return (
             _expectation(
                 config,
@@ -528,9 +605,25 @@ def appliance_expectations_for_circuit(
                 status="watch",
                 source_type=direct_source,
                 observed="One or more usage metrics are above the learned range.",
-                expected="Usage should stay within the learned normal range.",
-                why_it_matters="A change in use may need review.",
-                what_to_check_first=("Review recent activity and source data.",),
+                expected=expected,
+                why_it_matters=why_it_matters,
+                what_to_check_first=first_checks,
+                evidence_path=evidence_path,
+            ),
+        )
+
+    if recipe is not None:
+        title, expected, why_it_matters, first_checks = recipe
+        return (
+            _expectation(
+                config,
+                title=title,
+                status="ok",
+                source_type=direct_source,
+                observed="No profile-specific behavior issue is currently visible.",
+                expected=expected,
+                why_it_matters=why_it_matters,
+                what_to_check_first=first_checks,
                 evidence_path=evidence_path,
             ),
         )
