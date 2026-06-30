@@ -692,6 +692,23 @@ def test_coordinator_exposes_notification_controller() -> None:
     assert coordinator._notified_alert_ids == set()
 
 
+def test_coordinator_exposes_setup_health_aggregator() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        setup_health,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(
+        coordinator.setup_health,
+        setup_health.SetupHealthAggregator,
+    )
+    assert coordinator._active_repair_issues == set()
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
