@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 from .const import DOMAIN
@@ -167,6 +168,7 @@ def nilm_virtual_low_confidence_alert(
             state,
             notification_type,
             f"{assignment_id}:{notification_type}",
+            confidence=confidence,
         ),
     )
 
@@ -210,6 +212,7 @@ def nilm_virtual_finished_alert(
             state,
             "finished",
             f"{assignment_id}:{session_id}",
+            confidence=confidence,
         ),
     )
 
@@ -245,6 +248,7 @@ def nilm_virtual_unusual_runtime_alert(
         or str(getattr(state, "latest_session_id", "") or "").strip()
         or "current"
     )
+    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
     return AlertEvidence(
         timestamp=now,
         circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
@@ -252,7 +256,7 @@ def nilm_virtual_unusual_runtime_alert(
         message=_nilm_alert_message(
             state,
             "appears to be running longer than usual",
-            confidence=_clamped_float(getattr(state, "confidence", None), upper=1.0),
+            confidence=confidence,
         ),
         feature="nilm_appliance_unusual_runtime",
         observed_value=round(observed_minutes, 3),
@@ -265,6 +269,7 @@ def nilm_virtual_unusual_runtime_alert(
             state,
             "unusual_runtime",
             f"{assignment_id}:runtime:{session_id}",
+            confidence=confidence,
         ),
     )
 
@@ -288,6 +293,7 @@ def nilm_virtual_unusual_energy_alert(
     ):
         return None
     assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
+    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
     return AlertEvidence(
         timestamp=now,
         circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
@@ -295,7 +301,7 @@ def nilm_virtual_unusual_energy_alert(
         message=_nilm_alert_message(
             state,
             "appears to be using more energy than usual today",
-            confidence=_clamped_float(getattr(state, "confidence", None), upper=1.0),
+            confidence=confidence,
         ),
         feature="nilm_appliance_unusual_energy",
         observed_value=round(observed_kwh, 3),
@@ -307,6 +313,7 @@ def nilm_virtual_unusual_energy_alert(
             state,
             "unusual_energy",
             f"{assignment_id}:energy:{now.date().isoformat()}",
+            confidence=confidence,
         ),
     )
 
@@ -437,10 +444,14 @@ def _nilm_alert_features(
     state: Any,
     notification_type: str,
     notification_key: str,
+    *,
+    confidence: float,
 ) -> dict[str, Any]:
     return {
         "source": "nilm",
+        "source_type": "nilm_estimate",
         "estimated": True,
+        "confidence": confidence,
         "assignment_id": str(getattr(state, "assignment_id", "") or ""),
         "appliance_id": str(getattr(state, "appliance_id", "") or ""),
         "notification_type": notification_type,
@@ -615,6 +626,8 @@ def _clamped_float(value: Any, *, upper: float | None = None) -> float:
     try:
         number = float(value)
     except (TypeError, ValueError):
+        return 0.0
+    if not isfinite(number):
         return 0.0
     if number < 0:
         return 0.0
