@@ -784,6 +784,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             label_interval_datetime=_nilm_label_interval_datetime,
             label_interval_id=_nilm_label_interval_id,
             signature_fingerprint_value=_nilm_signature_fingerprint_value,
+            signature_assignment_label=_nilm_signature_assignment_label,
             label_interval_max_items=NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
             round_optional_number=_round_optional_number,
         )
@@ -3525,38 +3526,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         signature_fingerprint: str,
         assignment_id: str,
     ) -> None:
-        if not signature_fingerprint:
-            return
-        for assignment in self.store_data.nilm_appliance_assignments_by_circuit.get(
+        self.nilm_controller.remove_signature_from_other_assignments(
             circuit_id,
-            (),
-        ):
-            if assignment.get("assignment_id") == assignment_id:
-                continue
-            fingerprints = assignment.get("signature_fingerprints")
-            if not isinstance(fingerprints, list):
-                continue
-            assignment["signature_fingerprints"] = [
-                value for value in fingerprints if value != signature_fingerprint
-            ]
+            signature_fingerprint,
+            assignment_id,
+        )
 
     def _nilm_assignment_for_signature(
         self: Self,
         circuit_id: str,
         signature_fingerprint: str,
     ) -> dict[str, Any] | None:
-        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+        return self.nilm_controller.assignment_for_signature(
             circuit_id,
-            [],
-        )
-        return next(
-            (
-                assignment
-                for assignment in assignments
-                if signature_fingerprint
-                in assignment.get("signature_fingerprints", ())
-            ),
-            None,
+            signature_fingerprint,
         )
 
     async def async_publish_nilm_appliance_assignment(
@@ -3608,42 +3591,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         signature_id: str,
     ) -> None:
         """Persist an ignored NILM signature marker."""
-        self.ignored_nilm_signatures.add((circuit_id, signature_id))
-        signatures = self.store_data.nilm_signatures.setdefault(circuit_id, [])
-        for signature in signatures:
-            if signature.get("signature_id") == signature_id:
-                signature["ignored"] = True
-                assignment = self._upsert_nilm_assignment(
-                    circuit_id,
-                    label=_nilm_signature_assignment_label(signature, signature_id),
-                    signature_fingerprint=_nilm_signature_fingerprint_value(
-                        signature,
-                        signature_id,
-                    ),
-                    lifecycle_state="ignored",
-                    confidence=signature.get("confidence", 1.0),
-                )
-                signature["assignment_id"] = assignment["assignment_id"]
-                self._mark_store_dirty()
-                self._refresh_nilm_state(circuit_id)
-                self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-                self.async_set_updated_data(self.state)
-                await self._async_save_store(self._now_fn())
-                return
-        signature = {"signature_id": signature_id, "ignored": True}
-        assignment = self._upsert_nilm_assignment(
+        await self.nilm_controller.async_ignore_nilm_signature(
             circuit_id,
-            label=signature_id,
-            signature_fingerprint=signature_id,
-            lifecycle_state="ignored",
+            signature_id,
         )
-        signature["assignment_id"] = assignment["assignment_id"]
-        signatures.append(signature)
-        self._mark_store_dirty()
-        self._refresh_nilm_state(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
 
     async def async_mark_nilm_signature_expected(
         self: Self,
@@ -3651,25 +3602,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         signature_id: str,
     ) -> None:
         """Persist an expected NILM signature review decision."""
-        signature = self._nilm_signature_for_review(circuit_id, signature_id)
-        signature["expected"] = True
-        signature["review_state"] = "expected"
-        assignment = self._upsert_nilm_assignment(
+        await self.nilm_controller.async_mark_nilm_signature_expected(
             circuit_id,
-            label=_nilm_signature_assignment_label(signature, signature_id),
-            signature_fingerprint=_nilm_signature_fingerprint_value(
-                signature,
-                signature_id,
-            ),
-            lifecycle_state="expected",
-            confidence=signature.get("confidence", 1.0),
+            signature_id,
         )
-        signature["assignment_id"] = assignment["assignment_id"]
-        self._mark_store_dirty()
-        self._refresh_nilm_state(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
 
     async def async_merge_nilm_signatures(
         self: Self,
@@ -3678,42 +3614,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         target_signature_id: str,
     ) -> None:
         """Persist that one NILM signature should be treated as another."""
-        target = self._nilm_signature_for_review(circuit_id, target_signature_id)
-        source = self._nilm_signature_for_review(circuit_id, source_signature_id)
-        source["review_state"] = "merged"
-        source["merged_into"] = target_signature_id
-        if target.get("feedback_fingerprint"):
-            source["merged_into_fingerprint"] = target["feedback_fingerprint"]
-        target_fingerprint = _nilm_signature_fingerprint_value(
-            target,
+        await self.nilm_controller.async_merge_nilm_signatures(
+            circuit_id,
+            source_signature_id,
             target_signature_id,
         )
-        source_fingerprint = _nilm_signature_fingerprint_value(
-            source,
-            source_signature_id,
-        )
-        assignment = self._nilm_assignment_for_signature(
-            circuit_id,
-            target_fingerprint,
-        ) or self._nilm_assignment_for_signature(circuit_id, source_fingerprint)
-        if assignment is not None:
-            _append_unique(
-                assignment.setdefault("signature_fingerprints", []),
-                source_fingerprint,
-            )
-            assignment["updated_at"] = self._now_fn().isoformat()
-            source["assignment_id"] = assignment["assignment_id"]
-            target["assignment_id"] = assignment["assignment_id"]
-            self._remove_nilm_signature_from_other_assignments(
-                circuit_id,
-                source_fingerprint,
-                assignment["assignment_id"],
-            )
-        self._mark_store_dirty()
-        self._refresh_nilm_state(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
 
     def has_circuit(self: Self, circuit_id: str) -> bool:
         """Return whether this coordinator owns a circuit id."""
@@ -6143,13 +6048,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str,
         signature_id: str,
     ) -> dict[str, Any]:
-        signatures = self.store_data.nilm_signatures.setdefault(circuit_id, [])
-        for signature in signatures:
-            if signature.get("signature_id") == signature_id:
-                return signature
-        signature = {"signature_id": signature_id, "review_state": "new"}
-        signatures.append(signature)
-        return signature
+        return self.nilm_controller.signature_for_review(circuit_id, signature_id)
 
     def _mark_store_dirty(self: Self) -> None:
         self.store_persistence.mark_dirty()

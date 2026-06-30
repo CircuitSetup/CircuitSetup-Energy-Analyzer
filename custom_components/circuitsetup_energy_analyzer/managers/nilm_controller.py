@@ -17,6 +17,7 @@ class NilmController:
         label_interval_datetime: Callable[[Any, str], Any],
         label_interval_id: Callable[[str, str, str, str], str],
         signature_fingerprint_value: Callable[[Any, str], str],
+        signature_assignment_label: Callable[[Any, str], str],
         label_interval_max_items: int,
         round_optional_number: Callable[[Any], float | None],
     ) -> None:
@@ -27,6 +28,7 @@ class NilmController:
         self._label_interval_datetime = label_interval_datetime
         self._label_interval_id = label_interval_id
         self._signature_fingerprint_value = signature_fingerprint_value
+        self._signature_assignment_label = signature_assignment_label
         self._label_interval_max_items = label_interval_max_items
         self._round_optional_number = round_optional_number
 
@@ -181,7 +183,7 @@ class NilmController:
     ) -> dict[str, Any]:
         """Assign a NILM signature to a durable appliance assignment."""
         coordinator = self._coordinator
-        signature = coordinator._nilm_signature_for_review(circuit_id, signature_id)
+        signature = self.signature_for_review(circuit_id, signature_id)
         fingerprint = self._signature_fingerprint_value(signature, signature_id)
         assignment = coordinator._upsert_nilm_assignment(
             circuit_id,
@@ -198,7 +200,7 @@ class NilmController:
         signature["user_label"] = assignment["display_name"]
         signature.pop("ignored", None)
         coordinator.ignored_nilm_signatures.discard((circuit_id, signature_id))
-        coordinator._remove_nilm_signature_from_other_assignments(
+        self.remove_signature_from_other_assignments(
             circuit_id,
             fingerprint,
             assignment["assignment_id"],
@@ -422,6 +424,169 @@ class NilmController:
             f"Assign NILM session '{session_id_text}' to an appliance before "
             "validating it."
         )
+
+    async def async_ignore_nilm_signature(
+        self,
+        circuit_id: str,
+        signature_id: str,
+    ) -> None:
+        """Persist an ignored NILM signature marker."""
+        coordinator = self._coordinator
+        coordinator.ignored_nilm_signatures.add((circuit_id, signature_id))
+        signatures = coordinator.store_data.nilm_signatures.setdefault(circuit_id, [])
+        for signature in signatures:
+            if signature.get("signature_id") == signature_id:
+                signature["ignored"] = True
+                assignment = coordinator._upsert_nilm_assignment(
+                    circuit_id,
+                    label=self._signature_assignment_label(signature, signature_id),
+                    signature_fingerprint=self._signature_fingerprint_value(
+                        signature,
+                        signature_id,
+                    ),
+                    lifecycle_state="ignored",
+                    confidence=signature.get("confidence", 1.0),
+                )
+                signature["assignment_id"] = assignment["assignment_id"]
+                await self._async_save_nilm_review_change(circuit_id)
+                return
+        signature = {"signature_id": signature_id, "ignored": True}
+        assignment = coordinator._upsert_nilm_assignment(
+            circuit_id,
+            label=signature_id,
+            signature_fingerprint=signature_id,
+            lifecycle_state="ignored",
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
+        signatures.append(signature)
+        await self._async_save_nilm_review_change(circuit_id)
+
+    async def async_mark_nilm_signature_expected(
+        self,
+        circuit_id: str,
+        signature_id: str,
+    ) -> None:
+        """Persist an expected NILM signature review decision."""
+        coordinator = self._coordinator
+        signature = self.signature_for_review(circuit_id, signature_id)
+        signature["expected"] = True
+        signature["review_state"] = "expected"
+        assignment = coordinator._upsert_nilm_assignment(
+            circuit_id,
+            label=self._signature_assignment_label(signature, signature_id),
+            signature_fingerprint=self._signature_fingerprint_value(
+                signature,
+                signature_id,
+            ),
+            lifecycle_state="expected",
+            confidence=signature.get("confidence", 1.0),
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
+        await self._async_save_nilm_review_change(circuit_id)
+
+    async def async_merge_nilm_signatures(
+        self,
+        circuit_id: str,
+        source_signature_id: str,
+        target_signature_id: str,
+    ) -> None:
+        """Persist that one NILM signature should be treated as another."""
+        target = self.signature_for_review(circuit_id, target_signature_id)
+        source = self.signature_for_review(circuit_id, source_signature_id)
+        source["review_state"] = "merged"
+        source["merged_into"] = target_signature_id
+        if target.get("feedback_fingerprint"):
+            source["merged_into_fingerprint"] = target["feedback_fingerprint"]
+        target_fingerprint = self._signature_fingerprint_value(
+            target,
+            target_signature_id,
+        )
+        source_fingerprint = self._signature_fingerprint_value(
+            source,
+            source_signature_id,
+        )
+        assignment = self.assignment_for_signature(
+            circuit_id,
+            target_fingerprint,
+        ) or self.assignment_for_signature(circuit_id, source_fingerprint)
+        if assignment is not None:
+            self._append_unique(
+                assignment.setdefault("signature_fingerprints", []),
+                source_fingerprint,
+            )
+            assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+            source["assignment_id"] = assignment["assignment_id"]
+            target["assignment_id"] = assignment["assignment_id"]
+            self.remove_signature_from_other_assignments(
+                circuit_id,
+                source_fingerprint,
+                assignment["assignment_id"],
+            )
+        await self._async_save_nilm_review_change(circuit_id)
+
+    def signature_for_review(
+        self,
+        circuit_id: str,
+        signature_id: str,
+    ) -> dict[str, Any]:
+        """Return a stored NILM signature, creating a review placeholder if needed."""
+        signatures = self._coordinator.store_data.nilm_signatures.setdefault(
+            circuit_id,
+            [],
+        )
+        for signature in signatures:
+            if signature.get("signature_id") == signature_id:
+                return signature
+        signature = {"signature_id": signature_id, "review_state": "new"}
+        signatures.append(signature)
+        return signature
+
+    def assignment_for_signature(
+        self,
+        circuit_id: str,
+        signature_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        """Return the NILM assignment that owns one signature fingerprint."""
+        assignments = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        return next(
+            (
+                assignment
+                for assignment in assignments
+                if signature_fingerprint
+                in assignment.get("signature_fingerprints", ())
+            ),
+            None,
+        )
+
+    def remove_signature_from_other_assignments(
+        self,
+        circuit_id: str,
+        signature_fingerprint: str,
+        assignment_id: str,
+    ) -> None:
+        """Ensure one signature fingerprint is attached to only one assignment."""
+        if not signature_fingerprint:
+            return
+        assignments = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                (),
+            )
+        )
+        for assignment in assignments:
+            if assignment.get("assignment_id") == assignment_id:
+                continue
+            fingerprints = assignment.get("signature_fingerprints")
+            if not isinstance(fingerprints, list):
+                continue
+            assignment["signature_fingerprints"] = [
+                value for value in fingerprints if value != signature_fingerprint
+            ]
 
     async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
         coordinator = self._coordinator
