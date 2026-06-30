@@ -209,6 +209,29 @@ def test_dryer_leg_imbalance_produces_first_check_guidance() -> None:
     assert "dual-phase" in expectation["what_to_check_first"][0]
 
 
+def test_profile_specific_expectations_cover_remaining_named_appliances() -> None:
+    cases = {
+        ApplianceProfile.WASHER: "bounded cycle",
+        ApplianceProfile.DRYER: "high power",
+        ApplianceProfile.WATER_HEATER: "water heating",
+        ApplianceProfile.OVEN: "high heat",
+        ApplianceProfile.MICROWAVE: "short high-power",
+        ApplianceProfile.POOL_PUMP: "scheduled pump",
+        ApplianceProfile.EV_CHARGER: "circuit capacity",
+        ApplianceProfile.SOLAR_INVERTER: "daylight",
+        ApplianceProfile.MIXED: "mixed circuit",
+        ApplianceProfile.MAINS_NILM: "whole-home",
+    }
+
+    for profile, expected_text in cases.items():
+        config = _config(profile.value, profile)
+        expectation = _detail(config, AnalyzerState())["expectations"][0]
+
+        assert expectation["status"] == "ok"
+        assert expected_text in expectation["expected"].lower()
+        assert expectation["title"] != "Behavior looks normal"
+
+
 def test_maintenance_suppresses_issue_language() -> None:
     state = AnalyzerState()
     state.leg_imbalance_status_by_circuit["dryer"] = "imbalanced"
