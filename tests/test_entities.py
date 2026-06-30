@@ -10,6 +10,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -1725,6 +1726,82 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert attrs["issues"][0]["fix"] == (
         "Add at least one source sensor to Garage Freezer"
     )
+
+
+def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            energy_dashboard_status_by_circuit={"fridge": "needs_energy_source"},
+            energy_dashboard_evidence_by_circuit={
+                "fridge": {"status": "needs_energy_source"}
+            },
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: "standard",
+            CONF_ENABLE_EXPERIMENTAL_NILM: False,
+        },
+        last_dashboard_create_request={"action": "created"},
+    )
+
+    attrs = setup_health_attributes(coordinator)
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+
+    assert attrs["checklist_total_count"] == 10
+    assert checklist["source_data_found"]["status"] == "ok"
+    assert checklist["cumulative_kwh_sources_found"]["status"] == "needs_attention"
+    assert checklist["cumulative_kwh_sources_found"]["affected_circuits"] == [
+        "fridge"
+    ]
+    assert checklist["dashboard_created"]["status"] == "ok"
+    assert checklist["nilm_enabled"]["status"] == "optional"
+    assert checklist["learning_progress"]["status"] == "ok"
+    assert attrs["checklist_ready_count"] == 9
+
+
+def test_setup_health_dashboard_checklist_survives_reload_status() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(
+                    SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+                    SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
+                ),
+            ),
+        ),
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: "standard",
+            CONF_ENABLE_EXPERIMENTAL_NILM: False,
+        },
+        dashboard_status={"action": "created"},
+        last_dashboard_create_request=None,
+    )
+
+    attrs = setup_health_attributes(coordinator)
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+
+    assert checklist["dashboard_created"]["status"] == "ok"
 
 
 def test_summary_sensors_answer_primary_user_questions() -> None:
@@ -4104,7 +4181,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert setup_health.extra_state_attributes["next_step"] == (
         "Add a cumulative kWh sensor to Kitchen Fridge"
     )
-    assert not hasattr(setup_health, "device_info")
+    assert getattr(setup_health, "device_info", None) is None
     assert added_entities[1].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
     }

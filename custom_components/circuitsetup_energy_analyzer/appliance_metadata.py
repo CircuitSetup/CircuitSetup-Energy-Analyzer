@@ -170,7 +170,12 @@ def existing_area_names_for_hass(hass: Any) -> tuple[str, ...]:
     except ImportError:
         return ()
 
-    registry = ar.async_get(hass)
+    try:
+        registry = ar.async_get(hass)
+    except (AttributeError, TypeError):
+        registry = getattr(hass, "area_registry", None)
+    if registry is None:
+        return ()
     areas = getattr(registry, "areas", {})
     values = areas.values() if hasattr(areas, "values") else areas
     names: list[str] = []

@@ -101,6 +101,27 @@ def build_recommended_dashboard(
     ]
 
     sections = [
+        _household_overview_section(
+            appliance_circuits,
+            mains_circuits=mains_circuits,
+            include_feature_cards=include_feature_cards,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
+        _todays_energy_section(
+            appliance_circuits,
+            mains_circuits=mains_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
+        _behavior_watchlist_section(
+            appliance_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
         _appliance_status_section(
             appliance_circuits,
             include_evidence_links=include_feature_cards,
@@ -130,6 +151,23 @@ def build_recommended_dashboard(
             entry_id=entry_id,
         )
     )
+    sections.append(
+        _appliance_run_timeline_section(
+            appliance_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+    )
+    if include_feature_cards and mains_circuits:
+        sections.append(
+            _nilm_review_section(
+                mains_circuits[0],
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+        )
     if include_feature_cards and hvac_circuits:
         sections.append(
             _hvac_weather_section(
@@ -160,6 +198,113 @@ def build_recommended_dashboard(
     return dashboard
 
 
+def dashboard_preflight_summary(
+    circuits: Iterable[Any],
+    layout: Any,
+    *,
+    hass: Any | None = None,
+    entry_id: str | None = None,
+    outdoor_temperature_entity: str | None = None,
+) -> dict[str, Any]:
+    """Return the sections and data classes the generated dashboard will use."""
+    normalized_layout = normalize_dashboard_layout(layout)
+    include_feature_cards = _layout_includes_feature_cards(normalized_layout)
+    include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
+    circuit_list = [
+        circuit
+        for circuit in circuits
+        if _circuit_id(circuit)
+    ]
+    appliance_circuits = [
+        circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
+    ]
+    mains_circuits = [circuit for circuit in circuit_list if _is_mains_circuit(circuit)]
+    hvac_circuits = [
+        circuit for circuit in appliance_circuits if _is_hvac_circuit(circuit)
+    ]
+    will_include = _dashboard_section_titles(
+        appliance_circuits=appliance_circuits,
+        mains_circuits=mains_circuits,
+        hvac_circuits=hvac_circuits,
+        include_feature_cards=include_feature_cards,
+        include_expert_links=include_expert_links,
+    )
+    all_sections = [
+        "Household Overview",
+        "Today's Energy",
+        "Behavior Watchlist",
+        "Appliance Status",
+        "Mains, Solar, and NILM",
+        "Energy Tracking",
+        "Appliance Run Timeline",
+        "NILM Review",
+        "HVAC Weather Context",
+        "Diagnostics and Evidence",
+    ]
+    registry_lookup = _registry_entity_lookup(hass, entry_id)
+    missing_source_data, disabled_entities = _dashboard_preflight_entity_gaps(
+        appliance_circuits,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    return {
+        "layout": normalized_layout,
+        "will_include": will_include,
+        "will_skip": [
+            section for section in all_sections if section not in will_include
+        ],
+        "missing_source_data": missing_source_data,
+        "disabled_entities": disabled_entities,
+        "nilm_enabled": bool(mains_circuits),
+        "nilm_sections_enabled": include_feature_cards and bool(mains_circuits),
+        "estimated_appliance_count": len(
+            _published_nilm_power_rows(registry_lookup, entry_id)
+        ),
+        "outdoor_temperature_entity": outdoor_temperature_entity or None,
+    }
+
+
+def _dashboard_preflight_entity_gaps(
+    appliance_circuits: Sequence[Any],
+    *,
+    registry_lookup: Mapping[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> tuple[list[str], list[str]]:
+    if registry_lookup is None or not entry_id:
+        return [], []
+
+    missing: list[str] = []
+    disabled: list[str] = []
+    for circuit in appliance_circuits:
+        circuit_id = _circuit_id(circuit)
+        circuit_name = _circuit_name(circuit)
+        for entity_domain, entity_key, label in APPLIANCE_STATUS_ENTITY_SPECS:
+            entry, resolution_issue = _registry_entry_for_spec(
+                registry_lookup,
+                entry_id=entry_id,
+                circuit_id=circuit_id,
+                entity_domain=entity_domain,
+                entity_key=entity_key,
+            )
+            preflight_label = f"{circuit_name}: {label}"
+            if resolution_issue == "ambiguous" or entry is None:
+                missing.append(preflight_label)
+                continue
+            if _entry_value(entry, "disabled_by"):
+                disabled.append(preflight_label)
+                continue
+            entity_id = str(_entry_value(entry, "entity_id") or "").strip()
+            if (
+                not entity_id
+                or not entity_id.startswith(f"{entity_domain}.")
+                or _entity_is_unavailable(hass, entity_id)
+            ):
+                missing.append(preflight_label)
+    return list(_dedupe(missing)), list(_dedupe(disabled))
+
+
 def dashboard_storage_payload(
     circuits: Iterable[Any],
     layout: Any,
@@ -184,6 +329,192 @@ def dashboard_storage_payload(
             outdoor_temperature_entity=outdoor_temperature_entity,
         ),
     }
+
+
+def _dashboard_section_titles(
+    *,
+    appliance_circuits: Sequence[Any],
+    mains_circuits: Sequence[Any],
+    hvac_circuits: Sequence[Any],
+    include_feature_cards: bool,
+    include_expert_links: bool,
+) -> list[str]:
+    titles = [
+        "Household Overview",
+        "Today's Energy",
+        "Behavior Watchlist",
+        "Appliance Status",
+    ]
+    if mains_circuits:
+        titles.append("Mains, Solar, and NILM")
+    titles.extend(["Energy Tracking", "Appliance Run Timeline"])
+    if include_feature_cards and mains_circuits:
+        titles.append("NILM Review")
+    if include_feature_cards and hvac_circuits:
+        titles.append("HVAC Weather Context")
+    if include_expert_links:
+        titles.append("Diagnostics and Evidence")
+    return titles
+
+
+def _household_overview_section(
+    appliance_circuits: Iterable[Any],
+    *,
+    mains_circuits: Iterable[Any],
+    include_feature_cards: bool,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    appliance_list = list(appliance_circuits)
+    mains_list = list(mains_circuits)
+    cards: list[dict[str, Any]] = []
+    setup_health = _resolved_setup_health_entity_id(
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if setup_health:
+        cards.append(
+            {
+                "type": "tile",
+                "entity": setup_health,
+                "name": "Setup Health",
+                "vertical": False,
+            }
+        )
+
+    if mains_list:
+        overview_rows, _ = _resolved_entity_rows(
+            _circuit_id(mains_list[0]),
+            (
+                ("sensor", "monitored_power", "Total Monitored Power"),
+                ("sensor", "monitored_coverage", "Known Load Coverage"),
+            ),
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if include_feature_cards:
+            unknown_loads = _resolved_entity_id(
+                _circuit_id(mains_list[0]),
+                ("sensor", "nilm_unknown_loads", "NILM Review Count"),
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+            if unknown_loads:
+                overview_rows.append(
+                    {"entity": unknown_loads, "name": "NILM Review Count"}
+                )
+        if overview_rows:
+            cards.append(_entities_card("Household energy overview", overview_rows))
+
+    activity_rows = _resolved_rows_for_circuits(
+        appliance_list[:5],
+        ("sensor", "activity_summary", "Activity"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    if activity_rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "Top appliances right now",
+                "columns": min(len(activity_rows), 5),
+                "entities": activity_rows,
+            }
+        )
+    if not cards:
+        cards.append(_markdown_card("Household overview appears after setup."))
+    return {"type": "grid", "title": "Household Overview", "cards": cards}
+
+
+def _todays_energy_section(
+    appliance_circuits: Iterable[Any],
+    *,
+    mains_circuits: Iterable[Any],
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    circuits = [*list(appliance_circuits), *list(mains_circuits)]
+    daily_rows = _resolved_rows_for_circuits(
+        circuits,
+        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    cards: list[dict[str, Any]] = []
+    if daily_rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "Top energy users today",
+                "columns": min(len(daily_rows), 5),
+                "entities": daily_rows[:5],
+            }
+        )
+        cards.append(
+            _statistics_graph_card(
+                "Today's appliance energy",
+                [row["entity"] for row in daily_rows],
+            )
+        )
+    else:
+        cards.append(_markdown_card("Today's energy appears after kWh sources report."))
+    return {"type": "grid", "title": "Today's Energy", "cards": cards}
+
+
+def _behavior_watchlist_section(
+    appliance_circuits: Iterable[Any],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    circuits = list(appliance_circuits)
+    energy_rows = _resolved_rows_for_circuits(
+        circuits,
+        ("sensor", "energy_summary", "Energy Summary"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    electrical_rows = _resolved_rows_for_circuits(
+        circuits,
+        ("sensor", "electrical_health", "Electrical Health"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    cards: list[dict[str, Any]] = []
+    if energy_rows:
+        cards.append(_entities_card("Usage watchlist", energy_rows))
+    if electrical_rows:
+        cards.append(_entities_card("Electrical watchlist", electrical_rows))
+    for circuit in circuits[:3]:
+        circuit_id = _circuit_id(circuit)
+        if not circuit_id:
+            continue
+        cards.append(
+            {
+                "type": "button",
+                "name": f"Open {_circuit_name(circuit)} Evidence",
+                "icon": "mdi:clipboard-search-outline",
+                "tap_action": {
+                    "action": "navigate",
+                    "navigation_path": (
+                        f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}"
+                    ),
+                },
+            }
+        )
+    if not cards:
+        cards.append(_markdown_card("Behavior watchlist appears after entities load."))
+    return {"type": "grid", "title": "Behavior Watchlist", "cards": cards}
 
 
 def _appliance_status_section(
@@ -487,6 +818,77 @@ def _energy_tracking_section(
         "title": "Energy Tracking",
         "cards": cards,
     }
+
+
+def _appliance_run_timeline_section(
+    circuits: Iterable[Any],
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    activity_entities = _resolved_entities_for_circuits(
+        circuits,
+        ("sensor", "activity_summary", "Activity Summary"),
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    cards: list[dict[str, Any]] = []
+    if activity_entities:
+        cards.append(
+            {
+                "type": "history-graph",
+                "title": "Appliance run timeline",
+                "hours_to_show": 24,
+                "entities": [{"entity": entity_id} for entity_id in activity_entities],
+            }
+        )
+    else:
+        cards.append(_markdown_card("Run timeline appears after activity summaries."))
+    return {"type": "grid", "title": "Appliance Run Timeline", "cards": cards}
+
+
+def _nilm_review_section(
+    circuit: Any,
+    *,
+    registry_lookup: dict[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> dict[str, Any]:
+    circuit_id = _circuit_id(circuit)
+    rows, _notes = _resolved_entity_rows(
+        circuit_id,
+        UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS,
+        registry_lookup=registry_lookup,
+        hass=hass,
+        entry_id=entry_id,
+    )
+    cards: list[dict[str, Any]] = []
+    if rows:
+        cards.append(
+            {
+                "type": "glance",
+                "title": "NILM review",
+                "columns": min(len(rows), 3),
+                "entities": rows,
+            }
+        )
+    cards.append(
+        {
+            "type": "button",
+            "name": "Review NILM Assignments",
+            "icon": "mdi:playlist-check",
+            "tap_action": {
+                "action": "navigate",
+                "navigation_path": (
+                    f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
+                    f"nilm_workspace=1&circuit_id={circuit_id}"
+                ),
+            },
+        }
+    )
+    return {"type": "grid", "title": "NILM Review", "cards": cards}
 
 
 def _hvac_weather_section(
@@ -802,6 +1204,32 @@ def _published_nilm_power_rows(
         )
 
     return list(_dedupe_entity_rows(sorted(rows, key=lambda row: row["entity"])))
+
+
+def _resolved_setup_health_entity_id(
+    *,
+    registry_lookup: Mapping[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> str | None:
+    if not entry_id or registry_lookup is None:
+        return "sensor.circuitsetup_energy_analyzer_setup_health"
+
+    entry = registry_lookup.get(f"{entry_id}_setup_health")
+    if entry is None:
+        matches = [
+            value
+            for value in registry_lookup.values()
+            if _entry_value(value, "entity_key", "key") == "setup_health"
+            or str(_entry_value(value, "unique_id") or "").endswith("_setup_health")
+        ]
+        entry = matches[0] if len(matches) == 1 else None
+    if entry is None or _entry_value(entry, "disabled_by"):
+        return None
+    entity_id = str(_entry_value(entry, "entity_id") or "").strip()
+    if not entity_id.startswith("sensor.") or _entity_is_unavailable(hass, entity_id):
+        return None
+    return entity_id
 
 
 def _nilm_power_graph_label(entry: Any, assignment_id: str) -> str:

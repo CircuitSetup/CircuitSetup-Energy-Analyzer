@@ -55,7 +55,12 @@ def _devices_for_entry(hass: Any, entry_id: str) -> list[dict[str, Any]]:
     if async_get is None or entries_for_config_entry is None:
         return []
 
-    device_registry = async_get(hass)
+    try:
+        device_registry = async_get(hass)
+    except (AttributeError, TypeError):
+        device_registry = getattr(hass, "device_registry", None)
+    if device_registry is None:
+        return []
     devices = entries_for_config_entry(device_registry, entry_id)
     return [
         {

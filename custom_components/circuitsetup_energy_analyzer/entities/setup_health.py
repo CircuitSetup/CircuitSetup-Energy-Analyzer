@@ -6,6 +6,8 @@ from typing import Any
 from ..const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+    CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
@@ -70,6 +72,7 @@ _MAX_SETUP_HEALTH_LIST_ITEMS = 3
 _MAX_SETUP_HEALTH_ISSUES = 3
 _MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE = 2
 _MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH = 80
+_MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS = 3
 
 
 def setup_health_value(coordinator: Any) -> str:
@@ -88,7 +91,11 @@ def _setup_health_summary(coordinator: Any) -> dict[str, Any]:
         primary = issues[0]
         return {
             "state": primary["state"],
-            "attributes": _setup_health_attributes_for_issues(issues, primary),
+            "attributes": _setup_health_attributes_for_issues(
+                coordinator,
+                issues,
+                primary,
+            ),
         }
 
     primary = {
@@ -103,11 +110,16 @@ def _setup_health_summary(coordinator: Any) -> dict[str, Any]:
     }
     return {
         "state": "Ready",
-        "attributes": _setup_health_attributes_for_issues([], primary),
+        "attributes": _setup_health_attributes_for_issues(
+            coordinator,
+            [],
+            primary,
+        ),
     }
 
 
 def _setup_health_attributes_for_issues(
+    coordinator: Any,
     issues: list[dict[str, Any]],
     primary: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -149,6 +161,7 @@ def _setup_health_attributes_for_issues(
         issue_keys=_UTILITY_COMPARISON_SETUP_ISSUES,
     )
     bounded_issues = _bounded_setup_health_issues(issues)
+    checklist = _setup_health_checklist(coordinator, issues)
     ready = not issues
     return {
         "blocking_issue_count": len(issues),
@@ -214,7 +227,202 @@ def _setup_health_attributes_for_issues(
         ),
         "issues": bounded_issues,
         "issues_truncated_count": len(issues) - len(bounded_issues),
+        "checklist": checklist,
+        "checklist_ready_count": sum(
+            1 for item in checklist if item["status"] in {"ok", "optional"}
+        ),
+        "checklist_total_count": len(checklist),
     }
+
+
+def _setup_health_checklist(
+    coordinator: Any,
+    issues: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    circuits = _setup_health_circuits(coordinator)
+    has_circuits = bool(circuits)
+    source_circuits = _setup_health_issue_circuits(
+        issues,
+        issue_keys={
+            "missing_source_entities",
+            "missing_source_sensor",
+            "stale_source",
+            "invalid_source_state",
+            "source_data_quality",
+        },
+    )
+    energy_circuits = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"missing_energy_source"},
+    )
+    ct_circuits = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"check_ct_direction"},
+    )
+    learning_circuits = _setup_health_issue_circuits(
+        issues,
+        issue_keys={"learning"},
+    )
+    dashboard_request = getattr(coordinator, "last_dashboard_create_request", None)
+    if not isinstance(dashboard_request, Mapping):
+        dashboard_request = getattr(coordinator, "dashboard_status", None)
+    if not isinstance(dashboard_request, Mapping):
+        store_data = getattr(coordinator, "store_data", None)
+        dashboard_request = getattr(store_data, "dashboard_status", None)
+    dashboard_action = (
+        str(dashboard_request.get("action") or "")
+        if isinstance(dashboard_request, Mapping)
+        else ""
+    )
+    nilm_enabled = bool(
+        _setup_health_config_value(coordinator, CONF_ENABLE_EXPERIMENTAL_NILM)
+    )
+    entity_detail_level = _setup_health_config_value(
+        coordinator,
+        CONF_ENTITY_DETAIL_LEVEL,
+    )
+    compact = len(issues) > _MAX_SETUP_HEALTH_ISSUES
+
+    return [
+        _setup_health_checklist_item(
+            "source_data_found",
+            "Source data found",
+            "ok" if has_circuits and not source_circuits else "needs_attention",
+            "Appliance status needs fresh source sensors.",
+            affected_circuits=source_circuits,
+            fix=(
+                "Review source sensors"
+                if has_circuits
+                else "Review circuit assignments"
+            ),
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "circuit_assignments_reviewed",
+            "Circuit assignments reviewed",
+            "ok" if has_circuits else "needs_attention",
+            "Appliance guidance depends on circuit names, profiles, and sensors.",
+            fix="Review circuit assignments",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "ct_direction_valid",
+            "CT direction looks valid",
+            "ok" if not ct_circuits else "needs_attention",
+            "Signed power should match the circuit's load or generation role.",
+            affected_circuits=ct_circuits,
+            fix="Check CT direction",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "cumulative_kwh_sources_found",
+            "Cumulative kWh sources found",
+            "ok" if has_circuits and not energy_circuits else "needs_attention",
+            "Today vs Normal needs cumulative energy history.",
+            affected_circuits=energy_circuits,
+            fix="Add cumulative kWh source",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "appliance_profiles_selected",
+            "Appliance profiles selected",
+            "ok" if has_circuits else "needs_attention",
+            "Profile selection controls appliance-specific expectations.",
+            fix="Review appliance profiles",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "entity_detail_level_selected",
+            "Entity detail level selected",
+            "ok" if entity_detail_level else "needs_attention",
+            "The dashboard and registry cleanup need a chosen entity profile.",
+            fix="Choose entity detail level",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "dashboard_created",
+            "Dashboard created",
+            "ok" if dashboard_action in {"created", "updated"} else "needs_attention",
+            "The recommended dashboard is the first-stop appliance overview.",
+            fix="Create recommended dashboard",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "notifications_enabled",
+            "Notifications enabled",
+            "ok",
+            "Persistent notifications link alerts to appliance evidence.",
+            fix="Review notification preferences",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "nilm_enabled",
+            "NILM enabled",
+            "ok" if nilm_enabled else "optional",
+            "NILM can estimate unknown appliances from mains power when enabled.",
+            fix="Enable NILM if desired",
+            compact=compact,
+        ),
+        _setup_health_checklist_item(
+            "learning_progress",
+            "Learning progress",
+            (
+                "learning"
+                if learning_circuits
+                else ("ok" if has_circuits else "needs_attention")
+            ),
+            "Baseline learning makes comparisons and alerts more reliable.",
+            affected_circuits=learning_circuits,
+            fix="Let analyzer learn",
+            compact=compact,
+        ),
+    ]
+
+
+def _setup_health_checklist_item(
+    item_id: str,
+    title: str,
+    status: str,
+    why_it_matters: str,
+    *,
+    affected_circuits: list[str] | None = None,
+    fix: str,
+    compact: bool,
+) -> dict[str, Any]:
+    item = {
+        "item_id": item_id,
+        "status": status,
+    }
+    if compact:
+        if status not in {"ok", "optional"}:
+            item["fix"] = _bounded_setup_health_string(fix)
+        if affected_circuits:
+            item["affected_count"] = len(affected_circuits)
+        return item
+
+    item["title"] = _bounded_setup_health_string(title)
+    item["why_it_matters"] = _bounded_setup_health_string(why_it_matters)
+    if affected_circuits:
+        item["affected_circuits"] = _bounded_setup_health_list(
+            affected_circuits[:_MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS],
+        )
+        item["affected_circuits_truncated_count"] = max(
+            len(affected_circuits)
+            - _MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS,
+            0,
+        )
+    if status not in {"ok", "optional"}:
+        item["fix"] = _bounded_setup_health_string(fix)
+        item["open_path"] = SETUP_HEALTH_OPEN_PATH
+    return item
+
+
+def _setup_health_config_value(coordinator: Any, key: str) -> Any:
+    for source_name in ("options", "entry_data"):
+        source = getattr(coordinator, source_name, {})
+        if isinstance(source, Mapping) and key in source:
+            return source[key]
+    return None
 
 
 def _bounded_setup_health_list(values: list[str]) -> list[str]:

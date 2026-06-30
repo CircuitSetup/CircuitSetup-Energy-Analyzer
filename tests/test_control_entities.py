@@ -443,6 +443,36 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
 
 
 @pytest.mark.asyncio
+async def test_button_setup_avoids_duplicate_pause_alert_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import button
+
+    _disable_registry_pruning(monkeypatch, button)
+    coordinator = _FakeCoordinator()
+    coordinator.options[CONF_ENTITY_DETAIL_LEVEL] = "expert"
+    coordinator.options[CONF_SELECTED_ENTITY_GROUPS] = ["developer_diagnostics"]
+    coordinator.options[CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS] = [
+        "button:start_maintenance",
+        "button:end_maintenance",
+    ]
+    coordinator.data.active_alerts_by_circuit["fridge"] = [object()]
+    added_entities = []
+
+    await button.async_setup_entry(
+        _hass_with(coordinator),
+        SimpleNamespace(entry_id="entry-1", data={}),
+        added_entities.extend,
+    )
+
+    unique_ids = {entity.unique_id for entity in added_entities}
+
+    assert "entry-1_fridge_start_maintenance" in unique_ids
+    assert "entry-1_fridge_end_maintenance" in unique_ids
+    assert "entry-1_fridge_pause_alerts" not in unique_ids
+
+
+@pytest.mark.asyncio
 async def test_unavailable_maintenance_button_press_raises_clear_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
