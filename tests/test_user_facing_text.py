@@ -388,6 +388,14 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert dashboard["data"]["remove_dashboard"] == "Remove Existing Dashboard"
     assert "summary" in dashboard["data_description"]["dashboard_layout"].lower()
     assert (
+        "appliance evidence navigation"
+        in dashboard["data_description"]["dashboard_layout"].lower()
+    )
+    assert (
+        "diagnostics/evidence section"
+        in dashboard["data_description"]["dashboard_layout"].lower()
+    )
+    assert (
         "save a matching entity detail level"
         in dashboard["data_description"]["apply_entity_detail_profile"].lower()
     )
@@ -818,6 +826,20 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         assert f"sensor.{circuit}_energy_summary" in appliance_overview
         assert f"sensor.{circuit}_daily_energy_usage" in appliance_overview
         assert f"sensor.{circuit}_health_summary" not in appliance_overview
+        assert (
+            f"/circuitsetup-energy-analyzer-evidence?circuit_id={circuit}"
+            in appliance_overview
+        )
+    for name in (
+        "Open Refrigerator Evidence",
+        "Open HVAC Evidence",
+        "Open Water heater Evidence",
+        "Open Pool pump Evidence",
+        "Open Washer Evidence",
+        "Open Dryer Evidence",
+        "Open Car charger Evidence",
+    ):
+        assert name in appliance_overview
 
     energy_tracking = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
     assert "Electrical health rollups" in energy_tracking
@@ -2232,16 +2254,21 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     )
     assert "renamed analyzer entities are respected" in readme_text
     assert "matches the included example dashboard structure" in readme_text
-    assert "does not add dropdown, switch, number, or button control cards" in (
+    assert "does not add dropdown, switch, number, or service-control cards" in (
         readme_text
     )
+    assert "navigation-only evidence buttons" in readme_text
     assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
     assert "Create Or Update Dashboard" in readme_text
     assert "Match Entity Detail Level To Layout" in readme_text
     assert "Remove Existing Dashboard" in readme_text
     assert "dashboard action still runs from Configure" in readme_text
-    assert "**Expert**: Standard plus analyzer evidence links" in readme_text
+    assert "**Standard**: Simple plus feature-level mains" in readme_text
+    assert "appliance evidence navigation" in readme_text
+    assert "**Expert**: Standard plus the diagnostics/evidence section" in (
+        readme_text
+    )
     assert "does not add diagnostic/detail entity cards automatically" in readme_text
     assert "graph/detail cards for the Expert groups you selected" not in readme_text
     assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text

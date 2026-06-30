@@ -221,7 +221,7 @@
           "remove_dashboard": "Remove Existing Dashboard"
         },
         "data_description": {
-          "dashboard_layout": "Simple keeps the summary dashboard cards compact. Standard adds feature-level mains, HVAC, solar, and utility status cards. Expert also adds analyzer evidence links for each circuit.",
+          "dashboard_layout": "Simple keeps the summary dashboard cards compact. Standard adds feature-level mains, HVAC, solar, utility, and appliance evidence navigation cards. Expert also adds the diagnostics/evidence section for each circuit.",
           "apply_entity_detail_profile": "If the selected dashboard layout needs more analyzer entities than the current Entity Detail Level creates, check this to save a matching Entity Detail Level. The integration reloads to rebuild the desired entity set.",
           "remove_dashboard": "Check this to delete the existing CircuitSetup Energy Analyzer dashboard instead of creating or updating it."
         }

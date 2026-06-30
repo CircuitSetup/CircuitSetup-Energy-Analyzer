@@ -24,6 +24,12 @@ views:
                 name: Energy Summary
               - entity: sensor.refrigerator_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Refrigerator Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=refrigerator
           - type: entities
             title: HVAC
             entities:
@@ -35,6 +41,12 @@ views:
                 name: Energy Summary
               - entity: sensor.hvac_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open HVAC Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=hvac
           - type: entities
             title: Water heater
             entities:
@@ -46,6 +58,12 @@ views:
                 name: Energy Summary
               - entity: sensor.water_heater_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Water heater Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=water_heater
           - type: entities
             title: Pool pump
             entities:
@@ -57,6 +75,12 @@ views:
                 name: Energy Summary
               - entity: sensor.pool_pump_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Pool pump Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=pool_pump
           - type: entities
             title: Washer
             entities:
@@ -68,6 +92,12 @@ views:
                 name: Energy Summary
               - entity: sensor.washer_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Washer Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=washer
           - type: entities
             title: Dryer
             entities:
@@ -79,6 +109,12 @@ views:
                 name: Energy Summary
               - entity: sensor.dryer_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Dryer Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=dryer
           - type: entities
             title: Car charger
             entities:
@@ -90,6 +126,12 @@ views:
                 name: Energy Summary
               - entity: sensor.car_charger_daily_energy_usage
                 name: Daily Energy Usage
+          - type: button
+            name: Open Car charger Evidence
+            icon: mdi:chart-line
+            tap_action:
+              action: navigate
+              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=car_charger
 
       - type: grid
         title: Mains, Solar, and NILM
