@@ -709,6 +709,22 @@ def test_coordinator_exposes_setup_health_aggregator() -> None:
     assert coordinator._active_repair_issues == set()
 
 
+def test_coordinator_exposes_nilm_controller() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(
+        coordinator.nilm_controller,
+        nilm_controller.NilmController,
+    )
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
