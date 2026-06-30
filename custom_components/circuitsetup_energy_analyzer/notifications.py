@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
@@ -44,6 +45,7 @@ def alert_notification_message(
     if config is not None and config.name:
         lines.extend([f"**{config.name}**", ""])
     lines.append(alert.message)
+    lines.extend(_nilm_source_lines(alert))
     lines.extend(
         [
             "",
@@ -63,6 +65,48 @@ def alert_notification_message(
             )
         )
     return "\n".join(lines)
+
+
+def _nilm_source_lines(alert: AlertEvidence) -> list[str]:
+    if not _is_nilm_estimated_alert(alert):
+        return []
+
+    lines: list[str] = []
+    if "Estimated from mains power by NILM." not in alert.message:
+        lines.append("Estimated from mains power by NILM.")
+
+    confidence = _nilm_confidence(alert)
+    if confidence is not None and "Confidence:" not in alert.message:
+        lines.append(f"Confidence: {round(confidence * 100)}%.")
+    return lines
+
+
+def _is_nilm_estimated_alert(alert: AlertEvidence) -> bool:
+    source = str(alert.features.get("source") or "").strip().lower()
+    source_type = str(alert.features.get("source_type") or "").strip().lower()
+    if source == "nilm" or source_type == "nilm_estimate":
+        return True
+    assignment_id = str(alert.features.get("assignment_id") or "").strip()
+    return bool(assignment_id and alert.features.get("estimated") is True)
+
+
+def _nilm_confidence(alert: AlertEvidence) -> float | None:
+    for key in ("confidence", "nilm_confidence", "assignment_confidence"):
+        raw = alert.features.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isfinite(value):
+            continue
+        if value < 0:
+            continue
+        if value > 1.0:
+            value /= 100.0
+        return min(value, 1.0)
+    return None
 
 
 async def async_create_alert_notification(
