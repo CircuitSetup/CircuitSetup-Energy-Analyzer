@@ -4735,6 +4735,9 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert finished_alert.circuit_id == "mains"
     assert "Estimated from mains power by NILM" in finished_alert.message
     assert "Confidence: 82%" in finished_alert.message
+    assert finished_alert.features["source_type"] == "nilm_estimate"
+    assert finished_alert.features["estimated"] is True
+    assert finished_alert.features["confidence"] == pytest.approx(0.82)
     assert finished_alert.features["assignment_id"] == "assignment-dishwasher"
     assert finished_alert.features["notification_key"] == (
         "assignment-dishwasher:session-1"
@@ -4742,6 +4745,10 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
 
     low_confidence_state = SimpleNamespace(**{**state.__dict__, "confidence": 0.7})
     assert finished_builder(low_confidence_state, now=now) is None
+    nan_confidence_state = SimpleNamespace(
+        **{**state.__dict__, "confidence": float("nan")}
+    )
+    assert finished_builder(nan_confidence_state, now=now) is None
     pending_validation_state = SimpleNamespace(
         **{**state.__dict__, "model_status": "needs_validation"}
     )
@@ -4785,6 +4792,8 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert runtime_alert.feature == "nilm_appliance_unusual_runtime"
     assert runtime_alert.repeated_count == 2
     assert "estimated" in runtime_alert.message.lower()
+    assert runtime_alert.features["source_type"] == "nilm_estimate"
+    assert runtime_alert.features["confidence"] == pytest.approx(0.86)
 
     unvalidated_state = SimpleNamespace(
         **{**running_state.__dict__, "model_status": "assigned"}
@@ -4808,6 +4817,8 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert energy_alert.feature == "nilm_appliance_unusual_energy"
     assert energy_alert.repeated_count == 2
     assert "Estimated from mains power by NILM" in energy_alert.message
+    assert energy_alert.features["source_type"] == "nilm_estimate"
+    assert energy_alert.features["confidence"] == pytest.approx(0.82)
 
 
 @pytest.mark.asyncio
