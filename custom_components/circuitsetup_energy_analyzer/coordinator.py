@@ -781,6 +781,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             clean_string_list=_clean_string_list,
             append_unique=_append_unique,
             nonnegative_float_value=_nonnegative_float_value,
+            label_interval_datetime=_nilm_label_interval_datetime,
+            label_interval_id=_nilm_label_interval_id,
+            signature_fingerprint_value=_nilm_signature_fingerprint_value,
+            label_interval_max_items=NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
         )
         self.settings_controller = SettingsController(self)
         self.state_reducer = StateReducer()
@@ -3032,22 +3036,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         label: str,
     ) -> None:
         """Persist a user-confirmed label for a NILM signature."""
-        signatures = self.store_data.nilm_signatures.setdefault(circuit_id, [])
-        for signature in signatures:
-            if signature.get("signature_id") == signature_id:
-                signature["user_label"] = label
-                self._mark_store_dirty()
-                self._refresh_nilm_state(circuit_id)
-                self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-                self.async_set_updated_data(self.state)
-                await self._async_save_store(self._now_fn())
-                return
-        signatures.append({"signature_id": signature_id, "user_label": label})
-        self._mark_store_dirty()
-        self._refresh_nilm_state(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
+        await self.nilm_controller.async_label_nilm_signature(
+            circuit_id,
+            signature_id,
+            label,
+        )
 
     async def async_label_nilm_interval(
         self: Self,
@@ -3066,81 +3059,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         confidence: float = 1.0,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
-        label_text = str(label or "").strip()
-        if not label_text:
-            raise ValueError("Missing label.")
-        start_dt = _nilm_label_interval_datetime(start, "start")
-        end_dt = _nilm_label_interval_datetime(end, "end")
-        if end_dt <= start_dt:
-            raise ValueError("NILM label interval end must be after start.")
-
-        now_dt = self._now_fn()
-        now = now_dt.isoformat()
-        start_iso = start_dt.isoformat()
-        end_iso = end_dt.isoformat()
-        interval_id_text = str(interval_id or "").strip() or _nilm_label_interval_id(
+        return await self.nilm_controller.async_label_nilm_interval(
             circuit_id,
-            start_iso,
-            end_iso,
-            label_text,
+            label=label,
+            start=start,
+            end=end,
+            appliance_id=appliance_id,
+            mains_entity_id=mains_entity_id,
+            ground_truth_entity_id=ground_truth_entity_id,
+            validation_start=validation_start,
+            validation_end=validation_end,
+            interval_id=interval_id,
+            source=source,
+            confidence=confidence,
         )
-        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
-            circuit_id,
-            [],
-        )
-        existing = next(
-            (
-                interval
-                for interval in intervals
-                if interval.get("interval_id") == interval_id_text
-            ),
-            None,
-        )
-        try:
-            confidence_value = float(confidence)
-        except (TypeError, ValueError):
-            confidence_value = 1.0
-        payload: dict[str, Any] = {
-            "interval_id": interval_id_text,
-            "mains_circuit_id": circuit_id,
-            "appliance_id": str(appliance_id or label_text).strip(),
-            "label": label_text,
-            "start": start_iso,
-            "end": end_iso,
-            "source": str(source or "manual").strip() or "manual",
-            "confidence": max(min(confidence_value, 1.0), 0.0),
-            "mains_entity_id": str(mains_entity_id or "").strip(),
-            "created_at": str(existing.get("created_at") if existing else now),
-            "updated_at": now,
-        }
-        ground_truth_text = str(ground_truth_entity_id or "").strip()
-        if ground_truth_text:
-            payload["ground_truth_entity_id"] = ground_truth_text
-        if validation_start is not None and validation_end is not None:
-            validation_start_dt = _nilm_label_interval_datetime(
-                validation_start,
-                "validation_start",
-            )
-            validation_end_dt = _nilm_label_interval_datetime(
-                validation_end,
-                "validation_end",
-            )
-            if validation_end_dt <= validation_start_dt:
-                raise ValueError("NILM validation end must be after start.")
-            payload["validation_start"] = validation_start_dt.isoformat()
-            payload["validation_end"] = validation_end_dt.isoformat()
-
-        if existing is None:
-            intervals.append(payload)
-        else:
-            existing.clear()
-            existing.update(payload)
-        del intervals[:-NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT]
-
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now_dt)
-        return dict(payload)
 
     async def async_delete_nilm_label_interval(
         self: Self,
@@ -3148,26 +3080,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         interval_id: str,
     ) -> bool:
         """Delete a user-labeled NILM graph interval."""
-        interval_id_text = str(interval_id or "").strip()
-        if not interval_id_text:
-            raise ValueError("Missing interval_id.")
-        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
+        return await self.nilm_controller.async_delete_nilm_label_interval(
             circuit_id,
-            [],
+            interval_id,
         )
-        remaining = [
-            interval
-            for interval in intervals
-            if interval.get("interval_id") != interval_id_text
-        ]
-        if len(remaining) == len(intervals):
-            return False
-        self.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
-        now_dt = self._now_fn()
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now_dt)
-        return True
 
     async def async_assign_nilm_signature(
         self: Self,
@@ -3180,34 +3096,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Assign a NILM signature to a durable appliance assignment."""
-        signature = self._nilm_signature_for_review(circuit_id, signature_id)
-        fingerprint = _nilm_signature_fingerprint_value(signature, signature_id)
-        assignment = self._upsert_nilm_assignment(
+        return await self.nilm_controller.async_assign_nilm_signature(
             circuit_id,
+            signature_id,
             label=label,
             appliance_id=appliance_id,
             appliance_profile=appliance_profile,
             assignment_id=assignment_id,
-            signature_fingerprint=fingerprint,
-            lifecycle_state="assigned",
-            confidence=signature.get("confidence", 1.0),
         )
-        signature["assignment_id"] = assignment["assignment_id"]
-        signature["review_state"] = "assigned"
-        signature["user_label"] = assignment["display_name"]
-        signature.pop("ignored", None)
-        self.ignored_nilm_signatures.discard((circuit_id, signature_id))
-        self._remove_nilm_signature_from_other_assignments(
-            circuit_id,
-            fingerprint,
-            assignment["assignment_id"],
-        )
-        self._mark_store_dirty()
-        self._refresh_nilm_state(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
-        return dict(assignment)
 
     async def async_assign_nilm_session(
         self: Self,
@@ -3221,23 +3117,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Assign a NILM session to a durable appliance assignment."""
-        session_id_text = str(session_id or "").strip()
-        if not session_id_text:
-            raise ValueError("Missing session_id.")
-        assignment = self._upsert_nilm_assignment(
+        return await self.nilm_controller.async_assign_nilm_session(
             circuit_id,
+            session_id,
             label=label,
+            signature_fingerprint=signature_fingerprint,
             appliance_id=appliance_id,
             appliance_profile=appliance_profile,
             assignment_id=assignment_id,
-            signature_fingerprint=signature_fingerprint,
-            session_id=session_id_text,
-            lifecycle_state="assigned",
         )
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
-        return dict(assignment)
 
     async def async_assign_nilm_interval(
         self: Self,
@@ -3250,36 +3138,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Assign a NILM label interval to a durable appliance assignment."""
-        interval_id_text = str(interval_id or "").strip()
-        intervals = self.store_data.nilm_label_intervals_by_circuit.setdefault(
+        return await self.nilm_controller.async_assign_nilm_interval(
             circuit_id,
-            [],
-        )
-        interval = next(
-            (
-                item
-                for item in intervals
-                if item.get("interval_id") == interval_id_text
-            ),
-            None,
-        )
-        if interval is None:
-            raise ValueError(f"Unknown interval_id '{interval_id_text}'.")
-        assignment = self._upsert_nilm_assignment(
-            circuit_id,
-            label=label or str(interval.get("label") or ""),
-            appliance_id=appliance_id or str(interval.get("appliance_id") or ""),
+            interval_id,
+            label=label,
+            appliance_id=appliance_id,
             appliance_profile=appliance_profile,
             assignment_id=assignment_id,
-            label_interval_id=interval_id_text,
-            lifecycle_state="assigned",
-            confidence=interval.get("confidence", 1.0),
         )
-        interval["assignment_id"] = assignment["assignment_id"]
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(self._now_fn())
-        return dict(assignment)
 
     async def async_validate_nilm_session(
         self: Self,

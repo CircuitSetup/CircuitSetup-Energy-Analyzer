@@ -737,6 +737,21 @@ def test_nilm_controller_exposes_assignment_edit_actions() -> None:
     assert callable(coordinator.nilm_controller.async_merge_nilm_assignments)
 
 
+def test_nilm_controller_exposes_label_and_assignment_actions() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert callable(coordinator.nilm_controller.async_label_nilm_signature)
+    assert callable(coordinator.nilm_controller.async_label_nilm_interval)
+    assert callable(coordinator.nilm_controller.async_delete_nilm_label_interval)
+    assert callable(coordinator.nilm_controller.async_assign_nilm_signature)
+    assert callable(coordinator.nilm_controller.async_assign_nilm_session)
+    assert callable(coordinator.nilm_controller.async_assign_nilm_interval)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
