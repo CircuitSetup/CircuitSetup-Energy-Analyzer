@@ -658,6 +658,23 @@ def test_coordinator_exposes_source_update_manager() -> None:
     assert coordinator.source_entities == ()
 
 
+def test_coordinator_exposes_store_persistence_manager() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        store_persistence,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(
+        coordinator.store_persistence,
+        store_persistence.StorePersistenceManager,
+    )
+    assert coordinator._store_dirty is False
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (

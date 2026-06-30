@@ -127,6 +127,7 @@ from .managers.evidence_actions import EvidenceActionController
 from .managers.settings_controller import SettingsController
 from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
+from .managers.store_persistence import StorePersistenceManager
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -984,7 +985,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._settings_recommendation_notification_episode_key
         )
         self._active_repair_issues: set[tuple[str, str]] = set()
-        self._store_dirty = False
+        self.store_persistence = StorePersistenceManager(self)
         self.paused_circuits: set[str] = set()
         self.last_exported_diagnostics: dict[str, Any] = {}
         self.last_exported_history_csv: str = ""
@@ -6608,7 +6609,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return signature
 
     def _mark_store_dirty(self: Self) -> None:
-        self._store_dirty = True
+        self.store_persistence.mark_dirty()
+
+    @property
+    def _store_dirty(self: Self) -> bool:
+        return self.store_persistence.dirty
+
+    @_store_dirty.setter
+    def _store_dirty(self: Self, value: bool) -> None:
+        self.store_persistence.dirty = bool(value)
 
     async def _apply_feature_result(
         self: Self,
@@ -6636,12 +6645,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return list(result.events), active_alerts
 
     async def _async_save_store(self: Self, now: datetime) -> None:
-        if self._store is None or not self._store_dirty:
-            return
-        self._apply_retention(now)
-        self._store.data = self.store_data
-        await self._store.async_save()
-        self._store_dirty = False
+        await self.store_persistence.async_save_if_dirty(now)
 
     def _apply_retention(self: Self, now: datetime) -> None:
         retained_events = [
