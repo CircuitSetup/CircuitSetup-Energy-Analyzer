@@ -125,6 +125,7 @@ from .managers.dashboard_controller import DashboardController
 from .managers.entity_profile_controller import EntityProfileController
 from .managers.evidence_actions import EvidenceActionController
 from .managers.settings_controller import SettingsController
+from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -989,45 +990,53 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.last_exported_history_csv: str = ""
         self.mapping_checks_run = 0
         self.state = AnalyzerState()
-        self.source_entities: tuple[str, ...] = ()
-        self.pending_source_update_entities: tuple[str, ...] = ()
-        self.last_source_update_entities: tuple[str, ...] = ()
-        self._pending_source_update_entities: set[str] = set()
-        self._source_update_task: asyncio.Task[Any] | None = None
         self.started = False
-        self._unsub_state_change: Any = None
+        self.source_updates = SourceUpdateManager(
+            self,
+            track_state_change_event=async_track_state_change_event,
+            debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
+        )
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
-        if self._unsub_state_change is not None:
-            self._unsub_state_change()
-            self._unsub_state_change = None
-        self._cancel_pending_source_update()
-
-        self.source_entities = tuple(source_entities)
-        self.started = True
-
-        if async_track_state_change_event is None or not self.source_entities:
-            return
-
-        try:
-            self._unsub_state_change = async_track_state_change_event(
-                self.hass,
-                list(self.source_entities),
-                self._async_handle_source_state_change,
-            )
-        except AttributeError:
-            self._unsub_state_change = None
+        await self.source_updates.async_start(source_entities)
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
-        if self._unsub_state_change is not None:
-            self._unsub_state_change()
-            self._unsub_state_change = None
-        self._cancel_pending_source_update()
-        self.started = False
+        await self.source_updates.async_stop()
+
+    @property
+    def source_entities(self: Self) -> tuple[str, ...]:
+        """Configured source entities currently watched by the coordinator."""
+        return self.source_updates.source_entities
+
+    @source_entities.setter
+    def source_entities(self: Self, value: Iterable[str]) -> None:
+        self.source_updates.source_entities = tuple(value)
+
+    @property
+    def pending_source_update_entities(self: Self) -> tuple[str, ...]:
+        """Source entities queued for the next debounced update."""
+        return self.source_updates.pending_source_update_entities
+
+    @pending_source_update_entities.setter
+    def pending_source_update_entities(self: Self, value: Iterable[str]) -> None:
+        self.source_updates.pending_source_update_entities = tuple(value)
+
+    @property
+    def last_source_update_entities(self: Self) -> tuple[str, ...]:
+        """Source entities included in the most recent debounced update."""
+        return self.source_updates.last_source_update_entities
+
+    @last_source_update_entities.setter
+    def last_source_update_entities(self: Self, value: Iterable[str]) -> None:
+        self.source_updates.last_source_update_entities = tuple(value)
+
+    @property
+    def _source_update_task(self: Self) -> asyncio.Task[Any] | None:
+        return self.source_updates.source_update_task
 
     def _apply_config_entry_settings(self: Self) -> None:
         """Apply setup/options settings to store-backed runtime setting maps."""
@@ -1206,52 +1215,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
-        entity_id = _event_entity_id(event)
-        if entity_id:
-            self._pending_source_update_entities.add(entity_id)
-        self.pending_source_update_entities = tuple(
-            sorted(self._pending_source_update_entities)
-        )
-        if self._source_update_task is not None and not self._source_update_task.done():
-            return
-        self._source_update_task = asyncio.create_task(
-            self._async_process_debounced_source_update()
-        )
+        await self.source_updates.async_handle_source_state_change(event)
 
     async def _async_process_debounced_source_update(self: Self) -> None:
         """Process one analyzer update for a burst of source state changes."""
-        try:
-            await asyncio.sleep(SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS)
-            changed_entities = tuple(sorted(self._pending_source_update_entities))
-            self._pending_source_update_entities.clear()
-            self.pending_source_update_entities = ()
-            self.last_source_update_entities = changed_entities
-            if not self.started:
-                return
-            await self.async_process_update()
-        except asyncio.CancelledError:
-            self._pending_source_update_entities.clear()
-            self.pending_source_update_entities = ()
-            self._source_update_task = None
-            raise
-        finally:
-            if self._source_update_task is asyncio.current_task():
-                self._source_update_task = None
-                if self.started and self._pending_source_update_entities:
-                    self.pending_source_update_entities = tuple(
-                        sorted(self._pending_source_update_entities)
-                    )
-                    self._source_update_task = asyncio.create_task(
-                        self._async_process_debounced_source_update()
-                    )
+        await self.source_updates.async_process_debounced_source_update()
 
     def _cancel_pending_source_update(self: Self) -> None:
         """Cancel queued source-state processing during restart/unload."""
-        if self._source_update_task is not None and not self._source_update_task.done():
-            self._source_update_task.cancel()
-        self._source_update_task = None
-        self._pending_source_update_entities.clear()
-        self.pending_source_update_entities = ()
+        self.source_updates.cancel_pending_source_update()
 
     def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
         """Build immutable runtime context for feature processors."""

@@ -644,6 +644,20 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
     assert evidence["status"] == "normal"
 
 
+def test_coordinator_exposes_source_update_manager() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
+        SourceUpdateManager,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(coordinator.source_updates, SourceUpdateManager)
+    assert coordinator.source_entities == ()
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
