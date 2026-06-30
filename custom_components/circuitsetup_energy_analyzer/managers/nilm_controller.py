@@ -14,11 +14,277 @@ class NilmController:
         clean_string_list: Callable[[Any], list[str]],
         append_unique: Callable[[list[str], Any], None],
         nonnegative_float_value: Callable[..., float],
+        label_interval_datetime: Callable[[Any, str], Any],
+        label_interval_id: Callable[[str, str, str, str], str],
+        signature_fingerprint_value: Callable[[Any, str], str],
+        label_interval_max_items: int,
     ) -> None:
         self._coordinator = coordinator
         self._clean_string_list = clean_string_list
         self._append_unique = append_unique
         self._nonnegative_float_value = nonnegative_float_value
+        self._label_interval_datetime = label_interval_datetime
+        self._label_interval_id = label_interval_id
+        self._signature_fingerprint_value = signature_fingerprint_value
+        self._label_interval_max_items = label_interval_max_items
+
+    async def async_label_nilm_signature(
+        self,
+        circuit_id: str,
+        signature_id: str,
+        label: str,
+    ) -> None:
+        """Persist a user-confirmed label for a NILM signature."""
+        coordinator = self._coordinator
+        signatures = coordinator.store_data.nilm_signatures.setdefault(circuit_id, [])
+        for signature in signatures:
+            if signature.get("signature_id") == signature_id:
+                signature["user_label"] = label
+                await self._async_save_nilm_review_change(circuit_id)
+                return
+        signatures.append({"signature_id": signature_id, "user_label": label})
+        await self._async_save_nilm_review_change(circuit_id)
+
+    async def async_label_nilm_interval(
+        self,
+        circuit_id: str,
+        *,
+        label: str,
+        start: Any,
+        end: Any,
+        appliance_id: str | None = None,
+        mains_entity_id: str | None = None,
+        ground_truth_entity_id: str | None = None,
+        validation_start: Any = None,
+        validation_end: Any = None,
+        interval_id: str | None = None,
+        source: str = "manual",
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """Persist a user-labeled NILM graph interval."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        start_dt = self._label_interval_datetime(start, "start")
+        end_dt = self._label_interval_datetime(end, "end")
+        if end_dt <= start_dt:
+            raise ValueError("NILM label interval end must be after start.")
+
+        coordinator = self._coordinator
+        now_dt = coordinator._now_fn()
+        now = now_dt.isoformat()
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+        interval_id_text = str(interval_id or "").strip() or self._label_interval_id(
+            circuit_id,
+            start_iso,
+            end_iso,
+            label_text,
+        )
+        intervals = coordinator.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        existing = next(
+            (
+                interval
+                for interval in intervals
+                if interval.get("interval_id") == interval_id_text
+            ),
+            None,
+        )
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            confidence_value = 1.0
+        payload: dict[str, Any] = {
+            "interval_id": interval_id_text,
+            "mains_circuit_id": circuit_id,
+            "appliance_id": str(appliance_id or label_text).strip(),
+            "label": label_text,
+            "start": start_iso,
+            "end": end_iso,
+            "source": str(source or "manual").strip() or "manual",
+            "confidence": max(min(confidence_value, 1.0), 0.0),
+            "mains_entity_id": str(mains_entity_id or "").strip(),
+            "created_at": str(existing.get("created_at") if existing else now),
+            "updated_at": now,
+        }
+        ground_truth_text = str(ground_truth_entity_id or "").strip()
+        if ground_truth_text:
+            payload["ground_truth_entity_id"] = ground_truth_text
+        if validation_start is not None and validation_end is not None:
+            validation_start_dt = self._label_interval_datetime(
+                validation_start,
+                "validation_start",
+            )
+            validation_end_dt = self._label_interval_datetime(
+                validation_end,
+                "validation_end",
+            )
+            if validation_end_dt <= validation_start_dt:
+                raise ValueError("NILM validation end must be after start.")
+            payload["validation_start"] = validation_start_dt.isoformat()
+            payload["validation_end"] = validation_end_dt.isoformat()
+
+        if existing is None:
+            intervals.append(payload)
+        else:
+            existing.clear()
+            existing.update(payload)
+        del intervals[:-self._label_interval_max_items]
+
+        coordinator._mark_store_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now_dt)
+        return dict(payload)
+
+    async def async_delete_nilm_label_interval(
+        self,
+        circuit_id: str,
+        interval_id: str,
+    ) -> bool:
+        """Delete a user-labeled NILM graph interval."""
+        interval_id_text = str(interval_id or "").strip()
+        if not interval_id_text:
+            raise ValueError("Missing interval_id.")
+        coordinator = self._coordinator
+        intervals = coordinator.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        remaining = [
+            interval
+            for interval in intervals
+            if interval.get("interval_id") != interval_id_text
+        ]
+        if len(remaining) == len(intervals):
+            return False
+        coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
+        now_dt = coordinator._now_fn()
+        coordinator._mark_store_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now_dt)
+        return True
+
+    async def async_assign_nilm_signature(
+        self,
+        circuit_id: str,
+        signature_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM signature to a durable appliance assignment."""
+        coordinator = self._coordinator
+        signature = coordinator._nilm_signature_for_review(circuit_id, signature_id)
+        fingerprint = self._signature_fingerprint_value(signature, signature_id)
+        assignment = coordinator._upsert_nilm_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=fingerprint,
+            lifecycle_state="assigned",
+            confidence=signature.get("confidence", 1.0),
+        )
+        signature["assignment_id"] = assignment["assignment_id"]
+        signature["review_state"] = "assigned"
+        signature["user_label"] = assignment["display_name"]
+        signature.pop("ignored", None)
+        coordinator.ignored_nilm_signatures.discard((circuit_id, signature_id))
+        coordinator._remove_nilm_signature_from_other_assignments(
+            circuit_id,
+            fingerprint,
+            assignment["assignment_id"],
+        )
+        await self._async_save_nilm_review_change(circuit_id)
+        return dict(assignment)
+
+    async def async_assign_nilm_session(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        label: str,
+        signature_fingerprint: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM session to a durable appliance assignment."""
+        session_id_text = str(session_id or "").strip()
+        if not session_id_text:
+            raise ValueError("Missing session_id.")
+        coordinator = self._coordinator
+        assignment = coordinator._upsert_nilm_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=signature_fingerprint,
+            session_id=session_id_text,
+            lifecycle_state="assigned",
+        )
+        coordinator._mark_store_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(coordinator._now_fn())
+        return dict(assignment)
+
+    async def async_assign_nilm_interval(
+        self,
+        circuit_id: str,
+        interval_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM label interval to a durable appliance assignment."""
+        interval_id_text = str(interval_id or "").strip()
+        coordinator = self._coordinator
+        intervals = coordinator.store_data.nilm_label_intervals_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        interval = next(
+            (
+                item
+                for item in intervals
+                if item.get("interval_id") == interval_id_text
+            ),
+            None,
+        )
+        if interval is None:
+            raise ValueError(f"Unknown interval_id '{interval_id_text}'.")
+        assignment = coordinator._upsert_nilm_assignment(
+            circuit_id,
+            label=label or str(interval.get("label") or ""),
+            appliance_id=appliance_id or str(interval.get("appliance_id") or ""),
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            label_interval_id=interval_id_text,
+            lifecycle_state="assigned",
+            confidence=interval.get("confidence", 1.0),
+        )
+        interval["assignment_id"] = assignment["assignment_id"]
+        coordinator._mark_store_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(coordinator._now_fn())
+        return dict(assignment)
+
+    async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
+        coordinator = self._coordinator
+        coordinator._mark_store_dirty()
+        coordinator._refresh_nilm_state(circuit_id)
+        coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(coordinator._now_fn())
 
     async def async_rename_nilm_appliance(
         self,
