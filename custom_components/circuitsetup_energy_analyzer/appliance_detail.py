@@ -131,7 +131,7 @@ class ApplianceExpectation:
     circuit_id: str
     title: str
     status: ExpectationStatus
-    source_type: Literal["direct_meter", "nilm_estimate"]
+    source_type: SourceType
     confidence: float | None
     observed: str
     expected: str
@@ -393,7 +393,7 @@ def appliance_expectations_for_circuit(
 ) -> tuple[ApplianceExpectation, ...]:
     """Return one bounded behavior expectation for a direct appliance."""
     circuit_id = config.circuit_id
-    direct_source = "direct_meter" if source_type != "nilm_estimate" else source_type
+    expectation_source = source_type
     maintenance = _mapping_for_circuit(state, "maintenance_by_circuit", circuit_id)
     if maintenance.get("active") is True:
         return (
@@ -401,7 +401,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title="Maintenance mode active",
                 status="expected",
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="Maintenance is active for this appliance.",
                 expected="Issue language is suppressed while work is expected.",
                 why_it_matters=(
@@ -425,7 +425,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title="Source data needs review",
                 status="not_enough_data",
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="Analyzer source data is missing, stale, or invalid.",
                 expected="Reliable appliance checks need fresh numeric source data.",
                 why_it_matters=(
@@ -445,7 +445,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title="Electrical balance needs review",
                 status="possible_issue",
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="A dual-phase load has meaningful leg-to-leg imbalance.",
                 expected="Both legs should stay within the learned balance range.",
                 why_it_matters=(
@@ -468,7 +468,7 @@ def appliance_expectations_for_circuit(
                     config,
                     title="Energy is above normal",
                     status="watch",
-                    source_type=direct_source,
+                    source_type=expectation_source,
                     observed=f"{config.name} energy is above normal today.",
                     expected=_normal_range_text(daily),
                     why_it_matters=(
@@ -483,7 +483,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title="Cycling looks normal",
                 status=_ok_or_learning(daily),
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="Daily energy is within the learned range."
                 if _is_normal(daily)
                 else "The analyzer is still learning this appliance.",
@@ -512,7 +512,7 @@ def appliance_expectations_for_circuit(
                         config,
                         title="Runtime fits weather context",
                         status="expected",
-                        source_type=direct_source,
+                        source_type=expectation_source,
                         observed="Longer runtime is explained by weather context.",
                         expected=_normal_range_text(runtime),
                         why_it_matters=(
@@ -529,7 +529,7 @@ def appliance_expectations_for_circuit(
                     config,
                     title="Runtime is above normal",
                     status="watch",
-                    source_type=direct_source,
+                    source_type=expectation_source,
                     observed="HVAC runtime is above the learned range.",
                     expected=_normal_range_text(runtime),
                     why_it_matters=(
@@ -557,7 +557,7 @@ def appliance_expectations_for_circuit(
                         config,
                         title="Pump activity fits rain context",
                         status="expected",
-                        source_type=direct_source,
+                        source_type=expectation_source,
                         observed="Recent rain explains the pump runtime.",
                         expected=_normal_range_text(runtime),
                         why_it_matters="Pump activity often follows rain or water use.",
@@ -570,7 +570,7 @@ def appliance_expectations_for_circuit(
                     config,
                     title="Pump runtime is above normal",
                     status="watch",
-                    source_type=direct_source,
+                    source_type=expectation_source,
                     observed="Pump runtime is above the learned range without context.",
                     expected=_normal_range_text(runtime),
                     why_it_matters=(
@@ -603,7 +603,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title="Usage is above normal",
                 status="watch",
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="One or more usage metrics are above the learned range.",
                 expected=expected,
                 why_it_matters=why_it_matters,
@@ -619,7 +619,7 @@ def appliance_expectations_for_circuit(
                 config,
                 title=title,
                 status="ok",
-                source_type=direct_source,
+                source_type=expectation_source,
                 observed="No profile-specific behavior issue is currently visible.",
                 expected=expected,
                 why_it_matters=why_it_matters,
@@ -633,7 +633,7 @@ def appliance_expectations_for_circuit(
             config,
             title="Behavior looks normal",
             status="ok",
-            source_type=direct_source,
+            source_type=expectation_source,
             observed="No appliance behavior issue is currently visible.",
             expected="Usage and activity should stay within learned ranges.",
             why_it_matters="This is the baseline appliance check.",
@@ -823,7 +823,7 @@ def _expectation(
     *,
     title: str,
     status: ExpectationStatus,
-    source_type: Literal["direct_meter", "nilm_estimate"],
+    source_type: SourceType,
     observed: str,
     expected: str,
     why_it_matters: str,

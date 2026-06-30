@@ -59,6 +59,13 @@ class SetupHealthAggregator:
             for issue in self.active_repair_issues
             if issue[0] == circuit_id and issue[1] in _DATA_QUALITY_REPAIR_PROBLEMS
         }
+        current.update(
+            repairs.existing_circuit_problem_issues(
+                coordinator.hass,
+                circuit_id,
+                _DATA_QUALITY_REPAIR_PROBLEMS,
+            )
+        )
         for issue in current - desired:
             await repairs.async_delete_data_quality_issue(
                 coordinator.hass,
@@ -134,6 +141,13 @@ class SetupHealthAggregator:
             for issue in self.active_repair_issues
             if issue[0] == circuit_id and issue[1] in _SETUP_HEALTH_REPAIR_PROBLEMS
         }
+        current.update(
+            repairs.existing_circuit_problem_issues(
+                coordinator.hass,
+                circuit_id,
+                _SETUP_HEALTH_REPAIR_PROBLEMS,
+            )
+        )
         if (
             utility_comparison_problem
             in {

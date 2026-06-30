@@ -62,6 +62,39 @@ def issue_id_for_compact_entity_model(entry_id: str) -> str:
     return f"{COMPACT_ENTITY_MODEL_REPAIR}_{entry_id}"
 
 
+def existing_circuit_problem_issues(
+    hass: Any,
+    circuit_id: str,
+    problems: Iterable[str],
+) -> set[tuple[str, str]]:
+    """Return known circuit problem issues currently present in HA Repairs."""
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except ModuleNotFoundError:
+        return set()
+
+    get_registry = getattr(ir, "async_get", None)
+    if get_registry is None:
+        return set()
+
+    try:
+        registry = get_registry(hass)
+    except (AttributeError, TypeError):
+        return set()
+    get_issue = getattr(registry, "async_get_issue", None)
+    if get_issue is None:
+        return set()
+
+    existing: set[tuple[str, str]] = set()
+    for problem in problems:
+        problem_text = str(problem or "").strip()
+        if not problem_text:
+            continue
+        if get_issue(DOMAIN, issue_id_for_circuit_problem(circuit_id, problem_text)):
+            existing.add((circuit_id, problem_text))
+    return existing
+
+
 async def async_create_compact_entity_model_issue(
     hass: Any,
     entry_id: str,

@@ -419,7 +419,7 @@ class NilmController:
             for session_id in conflicting_session_ids
             if session_id not in rejected
         ]
-        if not newly_confirmed and not newly_rejected:
+        if not matched_session_ids and not conflicting_session_ids:
             raise ValueError(
                 "No matching ground-truth NILM sessions were found for this "
                 "assignment."
@@ -499,15 +499,16 @@ class NilmController:
         if validation_starts and validation_ends:
             assignment["validation_window_start"] = min(validation_starts).isoformat()
             assignment["validation_window_end"] = max(validation_ends).isoformat()
-        if newly_rejected and assignment.get("lifecycle_state") != "retired":
+        has_conflicts = bool(conflicting_session_ids)
+        if has_conflicts and assignment.get("lifecycle_state") != "retired":
             assignment["lifecycle_state"] = "conflict"
         elif assignment.get("lifecycle_state") not in {"published", "retired"}:
             assignment["lifecycle_state"] = "validated"
         assignment["last_validation"] = (
-            "direct_meter_conflict" if newly_rejected else "history"
+            "direct_meter_conflict" if has_conflicts else "history"
         )
         assignment["last_validated_at"] = now
-        if newly_rejected:
+        if has_conflicts:
             assignment["last_rejected_at"] = now
         assignment["updated_at"] = now
         coordinator._mark_store_dirty()
@@ -850,6 +851,10 @@ class NilmController:
             )
         source = self.assignment_for_id(circuit_id, source_id)
         target = self.assignment_for_id(circuit_id, target_id)
+        target_confirmed = self._clean_string_list(
+            target.get("confirmed_session_ids")
+        )
+        target_rejected = self._clean_string_list(target.get("rejected_session_ids"))
         for key in (
             "signature_fingerprints",
             "session_ids",
@@ -860,11 +865,36 @@ class NilmController:
             values = target.setdefault(key, [])
             for value in self._clean_string_list(source.get(key)):
                 self._append_unique(values, value)
-        target["confirmed_sessions"] = len(
-            self._clean_string_list(target.get("confirmed_session_ids"))
-        )
-        target["rejected_sessions"] = len(
-            self._clean_string_list(target.get("rejected_session_ids"))
+        confirmed = self._clean_string_list(target.get("confirmed_session_ids"))
+        rejected = self._clean_string_list(target.get("rejected_session_ids"))
+        target_confirmed_set = set(target_confirmed)
+        target_rejected_set = set(target_rejected)
+        confirmed = [
+            session_id
+            for session_id in confirmed
+            if session_id not in target_rejected_set
+            or session_id in target_confirmed_set
+        ]
+        rejected = [
+            session_id
+            for session_id in rejected
+            if session_id not in target_confirmed_set
+        ]
+        confirmed_set = set(confirmed)
+        rejected = [
+            session_id
+            for session_id in rejected
+            if session_id not in confirmed_set
+        ]
+        target["confirmed_session_ids"] = confirmed
+        target["rejected_session_ids"] = rejected
+        target["confirmed_sessions"] = len(confirmed)
+        target["rejected_sessions"] = len(rejected)
+        validation_total = len(confirmed) + len(rejected)
+        target["false_positive_rate"] = (
+            round(len(rejected) / validation_total, 3)
+            if validation_total
+            else 0.0
         )
         target["confidence"] = max(
             self._nonnegative_float_value(target.get("confidence"), default=0.0),
