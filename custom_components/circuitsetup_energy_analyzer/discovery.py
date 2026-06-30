@@ -289,7 +289,12 @@ def _get_entity_registry_entries(hass: Any) -> dict[str, Any]:
     except ImportError:
         return {}
 
-    registry = er.async_get(hass)
+    try:
+        registry = er.async_get(hass)
+    except (AttributeError, TypeError):
+        registry = getattr(hass, "entity_registry", None)
+    if registry is None:
+        return {}
     entries = getattr(registry, "entities", {})
     values = entries.values() if hasattr(entries, "values") else entries
     return {

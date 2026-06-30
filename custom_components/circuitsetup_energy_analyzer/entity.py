@@ -163,7 +163,17 @@ def apply_entity_profile_to_registry(
             "actions": [],
         }
 
-    registry = er.async_get(hass)
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
+        return {
+            "profile": normalize_entity_detail_level(detail_level),
+            "will_enable": 0,
+            "will_disable": 0,
+            "unchanged": 0,
+            "left_user_disabled": 0,
+            "total": 0,
+            "actions": [],
+        }
     update_entity = getattr(registry, "async_update_entity", None)
     entries = getattr(registry, "entities", {})
     values = entries.values() if hasattr(entries, "values") else entries
@@ -195,9 +205,8 @@ def enable_summary_registry_entries(
     tier_by_unique_id_suffix: Mapping[str, EntityTier],
 ) -> dict[str, Any]:
     """Re-enable integration-disabled summary entities after tier promotions."""
-    try:
-        from homeassistant.helpers import entity_registry as er
-    except ImportError:
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
         return {
             "enabled": 0,
             "left_user_disabled": 0,
@@ -205,8 +214,6 @@ def enable_summary_registry_entries(
             "ignored": 0,
             "actions": [],
         }
-
-    registry = er.async_get(hass)
     update_entity = getattr(registry, "async_update_entity", None)
     entries = getattr(registry, "entities", {})
     values = entries.values() if hasattr(entries, "values") else entries
@@ -493,12 +500,9 @@ def prune_stale_entity_registry_entries(
     desired_unique_ids: set[str],
 ) -> None:
     """Remove stale entity registry rows for entities no longer created."""
-    try:
-        from homeassistant.helpers import entity_registry as er
-    except ImportError:
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
         return
-
-    registry = er.async_get(hass)
     entries = getattr(registry, "entities", {})
     values = entries.values() if hasattr(entries, "values") else entries
     for entity_id in stale_entity_registry_entity_ids(
@@ -523,7 +527,9 @@ def hide_entity_registry_entries(
     except ImportError:
         return
 
-    registry = er.async_get(hass)
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
+        return
     update_entity = getattr(registry, "async_update_entity", None)
     if not callable(update_entity):
         return
@@ -573,7 +579,9 @@ def sync_entity_registry_visibility(
     except ImportError:
         return
 
-    registry = er.async_get(hass)
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
+        return
     update_entity = getattr(registry, "async_update_entity", None)
     if not callable(update_entity):
         return
@@ -611,12 +619,9 @@ def sync_entity_registry_categories(
     entity_category_by_unique_id_suffix: dict[str, Any | None],
 ) -> None:
     """Update existing entity registry rows to current platform categories."""
-    try:
-        from homeassistant.helpers import entity_registry as er
-    except ImportError:
+    registry = _entity_registry_for_hass(hass)
+    if registry is None:
         return
-
-    registry = er.async_get(hass)
     update_entity = getattr(registry, "async_update_entity", None)
     if not callable(update_entity):
         return
@@ -680,12 +685,9 @@ def prune_stale_device_registry_entries(
     desired_identifiers: set[tuple[str, str]],
 ) -> None:
     """Remove stale integration devices no longer used by platform entities."""
-    try:
-        from homeassistant.helpers import device_registry as dr
-    except ImportError:
+    registry = _device_registry_for_hass(hass)
+    if registry is None:
         return
-
-    registry = dr.async_get(hass)
     devices = getattr(registry, "devices", {})
     values = devices.values() if hasattr(devices, "values") else devices
     update_device = getattr(registry, "async_update_device", None)
@@ -711,6 +713,28 @@ def device_identifiers_for_entities(entities: Iterable[Any]) -> set[tuple[str, s
             if isinstance(identifier, (list, tuple)) and len(identifier) == 2:
                 identifiers.add((str(identifier[0]), str(identifier[1])))
     return identifiers
+
+
+def _entity_registry_for_hass(hass: Any) -> Any | None:
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return getattr(hass, "entity_registry", None)
+    try:
+        return er.async_get(hass)
+    except (AttributeError, TypeError):
+        return getattr(hass, "entity_registry", None)
+
+
+def _device_registry_for_hass(hass: Any) -> Any | None:
+    try:
+        from homeassistant.helpers import device_registry as dr
+    except ImportError:
+        return getattr(hass, "device_registry", None)
+    try:
+        return dr.async_get(hass)
+    except (AttributeError, TypeError):
+        return getattr(hass, "device_registry", None)
 
 
 class CircuitAnalyzerEntity(CoordinatorEntity):

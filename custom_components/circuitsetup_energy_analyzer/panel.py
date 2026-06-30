@@ -9,6 +9,11 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .alert_links import _feature_for_alert as _canonical_feature_for_alert
+from .appliance_detail import (
+    ApplianceDetail,
+    appliance_detail_for_assignment,
+    appliance_detail_for_circuit,
+)
 from .const import DOMAIN
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
@@ -16,6 +21,7 @@ from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
+    recommendation_setting_control_text,
     recommendation_setting_default_value,
     recommendation_setting_expected_effect,
 )
@@ -78,10 +84,14 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "user_label",
     "likely_type",
     "typical_watts",
+    "typical_duration_seconds",
+    "seen_count",
     "confidence",
     "first_seen",
     "last_seen",
     "voltage_class",
+    "dominant_leg",
+    "known_load_overlap",
     "running_state",
     "current_runtime_minutes",
     "estimated_energy_today_kwh",
@@ -89,14 +99,16 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "expected",
     "ignored",
     "merged_into",
+    "fingerprint",
     "feedback_fingerprint",
     "signature_fingerprint",
 )
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260630-review-first-guidance"
+PANEL_MODULE_VERSION = "20260630-appliance-story-ui"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
+APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
@@ -147,6 +159,24 @@ class AlertEvidenceView(HomeAssistantView):
             feature=request.query.get("feature"),
             recommendation_id=request.query.get(ATTR_RECOMMENDATION_ID),
             include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
+        )
+        return web.json_response(payload)
+
+
+class ApplianceDetailView(HomeAssistantView):
+    """Authenticated appliance-centered detail endpoint."""
+
+    url = APPLIANCE_DETAIL_API_PATH
+    name = f"api:{DOMAIN}:appliance_detail"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return appliance detail selected by circuit or NILM assignment."""
+        hass = request.app[KEY_HASS]
+        payload = appliance_detail_payload(
+            _loaded_coordinators(hass),
+            circuit_id=request.query.get("circuit_id"),
+            assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
         )
         return web.json_response(payload)
 
@@ -368,6 +398,120 @@ def alert_evidence_payload(
     )
 
 
+def appliance_detail_payload(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None = None,
+    assignment_id: str | None = None,
+) -> dict[str, Any]:
+    """Return one appliance-centered detail payload."""
+    requested_circuit_id = str(circuit_id or "").strip() or None
+    requested_assignment_id = str(assignment_id or "").strip() or None
+    coordinators = tuple(coordinators)
+
+    if requested_assignment_id:
+        for coordinator in coordinators:
+            detail = appliance_detail_for_assignment(
+                coordinator,
+                requested_assignment_id,
+            )
+            if detail is not None:
+                return _appliance_detail_payload(
+                    coordinator,
+                    detail,
+                    requested_circuit_id=requested_circuit_id,
+                    requested_assignment_id=requested_assignment_id,
+                )
+        return {
+            "status": "not_found",
+            "requested_circuit_id": requested_circuit_id,
+            "requested_assignment_id": requested_assignment_id,
+            "detail": None,
+            "actions": {},
+            "message": (
+                "The requested NILM appliance assignment is no longer available."
+            ),
+            "next_step": (
+                "Open the NILM workspace to review current appliance assignments."
+            ),
+        }
+
+    if requested_circuit_id:
+        for coordinator in coordinators:
+            detail = appliance_detail_for_circuit(coordinator, requested_circuit_id)
+            if detail is not None:
+                return _appliance_detail_payload(
+                    coordinator,
+                    detail,
+                    requested_circuit_id=requested_circuit_id,
+                    requested_assignment_id=requested_assignment_id,
+                )
+
+    return {
+        "status": "not_found",
+        "requested_circuit_id": requested_circuit_id,
+        "requested_assignment_id": requested_assignment_id,
+        "detail": None,
+        "actions": {},
+        "message": "No appliance detail is available for the requested appliance.",
+        "next_step": (
+            "Open the generated dashboard or review the appliance summary sensors."
+        ),
+    }
+
+
+def _appliance_detail_payload(
+    coordinator: Any,
+    detail: ApplianceDetail,
+    *,
+    requested_circuit_id: str | None,
+    requested_assignment_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "requested_circuit_id": requested_circuit_id,
+        "requested_assignment_id": requested_assignment_id,
+        "detail": detail.as_dict(),
+        "actions": _appliance_detail_actions(coordinator, detail),
+    }
+
+
+def _appliance_detail_actions(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> dict[str, dict[str, Any]]:
+    actions: dict[str, dict[str, Any]] = {}
+    if detail.evidence_path:
+        actions["open_evidence"] = {
+            "type": "navigate",
+            "path": detail.evidence_path,
+        }
+
+    if detail.source_type == "nilm_estimate" and detail.assignment_id:
+        actions["review_nilm_assignment"] = {
+            "type": "navigate",
+            "path": detail.evidence_path,
+            "data": {
+                ATTR_CIRCUIT_ID: detail.circuit_id,
+                ATTR_ASSIGNMENT_ID: detail.assignment_id,
+            },
+        }
+        return actions
+
+    config = _config_for_circuit(coordinator, detail.circuit_id)
+    latest_alert = _latest_alert_for_circuit(coordinator, detail.circuit_id)
+    alert_id = notification_id_for_alert(latest_alert) if latest_alert else None
+    actions.update(
+        _actions_for_context(
+            coordinator,
+            config=config,
+            alert_id=alert_id,
+            circuit_id=detail.circuit_id,
+        )
+    )
+    return actions
+
+
 def nilm_workspace_payload(
     coordinators: Iterable[Any],
     *,
@@ -452,6 +596,7 @@ def nilm_workspace_payload(
         all_sessions,
         assignments,
     )
+    lanes = _nilm_workspace_lanes(signatures, assignments)
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -472,6 +617,12 @@ def nilm_workspace_payload(
         "virtual_appliances": virtual_appliances,
         "virtual_appliance_count": len(virtual_appliances),
         "validation": validation,
+        "lanes": lanes,
+        "lane_counts": {
+            key: len(value["assignment_ids"]) + len(value["signature_ids"])
+            for key, value in lanes.items()
+        },
+        "selection_guidance": _nilm_selection_guidance(),
         "actions": {
             "label_interval": _nilm_label_interval_action(config),
             "sensor_label_interval": _nilm_sensor_label_interval_action(
@@ -799,6 +950,9 @@ def _recommendation_actions(
 
 def _add_recommendation_guidance(payload: dict[str, Any]) -> None:
     setting_key = str(payload.get("setting_key") or "")
+    control_text = recommendation_setting_control_text(setting_key)
+    if control_text:
+        payload["what_this_controls"] = control_text
     default_value = recommendation_setting_default_value(setting_key)
     if default_value is not None:
         payload["default_value"] = default_value
@@ -810,6 +964,20 @@ def _add_recommendation_guidance(payload: dict[str, Any]) -> None:
     evidence_preview = recommendation_evidence_preview(evidence)
     if evidence_preview:
         payload["evidence_preview"] = evidence_preview
+    payload["setting_explanation"] = _recommendation_setting_explanation(payload)
+
+
+def _recommendation_setting_explanation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    explanation = {
+        "what_this_controls": payload.get("what_this_controls"),
+        "current_value": payload.get("current_value"),
+        "default_value": payload.get("default_value"),
+        "suggested_value": payload.get("suggested_value"),
+        "why_suggestion_exists": payload.get("reason"),
+        "expected_effect": payload.get("expected_effect"),
+        "reset_to_default": True,
+    }
+    return {key: value for key, value in explanation.items() if value is not None}
 
 
 def _recommendation_evidence_metadata(
@@ -1057,10 +1225,23 @@ def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
     payload = {
         key: signature[key] for key in NILM_SIGNATURE_PANEL_FIELDS if key in signature
     }
+    payload["source_type"] = "nilm_estimate"
+    payload["source_label"] = "Estimated by NILM"
+    if "typical_watts" in signature:
+        payload["typical_power_w"] = signature["typical_watts"]
+    payload["why_grouped"] = _nilm_signature_explanation(signature)
     review_state = _nilm_review_state(signature)
     if review_state:
         payload["review_state"] = review_state
     return payload
+
+
+def _nilm_signature_explanation(signature: Mapping[str, Any]) -> str:
+    typical_watts = _clamped_float(signature.get("typical_watts"), default=0.0)
+    if typical_watts > 0:
+        power = _format_power_label(typical_watts)
+        return f"Grouped by similar NILM on/off edges around {power}."
+    return "Grouped by similar NILM on/off edges from mains power."
 
 
 def _nilm_review_state(signature: Mapping[str, Any]) -> str | None:
@@ -1554,9 +1735,123 @@ def _nilm_virtual_appliances_for_assignments(
                 "model_status": str(
                     assignment.get("lifecycle_state") or "candidate"
                 ),
+                "source_type": "nilm_estimate",
+                "source_label": "Estimated by NILM",
+                "estimated": True,
+                "mains_circuit_id": str(
+                    assignment.get("mains_circuit_id") or ""
+                ),
+                "appliance_detail_api_path": (
+                    f"{APPLIANCE_DETAIL_API_PATH}?"
+                    f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id})}"
+                ),
             }
         )
     return virtual_appliances
+
+
+def _nilm_workspace_lanes(
+    signatures: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    lanes = {
+        "needs_review": _nilm_lane("Needs Review"),
+        "assigned": _nilm_lane("Assigned"),
+        "needs_validation": _nilm_lane("Needs Validation"),
+        "ready_to_publish": _nilm_lane("Ready to Publish"),
+        "published": _nilm_lane("Published"),
+        "ignored_expected": _nilm_lane("Ignored / Expected"),
+    }
+    assigned_signature_ids = _nilm_assigned_signature_ids(assignments)
+    for signature in signatures:
+        signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
+        if not signature_id:
+            continue
+        review_state = str(signature.get("review_state") or "").strip().lower()
+        if signature.get("ignored") or signature.get("expected") or review_state in {
+            "ignored",
+            "expected",
+            "merged",
+        }:
+            lanes["ignored_expected"]["signature_ids"].append(signature_id)
+        elif _nilm_signature_identifiers(signature).isdisjoint(
+            assigned_signature_ids,
+        ):
+            lanes["needs_review"]["signature_ids"].append(signature_id)
+
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not assignment_id:
+            continue
+        state = str(assignment.get("lifecycle_state") or "").strip().lower()
+        confidence = _clamped_float(assignment.get("confidence"), default=0.0)
+        if state in {"ignored", "expected", "retired"}:
+            lane = "ignored_expected"
+        elif state in {"needs_validation", "conflict", "low_confidence"}:
+            lane = "needs_validation"
+        elif confidence < 0.8:
+            lane = "needs_validation"
+        elif assignment.get("publish_entities") is True or state == "published":
+            lane = "published"
+        elif state in {"validated", "ready_to_publish"}:
+            lane = "ready_to_publish"
+        else:
+            lane = "assigned"
+        lanes[lane]["assignment_ids"].append(assignment_id)
+    return lanes
+
+
+def _nilm_lane(label: str) -> dict[str, Any]:
+    return {"label": label, "assignment_ids": [], "signature_ids": []}
+
+
+def _nilm_assigned_signature_ids(
+    assignments: Iterable[Mapping[str, Any]],
+) -> set[str]:
+    signature_ids: set[str] = set()
+    for assignment in assignments:
+        for key in ("signature_fingerprints", "signature_ids"):
+            signature_ids.update(
+                str(value or "").strip()
+                for value in _iter_items(assignment.get(key))
+                if str(value or "").strip()
+            )
+        for key in ("feedback_fingerprint", "signature_fingerprint", "fingerprint"):
+            value = str(assignment.get(key) or "").strip()
+            if value:
+                signature_ids.add(value)
+    return signature_ids
+
+
+def _nilm_signature_identifiers(signature: Mapping[str, Any]) -> set[str]:
+    identifiers: set[str] = set()
+    for key in (
+        ATTR_SIGNATURE_ID,
+        "signature_id",
+        "fingerprint",
+        "feedback_fingerprint",
+        "signature_fingerprint",
+    ):
+        value = str(signature.get(key) or "").strip()
+        if value:
+            identifiers.add(value)
+    for key in ("signature_fingerprints", "signature_ids"):
+        identifiers.update(
+            str(value or "").strip()
+            for value in _iter_items(signature.get(key))
+            if str(value or "").strip()
+        )
+    return identifiers
+
+
+def _nilm_selection_guidance() -> dict[str, Any]:
+    return {
+        "snap_to_edges": True,
+        "show_likely_paired_off_edge": True,
+        "preview_interval_kwh": True,
+        "show_known_load_overlap": True,
+        "question": "Was this appliance running here?",
+    }
 
 
 def _nilm_validation_payload(
@@ -2493,6 +2788,7 @@ def _register_view(hass: Any) -> None:
     register_view = getattr(http, "register_view", None)
     if register_view is not None:
         register_view(AlertEvidenceView())
+        register_view(ApplianceDetailView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceHistoryView())
 

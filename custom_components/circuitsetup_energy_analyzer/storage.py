@@ -155,6 +155,7 @@ class FeatureStoreData:
         tuple[str, ...],
         ...,
     ] = field(default_factory=tuple)
+    dashboard_status: dict[str, Any] = field(default_factory=dict)
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -393,6 +394,7 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             list(part)
             for part in data.settings_recommendation_notification_episode_key
         ],
+        "dashboard_status": _dict_of_jsonable_values(data.dashboard_status),
     }
 
 
@@ -510,6 +512,7 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         settings_recommendation_notification_episode_key=_episode_key_from_raw(
             raw.get("settings_recommendation_notification_episode_key", [])
         ),
+        dashboard_status=_dict_of_jsonable_values(raw.get("dashboard_status", {})),
     )
 
 
@@ -1016,6 +1019,13 @@ def _dict_of_dicts(values: Any) -> dict[str, dict[str, Any]]:
         if isinstance(value, Mapping):
             sanitized[str(key)] = dict(value)
     return sanitized
+
+
+def _dict_of_jsonable_values(values: Any) -> dict[str, Any]:
+    return {
+        str(key): _json_safe_feature_value(value)
+        for key, value in _mapping_items(values)
+    }
 
 
 def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:

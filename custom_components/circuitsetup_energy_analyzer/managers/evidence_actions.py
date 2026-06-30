@@ -1,0 +1,103 @@
+"""Evidence, alert-feedback, and maintenance actions for the coordinator."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+class EvidenceActionController:
+    """Own user-triggered evidence and alert lifecycle actions."""
+
+    def __init__(self, coordinator: Any) -> None:
+        self._coordinator = coordinator
+
+    async def async_pause_alerts(
+        self,
+        circuit_id: str,
+        duration: str | None = None,
+    ) -> None:
+        """Pause alert notifications for a circuit."""
+        del duration
+        coordinator = self._coordinator
+        coordinator.paused_circuits.add(circuit_id)
+        coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
+        coordinator.async_set_updated_data(coordinator.state)
+
+    async def async_acknowledge_alert(self, alert_id: str) -> bool:
+        """Acknowledge an active alert evidence item."""
+        coordinator = self._coordinator
+        if coordinator._alert_for_id(alert_id) is None:
+            return False
+        coordinator._retire_alert_id(alert_id)
+        now = coordinator._now_fn()
+        coordinator._refresh_all_ux_state(now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+        return True
+
+    async def async_start_maintenance(
+        self,
+        circuit_id: str,
+        note: str = "",
+        duration: str | None = None,
+        relearn_on_end: bool = False,
+    ) -> None:
+        """Mark one circuit in maintenance and pause appliance notifications."""
+        coordinator = self._coordinator
+        now = coordinator._now_fn()
+        payload: dict[str, Any] = {
+            "active": True,
+            "note": str(note),
+            "started_at": now.isoformat(),
+            "relearn_on_end": bool(relearn_on_end),
+        }
+        if duration is not None:
+            payload["duration"] = str(duration)
+        coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
+        coordinator.paused_circuits.add(circuit_id)
+        coordinator._mark_store_dirty()
+        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+
+    async def async_end_maintenance(
+        self,
+        circuit_id: str,
+        relearn: bool = False,
+    ) -> None:
+        """Clear maintenance state and optionally relearn the circuit baseline."""
+        coordinator = self._coordinator
+        now = coordinator._now_fn()
+        current = dict(
+            coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
+        )
+        should_relearn = bool(relearn or current.get("relearn_on_end"))
+        current.update({"active": False, "ended_at": now.isoformat()})
+        coordinator.store_data.maintenance_by_circuit[circuit_id] = current
+        coordinator.paused_circuits.discard(circuit_id)
+        coordinator._mark_store_dirty()
+        if should_relearn:
+            await coordinator.async_relearn_baseline(circuit_id)
+            return
+        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+
+    async def async_mark_alert_expected(self, alert_id: str) -> bool:
+        """Mark an alert pattern as expected for future notifications."""
+        return await self._coordinator._store_alert_feedback(alert_id, "expected")
+
+    async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
+        """Mark an alert pattern as unhelpful for future notifications."""
+        return await self._coordinator._store_alert_feedback(alert_id, "unhelpful")
+
+    async def async_mark_nilm_appliance_correct(self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as correct."""
+        return await self._coordinator._store_alert_feedback(alert_id, "correct")
+
+    async def async_mark_nilm_appliance_wrong(self, alert_id: str) -> bool:
+        """Mark an estimated NILM appliance notification as the wrong appliance."""
+        return await self._coordinator._store_alert_feedback(
+            alert_id,
+            "wrong_appliance",
+        )

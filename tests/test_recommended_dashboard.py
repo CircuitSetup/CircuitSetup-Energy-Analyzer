@@ -16,6 +16,7 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     NILM_DASHBOARD_GRAPHS_CARD,
     build_recommended_dashboard,
     dashboard_graph_module_resource,
+    dashboard_preflight_summary,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -304,9 +305,14 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     )
 
     assert [section.get("title") for section in _dashboard_sections(dashboard)] == [
+        "Household Overview",
+        "Today's Energy",
+        "Behavior Watchlist",
         "Appliance Status",
         "Mains, Solar, and NILM",
         "Energy Tracking",
+        "Appliance Run Timeline",
+        "NILM Review",
         "HVAC Weather Context",
     ]
     assert dashboard["views"][0]["type"] == "sections"
@@ -314,6 +320,89 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     assert dashboard["views"][0]["path"] == "overview"
     assert dashboard["views"][0]["max_columns"] == 4
     assert dashboard["views"][0]["dense_section_placement"] is True
+
+
+def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    refs = _entity_refs(dashboard)
+
+    assert _dashboard_section(dashboard, "Household Overview")
+    assert _dashboard_section(dashboard, "Today's Energy")
+    assert _dashboard_section(dashboard, "Behavior Watchlist")
+    assert _dashboard_section(dashboard, "Appliance Run Timeline")
+    assert _dashboard_section(dashboard, "NILM Review")
+    assert "sensor.fridge_daily_energy_usage" in refs
+    assert "sensor.fridge_energy_summary" in refs
+    assert "sensor.fridge_activity_summary" in refs
+    assert "sensor.mains_nilm_unknown_loads" in refs
+    assert "select.fridge_alert_sensitivity" not in refs
+    assert "button.fridge_relearn_baseline" not in refs
+
+
+def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
+    dashboard = build_recommended_dashboard(
+        (_config for _config in _example_circuits() if _config.circuit_id != "mains"),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    assert "NILM Review" not in {
+        section.get("title") for section in _dashboard_sections(dashboard)
+    }
+
+
+def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
+    preflight = dashboard_preflight_summary(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
+    assert preflight["will_include"] == [
+        "Household Overview",
+        "Today's Energy",
+        "Behavior Watchlist",
+        "Appliance Status",
+        "Mains, Solar, and NILM",
+        "Energy Tracking",
+        "Appliance Run Timeline",
+        "NILM Review",
+        "HVAC Weather Context",
+    ]
+    assert "Diagnostics and Evidence" in preflight["will_skip"]
+    assert preflight["nilm_enabled"] is True
+    assert preflight["estimated_appliance_count"] == 0
+
+
+def test_dashboard_preflight_reports_missing_and_disabled_entities() -> None:
+    hass = SimpleNamespace(
+        entity_registry=SimpleNamespace(
+            entities={
+                "sensor.fridge_activity": _registry_entry(
+                    "sensor.fridge_activity",
+                    "entry-1_fridge_activity_summary",
+                ),
+                "sensor.fridge_electrical": _registry_entry(
+                    "sensor.fridge_electrical",
+                    "entry-1_fridge_electrical_health",
+                    disabled_by="integration",
+                ),
+            }
+        )
+    )
+
+    preflight = dashboard_preflight_summary(
+        (next(iter(_example_circuits())),),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=hass,
+        entry_id="entry-1",
+    )
+
+    assert "Refrigerator: Electrical Health" in preflight["disabled_entities"]
+    assert "Refrigerator: Energy Summary" in preflight["missing_source_data"]
+    assert "Refrigerator: Daily Energy Usage" in preflight["missing_source_data"]
 
 
 def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None:

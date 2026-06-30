@@ -124,6 +124,29 @@ Use the integration in this order:
 
 You do not need to enable every diagnostic entity. For behavior alerts, let the analyzer learn for at least 7 days or enough appliance cycles before tuning thresholds.
 
+## Appliance-centered views
+
+The generated dashboard and evidence panel are organized around appliance
+questions instead of raw diagnostic entity lists:
+
+- **Appliance Detail** combines current activity, health, electrical state,
+  energy state, Today vs Normal comparisons, behavior expectations, active
+  alerts, first checks, and actions for one appliance or circuit.
+- **Behavior Watchlist** highlights appliances that are higher than normal,
+  still learning, expected because of context, or worth validating.
+- **Today vs Normal** compares current daily energy, runtime, run count, or
+  power against learned normal ranges when enough baseline data exists.
+- **Direct meter vs Estimated by NILM** labels show whether a value is directly
+  measured or inferred from mains power. NILM appliances show confidence and
+  validation state; low-confidence NILM asks for review instead of implying a
+  confirmed appliance fault.
+- **Setup Health checklist** adds onboarding checklist attributes for source
+  data, assignments, CT direction, cumulative kWh, appliance profiles,
+  dashboard creation, notifications, NILM, and learning progress.
+- **Advanced setting suggestions** show current value, default value, suggested
+  value, what the setting controls, why the suggestion exists, expected effect,
+  and reset/apply/dismiss actions.
+
 ## First-time setup checklist
 
 1. Install the integration, restart Home Assistant, and add it from **Settings > Devices & services**.
@@ -250,7 +273,7 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It matches the included example dashboard structure with appliance status, mains/NILM, shared energy tracking, and HVAC weather-context sections when those circuits exist. It keeps each appliance card to four summary rows: Activity, Electrical Health, Energy Summary, and Daily Energy Usage, plus navigation-only evidence buttons on Standard and Expert layouts. It does not add dropdown, switch, number, or service-control cards. When the registry is available, the dashboard treats absent analyzer entities as missing and shows a note instead of falling back to guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Behavior Watchlist, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or expert sections when data exists. It uses registry-resolved summary and graph entities plus navigation-only evidence buttons and NILM buttons instead of service-control cards. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
 
 For manual dashboards, start with one simple card per important appliance:
 

@@ -716,7 +716,10 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
-    await asyncio.sleep(0.03)
+    for _ in range(20):
+        if process_calls:
+            break
+        await asyncio.sleep(0.01)
 
     assert process_calls == 1
     assert coordinator.pending_source_update_entities == ()

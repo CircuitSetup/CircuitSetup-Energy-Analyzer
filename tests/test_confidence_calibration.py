@@ -449,5 +449,9 @@ def test_calibration_report_script_runs_directly() -> None:
     assert "# Confidence Calibration Report" in completed.stdout
 
 
-def test_repository_does_not_keep_qa_docs() -> None:
-    assert not (Path(__file__).parents[1] / "docs" / "qa").exists()
+def test_repository_keeps_required_appliance_qa_docs() -> None:
+    qa_dir = Path(__file__).parents[1] / "docs" / "qa"
+
+    assert (qa_dir / "appliance-usability-test-matrix.md").exists()
+    assert (qa_dir / "dashboard-visual-results.md").exists()
+    assert (qa_dir / "home-assistant-appliance-workflow-results.md").exists()

@@ -618,9 +618,21 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
 
     recommendation = payload["setting_recommendations"][0]
     assert recommendation["default_value"] == 0.8
+    assert recommendation["what_this_controls"].startswith(
+        "Controls how close load can get to configured circuit capacity"
+    )
     assert recommendation["expected_effect"].startswith(
         "Warn earlier when usage approaches capacity"
     )
+    assert recommendation["setting_explanation"] == {
+        "what_this_controls": recommendation["what_this_controls"],
+        "current_value": 0.9,
+        "default_value": 0.8,
+        "suggested_value": 0.75,
+        "why_suggestion_exists": "Observed sustained high-current samples.",
+        "expected_effect": recommendation["expected_effect"],
+        "reset_to_default": True,
+    }
     assert recommendation["evidence_preview"] == (
         "Observed Samples: 8; P95 Current Amps: 36.4"
     )
@@ -1381,6 +1393,140 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         },
     }
     assert payload["sessions"][0]["off_edge_id"] is not None
+
+
+def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-assigned",
+                "display_name": "Dishwasher",
+                "signature_fingerprints": ["fingerprint-assigned"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.86,
+                "publish_entities": False,
+            },
+            {
+                "assignment_id": "assignment-zero-confidence",
+                "display_name": "Unknown Appliance",
+                "signature_fingerprints": ["sig-zero"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.0,
+                "publish_entities": False,
+            },
+            {
+                "assignment_id": "assignment-validation",
+                "display_name": "Dryer",
+                "lifecycle_state": "needs_validation",
+                "confidence": 0.61,
+                "publish_entities": True,
+            },
+            {
+                "assignment_id": "assignment-ready",
+                "display_name": "Washer",
+                "lifecycle_state": "validated",
+                "confidence": 0.91,
+                "publish_entities": False,
+            },
+            {
+                "assignment_id": "assignment-published",
+                "display_name": "Pool Pump",
+                "lifecycle_state": "published",
+                "confidence": 0.94,
+                "publish_entities": True,
+            },
+            {
+                "assignment_id": "assignment-ignored",
+                "display_name": "Expected Load",
+                "lifecycle_state": "ignored",
+                "confidence": 0.5,
+                "publish_entities": False,
+            },
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "sig-assigned",
+                    "fingerprint": "fingerprint-assigned",
+                    "display_name": "Dishwasher-like load",
+                    "typical_watts": 510.0,
+                },
+                {
+                    "signature_id": "sig-new",
+                    "display_name": "Pump-like load",
+                    "typical_watts": 720.0,
+                    "typical_duration_seconds": 1500.0,
+                    "seen_count": 4,
+                    "confidence": 0.72,
+                    "voltage_class": "120v",
+                    "dominant_leg": "a",
+                },
+                {
+                    "signature_id": "sig-ignored",
+                    "display_name": "Expected background load",
+                    "typical_watts": 110.0,
+                    "ignored": True,
+                },
+            ]
+        }
+    }
+    coordinator._nilm_unmatched_edges = {}
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["lanes"]["needs_review"]["signature_ids"] == ["sig-new"]
+    assert payload["lanes"]["assigned"]["assignment_ids"] == ["assignment-assigned"]
+    assert payload["lanes"]["needs_validation"]["assignment_ids"] == [
+        "assignment-zero-confidence",
+        "assignment-validation"
+    ]
+    assert payload["lanes"]["ready_to_publish"]["assignment_ids"] == [
+        "assignment-ready"
+    ]
+    assert payload["lanes"]["published"]["assignment_ids"] == [
+        "assignment-published"
+    ]
+    assert payload["lanes"]["ignored_expected"]["assignment_ids"] == [
+        "assignment-ignored"
+    ]
+    assert payload["lanes"]["ignored_expected"]["signature_ids"] == ["sig-ignored"]
+    assert payload["lane_counts"]["needs_review"] == 1
+    signature = next(
+        item for item in payload["signatures"] if item["signature_id"] == "sig-new"
+    )
+    assert signature["source_type"] == "nilm_estimate"
+    assert signature["source_label"] == "Estimated by NILM"
+    assert signature["typical_power_w"] == 720.0
+    assert signature["typical_duration_seconds"] == 1500.0
+    assert signature["seen_count"] == 4
+    assert "similar NILM on/off edges" in signature["why_grouped"]
+    assert payload["selection_guidance"] == {
+        "snap_to_edges": True,
+        "show_likely_paired_off_edge": True,
+        "preview_interval_kwh": True,
+        "show_known_load_overlap": True,
+        "question": "Was this appliance running here?",
+    }
+    virtual = payload["virtual_appliances"][0]
+    assert virtual["source_type"] == "nilm_estimate"
+    assert virtual["source_label"] == "Estimated by NILM"
+    assert virtual["appliance_detail_api_path"].endswith(
+        "assignment_id=assignment-assigned"
+    )
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
@@ -2495,6 +2641,7 @@ def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback(
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
+        APPLIANCE_DETAIL_API_PATH,
         EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
@@ -2547,6 +2694,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert STATIC_URL_PATH in str(http.static_paths[0])
     assert [view.url for view in http.views] == [
         EVIDENCE_API_PATH,
+        APPLIANCE_DETAIL_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
     ]
@@ -2671,7 +2819,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 3
+    assert len(http.views) == 4
 
     assert await async_unload_entry(hass, entry) is True
 

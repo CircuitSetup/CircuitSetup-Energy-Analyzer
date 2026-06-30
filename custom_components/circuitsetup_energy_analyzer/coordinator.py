@@ -41,7 +41,6 @@ from .const import (
     CONF_CIRCUITS,
     CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
-    CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
@@ -78,12 +77,10 @@ from .cycles import (
     summarize_circuit_cycles,
 )
 from .dashboard import (
-    DASHBOARD_TITLE,
     DASHBOARD_URL_PATH,
     NILM_DASHBOARD_GRAPHS_CARD,
     dashboard_graph_module_resource,
     dashboard_includes_nilm_graph_card,
-    dashboard_storage_payload,
     normalize_dashboard_layout,
 )
 from .demand import (
@@ -124,6 +121,11 @@ from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 )
 from .local_time import local_date, local_day_time
+from .managers.dashboard_controller import DashboardController
+from .managers.entity_profile_controller import EntityProfileController
+from .managers.evidence_actions import EvidenceActionController
+from .managers.settings_controller import SettingsController
+from .managers.state_reducer import StateReducer, apply_state_update
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -151,7 +153,6 @@ from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sampl
 from .operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
     OPERATING_DETECTION_SOURCE,
-    OperatingThresholdSource,
     resolve_operating_detection_from_settings,
 )
 from .phase_balance import (
@@ -182,7 +183,6 @@ from .processors import (
     WaterContextAlertProcessor,
 )
 from .profiles import get_profile_definition
-from .recommendation_guidance import recommendation_setting_default_value
 from .settings_advisor import (
     DEFAULT_RECOMMENDATION_TTL,
     AdvisorCircuitContext,
@@ -729,39 +729,7 @@ def _remove_setting_key(
 
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     """Apply a processor-requested update to AnalyzerState."""
-    if not path:
-        msg = "State update path must not be empty"
-        raise ValueError(msg)
-    if len(path) < 2:
-        msg = "State update path must include a root and destination key"
-        raise ValueError(msg)
-
-    root = path[0]
-    if root not in getattr(type(state), "__dataclass_fields__", {}):
-        msg = f"State update path has unknown root: {root}"
-        raise ValueError(msg)
-
-    target = getattr(state, root)
-    if not isinstance(target, MutableMapping):
-        msg = f"State update root is not a mapping: {root}"
-        raise TypeError(msg)
-
-    target_segment = root
-    for segment in path[1:-1]:
-        if not isinstance(target, MutableMapping):
-            msg = f"State update target is not a mapping at: {target_segment}"
-            raise TypeError(msg)
-        if segment not in target:
-            msg = f"State update cannot create intermediate key: {segment}"
-            raise ValueError(msg)
-        target = target[segment]
-        target_segment = segment
-
-    if not isinstance(target, MutableMapping):
-        msg = f"State update target is not a mapping at: {target_segment}"
-        raise TypeError(msg)
-    final_segment = path[-1]
-    target[final_segment] = value
+    apply_state_update(state, path, value)
 
 
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
@@ -816,6 +784,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self.last_dashboard_create_request: dict[str, Any] | None = None
         self.last_dashboard_remove_request: dict[str, Any] | None = None
+        self.dashboard_status: dict[str, Any] | None = (
+            dict(self.store_data.dashboard_status)
+            if self.store_data.dashboard_status
+            else None
+        )
+        self.dashboard_controller = DashboardController(self)
+        self.entity_profile_controller = EntityProfileController(self)
+        self.evidence_actions = EvidenceActionController(self)
+        self.settings_controller = SettingsController(self)
+        self.state_reducer = StateReducer()
         self._apply_config_entry_settings()
         self._detectors = {
             config.circuit_id: CircuitEventDetector()
@@ -1486,20 +1464,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         duration: str | None = None,
     ) -> None:
         """Pause alert notifications for a circuit."""
-        self.paused_circuits.add(circuit_id)
-        self._refresh_ux_state_for_circuit(circuit_id, self._now_fn())
-        self.async_set_updated_data(self.state)
+        await self.evidence_actions.async_pause_alerts(circuit_id, duration)
 
     async def async_acknowledge_alert(self: Self, alert_id: str) -> bool:
         """Acknowledge an active alert evidence item."""
-        if self._alert_for_id(alert_id) is None:
-            return False
-        self._retire_alert_id(alert_id)
-        now = self._now_fn()
-        self._refresh_all_ux_state(now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
-        return True
+        return await self.evidence_actions.async_acknowledge_alert(alert_id)
 
     async def async_set_circuit_sensitivity(
         self: Self,
@@ -1518,13 +1487,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
         """Persist the entity detail level and reload desired entities."""
-        from .entity import normalize_entity_detail_level
-
-        level = normalize_entity_detail_level(detail_level)
-        self.options[CONF_ENTITY_DETAIL_LEVEL] = level
-        await self._async_persist_config_entry_options()
-        self.async_set_updated_data(self.state)
-        await self._async_reload_config_entry()
+        await self.entity_profile_controller.async_set_entity_detail_level(
+            detail_level,
+        )
 
     async def async_replace_advanced_settings(
         self: Self,
@@ -1576,12 +1541,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str | None = None,
     ) -> None:
         """Rebuild pending advanced-setting recommendations from retained data."""
-        now = self._now_fn()
-        if self._rebuild_setting_recommendations(now, circuit_id=circuit_id):
-            self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
-        await self._notify_settings_recommendations_if_needed()
+        await self.settings_controller.async_recalculate_setting_recommendations(
+            circuit_id,
+        )
 
     def _rebuild_setting_recommendations(
         self: Self,
@@ -1653,106 +1615,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         recommendation_id: str,
     ) -> None:
         """Apply one pending setting recommendation to advanced settings."""
-        recommendation = self.store_data.settings_recommendations.get(
+        await self.settings_controller.async_apply_setting_recommendation(
             recommendation_id,
         )
-        if (
-            recommendation is None
-            or recommendation.status is not RecommendationStatus.PENDING
-        ):
-            return
-
-        for setting_key, value in recommendation.apply_payload.items():
-            self._set_recommendation_setting_value(
-                recommendation.circuit_id,
-                str(setting_key),
-                value,
-            )
-        if any(
-            key in OPERATING_DETECTION_OVERRIDE_FIELDS
-            for key in recommendation.apply_payload
-        ):
-            self._set_recommendation_setting_value(
-                recommendation.circuit_id,
-                OPERATING_DETECTION_SOURCE,
-                OperatingThresholdSource.LEARNED_RECOMMENDATION.value,
-            )
-        await self._async_persist_config_entry_options()
-
-        self.store_data.settings_recommendations[recommendation_id] = replace(
-            recommendation,
-            status=RecommendationStatus.APPLIED,
-        )
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_settings_recommendation_state(now)
-        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_undo_setting_recommendation(
         self: Self,
         recommendation_id: str,
     ) -> bool:
         """Restore the value recorded before an applied recommendation."""
-        recommendation = self.store_data.settings_recommendations.get(
+        return await self.settings_controller.async_undo_setting_recommendation(
             recommendation_id,
         )
-        if (
-            recommendation is None
-            or recommendation.status is not RecommendationStatus.APPLIED
-        ):
-            return False
-
-        self._set_recommendation_setting_value(
-            recommendation.circuit_id,
-            recommendation.setting_key,
-            recommendation.current_value,
-        )
-        await self._async_persist_config_entry_options()
-        self.store_data.settings_recommendations[recommendation_id] = replace(
-            recommendation,
-            status=RecommendationStatus.PENDING,
-        )
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_settings_recommendation_state(now)
-        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
-        return True
 
     async def async_reset_setting_recommendation(
         self: Self,
         recommendation_id: str,
     ) -> bool:
         """Reset a recommendation-backed setting to its built-in default."""
-        recommendation = self.store_data.settings_recommendations.get(
+        return await self.settings_controller.async_reset_setting_recommendation(
             recommendation_id,
         )
-        if recommendation is None:
-            return False
-
-        default_value = recommendation_setting_default_value(
-            recommendation.setting_key,
-        )
-        self._set_recommendation_setting_value(
-            recommendation.circuit_id,
-            recommendation.setting_key,
-            default_value,
-        )
-        await self._async_persist_config_entry_options()
-        self.store_data.settings_recommendations[recommendation_id] = replace(
-            recommendation,
-            status=RecommendationStatus.STALE,
-        )
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_settings_recommendation_state(now)
-        self._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
-        return True
 
     def _set_recommendation_setting_value(
         self: Self,
@@ -1865,9 +1748,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         recommendation_id: str,
     ) -> None:
         """Record a denial for one pending setting recommendation."""
-        await self._async_record_setting_recommendation_decision(
+        await self.settings_controller.async_deny_setting_recommendation(
             recommendation_id,
-            RecommendationStatus.DENIED,
         )
 
     async def async_dismiss_setting_recommendation(
@@ -1875,9 +1757,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         recommendation_id: str,
     ) -> None:
         """Record a dismissal for one pending setting recommendation."""
-        await self._async_record_setting_recommendation_decision(
+        await self.settings_controller.async_dismiss_setting_recommendation(
             recommendation_id,
-            RecommendationStatus.DISMISSED,
         )
 
     async def _async_persist_config_entry_options(self: Self) -> None:
@@ -2837,21 +2718,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         relearn_on_end: bool = False,
     ) -> None:
         """Mark one circuit in maintenance and pause appliance notifications."""
-        now = self._now_fn()
-        payload: dict[str, Any] = {
-            "active": True,
-            "note": str(note),
-            "started_at": now.isoformat(),
-            "relearn_on_end": bool(relearn_on_end),
-        }
-        if duration is not None:
-            payload["duration"] = str(duration)
-        self.store_data.maintenance_by_circuit[circuit_id] = payload
-        self.paused_circuits.add(circuit_id)
-        self._mark_store_dirty()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.evidence_actions.async_start_maintenance(
+            circuit_id,
+            note=note,
+            duration=duration,
+            relearn_on_end=relearn_on_end,
+        )
 
     async def async_end_maintenance(
         self: Self,
@@ -2859,35 +2731,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         relearn: bool = False,
     ) -> None:
         """Clear maintenance state and optionally relearn the circuit baseline."""
-        now = self._now_fn()
-        current = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
-        should_relearn = bool(relearn or current.get("relearn_on_end"))
-        current.update({"active": False, "ended_at": now.isoformat()})
-        self.store_data.maintenance_by_circuit[circuit_id] = current
-        self.paused_circuits.discard(circuit_id)
-        self._mark_store_dirty()
-        if should_relearn:
-            await self.async_relearn_baseline(circuit_id)
-            return
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.evidence_actions.async_end_maintenance(circuit_id, relearn=relearn)
 
     async def async_mark_alert_expected(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
-        return await self._store_alert_feedback(alert_id, "expected")
+        return await self.evidence_actions.async_mark_alert_expected(alert_id)
 
     async def async_mark_alert_unhelpful(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as unhelpful for future notifications."""
-        return await self._store_alert_feedback(alert_id, "unhelpful")
+        return await self.evidence_actions.async_mark_alert_unhelpful(alert_id)
 
     async def async_mark_nilm_appliance_correct(self: Self, alert_id: str) -> bool:
         """Mark an estimated NILM appliance notification as correct."""
-        return await self._store_alert_feedback(alert_id, "correct")
+        return await self.evidence_actions.async_mark_nilm_appliance_correct(alert_id)
 
     async def async_mark_nilm_appliance_wrong(self: Self, alert_id: str) -> bool:
         """Mark an estimated NILM appliance notification as the wrong appliance."""
-        return await self._store_alert_feedback(alert_id, "wrong_appliance")
+        return await self.evidence_actions.async_mark_nilm_appliance_wrong(alert_id)
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
@@ -3100,70 +2960,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_create_dashboard(self: Self) -> dict[str, Any]:
         """Create or update the recommended Home Assistant dashboard."""
-        layout = normalize_dashboard_layout(self.dashboard_layout)
-        dashboard_payload = dashboard_storage_payload(
-            self.circuit_configs,
-            layout,
-            hass=self.hass,
-            entry_id=self.entry_id,
-            outdoor_temperature_entity=self._outdoor_temperature_entity(),
-        )
-        action, reason = await self._async_create_or_update_lovelace_dashboard(
-            dashboard_payload
-        )
-        payload = {
-            "entry_id": self.entry_id,
-            "dashboard_path": f"/{DASHBOARD_URL_PATH}",
-            "title": DASHBOARD_TITLE,
-            "layout": layout,
-            "action": action,
-        }
-        if reason is not None:
-            payload["reason"] = reason
-        self.last_dashboard_create_request = payload
-        bus = getattr(self.hass, "bus", None)
-        fire = getattr(bus, "async_fire", None)
-        if fire is not None:
-            fire(f"{DOMAIN}_create_dashboard", payload)
-        self.async_set_updated_data(self.state)
-        return payload
+        return await self.dashboard_controller.async_create_dashboard()
 
     async def async_remove_dashboard(self: Self) -> dict[str, Any]:
         """Remove the recommended Home Assistant dashboard."""
-        action, reason = await self._async_remove_lovelace_dashboard()
-        payload = {
-            "entry_id": self.entry_id,
-            "dashboard_path": f"/{DASHBOARD_URL_PATH}",
-            "title": DASHBOARD_TITLE,
-            "action": action,
-        }
-        if reason is not None:
-            payload["reason"] = reason
-        self.last_dashboard_remove_request = payload
-        bus = getattr(self.hass, "bus", None)
-        fire = getattr(bus, "async_fire", None)
-        if fire is not None:
-            fire(f"{DOMAIN}_remove_dashboard", payload)
-        self.async_set_updated_data(self.state)
-        return payload
+        return await self.dashboard_controller.async_remove_dashboard()
 
     async def async_set_dashboard_layout(self: Self, layout: str) -> None:
         """Persist the selected recommended-dashboard layout."""
-        normalized = normalize_dashboard_layout(layout)
-        self.dashboard_layout = normalized
-        self.options[CONF_DASHBOARD_LAYOUT] = normalized
-        entry = self._config_entry
-        if entry is not None:
-            options = dict(getattr(entry, "options", {}) or {})
-            options[CONF_DASHBOARD_LAYOUT] = normalized
-            update_entry = getattr(
-                getattr(self.hass, "config_entries", None),
-                "async_update_entry",
-                None,
-            )
-            if callable(update_entry):
-                update_entry(entry, options=options)
-        self.async_set_updated_data(self.state)
+        await self.dashboard_controller.async_set_dashboard_layout(layout)
 
     async def _async_create_or_update_lovelace_dashboard(
         self: Self,
@@ -5789,7 +5594,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             events=events,
         )
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
         if result.store_dirty:
             self._mark_store_dirty()
         return list(result.alerts)
@@ -5820,7 +5625,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._build_processing_context(match.edge.timestamp),
         )
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
         return result.alerts[0] if result.alerts else None
 
     def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
@@ -5852,7 +5657,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._build_processing_context(self._now_fn()),
         )
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
 
     def _seed_demo_event_history(
         self: Self,
@@ -6180,7 +5985,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._build_processing_context(now),
         )
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
 
     def _refresh_solar_flow_state(
         self: Self,
@@ -6192,7 +5997,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._build_processing_context(now),
         )
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
 
     async def _observe_utility_comparisons(
         self: Self,
@@ -6851,7 +6656,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for observation in result.observations:
             self._record_recent_observation(observation)
         for update in result.state_updates:
-            _apply_state_update(self.state, update.path, update.value)
+            self.state_reducer.apply_update(self.state, update.path, update.value)
         for alert in result.notifications:
             await self._notify_alert(self._alert_with_feedback(alert))
         if result.store_dirty or result.events or stored_alerts:

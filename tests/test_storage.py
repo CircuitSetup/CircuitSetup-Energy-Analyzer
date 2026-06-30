@@ -978,6 +978,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
                 "days": [{"date": "2026-06-02", "usage_kwh": 8.5}],
             }
         },
+        dashboard_status={
+            "entry_id": "entry-1",
+            "dashboard_path": "/circuitsetup-energy-analyzer",
+            "title": "CircuitSetup Energy Analyzer",
+            "layout": "standard",
+            "action": "created",
+        },
     )
 
     raw = feature_store_data_to_dict(data)
@@ -1049,6 +1056,13 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.energy_usage_by_circuit["fridge"]["days"] == [
         {"date": "2026-06-02", "usage_kwh": 8.5}
     ]
+    assert restored.dashboard_status == {
+        "entry_id": "entry-1",
+        "dashboard_path": "/circuitsetup-energy-analyzer",
+        "title": "CircuitSetup Energy Analyzer",
+        "layout": "standard",
+        "action": "created",
+    }
 
 
 def test_feature_store_round_trips_fingerprint_alert_feedback() -> None:

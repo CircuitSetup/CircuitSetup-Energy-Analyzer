@@ -1734,6 +1734,24 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
     assert "originalIndex" in asset
 
 
+def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        "class CircuitSetupPanelComponent",
+        "class CircuitSetupEvidenceSummary",
+        "class CircuitSetupNilmWorkspace",
+        "class CircuitSetupRecommendationCards",
+        "this._evidenceSummary = new CircuitSetupEvidenceSummary(this);",
+        "this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);",
+        "this._recommendationCards = new CircuitSetupRecommendationCards(this);",
+        "return this._evidenceSummary.renderAlert(alert, circuit);",
+        "return this._nilmWorkspaceComponent.render();",
+        "return this._recommendationCards.renderSection(",
+    ):
+        assert expected in asset
+
+
 def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> None:
     asset_path = (
         INTEGRATION_DIR
@@ -2392,12 +2410,14 @@ def test_readme_explains_generated_dashboard_controls() -> None:
         readme_text
     )
     assert "renamed analyzer entities are respected" in readme_text
-    assert "matches the included example dashboard structure" in readme_text
-    assert "does not add dropdown, switch, number, or service-control cards" in (
-        readme_text
-    )
+    assert "visual appliance story" in readme_text
+    assert "Household Overview" in readme_text
+    assert "Today's Energy" in readme_text
+    assert "Behavior Watchlist" in readme_text
+    assert "Appliance Run Timeline" in readme_text
+    assert "NILM Review" in readme_text
+    assert "instead of service-control cards" in readme_text
     assert "navigation-only evidence buttons" in readme_text
-    assert "keeps each appliance card to four summary rows" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
     assert "Create Or Update Dashboard" in readme_text
     assert "Match Entity Detail Level To Layout" in readme_text

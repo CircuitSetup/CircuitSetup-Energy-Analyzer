@@ -82,12 +82,19 @@ async def async_create_alert_notification(
     if create is None:
         return
 
-    create(
-        hass,
-        alert_notification_message(alert, config=config, dashboard_path=dashboard_path),
-        title="Energy Analyzer Alert",
-        notification_id=notification_id_for_alert(alert),
-    )
+    try:
+        create(
+            hass,
+            alert_notification_message(
+                alert,
+                config=config,
+                dashboard_path=dashboard_path,
+            ),
+            title="Energy Analyzer Alert",
+            notification_id=notification_id_for_alert(alert),
+        )
+    except (AttributeError, TypeError):
+        return
 
 
 async def async_create_settings_recommendation_notification(
@@ -108,12 +115,15 @@ async def async_create_settings_recommendation_notification(
     if create is None:
         return
 
-    create(
-        hass,
-        _settings_recommendation_message(total_pending),
-        title="CircuitSetup Energy Analyzer suggested settings",
-        notification_id=settings_recommendation_notification_id(entry_id),
-    )
+    try:
+        create(
+            hass,
+            _settings_recommendation_message(total_pending),
+            title="CircuitSetup Energy Analyzer suggested settings",
+            notification_id=settings_recommendation_notification_id(entry_id),
+        )
+    except (AttributeError, TypeError):
+        return
 
 
 def _settings_recommendation_message(total_pending: int) -> str:

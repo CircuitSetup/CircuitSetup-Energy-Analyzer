@@ -130,10 +130,85 @@ _SETTING_EXPECTED_EFFECTS = {
     ),
 }
 
+_SETTING_CONTROL_DESCRIPTIONS = {
+    "daily_spike_ratio": (
+        "Controls how far daily energy can drift above normal before high-usage "
+        "guidance appears."
+    ),
+    "operating_on_threshold_w": (
+        "Controls the power level that turns appliance activity on."
+    ),
+    "operating_off_threshold_w": (
+        "Controls the power level that turns appliance activity back to idle."
+    ),
+    "max_active_minutes": (
+        "Controls when a running cycle is considered unusually long."
+    ),
+    "max_idle_minutes": (
+        "Controls when an idle-but-not-off appliance should be reviewed."
+    ),
+    "warning_ratio": (
+        "Controls how close load can get to configured circuit capacity before "
+        "capacity guidance appears."
+    ),
+    "window_hours": "Controls the amount of standby history used for learning.",
+    "standby_threshold_w": (
+        "Controls the power boundary between standby draw and active use."
+    ),
+    "always_on_alert_w": (
+        "Controls when always-on standby draw becomes worth surfacing."
+    ),
+    "standby_min_samples": (
+        "Controls how many standby samples are required before standby guidance."
+    ),
+    "leg_imbalance_warning_ratio": (
+        "Controls the paired-leg imbalance ratio that triggers split-phase "
+        "guidance."
+    ),
+    "leg_imbalance_min_total_power_w": (
+        "Controls the minimum total power required before leg imbalance checks run."
+    ),
+    "apparent_power_tolerance_percent": (
+        "Controls the allowed difference between reported real and apparent power."
+    ),
+    "power_factor_tolerance": (
+        "Controls the allowed power-factor relationship drift."
+    ),
+    "minimum_apparent_power_va": (
+        "Controls the low-load cutoff for metric consistency checks."
+    ),
+    "balance_negative_tolerance_w": (
+        "Controls how much negative mains-minus-load balance is tolerated."
+    ),
+    "export_tolerance_w": (
+        "Controls how much solar export mismatch is tolerated."
+    ),
+    "solar_export_tolerance_w": (
+        "Controls how much solar export mismatch is tolerated."
+    ),
+    "solar_surplus_threshold_w": (
+        "Controls when solar surplus is high enough for load-shifting guidance."
+    ),
+    "high_solar_surplus_threshold_w": (
+        "Controls when solar surplus is considered especially high."
+    ),
+    "flexible_load_running_threshold_w": (
+        "Controls when a flexible load counts as active for load-shift guidance."
+    ),
+}
+
 
 def recommendation_setting_default_value(setting_key: str) -> Any:
     """Return the built-in default shown beside a suggested setting."""
     return _SETTING_DEFAULTS.get(setting_key)
+
+
+def recommendation_setting_control_text(setting_key: str) -> str:
+    """Return the user-facing description of what a setting controls."""
+    return _SETTING_CONTROL_DESCRIPTIONS.get(
+        setting_key,
+        f"Controls {friendly_feature_name(setting_key).lower()} for this circuit.",
+    )
 
 
 def recommendation_setting_expected_effect(setting_key: str) -> str:

@@ -47,10 +47,41 @@ function installRouteChangeDispatcher() {
   window.addEventListener("popstate", dispatchRouteChange);
 }
 
+class CircuitSetupPanelComponent {
+  constructor(host) {
+    this.host = host;
+  }
+}
+
+class CircuitSetupEvidenceSummary extends CircuitSetupPanelComponent {
+  renderAlert(alert, circuit) {
+    return this.host._renderAlertContent(alert, circuit);
+  }
+
+  renderFallbackActions() {
+    return this.host._renderFallbackActionsContent();
+  }
+}
+
+class CircuitSetupNilmWorkspace extends CircuitSetupPanelComponent {
+  render() {
+    return this.host._renderNilmWorkspaceContent();
+  }
+}
+
+class CircuitSetupRecommendationCards extends CircuitSetupPanelComponent {
+  renderSection(title, recommendationItems) {
+    return this.host._renderRecommendationSectionContent(title, recommendationItems);
+  }
+}
+
 class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    this._evidenceSummary = new CircuitSetupEvidenceSummary(this);
+    this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);
+    this._recommendationCards = new CircuitSetupRecommendationCards(this);
     this._hass = null;
     this._payload = null;
     this._historySeries = [];
@@ -1179,6 +1210,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderAlert(alert, circuit) {
+    return this._evidenceSummary.renderAlert(alert, circuit);
+  }
+
+  _renderAlertContent(alert, circuit) {
     return `
       <section class="panel summary">
         ${this._metric("Circuit", (circuit && circuit.name) || alert.circuit_id)}
@@ -1589,6 +1624,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderRecommendationSection(title, recommendationItems) {
+    return this._recommendationCards.renderSection(title, recommendationItems);
+  }
+
+  _renderRecommendationSectionContent(title, recommendationItems) {
     if (!recommendationItems.length) {
       return "";
     }
@@ -1745,6 +1784,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmWorkspace() {
+    return this._nilmWorkspaceComponent.render();
+  }
+
+  _renderNilmWorkspaceContent() {
     if (this._nilmWorkspaceLoading) {
       return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">Loading NILM workspace...</p></section>`;
     }
@@ -2461,6 +2504,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderFallbackActions() {
+    return this._evidenceSummary.renderFallbackActions();
+  }
+
+  _renderFallbackActionsContent() {
     const actions = this._payload && this._payload.actions;
     if (!actions || !Object.keys(actions).length) {
       return "";
