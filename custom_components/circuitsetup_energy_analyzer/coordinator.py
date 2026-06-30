@@ -785,6 +785,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             label_interval_id=_nilm_label_interval_id,
             signature_fingerprint_value=_nilm_signature_fingerprint_value,
             label_interval_max_items=NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
+            round_optional_number=_round_optional_number,
         )
         self.settings_controller = SettingsController(self)
         self.state_reducer = StateReducer()
@@ -3155,11 +3156,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Record that a NILM session matched its appliance assignment."""
-        return await self._async_record_nilm_session_validation(
+        return await self.nilm_controller.async_validate_nilm_session(
             circuit_id,
             session_id,
             assignment_id=assignment_id,
-            correct=True,
         )
 
     async def async_reject_nilm_session(
@@ -3170,11 +3170,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Record that a NILM session did not match its appliance assignment."""
-        return await self._async_record_nilm_session_validation(
+        return await self.nilm_controller.async_reject_nilm_session(
             circuit_id,
             session_id,
             assignment_id=assignment_id,
-            correct=False,
         )
 
     async def async_validate_nilm_assignment_history(
@@ -3406,75 +3405,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         assignment_id: str | None,
         correct: bool,
     ) -> dict[str, Any]:
-        session_id_text = str(session_id or "").strip()
-        assignment = self._nilm_assignment_for_session(
+        return await self.nilm_controller.async_record_nilm_session_validation(
             circuit_id,
-            session_id_text,
+            session_id,
             assignment_id=assignment_id,
+            correct=correct,
         )
-        _append_unique(assignment.setdefault("session_ids", []), session_id_text)
-        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
-        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
-        current_confidence = _nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
-        )
-        now_dt = self._now_fn()
-        now = now_dt.isoformat()
-        if correct:
-            already_confirmed = session_id_text in confirmed
-            _append_unique(confirmed, session_id_text)
-            rejected = [value for value in rejected if value != session_id_text]
-            if not already_confirmed:
-                assignment["confidence"] = min(
-                    1.0,
-                    round(current_confidence + 0.05, 3),
-                )
-            if assignment.get("lifecycle_state") not in {"published", "retired"}:
-                assignment["lifecycle_state"] = "validated"
-            assignment["last_validation"] = "correct"
-            assignment["last_validated_at"] = now
-        else:
-            already_rejected = session_id_text in rejected
-            _append_unique(rejected, session_id_text)
-            confirmed = [value for value in confirmed if value != session_id_text]
-            if not already_rejected:
-                assignment["confidence"] = max(
-                    0.0,
-                    round(current_confidence - 0.15, 3),
-                )
-            if assignment.get("lifecycle_state") != "retired":
-                assignment["lifecycle_state"] = "needs_validation"
-            assignment["last_validation"] = "wrong_appliance"
-            assignment["last_rejected_at"] = now
-        assignment["confirmed_session_ids"] = confirmed
-        assignment["rejected_session_ids"] = rejected
-        assignment["confirmed_sessions"] = len(confirmed)
-        assignment["rejected_sessions"] = len(rejected)
-        assignment["adjusted_sessions"] = len(
-            _clean_string_list(assignment.get("adjusted_session_ids")),
-        )
-        false_positive_denominator = len(confirmed) + len(rejected)
-        assignment["false_positive_rate"] = (
-            round(len(rejected) / false_positive_denominator, 3)
-            if false_positive_denominator
-            else 0.0
-        )
-        assignment["false_negative_rate"] = _nonnegative_float_value(
-            assignment.get("false_negative_rate"),
-            default=0.0,
-        )
-        assignment["median_power_error"] = _round_optional_number(
-            assignment.get("median_power_error"),
-        )
-        assignment["energy_estimate_error"] = _round_optional_number(
-            assignment.get("energy_estimate_error"),
-        )
-        assignment["updated_at"] = now
-        self._mark_store_dirty()
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now_dt)
-        return dict(assignment)
 
     def _upsert_nilm_assignment(
         self: Self,
@@ -3577,24 +3513,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         *,
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
-        session_id_text = str(session_id or "").strip()
-        if not session_id_text:
-            raise ValueError("Missing session_id.")
-        assignment_id_text = str(assignment_id or "").strip()
-        if assignment_id_text:
-            assignment = self._nilm_assignment_for_id(circuit_id, assignment_id_text)
-            _append_unique(assignment.setdefault("session_ids", []), session_id_text)
-            return assignment
-        assignments = self.store_data.nilm_appliance_assignments_by_circuit.get(
+        return self.nilm_controller.assignment_for_session(
             circuit_id,
-            [],
-        )
-        for assignment in assignments:
-            if session_id_text in assignment.get("session_ids", ()):
-                return assignment
-        raise ValueError(
-            f"Assign NILM session '{session_id_text}' to an appliance before "
-            "validating it."
+            session_id,
+            assignment_id=assignment_id,
         )
 
     def _remove_nilm_signature_from_other_assignments(
