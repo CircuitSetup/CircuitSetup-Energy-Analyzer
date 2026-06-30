@@ -1250,7 +1250,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderNilmWorkspaceBody",
         "NILM Workspace",
         "_renderNilmReviewQueue(workspace)",
-        "Review queue",
+        "_nilmReviewItems",
+        "Needs review",
+        "Next to review",
         "signatures need labels or decisions.",
         "Review mains load changes, labels, and assignments used by NILM.",
         "Known Load Overlays",
@@ -1462,6 +1464,116 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
 
 
+def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    review = asset.index("_renderNilmReviewQueue(workspace)")
+    signatures = asset.index('_renderNilmWorkspaceList("NILM Signatures"')
+    overlays = asset.index("_renderNilmOverlayToggles(workspace)")
+    graph_controls = asset.index("_renderNilmGraphControls(graphWindow)")
+    prediction = asset.index("_renderNilmValidation(workspace.validation)")
+    edges = asset.index('_renderNilmWorkspaceList("NILM Edges"')
+
+    assert review < signatures < overlays < graph_controls < prediction < edges
+    assert "Needs review" in asset
+    assert "Next to review" in asset
+
+
+def test_nilm_workspace_review_queue_shows_next_review_item_actions() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [
+    {
+      signature_id: "sig-1",
+      display_label: "Unknown load 1",
+      confidence: 0.42,
+      actions: {
+        label: {},
+        assign: {},
+        ignore: {},
+        mark_expected: {},
+        merge: { target_options: [] }
+      }
+    },
+    {
+      signature_id: "sig-2",
+      user_label: "Dryer",
+      review_state: "confirmed",
+      actions: { label: {} }
+    }
+  ]
+};
+const html = panel._renderNilmReviewQueue(panel._nilmWorkspace);
+for (const expected of [
+  "Needs review",
+  "1 signature needs labels or decisions.",
+  "Next to review",
+  "Unknown load 1",
+  "Save Label",
+  "Assign Appliance",
+  "Ignore",
+  "Mark Expected"
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_workspace_does_not_duplicate_review_item_control_ids() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [
+    {
+      signature_id: "sig-1",
+      display_label: "Unknown load 1",
+      confidence: 0.42,
+      actions: {
+        label: {},
+        assign: {},
+        ignore: {},
+        mark_expected: {},
+        merge: {
+          target_options: [{ value: "sig-2", label: "Unknown load 2" }]
+        }
+      }
+    },
+    {
+      signature_id: "sig-2",
+      display_label: "Unknown load 2",
+      user_label: "Dryer",
+      review_state: "confirmed",
+      actions: { label: {} }
+    }
+  ],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const id of ['id="nilm_label_0"', 'id="nilm_merge_targets_0"']) {
+  const count = (html.match(new RegExp(id, "g")) || []).length;
+  if (count !== 1) {
+    throw new Error(`${id} rendered ${count} times: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
@@ -1657,6 +1769,33 @@ def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None
     assert "selected_recommendation" in asset
     assert "Recommendation Evidence" in asset
     assert "Previewing evidence for" in asset
+
+
+def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    preview = asset.index(
+        'this._recommendationActionButton(recommendation, originalIndex, '
+        '"preview", "Preview evidence", true)'
+    )
+    apply = asset.index(
+        'this._recommendationActionButton(recommendation, originalIndex, '
+        '"apply", "Apply")'
+    )
+    dismiss = asset.index(
+        'this._recommendationActionButton(recommendation, originalIndex, '
+        '"dismiss", "Dismiss", true)'
+    )
+    undo = asset.index(
+        'this._recommendationActionButton(recommendation, originalIndex, '
+        '"undo", "Undo", true)'
+    )
+    reset = asset.index(
+        'this._recommendationActionButton(recommendation, originalIndex, '
+        '"reset", "Reset default", true)'
+    )
+
+    assert preview < apply < dismiss < undo < reset
 
 
 def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:

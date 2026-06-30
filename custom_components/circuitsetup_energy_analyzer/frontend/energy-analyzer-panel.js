@@ -1605,11 +1605,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
                 <div class="actions">
+                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", "Preview evidence", true) : ""}
                  ${this._recommendationActionButton(recommendation, originalIndex, "apply", "Apply")}
                  ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", "Dismiss", true)}
                  ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, originalIndex, "undo", "Undo", true) : ""}
                  ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, originalIndex, "reset", "Reset default", true) : ""}
-                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", "Preview evidence", true) : ""}
                 </div>
             </div>
           `).join("")}
@@ -1764,6 +1764,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const graphSessions = this._nilmFocusedSignature
       ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
       : workspace.sessions;
+    const nextReviewItem = this._nilmReviewItems(workspace)[0];
+    const nextReviewIndex = nextReviewItem ? nextReviewItem.index : -1;
     const graph = graphWindow && series.length
       ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
       : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
@@ -1774,11 +1776,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmReviewQueue(workspace)}
-        ${this._renderNilmOverlayToggles(workspace)}
-        ${this._renderNilmGraphControls(graphWindow)}
-        ${graph}
+        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
+          <div class="metric">
+            <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
+            <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+            ${index === nextReviewIndex ? `<p class="muted">Use Needs review above for this signature's actions.</p>` : this._renderNilmSignatureReview(item, index)}
+          </div>
+        `, "Signatures group similar sessions that may be the same appliance.")}
         ${this._renderNilmLabelIntervals(workspace)}
-        ${this._renderNilmValidation(workspace.validation)}
         ${this._renderNilmWorkspaceList("Estimated Appliances", workspace.virtual_appliances, "No estimated appliances are available yet.", (item) => `
           <div class="metric">
             <span>${this._escape(item.model_status || "candidate")}</span>
@@ -1797,6 +1802,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
         `, "Assignments save a signature as a named appliance for future review.")}
+        ${this._renderNilmOverlayToggles(workspace)}
+        ${this._renderNilmGraphControls(graphWindow)}
+        ${graph}
+        ${this._renderNilmValidation(workspace.validation)}
         ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
@@ -1824,13 +1833,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             </div>` : ""}
           </div>
         `, "Sessions pair on/off edges into likely appliance runs.")}
-        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
-          <div class="metric">
-            <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
-            <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
-            ${this._renderNilmSignatureReview(item, index)}
-          </div>
-        `, "Signatures group similar sessions that may be the same appliance.")}
         ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
           <div class="metric">
             <span>${this._escape(item.timestamp || "")}</span>
@@ -1842,24 +1844,38 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
-  _renderNilmReviewQueue(workspace) {
-    const signatures = Array.isArray(workspace.signatures) ? workspace.signatures : [];
-    if (!signatures.length) {
-      return "";
-    }
+  _nilmReviewItems(workspace) {
+    const signatures = Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [];
     const doneStates = new Set(["expected", "ignored", "confirmed"]);
-    const needsReview = signatures.filter((signature) => {
+    return signatures.map((signature, index) => ({ signature, index })).filter(({ signature }) => {
       const state = String((signature && signature.review_state) || "").toLowerCase();
       return !(signature && signature.user_label) && !doneStates.has(state);
-    }).length;
-    const summary = needsReview
-      ? `${needsReview} ${needsReview === 1 ? "signature needs" : "signatures need"} labels or decisions.`
-      : "No signatures need labels or decisions.";
+    });
+  }
+
+  _renderNilmReviewQueue(workspace) {
+    const reviewItems = this._nilmReviewItems(workspace);
+    if (!reviewItems.length) {
+      return `
+        <div class="action-group">
+          <h3>Needs review</h3>
+          <p class="muted">No signatures need labels or decisions.</p>
+        </div>
+      `;
+    }
+    const { signature, index } = reviewItems[0];
+    const count = reviewItems.length;
+    const title = signature.display_label || signature.display_name || signature.likely_type || "Unknown load";
     return `
-      <div class="metric">
-        <span>Review queue</span>
-        <strong>${this._escape(summary)}</strong>
-        <p class="muted">Start here before tuning overlays or graph windows.</p>
+      <div class="action-group">
+        <h3>Needs review</h3>
+        <p class="muted">${this._escape(count)} ${count === 1 ? "signature needs" : "signatures need"} labels or decisions.</p>
+        <div class="metric">
+          <span>Next to review</span>
+          <strong>${this._escape(title)}</strong>
+          ${signature.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(Math.round(Number(signature.confidence || 0) * 100))}%</p>` : ""}
+          ${this._renderNilmSignatureReview(signature, index)}
+        </div>
       </div>
     `;
   }
