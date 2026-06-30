@@ -291,7 +291,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      this._lastActionMessage = "Action complete.";
+      this._lastActionMessage = this._alertActionMessage(actionKey);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
       this._scrollToTop();
@@ -754,6 +754,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return "Action complete.";
   }
 
+  _alertActionMessage(actionKey) {
+    const messages = {
+      acknowledge: "Alert acknowledged.",
+      mark_expected: "Marked as expected behavior.",
+      mark_unhelpful: "Marked as not helpful.",
+      pause_alerts: "Alert pause updated.",
+      relearn_baseline: "Baseline relearn requested.",
+    };
+    return messages[actionKey] || "Action complete.";
+  }
+
   _nilmWorkspaceActionMessage(actionKey, data, item) {
     const name = (data && data.label) || (item && (item.display_name || item.label)) || "appliance";
     if (actionKey === "assign") {
@@ -953,6 +964,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: flex;
           flex-wrap: wrap;
           gap: 10px;
+        }
+        .action-group {
+          display: grid;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .action-group h3 {
+          font-size: 1rem;
+          margin: 0;
         }
         .action-item {
           display: inline-flex;
@@ -1196,14 +1216,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ${this._renderNilmWorkspace()}
       <section class="panel">
         <h2>Actions</h2>
-        <div class="actions">
-          ${this._actionButton("acknowledge", "Acknowledge")}
-          ${this._actionButton("mark_expected", "Mark Expected", true)}
-          ${this._actionButton("mark_unhelpful", "Not Helpful", true)}
-          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
-          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
-        </div>
+        ${this._renderActionGroup("Respond to this alert", "Review the graph, then choose how the analyzer should treat this alert.", [
+          this._actionButton("acknowledge", "Acknowledge"),
+          this._actionButton("mark_expected", "Mark Expected", true),
+          this._actionButton("mark_unhelpful", "Not Helpful", true),
+        ])}
+        ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
+          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ])}
+        ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("relearn_baseline", "Relearn Baseline", true),
+          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ])}
       </section>
       ${this._renderRecommendations()}
     `;
@@ -1749,6 +1773,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <p class="muted">Review mains load changes, labels, and assignments used by NILM.</p>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
+        ${this._renderNilmReviewQueue(workspace)}
         ${this._renderNilmOverlayToggles(workspace)}
         ${this._renderNilmGraphControls(graphWindow)}
         ${graph}
@@ -1814,6 +1839,28 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </div>
         `, "Edges are detected power changes before they are paired into sessions.")}
       </section>
+    `;
+  }
+
+  _renderNilmReviewQueue(workspace) {
+    const signatures = Array.isArray(workspace.signatures) ? workspace.signatures : [];
+    if (!signatures.length) {
+      return "";
+    }
+    const doneStates = new Set(["expected", "ignored", "confirmed"]);
+    const needsReview = signatures.filter((signature) => {
+      const state = String((signature && signature.review_state) || "").toLowerCase();
+      return !(signature && signature.user_label) && !doneStates.has(state);
+    }).length;
+    const summary = needsReview
+      ? `${needsReview} ${needsReview === 1 ? "signature needs" : "signatures need"} labels or decisions.`
+      : "No signatures need labels or decisions.";
+    return `
+      <div class="metric">
+        <span>Review queue</span>
+        <strong>${this._escape(summary)}</strong>
+        <p class="muted">Start here before tuning overlays or graph windows.</p>
+      </div>
     `;
   }
 
@@ -2405,11 +2452,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <section class="panel">
         <h2>Available Circuit Actions</h2>
-        <div class="actions">
-          ${this._actionButton("pause_alerts", "Pause Alerts", true)}
-          ${this._actionButton("relearn_baseline", "Relearn Baseline", true)}
-          ${this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true)}
-        </div>
+        ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
+          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ])}
+        ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("relearn_baseline", "Relearn Baseline", true),
+          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ])}
       </section>
       ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
@@ -2438,6 +2487,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
+  }
+
+  _renderActionGroup(title, description, buttons) {
+    const renderedButtons = buttons.filter(Boolean);
+    if (!renderedButtons.length) {
+      return "";
+    }
+    return `
+      <div class="action-group">
+        <h3>${this._escape(title)}</h3>
+        <p class="muted">${this._escape(description)}</p>
+        <div class="actions">${renderedButtons.join("")}</div>
+      </div>
+    `;
   }
 
   _actionButton(actionKey, label, secondary = false) {

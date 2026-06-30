@@ -487,6 +487,36 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
     assert "resources" not in dashboard
 
 
+def test_standard_dashboard_links_appliance_evidence_without_control_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    appliance_status = _dashboard_section(dashboard, "Appliance Status")
+
+    evidence_card = next(
+        card
+        for card in _dashboard_cards(appliance_status)
+        if card.get("name") == "Open Refrigerator Evidence"
+    )
+    refs = _entity_refs(appliance_status)
+
+    assert evidence_card["type"] == "button"
+    assert evidence_card["tap_action"] == {
+        "action": "navigate",
+        "navigation_path": (
+            "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge"
+        ),
+    }
+    assert "sensor.fridge_alert_evidence" not in refs
+    assert not {
+        entity_id
+        for entity_id in refs
+        if entity_id.startswith(("button.", "select.", "switch."))
+    }
+    assert "Controls" not in str(appliance_status)
+
+
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
     dashboard = build_recommended_dashboard(
         (

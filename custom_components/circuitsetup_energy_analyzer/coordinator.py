@@ -9343,18 +9343,31 @@ def _register_lovelace_dashboard_panel(
         return
 
     try:
-        frontend.async_register_built_in_panel(
-            hass,
-            LOVELACE_DOMAIN,
-            frontend_url_path=item.get(CONF_URL_PATH),
-            require_admin=item[CONF_REQUIRE_ADMIN],
-            show_in_sidebar=item[CONF_SHOW_IN_SIDEBAR],
-            sidebar_title=item[CONF_TITLE],
-            sidebar_icon=item.get(CONF_ICON, DEFAULT_ICON),
-            config={"mode": MODE_STORAGE},
-            update=update,
-        )
-    except (KeyError, ValueError):
+        panel_kwargs = {
+            "frontend_url_path": item.get(CONF_URL_PATH),
+            "require_admin": item[CONF_REQUIRE_ADMIN],
+            "show_in_sidebar": item[CONF_SHOW_IN_SIDEBAR],
+            "sidebar_title": item[CONF_TITLE],
+            "sidebar_icon": item.get(CONF_ICON, DEFAULT_ICON),
+            "config": {"mode": MODE_STORAGE},
+            "update": update,
+        }
+        try:
+            frontend.async_register_built_in_panel(
+                hass,
+                LOVELACE_DOMAIN,
+                **panel_kwargs,
+            )
+        except TypeError as err:
+            if "show_in_sidebar" not in str(err):
+                raise
+            panel_kwargs.pop("show_in_sidebar", None)
+            frontend.async_register_built_in_panel(
+                hass,
+                LOVELACE_DOMAIN,
+                **panel_kwargs,
+            )
+    except (AttributeError, KeyError, ValueError):
         return
 
 
