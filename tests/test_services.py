@@ -194,6 +194,32 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     assert "Confidence: 82%." not in direct_message
 
 
+def test_alert_notification_message_ignores_non_finite_nilm_confidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished.",
+        feature="nilm_appliance_finished",
+        observed_value=0.45,
+        baseline_value=0.8,
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "confidence": float("nan"),
+        },
+    )
+
+    message = alert_notification_message(alert)
+
+    assert "Estimated from mains power by NILM." in message
+    assert "Confidence:" not in message
+
+
 @pytest.mark.asyncio
 async def test_alert_notification_uses_short_title_and_bold_appliance_name(
     monkeypatch: pytest.MonkeyPatch,

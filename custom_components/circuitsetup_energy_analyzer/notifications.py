@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
@@ -97,6 +98,8 @@ def _nilm_confidence(alert: AlertEvidence) -> float | None:
         try:
             value = float(raw)
         except (TypeError, ValueError):
+            continue
+        if not isfinite(value):
             continue
         if value < 0:
             continue
