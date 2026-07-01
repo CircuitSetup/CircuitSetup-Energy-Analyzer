@@ -723,6 +723,7 @@ def test_coordinator_exposes_nilm_controller() -> None:
         coordinator.nilm_controller,
         nilm_controller.NilmController,
     )
+    assert callable(coordinator.nilm_controller.upsert_assignment)
 
 
 def test_nilm_controller_exposes_assignment_edit_actions() -> None:

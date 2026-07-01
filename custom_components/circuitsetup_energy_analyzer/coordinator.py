@@ -794,6 +794,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
             float_or_none=_float_or_none,
             datetime_or_none=_datetime_or_none,
+            assignment_appliance_id=_nilm_assignment_appliance_id,
+            assignment_id=_nilm_assignment_id,
+            assignment_max_items=NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
         )
         self.settings_controller = SettingsController(self)
         self.state_reducer = StateReducer()
@@ -3265,85 +3268,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         lifecycle_state: str = "assigned",
         confidence: Any = 1.0,
     ) -> dict[str, Any]:
-        label_text = str(label or "").strip()
-        if not label_text:
-            raise ValueError("Missing label.")
-        appliance_id_text = (
-            str(appliance_id or "").strip()
-            or _nilm_assignment_appliance_id(label_text)
+        return self.nilm_controller.upsert_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=signature_fingerprint,
+            session_id=session_id,
+            label_interval_id=label_interval_id,
+            lifecycle_state=lifecycle_state,
+            confidence=confidence,
         )
-        assignments = (
-            self.store_data.nilm_appliance_assignments_by_circuit.setdefault(
-                circuit_id,
-                [],
-            )
-        )
-        assignment_id_text = str(assignment_id or "").strip()
-        assignment = next(
-            (
-                item
-                for item in assignments
-                if (
-                    (
-                        assignment_id_text
-                        and item.get("assignment_id") == assignment_id_text
-                    )
-                    or (
-                        not assignment_id_text
-                        and item.get("appliance_id") == appliance_id_text
-                    )
-                )
-            ),
-            None,
-        )
-        now = self._now_fn().isoformat()
-        if assignment is None:
-            assignment = {
-                "assignment_id": assignment_id_text
-                or _nilm_assignment_id(circuit_id, appliance_id_text),
-                "appliance_id": appliance_id_text,
-                "display_name": label_text,
-                "appliance_profile": str(appliance_profile or "").strip() or None,
-                "mains_circuit_id": circuit_id,
-                "signature_fingerprints": [],
-                "session_ids": [],
-                "label_interval_ids": [],
-                "lifecycle_state": lifecycle_state,
-                "confidence": 0.0,
-                "created_at": now,
-                "updated_at": now,
-                "created_device": False,
-                "publish_entities": False,
-            }
-            assignments.append(assignment)
-        else:
-            assignments[:] = [item for item in assignments if item is not assignment]
-            assignments.append(assignment)
-            assignment["display_name"] = label_text
-            if appliance_profile:
-                assignment["appliance_profile"] = str(appliance_profile).strip()
-            assignment["lifecycle_state"] = lifecycle_state
-            assignment["updated_at"] = now
-
-        _append_unique(
-            assignment.setdefault("signature_fingerprints", []),
-            signature_fingerprint,
-        )
-        _append_unique(assignment.setdefault("session_ids", []), session_id)
-        _append_unique(
-            assignment.setdefault("label_interval_ids", []),
-            label_interval_id,
-        )
-        try:
-            confidence_value = float(confidence)
-        except (TypeError, ValueError):
-            confidence_value = 1.0
-        assignment["confidence"] = max(
-            float(assignment.get("confidence") or 0.0),
-            max(min(confidence_value, 1.0), 0.0),
-        )
-        del assignments[:-NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT]
-        return assignment
 
     def _nilm_assignment_for_session(
         self: Self,
