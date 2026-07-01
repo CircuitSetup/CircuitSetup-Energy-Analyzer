@@ -100,6 +100,23 @@ class NilmController:
             coordinator._mark_store_dirty()
         return list(result.alerts)
 
+    def known_load_events(
+        self,
+        nilm_circuit_id: str,
+        events: Iterable[Any],
+    ) -> Iterable[Any]:
+        """Yield events that may mask a mains NILM edge."""
+        known_load_circuit_ids = self._coordinator._known_load_circuit_ids
+        for event in events:
+            if event.circuit_id == nilm_circuit_id:
+                continue
+            if (
+                known_load_circuit_ids
+                and event.circuit_id not in known_load_circuit_ids
+            ):
+                continue
+            yield event
+
     def observe_known_load_topology(
         self,
         mains_config: Any,
