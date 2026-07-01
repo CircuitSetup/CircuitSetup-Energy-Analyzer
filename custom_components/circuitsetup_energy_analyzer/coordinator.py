@@ -5912,17 +5912,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.store_persistence.async_save_if_dirty(now)
 
     def _apply_retention(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_events(now)
-        self._prune_energy_usage(now)
-        self._prune_demand(now)
-        self._prune_standby(now)
-        self._prune_weather_context(now)
-        self._prune_water_context(now)
-        self._prune_contextual_baseline_state(now)
-        self._prune_alert_history(now)
-        self._prune_nilm_history(now)
-        self._prune_alert_feedback(now)
-        self._prune_recommendation_history(now)
+        self.store_persistence.apply_retention(now)
 
     def _observation_payload(self: Self, observation: Any) -> dict[str, Any]:
         payload = {
@@ -5969,36 +5959,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if kept:
                 retained[circuit_id] = kept
         self.state.recent_observations_by_circuit = retained
-
-    def _prune_energy_usage(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_energy_usage(now)
-
-    def _prune_demand(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_demand(now)
-
-    def _prune_standby(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_standby(now)
-
-    def _prune_weather_context(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_weather_context(now)
-
-    def _prune_water_context(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_water_context(now)
-
-    def _prune_contextual_baseline_state(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_contextual_baseline_state(now)
-
-    def _prune_alert_history(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_alert_history(now)
-
-    def _prune_nilm_history(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_nilm_history(now)
-
-    def _prune_alert_feedback(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_alert_feedback(now)
-
-    def _prune_recommendation_history(self: Self, now: datetime) -> None:
-        self.store_persistence.prune_recommendation_history(now)
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:

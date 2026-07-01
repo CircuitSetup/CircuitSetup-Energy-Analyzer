@@ -85,10 +85,24 @@ class StorePersistenceManager:
         store = getattr(self._coordinator, "_store", None)
         if store is None or not self.dirty:
             return
-        self._coordinator._apply_retention(now)
+        self.apply_retention(now)
         store.data = self._coordinator.store_data
         await store.async_save()
         self.dirty = False
+
+    def apply_retention(self, now: datetime) -> None:
+        """Apply all persisted store retention rules."""
+        self.prune_events(now)
+        self.prune_energy_usage(now)
+        self.prune_demand(now)
+        self.prune_standby(now)
+        self.prune_weather_context(now)
+        self.prune_water_context(now)
+        self.prune_contextual_baseline_state(now)
+        self.prune_alert_history(now)
+        self.prune_nilm_history(now)
+        self.prune_alert_feedback(now)
+        self.prune_recommendation_history(now)
 
     def prune_events(self, now: datetime) -> None:
         """Apply retention caps to stored circuit events."""
