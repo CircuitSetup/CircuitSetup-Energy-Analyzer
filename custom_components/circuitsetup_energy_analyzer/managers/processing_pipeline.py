@@ -151,7 +151,7 @@ class ProcessingPipeline:
         alerts: list[Any] = []
         utility_context = coordinator.context_builder.build(now)
         for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
-            config = coordinator._config_for_circuit(circuit_id)
+            config = coordinator.circuit_registry.config_for_circuit(circuit_id)
             if config is None:
                 continue
             result = await coordinator._utility_comparison_processor.process(

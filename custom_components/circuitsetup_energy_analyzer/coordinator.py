@@ -108,6 +108,7 @@ from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
 from .local_time import local_date, local_day_time
+from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
 from .managers.context import ProcessingContextBuilder
 from .managers.dashboard_controller import DashboardController
@@ -578,6 +579,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.entry_data,
             self.options,
         )
+        self.circuit_registry = CircuitRegistry(self)
         self._now_fn = now_fn or (lambda: datetime.now(UTC))
         self._entry_retention_mode = _retention_mode_from_sources(
             self.entry_data,
@@ -742,7 +744,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ),
         )
         self._nilm_topology_processor = NilmTopologyProcessor(
-            known_config_for_circuit=self._config_for_circuit,
+            known_config_for_circuit=self.circuit_registry.config_for_circuit,
             alert_policy_for_circuit=self._nilm_topology_alert_policy_for_circuit,
         )
         self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
@@ -1846,7 +1848,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str,
         now: datetime,
     ) -> None:
-        config = self._config_for_circuit(circuit_id)
+        config = self.circuit_registry.config_for_circuit(circuit_id)
         if config is not None:
             self._refresh_ux_state(config, None, now)
 
@@ -1975,7 +1977,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             return
         self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(
             alert,
-            config=self._config_for_circuit(circuit_id),
+            config=self.circuit_registry.config_for_circuit(circuit_id),
         )
 
     def _refresh_recent_activity_state(
@@ -2697,12 +2699,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not alerts:
             return None
         return max(alerts, key=lambda alert: alert.timestamp)
-
-    def _config_for_circuit(self: Self, circuit_id: str) -> CircuitConfig | None:
-        for config in self.circuit_configs:
-            if config.circuit_id == circuit_id:
-                return config
-        return None
 
     def _sample_for_config(
         self: Self,

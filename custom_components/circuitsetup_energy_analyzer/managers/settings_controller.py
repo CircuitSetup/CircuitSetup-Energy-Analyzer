@@ -1114,7 +1114,7 @@ class SettingsController:
     ) -> None:
         """Persist daily energy usage spike settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.energy_usage_settings_for_config(config, circuit_id)
         settings = {
             "window_days": _positive_int_value(
@@ -1140,7 +1140,7 @@ class SettingsController:
     ) -> None:
         """Persist daily energy goal settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.energy_goal_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "goal_alert_ratio": _positive_float_value(
@@ -1206,7 +1206,7 @@ class SettingsController:
     ) -> None:
         """Persist rolling demand settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.demand_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "window_minutes": _positive_int_value(
@@ -1262,7 +1262,7 @@ class SettingsController:
     ) -> None:
         """Persist Always On and standby settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.standby_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "window_hours": _positive_int_value(
@@ -1295,7 +1295,7 @@ class SettingsController:
     ) -> None:
         """Persist billing-cycle usage forecast settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.billing_cycle_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "cycle_start_day": _positive_int_value(
@@ -1332,7 +1332,7 @@ class SettingsController:
     ) -> None:
         """Persist cost and Time-of-Use settings for one circuit."""
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.cost_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "cycle_start_day": _positive_int_value(

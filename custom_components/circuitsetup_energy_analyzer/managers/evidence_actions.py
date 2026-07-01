@@ -132,7 +132,7 @@ class EvidenceActionController:
         now = coordinator._now_fn()
         fingerprint = alert_feedback_fingerprint(
             alert,
-            config=coordinator._config_for_circuit(alert.circuit_id),
+            config=coordinator.circuit_registry.config_for_circuit(alert.circuit_id),
         )
         existing = coordinator.store_data.alert_feedback.get(fingerprint, {})
         evidence_count = (
@@ -183,7 +183,9 @@ class EvidenceActionController:
         candidates = (
             alert_feedback_fingerprint_for_observation(
                 observation,
-                config=coordinator._config_for_circuit(observation.circuit_id),
+                config=coordinator.circuit_registry.config_for_circuit(
+                    observation.circuit_id
+                ),
             ),
             alert_feedback_fingerprint_for_observation(observation),
             _legacy_alert_feedback_key_for_observation(observation),
@@ -204,7 +206,9 @@ class EvidenceActionController:
         candidates = (
             _alert_feedback_key(
                 alert,
-                config=coordinator._config_for_circuit(alert.circuit_id),
+                config=coordinator.circuit_registry.config_for_circuit(
+                    alert.circuit_id
+                ),
             ),
             _alert_feedback_key(alert),
             _legacy_alert_feedback_key(alert),

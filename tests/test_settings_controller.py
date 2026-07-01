@@ -136,6 +136,9 @@ class _SettingsCoordinator:
                 daily_energy_spike_ratio=0.25,
             )
         ]
+        self.circuit_registry = SimpleNamespace(
+            config_for_circuit=self._lookup_config_for_circuit,
+        )
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -181,7 +184,7 @@ class _SettingsCoordinator:
     async def _record_settings_recommendation_notification(self) -> None:
         self.notified += 1
 
-    def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
+    def _lookup_config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
             circuit_id=circuit_id,
             energy_usage_window_days=7,
