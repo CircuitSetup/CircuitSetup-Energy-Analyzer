@@ -156,7 +156,6 @@ from .nilm import (
     NilmEdge,
     NilmEdgeDetector,
 )
-from .nilm_virtual import nilm_virtual_appliance_alerts
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
@@ -5983,18 +5982,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         now: datetime,
     ) -> list[AlertEvidence]:
-        active_alerts: list[AlertEvidence] = []
-        for alert in nilm_virtual_appliance_alerts(self, now=now):
-            alert = self._alert_with_feedback(alert)
-            alert_id = notifications.notification_id_for_alert(alert)
-            if alert.feedback_status != "expected":
-                active_alerts.append(alert)
-            if alert_id in self._notified_alert_ids:
-                continue
-            self.store_data.alerts.append(alert)
-            self._mark_store_dirty()
-            await self._notify_alert(alert)
-        return active_alerts
+        return await self.notification_controller.async_notify_nilm_virtual_appliances(
+            now
+        )
 
 
 def _numeric_items(

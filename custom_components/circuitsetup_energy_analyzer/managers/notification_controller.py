@@ -5,6 +5,7 @@ from typing import Any
 
 from .. import notifications
 from ..models import AlertEvidence
+from ..nilm_virtual import nilm_virtual_appliance_alerts
 
 
 class NotificationController:
@@ -52,6 +53,24 @@ class NotificationController:
             alert,
             config=self._coordinator._config_for_circuit(alert.circuit_id),
         )
+
+    async def async_notify_nilm_virtual_appliances(
+        self,
+        now: Any,
+    ) -> list[AlertEvidence]:
+        """Create notifications for published NILM virtual appliance alerts."""
+        active_alerts: list[AlertEvidence] = []
+        for alert in nilm_virtual_appliance_alerts(self._coordinator, now=now):
+            alert = self._coordinator._alert_with_feedback(alert)
+            alert_id = notifications.notification_id_for_alert(alert)
+            if alert.feedback_status != "expected":
+                active_alerts.append(alert)
+            if alert_id in self.notified_alert_ids:
+                continue
+            self._coordinator.store_data.alerts.append(alert)
+            self._coordinator._mark_store_dirty()
+            await self.async_notify_alert(alert)
+        return active_alerts
 
     async def async_notify_settings_recommendations_if_needed(self) -> None:
         """Notify once for each material set of pending setting recommendations."""
