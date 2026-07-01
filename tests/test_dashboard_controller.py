@@ -9,6 +9,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     DASHBOARD_LAYOUT_EXPERT,
     DASHBOARD_LAYOUT_STANDARD,
 )
+from custom_components.circuitsetup_energy_analyzer.dashboard import DASHBOARD_URL_PATH
 from custom_components.circuitsetup_energy_analyzer.managers import (
     dashboard_controller,
 )
@@ -37,15 +38,62 @@ class _FakeConfigEntries:
         self.updated.append((entry, options))
 
 
-class _DashboardCoordinator:
+class _FakeLovelaceStorage:
+    mode = "storage"
+
+    def __init__(self, config: dict[str, object]) -> None:
+        self.config = config
+        self.saved: list[dict[str, object]] = []
+        self.deleted = False
+
+    async def async_save(self, config: dict[str, object]) -> None:
+        self.saved.append(config)
+
+    async def async_delete(self) -> None:
+        self.deleted = True
+
+
+class _FakeDashboardCollection:
+    def __init__(self, stores: dict[str, _FakeLovelaceStorage]) -> None:
+        self.stores = stores
+        self.created: list[dict[str, object]] = []
+        self.deleted: list[str] = []
+
+    async def async_items(self) -> list[dict[str, object]]:
+        if DASHBOARD_URL_PATH not in self.stores:
+            return []
+        return [{"id": DASHBOARD_URL_PATH, "url_path": DASHBOARD_URL_PATH}]
+
+    async def async_create_item(self, data: dict[str, object]) -> dict[str, object]:
+        self.created.append(data)
+        item = {"id": DASHBOARD_URL_PATH, **data}
+        self.stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(item)
+        return item
+
+    async def async_delete_item(self, item_id: str) -> None:
+        self.deleted.append(item_id)
+        dashboard_store = self.stores.pop(DASHBOARD_URL_PATH, None)
+        if dashboard_store is not None:
+            await dashboard_store.async_delete()
+
+
+class _StorageDashboardCoordinator:
     def __init__(self) -> None:
         self.entry_id = "entry-1"
         self.dashboard_layout = DASHBOARD_LAYOUT_STANDARD
         self.options: dict[str, object] = {}
         self._config_entry = SimpleNamespace(options={})
+        self.dashboard_stores: dict[str, _FakeLovelaceStorage] = {}
+        self.collection = _FakeDashboardCollection(self.dashboard_stores)
         self.hass = SimpleNamespace(
             bus=_FakeBus(),
             config_entries=_FakeConfigEntries(),
+            data={
+                "lovelace": {
+                    "dashboards": self.dashboard_stores,
+                    "dashboards_collection": self.collection,
+                }
+            },
         )
         self.circuit_configs = (
             CircuitConfig(
@@ -59,21 +107,11 @@ class _DashboardCoordinator:
         self.state = SimpleNamespace()
         self.last_dashboard_create_request: dict[str, object] | None = None
         self.last_dashboard_remove_request: dict[str, object] | None = None
-        self.created_payload: dict[str, object] | None = None
+        self.dashboard_status: dict[str, object] | None = None
         self.updated_data: list[object] = []
 
     def _outdoor_temperature_entity(self) -> str:
         return "sensor.outdoor_temperature"
-
-    async def _async_create_or_update_lovelace_dashboard(
-        self,
-        payload: dict[str, object],
-    ) -> tuple[str, str | None]:
-        self.created_payload = payload
-        return "created", None
-
-    async def _async_remove_lovelace_dashboard(self) -> tuple[str, str | None]:
-        return "deleted", None
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated_data.append(state)
@@ -81,14 +119,15 @@ class _DashboardCoordinator:
 
 @pytest.mark.asyncio
 async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
-    coordinator = _DashboardCoordinator()
+    coordinator = _StorageDashboardCoordinator()
     controller = dashboard_controller.DashboardController(coordinator)
 
     payload = await controller.async_create_dashboard()
 
     assert payload["action"] == "created"
     assert payload["layout"] == DASHBOARD_LAYOUT_STANDARD
-    assert coordinator.created_payload is not None
+    assert coordinator.collection.created
+    assert coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved
     assert coordinator.last_dashboard_create_request == payload
     assert coordinator.hass.bus.events == [
         ("circuitsetup_energy_analyzer_create_dashboard", payload)
@@ -97,8 +136,31 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_controller_owns_lovelace_create_and_remove() -> None:
+    coordinator = _StorageDashboardCoordinator()
+    controller = dashboard_controller.DashboardController(coordinator)
+
+    created = await controller.async_create_dashboard()
+
+    assert created["action"] == "created"
+    assert coordinator.collection.created[0]["url_path"] == DASHBOARD_URL_PATH
+    dashboard_store = coordinator.dashboard_stores[DASHBOARD_URL_PATH]
+    assert dashboard_store.saved
+    assert dashboard_store.saved[0]["views"]
+
+    removed = await controller.async_remove_dashboard()
+
+    assert removed["action"] == "deleted"
+    assert coordinator.collection.deleted == [DASHBOARD_URL_PATH]
+    assert DASHBOARD_URL_PATH not in coordinator.dashboard_stores
+
+
+@pytest.mark.asyncio
 async def test_dashboard_controller_removes_dashboard_and_persists_layout() -> None:
-    coordinator = _DashboardCoordinator()
+    coordinator = _StorageDashboardCoordinator()
+    coordinator.dashboard_stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(
+        {"url_path": DASHBOARD_URL_PATH}
+    )
     controller = dashboard_controller.DashboardController(coordinator)
 
     removed = await controller.async_remove_dashboard()
