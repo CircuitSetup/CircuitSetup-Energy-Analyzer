@@ -658,6 +658,19 @@ def test_coordinator_exposes_source_update_manager() -> None:
     assert coordinator.source_entities == ()
 
 
+def test_coordinator_exposes_processing_context_builder() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(coordinator.context_builder, ProcessingContextBuilder)
+
+
 def test_coordinator_exposes_store_persistence_manager() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
