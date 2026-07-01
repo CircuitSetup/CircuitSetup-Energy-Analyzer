@@ -53,7 +53,7 @@ class EvidenceActionController:
         now = coordinator._now_fn()
         coordinator._refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
         return True
 
     async def async_start_maintenance(
@@ -76,10 +76,10 @@ class EvidenceActionController:
             payload["duration"] = str(duration)
         coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
         coordinator.paused_circuits.add(circuit_id)
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     async def async_end_maintenance(
         self,
@@ -96,13 +96,13 @@ class EvidenceActionController:
         current.update({"active": False, "ended_at": now.isoformat()})
         coordinator.store_data.maintenance_by_circuit[circuit_id] = current
         coordinator.paused_circuits.discard(circuit_id)
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         if should_relearn:
             await coordinator.async_relearn_baseline(circuit_id)
             return
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
@@ -160,7 +160,7 @@ class EvidenceActionController:
         self.retire_alert_id(alert_id)
         coordinator._refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
         return True
 
     def adjusted_min_repeated_for_observation(
@@ -269,7 +269,7 @@ class EvidenceActionController:
             circuit_id: max(alert_anomaly_score(alert) for alert in alerts)
             for circuit_id, alerts in coordinator.state.active_alerts_by_circuit.items()
         }
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
 
     def alert_for_id(self, alert_id: str) -> AlertEvidence | None:
         """Return a stored or active alert by notification id."""
