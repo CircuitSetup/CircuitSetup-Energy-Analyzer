@@ -110,7 +110,7 @@ PANEL_MODULE_NAME = "energy-analyzer-panel.js"
 PANEL_MODULE_VERSION = (
     "20260701-appliance-timeline-nilm-lanes-dashboard-nilm-lanes-"
     "nilm-review-card-candidate-facts-session-validation-card-"
-    "interval-running-prompt"
+    "interval-running-prompt-low-confidence-nilm"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
