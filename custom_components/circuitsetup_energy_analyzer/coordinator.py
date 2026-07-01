@@ -978,6 +978,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self,
             newest_mapping_items=_newest_mapping_items,
             mapping_time=_mapping_time,
+            retention_window_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(circuit_id)
+            ],
+            ha_local_date=_ha_local_date,
+            ha_time_zone=self._ha_time_zone,
             alert_history_max_age=ALERT_HISTORY_MAX_AGE,
             alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
             alert_feedback_is_expired=_alert_feedback_is_expired,
@@ -5969,20 +5974,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return event.timestamp >= now - RETENTION_WINDOWS[retention_mode]
 
     def _prune_energy_usage(self: Self, now: datetime) -> None:
-        for circuit_id, history in self.store_data.energy_usage_by_circuit.items():
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = (
-                _ha_local_date(now, self._ha_time_zone())
-                - RETENTION_WINDOWS[retention_mode]
-            ).isoformat()
-            days = history.get("days", [])
-            if not isinstance(days, list):
-                continue
-            history["days"] = [
-                day
-                for day in days
-                if isinstance(day, dict) and str(day.get("date", "")) >= cutoff
-            ]
+        self.store_persistence.prune_energy_usage(now)
 
     def _prune_demand(self: Self, now: datetime) -> None:
         for circuit_id, history in self.store_data.demand_by_circuit.items():

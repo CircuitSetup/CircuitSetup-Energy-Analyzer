@@ -14,6 +14,9 @@ class StorePersistenceManager:
         *,
         newest_mapping_items: Callable[[Any, int], list[dict[str, Any]]],
         mapping_time: Callable[..., datetime],
+        retention_window_for_circuit: Callable[[str], timedelta],
+        ha_local_date: Callable[[datetime, str | None], Any],
+        ha_time_zone: Callable[[], str | None],
         alert_history_max_age: timedelta,
         alert_history_max_items: int,
         alert_feedback_is_expired: Callable[[Any, datetime], bool],
@@ -37,6 +40,9 @@ class StorePersistenceManager:
         self._coordinator = coordinator
         self._newest_mapping_items = newest_mapping_items
         self._mapping_time = mapping_time
+        self._retention_window_for_circuit = retention_window_for_circuit
+        self._ha_local_date = ha_local_date
+        self._ha_time_zone = ha_time_zone
         self._alert_history_max_age = alert_history_max_age
         self._alert_history_max_items = alert_history_max_items
         self._alert_feedback_is_expired = alert_feedback_is_expired
@@ -68,6 +74,23 @@ class StorePersistenceManager:
         store.data = self._coordinator.store_data
         await store.async_save()
         self.dirty = False
+
+    def prune_energy_usage(self, now: datetime) -> None:
+        """Apply retention caps to stored daily energy rows."""
+        store_data = self._coordinator.store_data
+        for circuit_id, history in store_data.energy_usage_by_circuit.items():
+            cutoff = (
+                self._ha_local_date(now, self._ha_time_zone())
+                - self._retention_window_for_circuit(circuit_id)
+            ).isoformat()
+            days = history.get("days", [])
+            if not isinstance(days, list):
+                continue
+            history["days"] = [
+                day
+                for day in days
+                if isinstance(day, dict) and str(day.get("date", "")) >= cutoff
+            ]
 
     def prune_alert_history(self, now: datetime) -> None:
         """Apply retention caps to stored alert history."""
