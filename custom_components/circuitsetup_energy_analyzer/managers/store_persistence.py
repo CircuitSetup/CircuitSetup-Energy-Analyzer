@@ -17,6 +17,7 @@ class StorePersistenceManager:
         retention_window_for_circuit: Callable[[str], timedelta],
         ha_local_date: Callable[[datetime, str | None], Any],
         ha_time_zone: Callable[[], str | None],
+        sample_timestamp_is_at_or_after: Callable[[Any, datetime], bool],
         alert_history_max_age: timedelta,
         alert_history_max_items: int,
         alert_feedback_is_expired: Callable[[Any, datetime], bool],
@@ -43,6 +44,7 @@ class StorePersistenceManager:
         self._retention_window_for_circuit = retention_window_for_circuit
         self._ha_local_date = ha_local_date
         self._ha_time_zone = ha_time_zone
+        self._sample_timestamp_is_at_or_after = sample_timestamp_is_at_or_after
         self._alert_history_max_age = alert_history_max_age
         self._alert_history_max_items = alert_history_max_items
         self._alert_feedback_is_expired = alert_feedback_is_expired
@@ -91,6 +93,31 @@ class StorePersistenceManager:
                 for day in days
                 if isinstance(day, dict) and str(day.get("date", "")) >= cutoff
             ]
+
+    def prune_demand(self, now: datetime) -> None:
+        """Apply retention caps to stored demand histories."""
+        store_data = self._coordinator.store_data
+        for circuit_id, history in store_data.demand_by_circuit.items():
+            retention_window = self._retention_window_for_circuit(circuit_id)
+            cutoff_datetime = now - retention_window
+            cutoff = (
+                self._ha_local_date(now, self._ha_time_zone()) - retention_window
+            ).isoformat()
+            capacity_samples = history.get("capacity_current_samples")
+            if isinstance(capacity_samples, list):
+                history["capacity_current_samples"] = [
+                    sample
+                    for sample in capacity_samples
+                    if self._sample_timestamp_is_at_or_after(sample, cutoff_datetime)
+                ]
+            daily_peaks = history.get("daily_peaks", [])
+            if isinstance(daily_peaks, list):
+                history["daily_peaks"] = [
+                    peak
+                    for peak in daily_peaks
+                    if isinstance(peak, dict)
+                    and str(peak.get("date", "")) >= cutoff
+                ]
 
     def prune_alert_history(self, now: datetime) -> None:
         """Apply retention caps to stored alert history."""
