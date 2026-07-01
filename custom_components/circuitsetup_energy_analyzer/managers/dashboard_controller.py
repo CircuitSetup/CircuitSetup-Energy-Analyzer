@@ -88,18 +88,9 @@ class DashboardController:
         coordinator = self._coordinator
         normalized = normalize_dashboard_layout(layout)
         coordinator.dashboard_layout = normalized
-        coordinator.options[CONF_DASHBOARD_LAYOUT] = normalized
-        entry = coordinator._config_entry
-        if entry is not None:
-            options = dict(getattr(entry, "options", {}) or {})
-            options[CONF_DASHBOARD_LAYOUT] = normalized
-            update_entry = getattr(
-                getattr(coordinator.hass, "config_entries", None),
-                "async_update_entry",
-                None,
-            )
-            if callable(update_entry):
-                update_entry(entry, options=options)
+        await coordinator.config_entry_controller.async_update_options(
+            {CONF_DASHBOARD_LAYOUT: normalized},
+        )
         coordinator.async_set_updated_data(coordinator.state)
 
     def _fire_event(self, event_type: str, payload: Mapping[str, Any]) -> None:
