@@ -269,7 +269,7 @@ class SettingsController:
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
-            time_zone=coordinator._ha_time_zone(),
+            time_zone=coordinator.context_builder.time_zone(),
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -1163,7 +1163,7 @@ class SettingsController:
         goal_result = coordinator._energy_goal_processor.refresh_state(
             circuit_id,
             config,
-            coordinator._build_processing_context(now),
+            coordinator.context_builder.build(now),
         )
         await coordinator._apply_feature_result(goal_result)
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)

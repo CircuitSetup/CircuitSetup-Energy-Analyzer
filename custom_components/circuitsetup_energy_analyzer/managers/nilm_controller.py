@@ -89,7 +89,7 @@ class NilmController:
         result = coordinator._nilm_sample_processor.process(
             sample,
             config,
-            coordinator._build_processing_context(sample.timestamp),
+            coordinator.context_builder.build(sample.timestamp),
             events=events,
         )
         coordinator.state_reducer.apply_updates(
@@ -127,7 +127,7 @@ class NilmController:
         result = coordinator._nilm_topology_processor.process(
             mains_config,
             match,
-            coordinator._build_processing_context(match.edge.timestamp),
+            coordinator.context_builder.build(match.edge.timestamp),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -145,7 +145,7 @@ class NilmController:
         return coordinator._nilm_sample_processor._nilm_signature_payloads(
             circuit_id,
             signatures,
-            coordinator._build_processing_context(coordinator._now_fn()),
+            coordinator.context_builder.build(coordinator._now_fn()),
         )
 
     def refresh_state(self, circuit_id: str) -> None:
@@ -153,7 +153,7 @@ class NilmController:
         coordinator = self._coordinator
         result = coordinator._nilm_sample_processor.refresh_state(
             circuit_id,
-            coordinator._build_processing_context(coordinator._now_fn()),
+            coordinator.context_builder.build(coordinator._now_fn()),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,

@@ -160,7 +160,6 @@ from .processors import (
     NilmSampleProcessor,
     NilmTopologyProcessor,
     PowerQualityProcessor,
-    ProcessingContext,
     RunCycleProcessor,
     SolarFlowProcessor,
     StandbyProcessor,
@@ -781,7 +780,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._retention_mode_for_circuit(circuit_id)
             ],
             ha_local_date=_ha_local_date,
-            ha_time_zone=self._ha_time_zone,
+            ha_time_zone=self.context_builder.time_zone,
             sample_timestamp_is_at_or_after=_sample_timestamp_is_at_or_after,
             contextual_baseline_pruner=prune_contextual_baseline_state,
             weather_context_history_max_samples=WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
@@ -862,18 +861,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def last_source_update_entities(self: Self, value: Iterable[str]) -> None:
         self.source_updates.last_source_update_entities = tuple(value)
 
-    def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
-        """Build immutable runtime context for feature processors."""
-        return self.context_builder.build(now)
-
-    def _ha_time_zone(self: Self) -> str | None:
-        """Return Home Assistant's configured timezone name when available."""
-        return self.context_builder.time_zone()
-
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
-        context = self._build_processing_context(now)
+        context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
@@ -1911,7 +1902,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
-            time_zone=self._ha_time_zone(),
+            time_zone=self.context_builder.time_zone(),
         )
         self.state.run_cycle_count_by_circuit[circuit_id] = (
             cycle_summary.start_count
@@ -2064,7 +2055,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 else "°F"
             ),
             observed_at=now,
-            time_zone=self._ha_time_zone(),
+            time_zone=self.context_builder.time_zone(),
         )
         if outdoor_temperature_reading is not None:
             evidence["temperature_source_entity"] = outdoor_entity
@@ -2162,7 +2153,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AlertEvidence | None:
         result = self._water_context_alert_processor.process(
             config,
-            self._build_processing_context(now),
+            self.context_builder.build(now),
         )
         return result.alerts[0] if result.alerts else None
 
@@ -2458,8 +2449,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_time = _datetime_or_none(sample.get("timestamp"))
             if sample_time is not None and _ha_local_date(
                 sample_time,
-                self._ha_time_zone(),
-            ) >= _ha_local_date(now, self._ha_time_zone()):
+                self.context_builder.time_zone(),
+            ) >= _ha_local_date(now, self.context_builder.time_zone()):
                 continue
             if not _water_context_history_sample_is_dry(sample):
                 continue
@@ -2524,8 +2515,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
             if existing_time is not None and _ha_local_date(
                 existing_time,
-                self._ha_time_zone(),
-            ) == _ha_local_date(now, self._ha_time_zone()):
+                self.context_builder.time_zone(),
+            ) == _ha_local_date(now, self.context_builder.time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -2633,8 +2624,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_time = _datetime_or_none(raw_sample.get("timestamp"))
             if sample_time is None or _ha_local_date(
                 sample_time,
-                self._ha_time_zone(),
-            ) >= _ha_local_date(now, self._ha_time_zone()):
+                self.context_builder.time_zone(),
+            ) >= _ha_local_date(now, self.context_builder.time_zone()):
                 continue
             temperature = _float_or_none(raw_sample.get("temperature"))
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
@@ -2684,8 +2675,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
             if existing_time is not None and _ha_local_date(
                 existing_time,
-                self._ha_time_zone(),
-            ) == _ha_local_date(now, self._ha_time_zone()):
+                self.context_builder.time_zone(),
+            ) == _ha_local_date(now, self.context_builder.time_zone()):
                 if history[index] == sample:
                     return False
                 history[index] = sample
@@ -2989,7 +2980,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             return
 
         window_days = max(int(settings.window_days), 1)
-        today_date = _ha_local_date(now, self._ha_time_zone())
+        today_date = _ha_local_date(now, self.context_builder.time_zone())
         today = today_date.isoformat()
         history = self.store_data.energy_usage_by_circuit.setdefault(
             config.circuit_id,
@@ -3053,8 +3044,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_temp = _float_or_none(sample.get("temperature"))
             if (
                 sample_time is not None
-                and _ha_local_date(sample_time, self._ha_time_zone())
-                < _ha_local_date(now, self._ha_time_zone())
+                and _ha_local_date(sample_time, self.context_builder.time_zone())
+                < _ha_local_date(now, self.context_builder.time_zone())
                 and sample_temp is not None
                 and abs(sample_temp - outdoor_temperature) <= 3.0
             ):
@@ -3062,13 +3053,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if comparable_count >= 3:
             return
 
-        current_date = _ha_local_date(now, self._ha_time_zone())
+        current_date = _ha_local_date(now, self.context_builder.time_zone())
         self.store_data.weather_context_history_by_circuit[config.circuit_id] = [
             {
                 "timestamp": local_day_time(
                     current_date - timedelta(days=7 - index),
                     time(12, 0),
-                    self._ha_time_zone(),
+                    self.context_builder.time_zone(),
                 ).isoformat(),
                 "temperature": round(float(outdoor_temperature) + offset, 3),
                 "runtime_minutes": runtime,

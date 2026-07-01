@@ -143,6 +143,10 @@ class _SettingsCoordinator:
         ] = []
         self.context_calls: list[datetime] = []
         self.applied_feature_results: list[SimpleNamespace] = []
+        self.context_builder = SimpleNamespace(
+            build=self._record_processing_context,
+            time_zone=self._context_time_zone,
+        )
         self._energy_goal_processor = SimpleNamespace(
             refresh_state=self._refresh_energy_goal_state
         )
@@ -203,7 +207,7 @@ class _SettingsCoordinator:
             standby_min_samples=24,
         )
 
-    def _build_processing_context(self, now: datetime) -> SimpleNamespace:
+    def _record_processing_context(self, now: datetime) -> SimpleNamespace:
         self.context_calls.append(now)
         return self.goal_context
 
@@ -219,7 +223,7 @@ class _SettingsCoordinator:
     async def _apply_feature_result(self, result: SimpleNamespace) -> None:
         self.applied_feature_results.append(result)
 
-    def _ha_time_zone(self) -> str:
+    def _context_time_zone(self) -> str:
         return "UTC"
 
 

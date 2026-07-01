@@ -132,7 +132,7 @@ class ProcessingPipeline:
 
         balance_result = coordinator._mains_balance_processor.process(
             samples,
-            coordinator._build_processing_context(now),
+            coordinator.context_builder.build(now),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -141,7 +141,7 @@ class ProcessingPipeline:
 
         solar_result = coordinator._solar_flow_processor.process(
             samples,
-            coordinator._build_processing_context(now),
+            coordinator.context_builder.build(now),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -149,7 +149,7 @@ class ProcessingPipeline:
         )
 
         alerts: list[Any] = []
-        utility_context = coordinator._build_processing_context(now)
+        utility_context = coordinator.context_builder.build(now)
         for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
             config = coordinator._config_for_circuit(circuit_id)
             if config is None:
