@@ -3356,6 +3356,7 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
       ? `<p class="muted">Loading NILM graphs...</p>`
       : `
         ${this._renderDashboardNotificationGraph(alert)}
+        ${this._renderNilmWorkspaceLanes(workspace)}
         ${this._renderDashboardNilmMainsGraph(workspace)}
       `;
 
@@ -3381,6 +3382,30 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
           }
           .muted {
             color: var(--secondary-text-color, #6b7280);
+          }
+          .summary {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          }
+          .metric {
+            background: var(--secondary-background-color, #f4f6f8);
+            border: 1px solid var(--divider-color, #d8dee6);
+            border-radius: 6px;
+            padding: 10px;
+          }
+          .metric span {
+            color: var(--secondary-text-color, #6b7280);
+            display: block;
+            font-size: 12px;
+            margin-bottom: 4px;
+          }
+          .metric strong {
+            font-size: 16px;
+          }
+          .action-group {
+            display: grid;
+            gap: 8px;
           }
           .dashboard-chart-link {
             color: inherit;
