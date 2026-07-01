@@ -932,7 +932,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 sample,
                 events,
             ):
-                nilm_alert = self._alert_with_feedback(nilm_alert)
+                nilm_alert = self.evidence_actions.alert_with_feedback(nilm_alert)
                 if nilm_alert.feedback_status != "expected":
                     alerts.append(nilm_alert)
                 self.store_data.alerts.append(nilm_alert)
@@ -947,7 +947,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             await self._sync_setup_health_repairs(config.circuit_id)
             water_context_alert = self._observe_water_context(config, now)
             if water_context_alert is not None:
-                water_context_alert = self._alert_with_feedback(water_context_alert)
+                water_context_alert = self.evidence_actions.alert_with_feedback(
+                    water_context_alert
+                )
                 if water_context_alert.feedback_status != "expected":
                     alerts.append(water_context_alert)
                 self.store_data.alerts.append(water_context_alert)
@@ -3745,25 +3747,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         self.nilm_controller.apply_alert_feedback(alert, action, now)
 
-    def _retire_alert_id(self: Self, alert_id: str) -> None:
-        """Remove an alert from stored and active evidence after user action."""
-        self.evidence_actions.retire_alert_id(alert_id)
-
-    def _alert_for_id(self: Self, alert_id: str) -> AlertEvidence | None:
-        return self.evidence_actions.alert_for_id(alert_id)
-
-    def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
-        return self.evidence_actions.has_suppressed_alert_feedback(alert)
-
-    def _alert_feedback_for(
-        self: Self,
-        alert: AlertEvidence,
-    ) -> tuple[str | None, Mapping[str, Any]]:
-        return self.evidence_actions.alert_feedback_for(alert)
-
-    def _alert_with_feedback(self: Self, alert: AlertEvidence) -> AlertEvidence:
-        return self.evidence_actions.alert_with_feedback(alert)
-
     def _mark_store_dirty(self: Self) -> None:
         self.store_persistence.mark_dirty()
 
@@ -3800,7 +3783,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.state,
             self.store_data,
             result,
-            alert_feedback=self._alert_with_feedback,
+            alert_feedback=self.evidence_actions.alert_with_feedback,
             record_observation=self._record_recent_observation,
         )
         for alert in applied.notifications:
