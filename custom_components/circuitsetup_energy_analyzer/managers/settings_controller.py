@@ -11,7 +11,11 @@ from ..operating_detection import (
     OperatingThresholdSource,
 )
 from ..recommendation_guidance import recommendation_setting_default_value
-from ..settings_advisor import RecommendationStatus
+from ..settings_advisor import (
+    RecommendationDecision,
+    RecommendationStatus,
+    recommendation_evidence_fingerprint,
+)
 
 
 class SettingsController:
@@ -144,7 +148,7 @@ class SettingsController:
 
     async def async_deny_setting_recommendation(self, recommendation_id: str) -> None:
         """Record a denial for one pending setting recommendation."""
-        await self._coordinator._async_record_setting_recommendation_decision(
+        await self.async_record_setting_recommendation_decision(
             recommendation_id,
             RecommendationStatus.DENIED,
         )
@@ -154,7 +158,44 @@ class SettingsController:
         recommendation_id: str,
     ) -> None:
         """Record a dismissal for one pending setting recommendation."""
-        await self._coordinator._async_record_setting_recommendation_decision(
+        await self.async_record_setting_recommendation_decision(
             recommendation_id,
             RecommendationStatus.DISMISSED,
         )
+
+    async def async_record_setting_recommendation_decision(
+        self,
+        recommendation_id: str,
+        status: RecommendationStatus,
+    ) -> None:
+        """Record a terminal decision for one pending setting recommendation."""
+        coordinator = self._coordinator
+        recommendation = coordinator.store_data.settings_recommendations.get(
+            recommendation_id,
+        )
+        if (
+            recommendation is None
+            or recommendation.status is not RecommendationStatus.PENDING
+        ):
+            return
+
+        now = coordinator._now_fn()
+        coordinator.store_data.settings_recommendations[recommendation_id] = replace(
+            recommendation,
+            status=status,
+        )
+        coordinator.store_data.settings_recommendation_decisions[
+            recommendation.unique_key
+        ] = RecommendationDecision(
+            unique_key=recommendation.unique_key,
+            status=status,
+            decided_at=now,
+            denied_value=recommendation.suggested_value,
+            evidence_fingerprint=recommendation_evidence_fingerprint(
+                recommendation,
+            ),
+        )
+        coordinator._mark_store_dirty()
+        coordinator._refresh_settings_recommendation_state(now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
