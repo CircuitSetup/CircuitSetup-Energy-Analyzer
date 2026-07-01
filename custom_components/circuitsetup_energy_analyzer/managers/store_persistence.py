@@ -14,6 +14,8 @@ class StorePersistenceManager:
         *,
         newest_mapping_items: Callable[[Any, int], list[dict[str, Any]]],
         mapping_time: Callable[..., datetime],
+        alert_history_max_age: timedelta,
+        alert_history_max_items: int,
         alert_feedback_is_expired: Callable[[Any, datetime], bool],
         alert_feedback_max_age: timedelta,
         alert_feedback_max_items: int,
@@ -25,6 +27,8 @@ class StorePersistenceManager:
         self._coordinator = coordinator
         self._newest_mapping_items = newest_mapping_items
         self._mapping_time = mapping_time
+        self._alert_history_max_age = alert_history_max_age
+        self._alert_history_max_items = alert_history_max_items
         self._alert_feedback_is_expired = alert_feedback_is_expired
         self._alert_feedback_max_age = alert_feedback_max_age
         self._alert_feedback_max_items = alert_feedback_max_items
@@ -45,6 +49,16 @@ class StorePersistenceManager:
         store.data = self._coordinator.store_data
         await store.async_save()
         self.dirty = False
+
+    def prune_alert_history(self, now: datetime) -> None:
+        """Apply retention caps to stored alert history."""
+        store_data = self._coordinator.store_data
+        cutoff = now - self._alert_history_max_age
+        store_data.alerts = sorted(
+            (alert for alert in store_data.alerts if alert.timestamp >= cutoff),
+            key=lambda alert: alert.timestamp,
+            reverse=True,
+        )[: self._alert_history_max_items]
 
     def prune_nilm_history(self, now: datetime) -> None:
         """Apply retention caps to NILM store histories."""
