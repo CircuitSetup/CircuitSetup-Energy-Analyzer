@@ -2204,6 +2204,71 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
     assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
 
 
+def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "appliance_id": "dishwasher",
+                "display_name": "Dishwasher",
+                "mains_circuit_id": "mains",
+                "confirmed_session_ids": ["session-confirmed", "session-merged"],
+                "rejected_session_ids": ["session-rejected"],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-confirmed",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:45:00+00:00",
+                "assignment_id": "assignment-dishwasher",
+            },
+            {
+                "session_id": "session-merged",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T09:00:00+00:00",
+                "end": "2026-06-06T09:45:00+00:00",
+                "assignment_id": "assignment-before-merge",
+            },
+            {
+                "session_id": "session-pending",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T10:00:00+00:00",
+                "end": "2026-06-06T10:45:00+00:00",
+                "assignment_id": "assignment-dishwasher",
+            },
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    sessions = {session["session_id"]: session for session in payload["sessions"]}
+    assert "validate" not in sessions["session-confirmed"]["actions"]
+    assert "reject" not in sessions["session-confirmed"]["actions"]
+    assert "validate" not in sessions["session-merged"]["actions"]
+    assert "reject" not in sessions["session-merged"]["actions"]
+    assert "validate" in sessions["session-pending"]["actions"]
+    assert "reject" in sessions["session-pending"]["actions"]
+
+
 def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         nilm_workspace_payload,

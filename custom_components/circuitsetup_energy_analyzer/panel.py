@@ -644,15 +644,18 @@ def nilm_workspace_payload(
     )
     assignment_options = _nilm_assignment_options(assignments)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
+    reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
     stored_sessions = _nilm_session_history_for_circuit(
         coordinator,
         config.circuit_id,
+        reviewed_session_ids=reviewed_session_ids,
     )
     all_generated_sessions = _nilm_workspace_sessions(
         edges,
         config.circuit_id,
         signatures=signatures,
         assignments=assignments,
+        reviewed_session_ids=reviewed_session_ids,
         limit=None,
     )
     all_sessions = _merge_nilm_session_payloads(
@@ -670,6 +673,7 @@ def nilm_workspace_payload(
                 config.circuit_id,
                 signatures=signatures,
                 assignments=assignments,
+                reviewed_session_ids=reviewed_session_ids,
             ),
             stored_sessions,
         ),
@@ -2366,6 +2370,7 @@ def _nilm_workspace_sessions(
     *,
     signatures: list[dict[str, Any]],
     assignments: list[dict[str, Any]],
+    reviewed_session_ids: Mapping[str, set[str]] | None = None,
     limit: int | None = MAX_NILM_WORKSPACE_SESSIONS,
 ) -> list[dict[str, Any]]:
     sessions: list[NilmSession] = []
@@ -2394,7 +2399,13 @@ def _nilm_workspace_sessions(
         )
         if limit is not None and len(sessions) >= limit:
             break
-    payloads = [_nilm_session_payload(session) for session in sessions]
+    payloads = [
+        _nilm_session_payload(
+            session,
+            reviewed_session_ids=reviewed_session_ids,
+        )
+        for session in sessions
+    ]
     return payloads if limit is None else payloads[:limit]
 
 
@@ -2449,16 +2460,38 @@ def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
 def _nilm_session_history_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    reviewed_session_ids: Mapping[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     store_data = getattr(coordinator, "store_data", None)
     sessions_by_circuit = getattr(store_data, "nilm_session_history_by_circuit", {})
     if not isinstance(sessions_by_circuit, Mapping):
         return []
     return [
-        _nilm_session_payload_with_actions(dict(session))
+        _nilm_session_payload_with_actions(
+            dict(session),
+            reviewed_session_ids=reviewed_session_ids,
+        )
         for session in _iter_items(sessions_by_circuit.get(circuit_id))
         if isinstance(session, Mapping)
     ]
+
+
+def _nilm_reviewed_session_ids_by_assignment(
+    assignments: Iterable[Mapping[str, Any]],
+) -> dict[str, set[str]]:
+    reviewed: dict[str, set[str]] = {}
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not assignment_id:
+            continue
+        reviewed_ids = reviewed.setdefault(assignment_id, set())
+        for key in ("confirmed_session_ids", "rejected_session_ids"):
+            for value in _iter_items(assignment.get(key)):
+                session_id = str(value or "").strip()
+                if session_id:
+                    reviewed_ids.add(session_id)
+    return reviewed
 
 
 def _nilm_session_display_labels(
@@ -2552,11 +2585,22 @@ def _nilm_edges_matching_signature(
     ]
 
 
-def _nilm_session_payload(session: NilmSession) -> dict[str, Any]:
-    return _nilm_session_payload_with_actions(nilm_session_to_dict(session))
+def _nilm_session_payload(
+    session: NilmSession,
+    *,
+    reviewed_session_ids: Mapping[str, set[str]] | None = None,
+) -> dict[str, Any]:
+    return _nilm_session_payload_with_actions(
+        nilm_session_to_dict(session),
+        reviewed_session_ids=reviewed_session_ids,
+    )
 
 
-def _nilm_session_payload_with_actions(payload: dict[str, Any]) -> dict[str, Any]:
+def _nilm_session_payload_with_actions(
+    payload: dict[str, Any],
+    *,
+    reviewed_session_ids: Mapping[str, set[str]] | None = None,
+) -> dict[str, Any]:
     session_id = str(payload.get("session_id") or "").strip()
     circuit_id = str(payload.get("mains_circuit_id") or "").strip()
     if session_id and circuit_id:
@@ -2578,7 +2622,19 @@ def _nilm_session_payload_with_actions(payload: dict[str, Any]) -> dict[str, Any
             }
         }
         assignment_id = str(payload.get("assignment_id") or "").strip()
-        if assignment_id:
+        if (
+            assignment_id
+            and (
+                reviewed_session_ids is None
+                or (
+                    assignment_id in reviewed_session_ids
+                    and all(
+                        session_id not in ids
+                        for ids in reviewed_session_ids.values()
+                    )
+                )
+            )
+        ):
             action_data = {
                 ATTR_CIRCUIT_ID: circuit_id,
                 ATTR_SESSION_ID: session_id,
