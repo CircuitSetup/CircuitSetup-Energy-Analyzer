@@ -2247,6 +2247,18 @@ def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
     assert formatter.index(null_guard) < formatter.index(coercion)
 
 
+def test_appliance_detail_percent_comparisons_format_without_extra_space() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const rendered = panel._formatComparisonValue({ unit: "%" }, 74);
+if (rendered !== "74%") {
+  throw new Error(`expected compact percent label, got ${rendered}`);
+}
+"""
+    )
+
+
 def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
     setup_health_api_path = (

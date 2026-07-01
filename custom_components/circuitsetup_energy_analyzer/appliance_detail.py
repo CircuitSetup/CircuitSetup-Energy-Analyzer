@@ -362,9 +362,43 @@ def metric_comparisons_for_circuit(
             "latest_real_power_w_by_circuit",
             ("real_power", "current_power_w"),
         ),
+        (
+            "demand_peak_w",
+            "Demand peak",
+            "W",
+            "peak_demand_w_by_circuit",
+            ("demand_peak_w", "peak_demand_w"),
+        ),
+        (
+            "capacity_usage_percent",
+            "Capacity usage",
+            "%",
+            "capacity_usage_by_circuit",
+            ("capacity_usage_percent", "capacity_usage"),
+        ),
+        (
+            "solar_covered_share_percent",
+            "Solar-covered share",
+            "%",
+            "solar_flexible_load_coverage_percent_by_circuit",
+            (
+                "solar_covered_share_percent",
+                "solar_flexible_load_coverage_percent",
+            ),
+        ),
     )
     comparisons: list[MetricComparison] = []
     for metric_id, label, unit, field, baseline_features in specs:
+        if (
+            metric_id == "capacity_usage_percent"
+            and _mapping_status(
+                state,
+                "capacity_status_by_circuit",
+                config.circuit_id,
+            )
+            == "unconfigured"
+        ):
+            continue
         current = _state_number(state, field, config.circuit_id)
         baseline = _comparison_baseline(
             coordinator,
@@ -752,6 +786,25 @@ def _comparison_baseline(
                     low,
                     high,
                     _number_or_none(evidence.get("contextual_baseline_median_kwh")),
+                    _number_or_none(evidence.get("contextual_baseline_confidence")),
+                    "contextual_baseline",
+                )
+
+    if metric_id == "demand_peak_w":
+        evidence = _mapping_for_circuit(
+            state,
+            "demand_evidence_by_circuit",
+            circuit_id,
+        )
+        contextual_range = evidence.get("contextual_expected_range_w")
+        if isinstance(contextual_range, list | tuple) and len(contextual_range) >= 2:
+            low = _number_or_none(contextual_range[0])
+            high = _number_or_none(contextual_range[1])
+            if low is not None or high is not None:
+                return (
+                    low,
+                    high,
+                    _number_or_none(evidence.get("contextual_baseline_median_w")),
                     _number_or_none(evidence.get("contextual_baseline_confidence")),
                     "contextual_baseline",
                 )

@@ -3365,8 +3365,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (value === null || value === undefined) {
       return "Unknown";
     }
-    const unit = comparison && comparison.unit ? ` ${comparison.unit}` : "";
-    return `${this._formatNumber(value)}${unit}`;
+    const unit = comparison && comparison.unit ? String(comparison.unit) : "";
+    if (unit === "%") {
+      return `${this._formatNumber(value)}%`;
+    }
+    return `${this._formatNumber(value)}${unit ? ` ${unit}` : ""}`;
   }
 
   _sourceLabel(sourceType) {
