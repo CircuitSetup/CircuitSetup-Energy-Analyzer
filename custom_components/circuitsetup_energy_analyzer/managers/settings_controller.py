@@ -17,6 +17,10 @@ from ..billing import BillingCycleSettings
 from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
 from ..const import CONF_ADVANCED_SETTINGS
 from ..cost import CostSettings
+from ..cycles import (
+    RUN_CYCLE_DURATION_FEATURE,
+    cycle_baseline_feature_values,
+)
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
@@ -25,10 +29,12 @@ from ..metric_consistency import (
     DEFAULT_MIN_APPARENT_POWER_VA,
     DEFAULT_POWER_FACTOR_TOLERANCE,
 )
+from ..models import EventType
 from ..operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
     OPERATING_DETECTION_SOURCE,
     OperatingThresholdSource,
+    resolve_operating_detection_from_settings,
 )
 from ..phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -172,12 +178,159 @@ class SettingsController:
                     config.circuit_id,
                 ),
             ),
-            feature_history=coordinator._advisor_feature_history_for_circuit(
+            feature_history=self.advisor_feature_history_for_circuit(
                 config,
                 now,
             ),
             decisions=coordinator.store_data.settings_recommendation_decisions,
         )
+
+    def advisor_feature_history_for_circuit(
+        self,
+        config: Any,
+        now: Any,
+    ) -> dict[str, Any]:
+        """Build retained feature history used by settings recommendations."""
+        coordinator = self._coordinator
+        circuit_id = config.circuit_id
+        feature_history: dict[str, Any] = {
+            "energy_usage_days": [],
+            "cycles": [],
+            "operating_idle_samples": [],
+            "operating_start_samples": [],
+            "standby_samples_w": [],
+            "current_samples": [],
+            "leg_imbalance_ratios": [],
+            "dual_phase_total_power_w": [],
+            "apparent_power_residual_percent": [],
+            "power_factor_residual": [],
+            "apparent_power_samples_va": [],
+            "negative_balance_w": [],
+            "solar_export_w": [],
+        }
+
+        usage_history = coordinator.store_data.energy_usage_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        usage_days = usage_history.get("days")
+        if isinstance(usage_days, list):
+            feature_history["energy_usage_days"] = list(usage_days)
+
+        merge_gap_seconds = resolve_operating_detection_from_settings(
+            config,
+            getattr(
+                coordinator.store_data,
+                "operating_detection_settings_by_circuit",
+                {},
+            ).get(circuit_id, {}),
+        ).profile.merge_gap_seconds
+        cycle_values = cycle_baseline_feature_values(
+            coordinator.store_data.events,
+            circuit_id=circuit_id,
+            now=now,
+            merge_gap_seconds=merge_gap_seconds,
+            time_zone=coordinator._ha_time_zone(),
+        )
+        feature_history["cycles"] = [
+            {"duration_minutes": duration_seconds / 60.0}
+            for duration_seconds in _numeric_items(
+                cycle_values.get(RUN_CYCLE_DURATION_FEATURE, []),
+            )
+        ]
+
+        standby_history = coordinator.store_data.standby_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        standby_samples = standby_history.get("samples")
+        if isinstance(standby_samples, list):
+            feature_history["operating_idle_samples"] = [
+                dict(sample)
+                for sample in standby_samples
+                if isinstance(sample, Mapping)
+            ]
+        feature_history["standby_samples_w"] = _numeric_items(
+            standby_samples,
+            keys=("real_power_w",),
+        )
+
+        feature_history["operating_start_samples"] = [
+            {
+                "timestamp": event.timestamp.isoformat(),
+                "power_w": float(event.features["startup_power_w"]),
+            }
+            for event in coordinator.store_data.events
+            if (
+                event.circuit_id == circuit_id
+                and event.event_type is EventType.START
+                and "startup_power_w" in event.features
+            )
+        ]
+
+        demand_history = coordinator.store_data.demand_by_circuit.get(circuit_id, {})
+        feature_history["current_samples"] = _numeric_items(
+            demand_history.get("capacity_current_samples"),
+            keys=("current_amps", "current_a", "amps"),
+        )
+        feature_history["current_samples"].extend(
+            _numeric_items(
+                demand_history.get("samples"),
+                keys=("current_a", "current_amps", "amps"),
+            )
+        )
+
+        leg_evidence = coordinator.state.leg_imbalance_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["leg_imbalance_ratios"] = _numeric_items(
+            [leg_evidence],
+            keys=("leg_imbalance_ratio",),
+        )
+        total_power = _sum_optional_values(
+            leg_evidence.get("left_real_power_w"),
+            leg_evidence.get("right_real_power_w"),
+        )
+        if total_power is not None:
+            feature_history["dual_phase_total_power_w"] = [total_power]
+
+        metric_evidence = coordinator.state.metric_consistency_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["apparent_power_residual_percent"] = _numeric_items(
+            [metric_evidence],
+            keys=("apparent_power_difference_percent",),
+        )
+        feature_history["power_factor_residual"] = _numeric_items(
+            [metric_evidence],
+            keys=("power_factor_difference",),
+        )
+        feature_history["apparent_power_samples_va"] = _numeric_items(
+            [metric_evidence],
+            keys=("reported_apparent_power_va",),
+        )
+
+        balance_evidence = coordinator.state.balance_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["negative_balance_w"] = _numeric_items(
+            [balance_evidence],
+            keys=("balance_power_w",),
+        )
+
+        solar_evidence = coordinator.state.solar_flow_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        feature_history["solar_export_w"] = _numeric_items(
+            [solar_evidence],
+            keys=("grid_export_w", "solar_grid_export_w"),
+        )
+
+        return feature_history
 
     def unhelpful_alert_setting_recommendations(
         self,
@@ -1749,6 +1902,45 @@ def _positive_float_value(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
+
+
+def _numeric_items(
+    raw_items: Any,
+    *,
+    keys: tuple[str, ...] = (),
+) -> list[float]:
+    if raw_items is None:
+        return []
+    try:
+        items = list(raw_items)
+    except TypeError:
+        items = [raw_items]
+
+    values: list[float] = []
+    for item in items:
+        if keys and isinstance(item, Mapping):
+            for key in keys:
+                if key in item:
+                    _append_float(values, item.get(key))
+                    break
+            continue
+        _append_float(values, item)
+    return values
+
+
+def _append_float(values: list[float], raw_value: Any) -> None:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return
+    values.append(value)
+
+
+def _sum_optional_values(*raw_values: Any) -> float | None:
+    values = _numeric_items(raw_values)
+    if not values:
+        return None
+    return sum(abs(value) for value in values)
 
 
 def _optional_float_value(value: Any) -> float | None:
