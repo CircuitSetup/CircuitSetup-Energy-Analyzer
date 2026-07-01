@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from .. import notifications
-from ..alerting import alert_anomaly_score
+from ..alerting import alert_anomaly_score, alert_feedback_fingerprint
 from ..models import AlertEvidence
+
+ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
+ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
 
 
 class EvidenceActionController:
@@ -89,22 +93,62 @@ class EvidenceActionController:
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
-        return await self._coordinator._store_alert_feedback(alert_id, "expected")
+        return await self.async_store_alert_feedback(alert_id, "expected")
 
     async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
         """Mark an alert pattern as unhelpful for future notifications."""
-        return await self._coordinator._store_alert_feedback(alert_id, "unhelpful")
+        return await self.async_store_alert_feedback(alert_id, "unhelpful")
 
     async def async_mark_nilm_appliance_correct(self, alert_id: str) -> bool:
         """Mark an estimated NILM appliance notification as correct."""
-        return await self._coordinator._store_alert_feedback(alert_id, "correct")
+        return await self.async_store_alert_feedback(alert_id, "correct")
 
     async def async_mark_nilm_appliance_wrong(self, alert_id: str) -> bool:
         """Mark an estimated NILM appliance notification as the wrong appliance."""
-        return await self._coordinator._store_alert_feedback(
+        return await self.async_store_alert_feedback(
             alert_id,
             "wrong_appliance",
         )
+
+    async def async_store_alert_feedback(self, alert_id: str, action: str) -> bool:
+        """Store one alert-feedback decision and retire the visible alert."""
+        coordinator = self._coordinator
+        alert = self.alert_for_id(alert_id)
+        if alert is None:
+            return False
+        now = coordinator._now_fn()
+        fingerprint = alert_feedback_fingerprint(
+            alert,
+            config=coordinator._config_for_circuit(alert.circuit_id),
+        )
+        existing = coordinator.store_data.alert_feedback.get(fingerprint, {})
+        evidence_count = (
+            _positive_int_value(existing.get("evidence_count"), default=0) + 1
+        )
+        expires_at = _alert_feedback_expires_at(action, now)
+        coordinator.store_data.alert_feedback[fingerprint] = {
+            "fingerprint": fingerprint,
+            "status": action,
+            "action": action,
+            "source_alert_id": alert_id,
+            "alert_id": alert_id,
+            "decided_at": now.isoformat(),
+            "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "last_seen": now.isoformat(),
+            "circuit_id": alert.circuit_id,
+            "feature": _alert_feature(alert),
+            "change_ratio": alert.change_ratio,
+            "observed_value": alert.observed_value,
+            "baseline_value": alert.baseline_value,
+            "evidence_count": evidence_count,
+        }
+        coordinator._apply_nilm_alert_feedback(alert, action, now)
+        self.retire_alert_id(alert_id)
+        coordinator._refresh_all_ux_state(now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+        return True
 
     def retire_alert_id(self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
@@ -151,3 +195,27 @@ class EvidenceActionController:
             if notifications.notification_id_for_alert(alert) == alert_id:
                 return alert
         return None
+
+
+def _alert_feature(alert: AlertEvidence) -> str:
+    if alert.feature:
+        return alert.feature
+    if alert.event_type is not None:
+        return alert.event_type.value
+    return "alert"
+
+
+def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:
+    if action == "expected":
+        return now + ALERT_EXPECTED_FEEDBACK_TTL
+    if action == "unhelpful":
+        return now + ALERT_UNHELPFUL_FEEDBACK_TTL
+    return None
+
+
+def _positive_int_value(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default

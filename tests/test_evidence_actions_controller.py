@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.alerting import (
+    alert_feedback_fingerprint,
+)
 from custom_components.circuitsetup_energy_analyzer.managers.evidence_actions import (
     EvidenceActionController,
 )
@@ -20,13 +23,16 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 class _ActionCoordinator:
     def __init__(self) -> None:
         self.state = SimpleNamespace()
-        self.store_data = SimpleNamespace(maintenance_by_circuit={}, alerts=[])
+        self.store_data = SimpleNamespace(
+            maintenance_by_circuit={},
+            alert_feedback={},
+            alerts=[],
+        )
         self.paused_circuits: set[str] = set()
         self.refreshed: list[tuple[str, datetime] | datetime] = []
         self.updated: list[object] = []
         self.saved: list[datetime] = []
         self.dirty_count = 0
-        self.feedback_calls: list[tuple[str, str]] = []
         self.relearned: list[str] = []
         self.now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
 
@@ -52,9 +58,17 @@ class _ActionCoordinator:
     def _mark_store_dirty(self) -> None:
         self.dirty_count += 1
 
-    async def _store_alert_feedback(self, alert_id: str, action: str) -> bool:
-        self.feedback_calls.append((alert_id, action))
-        return True
+    def _config_for_circuit(self, circuit_id: str) -> None:
+        del circuit_id
+        return None
+
+    def _apply_nilm_alert_feedback(
+        self,
+        alert: AlertEvidence,
+        action: str,
+        now: datetime,
+    ) -> None:
+        del alert, action, now
 
     async def async_relearn_baseline(self, circuit_id: str) -> None:
         self.relearned.append(circuit_id)
@@ -125,8 +139,6 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
         relearn_on_end=True,
     )
     await controller.async_end_maintenance("fridge")
-    expected = await controller.async_mark_alert_expected("alert-1")
-    unhelpful = await controller.async_mark_alert_unhelpful("alert-2")
 
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["note"] == (
@@ -135,9 +147,29 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
     assert coordinator.relearned == ["fridge"]
     assert "fridge" not in coordinator.paused_circuits
     assert coordinator.dirty_count == 2
-    assert expected is True
-    assert unhelpful is True
-    assert coordinator.feedback_calls == [
-        ("alert-1", "expected"),
-        ("alert-2", "unhelpful"),
-    ]
+
+
+@pytest.mark.asyncio
+async def test_evidence_action_controller_stores_feedback_and_retires_alert() -> None:
+    coordinator = _ActionCoordinator()
+    alert = _alert("fridge", "reactive_power")
+    alert_id = notification_id_for_alert(alert)
+    coordinator.store_data.alerts = [alert]
+    coordinator.state.active_alerts_by_circuit = {"fridge": [alert]}
+    controller = EvidenceActionController(coordinator)
+
+    result = await controller.async_mark_alert_expected(alert_id)
+
+    fingerprint = alert_feedback_fingerprint(alert)
+    feedback = coordinator.store_data.alert_feedback[fingerprint]
+    assert result is True
+    assert feedback["fingerprint"] == fingerprint
+    assert feedback["action"] == "expected"
+    assert feedback["alert_id"] == alert_id
+    assert feedback["evidence_count"] == 1
+    assert feedback["expires_at"] == "2026-09-28T12:00:00+00:00"
+    assert coordinator.store_data.alerts == []
+    assert coordinator.state.active_alerts_by_circuit == {}
+    assert coordinator.refreshed == [coordinator.now]
+    assert coordinator.updated == [coordinator.state]
+    assert coordinator.saved == [coordinator.now]
