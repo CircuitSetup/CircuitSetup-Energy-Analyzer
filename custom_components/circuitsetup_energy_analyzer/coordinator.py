@@ -1805,30 +1805,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         budget_alert_ratio: Any = None,
     ) -> None:
         """Persist billing-cycle usage forecast settings for one circuit."""
-        config = self._config_for_circuit(circuit_id)
-        current = self._billing_cycle_settings_for_config(config, circuit_id)
-        settings: dict[str, Any] = {
-            "cycle_start_day": _positive_int_value(
-                cycle_start_day,
-                default=current.cycle_start_day,
-            ),
-            "budget_alert_ratio": _positive_float_value(
-                budget_alert_ratio,
-                default=current.budget_alert_ratio,
-            ),
-        }
-        budget = _optional_positive_float_value(
+        await self.settings_controller.async_set_billing_cycle_settings(
+            circuit_id,
+            cycle_start_day,
             budget_kwh,
-            default=current.budget_kwh,
+            budget_alert_ratio,
         )
-        if budget is not None:
-            settings["budget_kwh"] = budget
-        self.store_data.billing_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_cost_settings(
         self: Self,
@@ -1842,41 +1824,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         tou_name: Any = None,
     ) -> None:
         """Persist cost and Time-of-Use settings for one circuit."""
-        config = self._config_for_circuit(circuit_id)
-        current = self._cost_settings_for_config(config, circuit_id)
-        settings: dict[str, Any] = {
-            "cycle_start_day": _positive_int_value(
-                cycle_start_day,
-                default=current.cycle_start_day,
-            ),
-        }
-        default_rate = _optional_positive_float_value(
+        await self.settings_controller.async_set_cost_settings(
+            circuit_id,
+            cycle_start_day,
             default_rate_per_kwh,
-            default=current.default_rate_per_kwh,
-        )
-        tou_rate = _optional_positive_float_value(
             tou_rate_per_kwh,
-            default=current.tou_rate_per_kwh,
-        )
-        if default_rate is not None:
-            settings["default_rate_per_kwh"] = default_rate
-        if tou_rate is not None:
-            settings["tou_rate_per_kwh"] = tou_rate
-        settings["tou_start"] = str(tou_start or current.tou_start or "")
-        settings["tou_end"] = str(tou_end or current.tou_end or "")
-        weekdays = _weekday_csv_value(
+            tou_start,
+            tou_end,
             tou_weekdays,
-            default=current.tou_weekdays,
+            tou_name,
         )
-        if weekdays:
-            settings["tou_weekdays"] = weekdays
-        settings["tou_name"] = str(tou_name or current.tou_name or "Peak")
-        self.store_data.cost_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_demand_settings(
         self: Self,
@@ -1986,53 +1943,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         utility_statistic_period: Any = None,
     ) -> None:
         """Persist utility-vs-measured kWh comparison settings."""
-        current = self._utility_comparison_settings_for_circuit(circuit_id)
-        utility_entity = (
-            current.utility_energy_entity
-            if utility_energy_entity is None
-            else str(utility_energy_entity).strip()
-        )
-        utility_statistic = (
-            current.utility_statistic_id
-            if utility_statistic_id is None
-            else str(utility_statistic_id).strip()
-        )
-        source_type = (
-            current.utility_source_type
-            if utility_source_type is None
-            else str(utility_source_type).strip()
-        )
-        statistic_period = (
-            current.utility_statistic_period
-            if utility_statistic_period is None
-            else str(utility_statistic_period).strip()
-        )
-        measured_entities = _entity_id_tuple_value(
+        await self.settings_controller.async_set_utility_comparison_settings(
+            circuit_id,
+            utility_energy_entity,
             measured_energy_entities,
-            default=current.measured_energy_entities,
+            tolerance_percent,
+            utility_statistic_id,
+            utility_source_type,
+            utility_statistic_period,
         )
-        settings: dict[str, Any] = {
-            "tolerance_percent": _nonnegative_float_value(
-                tolerance_percent,
-                default=current.tolerance_percent,
-            ),
-        }
-        if utility_entity:
-            settings["utility_energy_entity"] = utility_entity
-        if utility_statistic:
-            settings["utility_statistic_id"] = utility_statistic
-        if source_type:
-            settings["utility_source_type"] = source_type
-        if statistic_period:
-            settings["utility_statistic_period"] = statistic_period
-        if measured_entities:
-            settings["measured_energy_entities"] = list(measured_entities)
-        self.store_data.utility_comparison_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_start_maintenance(
         self: Self,
