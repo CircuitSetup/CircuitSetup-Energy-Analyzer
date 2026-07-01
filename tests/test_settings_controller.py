@@ -611,3 +611,18 @@ async def test_settings_controller_sets_goal_and_activity_settings() -> None:
     assert coordinator.refreshed_circuits == [("fridge", coordinator.now)] * 2
     assert coordinator.updated == [coordinator.state] * 2
     assert coordinator.saved == [coordinator.now] * 2
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_sets_circuit_sensitivity() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_circuit_sensitivity("fridge", "high")
+
+    assert coordinator.store_data.sensitivity_by_circuit["fridge"] == "sensitive"
+    assert coordinator.dirty_count == 1
+    assert coordinator.refreshed_circuits == [("fridge", coordinator.now)]
+    assert coordinator.updated == [coordinator.state]
+    assert coordinator.saved == [coordinator.now]
