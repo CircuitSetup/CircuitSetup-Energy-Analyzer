@@ -79,6 +79,120 @@ class SettingsController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
 
+    async def async_set_energy_usage_settings(
+        self,
+        circuit_id: str,
+        window_days: Any = None,
+        daily_spike_ratio: Any = None,
+    ) -> None:
+        """Persist daily energy usage spike settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._energy_usage_settings_for_config(config, circuit_id)
+        settings = {
+            "window_days": _positive_int_value(
+                window_days,
+                default=current.window_days,
+            ),
+            "daily_spike_ratio": _positive_float_value(
+                daily_spike_ratio,
+                default=current.daily_spike_ratio,
+            ),
+        }
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.energy_usage_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_demand_settings(
+        self,
+        circuit_id: str,
+        window_minutes: Any = None,
+        demand_limit_w: Any = None,
+    ) -> None:
+        """Persist rolling demand settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._demand_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "window_minutes": _positive_int_value(
+                window_minutes,
+                default=current.window_minutes,
+            ),
+        }
+        limit_w = _optional_positive_float_value(
+            demand_limit_w,
+            default=current.demand_limit_w,
+        )
+        if limit_w is not None:
+            settings["demand_limit_w"] = limit_w
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.demand_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_capacity_settings(
+        self,
+        circuit_id: str,
+        breaker_amps: Any = None,
+        warning_ratio: Any = None,
+    ) -> None:
+        """Persist circuit capacity settings for one circuit."""
+        coordinator = self._coordinator
+        current = coordinator._capacity_settings_for_config(circuit_id)
+        settings: dict[str, Any] = {
+            "warning_ratio": _positive_float_value(
+                warning_ratio,
+                default=current.warning_ratio,
+            ),
+        }
+        capacity_amps = _optional_positive_float_value(
+            breaker_amps,
+            default=current.breaker_amps,
+        )
+        if capacity_amps is not None:
+            settings["breaker_amps"] = capacity_amps
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.capacity_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_standby_settings(
+        self,
+        circuit_id: str,
+        window_hours: Any = None,
+        standby_threshold_w: Any = None,
+        always_on_alert_w: Any = None,
+    ) -> None:
+        """Persist Always On and standby settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._standby_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "window_hours": _positive_int_value(
+                window_hours,
+                default=current.window_hours,
+            ),
+            "standby_threshold_w": _positive_float_value(
+                standby_threshold_w,
+                default=current.standby_threshold_w,
+            ),
+        }
+        alert_w = _optional_positive_float_value(
+            always_on_alert_w,
+            default=current.always_on_alert_w,
+        )
+        if alert_w is not None:
+            settings["always_on_alert_w"] = alert_w
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.standby_settings_by_circuit,
+            settings,
+        )
+
     async def async_set_leg_imbalance_settings(
         self,
         circuit_id: str,
@@ -782,7 +896,27 @@ def _replace_if_present_as(
         target[circuit_id] = values
 
 
+def _positive_int_value(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 def _positive_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0.0 else default
+
+
+def _optional_positive_float_value(
+    value: Any,
+    *,
+    default: float | None,
+) -> float | None:
     try:
         parsed = float(value)
     except (TypeError, ValueError):
