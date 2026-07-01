@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import re
@@ -857,10 +856,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def last_source_update_entities(self: Self, value: Iterable[str]) -> None:
         self.source_updates.last_source_update_entities = tuple(value)
 
-    @property
-    def _source_update_task(self: Self) -> asyncio.Task[Any] | None:
-        return self.source_updates.source_update_task
-
     def _apply_config_entry_settings(self: Self) -> None:
         """Apply setup/options settings to store-backed runtime setting maps."""
         self.settings_controller.apply_config_entry_settings()
@@ -881,18 +876,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         settings: dict[str, Any],
     ) -> None:
         self.settings_controller.apply_advanced_settings(circuit_id, settings)
-
-    async def _async_handle_source_state_change(self: Self, event: Any) -> None:
-        """Handle Home Assistant source state changes."""
-        await self.source_updates.async_handle_source_state_change(event)
-
-    async def _async_process_debounced_source_update(self: Self) -> None:
-        """Process one analyzer update for a burst of source state changes."""
-        await self.source_updates.async_process_debounced_source_update()
-
-    def _cancel_pending_source_update(self: Self) -> None:
-        """Cancel queued source-state processing during restart/unload."""
-        self.source_updates.cancel_pending_source_update()
 
     def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
         """Build immutable runtime context for feature processors."""
