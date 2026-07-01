@@ -427,6 +427,29 @@ def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None
     assert "sensor.fridge_alert_evidence" not in appliance_text
 
 
+def test_dashboard_appliance_buttons_open_appliance_detail_not_raw_evidence() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    buttons = [
+        card
+        for card in _dashboard_cards(dashboard)
+        if card.get("type") == "button"
+    ]
+    detail_buttons = [
+        card for card in buttons if "Detail" in str(card.get("name", ""))
+    ]
+
+    assert detail_buttons
+    assert any(card["name"] == "Open Refrigerator Detail" for card in detail_buttons)
+    for card in detail_buttons:
+        path = card["tap_action"]["navigation_path"]
+        assert "appliance_detail=1" in path
+        assert "alert_id=" not in path
+    assert "Open Refrigerator Evidence" not in str(dashboard)
+
+
 def test_generated_dashboard_omits_dropdown_and_switch_controls() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
@@ -576,25 +599,26 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
     assert "resources" not in dashboard
 
 
-def test_standard_dashboard_links_appliance_evidence_without_control_entities() -> None:
+def test_standard_dashboard_links_appliance_detail_without_control_entities() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
     appliance_status = _dashboard_section(dashboard, "Appliance Status")
 
-    evidence_card = next(
+    detail_card = next(
         card
         for card in _dashboard_cards(appliance_status)
-        if card.get("name") == "Open Refrigerator Evidence"
+        if card.get("name") == "Open Refrigerator Detail"
     )
     refs = _entity_refs(appliance_status)
 
-    assert evidence_card["type"] == "button"
-    assert evidence_card["tap_action"] == {
+    assert detail_card["type"] == "button"
+    assert detail_card["tap_action"] == {
         "action": "navigate",
         "navigation_path": (
-            "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge"
+            "/circuitsetup-energy-analyzer-evidence?"
+            "circuit_id=fridge&appliance_detail=1"
         ),
     }
     assert "sensor.fridge_alert_evidence" not in refs

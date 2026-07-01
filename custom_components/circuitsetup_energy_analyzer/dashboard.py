@@ -502,13 +502,11 @@ def _behavior_watchlist_section(
         cards.append(
             {
                 "type": "button",
-                "name": f"Open {_circuit_name(circuit)} Evidence",
-                "icon": "mdi:clipboard-search-outline",
+                "name": f"Open {_circuit_name(circuit)} Detail",
+                "icon": "mdi:clipboard-text-search-outline",
                 "tap_action": {
                     "action": "navigate",
-                    "navigation_path": (
-                        f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}"
-                    ),
+                    "navigation_path": _appliance_detail_path(circuit_id),
                 },
             }
         )
@@ -552,14 +550,11 @@ def _appliance_status_section(
                 cards.append(
                     {
                         "type": "button",
-                        "name": f"Open {name} Evidence",
-                        "icon": "mdi:chart-line",
+                        "name": f"Open {name} Detail",
+                        "icon": "mdi:clipboard-text-search-outline",
                         "tap_action": {
                             "action": "navigate",
-                            "navigation_path": (
-                                f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
-                                f"circuit_id={circuit_id}"
-                            ),
+                            "navigation_path": _appliance_detail_path(circuit_id),
                         },
                     }
                 )
@@ -1564,6 +1559,10 @@ def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> 
 
 def _markdown_card(content: str) -> dict[str, str]:
     return {"type": "markdown", "content": content}
+
+
+def _appliance_detail_path(circuit_id: str) -> str:
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}&appliance_detail=1"
 
 
 def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:
