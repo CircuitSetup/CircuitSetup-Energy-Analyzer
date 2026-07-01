@@ -4306,6 +4306,92 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_history_validation_recomputes_existing_matches() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 14, 0, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-dishwasher",
+                        "mains_circuit_id": "mains",
+                        "appliance_id": "dishwasher",
+                        "label": "Dishwasher",
+                        "start": "2026-06-02T12:10:00+00:00",
+                        "end": "2026-06-02T12:40:00+00:00",
+                        "source": "sensor",
+                        "confidence": 1.0,
+                        "ground_truth_entity_id": "sensor.dishwasher_power",
+                        "median_power_w": 800.0,
+                        "estimated_energy_kwh": 0.5,
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-match",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:45:00+00:00",
+                        "confidence": 0.78,
+                        "median_power_w": 820.0,
+                        "estimated_energy_kwh": 0.615,
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": [],
+                        "session_ids": ["session-match"],
+                        "label_interval_ids": ["label-dishwasher"],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": [],
+                        "lifecycle_state": "assigned",
+                        "confidence": 0.8,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now["value"],
+    )
+
+    first = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+    coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+        "median_power_w"
+    ] = 900.0
+    coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+        "estimated_energy_kwh"
+    ] = 0.7
+    now["value"] = datetime(2026, 6, 2, 14, 5, tzinfo=UTC)
+
+    second = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert first["confidence"] == pytest.approx(0.85)
+    assert second["confidence"] == pytest.approx(0.85)
+    assert second["matched_ground_truth_count"] == 1
+    assert second["median_power_error"] == pytest.approx(80.0)
+    assert second["energy_estimate_error"] == pytest.approx(0.085)
+    assert second["last_validated_at"] == "2026-06-02T14:05:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts() -> (
     None
 ):
@@ -4391,6 +4477,81 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
     assert validated["energy_estimate_error"] is None
     assert validated["validation_window_start"] == "2026-06-02T12:00:00+00:00"
     assert validated["validation_window_end"] == "2026-06-02T14:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_history_validation_preserves_existing_conflicts() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 15, 5, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-dishwasher",
+                        "mains_circuit_id": "mains",
+                        "appliance_id": "dishwasher",
+                        "label": "Dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:30:00+00:00",
+                        "validation_start": "2026-06-02T12:00:00+00:00",
+                        "validation_end": "2026-06-02T14:00:00+00:00",
+                        "source": "sensor",
+                        "confidence": 1.0,
+                        "ground_truth_entity_id": "sensor.dishwasher_power",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-false-positive",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T13:00:00+00:00",
+                        "end": "2026-06-02T13:30:00+00:00",
+                        "confidence": 0.78,
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": [],
+                        "session_ids": ["session-false-positive"],
+                        "label_interval_ids": ["label-dishwasher"],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": ["session-false-positive"],
+                        "lifecycle_state": "conflict",
+                        "confidence": 0.65,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    validated = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert validated["rejected_session_ids"] == ["session-false-positive"]
+    assert validated["confidence"] == pytest.approx(0.65)
+    assert validated["lifecycle_state"] == "conflict"
+    assert validated["last_validation"] == "direct_meter_conflict"
+    assert validated["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
 
 
 @pytest.mark.asyncio
@@ -4631,6 +4792,63 @@ async def test_nilm_assignment_merge_moves_references_to_target() -> None:
     assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
         "assignment_id"
     ] == "assignment-target"
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_merge_preserves_target_validation_decision() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 16, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-source",
+                        "appliance_id": "dishwasher_old",
+                        "display_name": "Dishwasher old",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": [],
+                        "session_ids": ["shared-session"],
+                        "label_interval_ids": [],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": ["shared-session"],
+                        "lifecycle_state": "validated",
+                        "confidence": 0.72,
+                    },
+                    {
+                        "assignment_id": "assignment-target",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": [],
+                        "session_ids": ["shared-session"],
+                        "label_interval_ids": [],
+                        "confirmed_session_ids": ["shared-session"],
+                        "rejected_session_ids": [],
+                        "lifecycle_state": "published",
+                        "confidence": 0.9,
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    merged = await coordinator.async_merge_nilm_assignments(
+        "mains",
+        "assignment-source",
+        "assignment-target",
+    )
+
+    assert merged["confirmed_session_ids"] == ["shared-session"]
+    assert merged["rejected_session_ids"] == []
+    assert merged["confirmed_sessions"] == 1
+    assert merged["rejected_sessions"] == 0
+    assert merged["false_positive_rate"] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio
@@ -5405,6 +5623,53 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    deleted: list[tuple[str, str]] = []
+
+    async def fake_delete(hass, circuit_id, problem) -> None:
+        del hass
+        deleted.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_delete_data_quality_issue",
+        fake_delete,
+    )
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "existing_circuit_problem_issues",
+        lambda hass, circuit_id, problems: {("fridge", "missing_required_sensor")},
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+    )
+
+    await coordinator._sync_data_quality_repairs(
+        "fridge",
+        SimpleNamespace(quality_issues=(), source_entity_ids=("sensor.fridge_power",)),
+    )
+
+    assert ("fridge", "missing_required_sensor") in deleted
 
 
 @pytest.mark.asyncio
@@ -13331,6 +13596,55 @@ async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
         ("mains", "utility_comparison_missing_utility_source"),
         ("mains", "utility_comparison_source_mismatch"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_setup_health_repair_clears_after_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    deleted: list[tuple[str, str]] = []
+
+    async def fake_delete(hass, circuit_id, problem) -> None:
+        del hass
+        deleted.append((circuit_id, problem))
+
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "async_delete_circuit_issue",
+        fake_delete,
+    )
+    monkeypatch.setattr(
+        coordinator_module.repairs,
+        "existing_circuit_problem_issues",
+        lambda hass, circuit_id, problems: {("fridge", "missing_energy_source")},
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
+    )
+    coordinator.state.energy_dashboard_status_by_circuit["fridge"] = "ready"
+
+    await coordinator._sync_setup_health_repairs("fridge")
+
+    assert ("fridge", "missing_energy_source") in deleted
 
 
 @pytest.mark.asyncio

@@ -197,6 +197,64 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
 
 
+def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    state = AnalyzerState()
+    state.health_summary_by_circuit["mains"] = "Ready"
+    coordinator = SimpleNamespace(
+        circuit_configs=(
+            _config(
+                "mains",
+                name="Whole Home",
+                profile=ApplianceProfile.MAINS_NILM,
+                mode=CircuitMode.MAINS_NILM,
+            ),
+        ),
+        state=state,
+        store_data=FeatureStoreData(),
+        entry_id="entry-1",
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="mains")
+
+    assert payload["status"] == "ok"
+    detail = payload["detail"]
+    assert detail["source_type"] == "mains"
+    assert detail["expectations"][0]["source_type"] == "mains"
+
+
+def test_mixed_appliance_detail_expectations_keep_mixed_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    state = AnalyzerState()
+    state.health_summary_by_circuit["garage"] = "Ready"
+    coordinator = SimpleNamespace(
+        circuit_configs=(
+            _config(
+                "garage",
+                name="Garage Mixed Loads",
+                profile=ApplianceProfile.MIXED,
+                mode=CircuitMode.MIXED,
+            ),
+        ),
+        state=state,
+        store_data=FeatureStoreData(),
+        entry_id="entry-1",
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="garage")
+
+    assert payload["status"] == "ok"
+    detail = payload["detail"]
+    assert detail["source_type"] == "mixed"
+    assert detail["expectations"][0]["source_type"] == "mixed"
+
+
 def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
