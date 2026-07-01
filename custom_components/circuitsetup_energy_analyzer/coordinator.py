@@ -3986,9 +3986,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return tuple(entity_ids)
 
     def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
-        return normalize_sensitivity(
-            self.store_data.sensitivity_by_circuit.get(circuit_id, self._sensitivity)
-        )
+        return self.settings_controller.sensitivity_for_circuit(circuit_id)
 
     def _feedback_aware_alert_policy(
         self: Self,

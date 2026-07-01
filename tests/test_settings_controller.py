@@ -101,6 +101,7 @@ class _SettingsCoordinator:
         self.options = {
             CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}
         }
+        self._sensitivity = "standard"
         self.now = datetime(2026, 6, 30, 12, 5, tzinfo=UTC)
         self.persist_count = 0
         self.dirty_count = 0
@@ -941,6 +942,17 @@ async def test_settings_controller_sets_circuit_sensitivity() -> None:
     assert coordinator.refreshed_circuits == [("fridge", coordinator.now)]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
+
+
+def test_settings_controller_reads_circuit_sensitivity() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "high"
+    coordinator._sensitivity = "quiet"
+
+    assert controller.sensitivity_for_circuit("fridge") == "sensitive"
+    assert controller.sensitivity_for_circuit("hvac") == "quiet"
 
 
 def test_settings_controller_reads_runtime_setting_defaults() -> None:

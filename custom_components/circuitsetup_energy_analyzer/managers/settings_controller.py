@@ -510,6 +510,15 @@ class SettingsController:
             normalize_sensitivity(preset),
         )
 
+    def sensitivity_for_circuit(self, circuit_id: str) -> str:
+        """Return normalized alert sensitivity for one circuit."""
+        return normalize_sensitivity(
+            self._coordinator.store_data.sensitivity_by_circuit.get(
+                circuit_id,
+                self._coordinator._sensitivity,
+            )
+        )
+
     def activity_alert_settings_for_config(
         self,
         config: Any | None,
