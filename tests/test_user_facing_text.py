@@ -1250,6 +1250,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderApplianceDetailBody",
         "Appliance Detail",
         "Today vs Normal",
+        "Recent Timeline",
+        "_renderApplianceTimeline",
+        "detail.recent_timeline",
         "Behavior Expectations",
         "Source",
         "Confidence",
@@ -1482,6 +1485,14 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
     assert "deny_setting_recommendation" not in asset
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
+
+
+def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_MODULE_VERSION,
+    )
+
+    assert "timeline" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:

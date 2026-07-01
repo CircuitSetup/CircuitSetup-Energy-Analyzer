@@ -1532,6 +1532,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric("Cost Today", this._formatCost(detail.cost_today))}
       </section>
       <section class="panel">
+        <h2>Recent Timeline</h2>
+        ${this._renderApplianceTimeline(detail.recent_timeline)}
+      </section>
+      <section class="panel">
         <h2>Today vs Normal</h2>
         ${this._renderApplianceComparisons(detail.today_vs_normal)}
       </section>
@@ -1552,6 +1556,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._renderApplianceActions(payload.actions)}
       </section>
     `;
+  }
+
+  _renderApplianceTimeline(timeline) {
+    const items = Array.isArray(timeline && timeline.items) ? timeline.items : [];
+    if (!items.length) {
+      const title = timeline && timeline.latest_title ? timeline.latest_title : "No recent activity";
+      return `<p class="muted">${this._escape(title)}</p>`;
+    }
+    return `<div class="entity-list">${items.map((item) => `
+      <div class="metric">
+        <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
+        <strong>${this._escape(item.title || this._friendlyFeature(item.kind || "activity"))}</strong>
+        <p class="muted">${this._escape(item.detail || "")}</p>
+      </div>
+    `).join("")}</div>`;
   }
 
   _renderApplianceComparisons(comparisons) {
