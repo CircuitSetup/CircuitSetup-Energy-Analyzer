@@ -10,6 +10,11 @@ from ..const import (
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
 )
+from ..context_sources import (
+    flow_entities_for_settings,
+    has_mains_source_configured,
+    has_rain_context_source_configured,
+)
 from ..models import ApplianceProfile
 
 _DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
@@ -137,7 +142,10 @@ class SetupHealthAggregator:
                 desired.add((circuit_id, "missing_energy_source"))
             if (
                 self.has_missing_mains_status(circuit_id)
-                and not coordinator._has_mains_source_configured()
+                and not has_mains_source_configured(
+                    coordinator.entry_data,
+                    coordinator.options,
+                )
             ):
                 desired.add((circuit_id, "missing_mains_source"))
             if (
@@ -403,7 +411,9 @@ class SetupHealthAggregator:
             or config.appliance_profile not in _PUMP_WATER_CONTEXT_PROFILES
         ):
             return False
-        advanced_settings = coordinator._advanced_settings_for_circuit(circuit_id)
+        advanced_settings = (
+            coordinator.settings_controller.advanced_settings_for_circuit(circuit_id)
+        )
         if not bool(
             advanced_settings.get(
                 CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -411,7 +421,10 @@ class SetupHealthAggregator:
             )
         ):
             return False
-        return not coordinator._has_rain_context_source_configured()
+        return not has_rain_context_source_configured(
+            coordinator.entry_data,
+            coordinator.options,
+        )
 
     def has_missing_water_flow_source(self, circuit_id: str) -> bool:
         coordinator = self._coordinator
@@ -421,7 +434,9 @@ class SetupHealthAggregator:
             or config.appliance_profile not in _FLOW_WATER_CONTEXT_PROFILES
         ):
             return False
-        advanced_settings = coordinator._advanced_settings_for_circuit(circuit_id)
+        advanced_settings = (
+            coordinator.settings_controller.advanced_settings_for_circuit(circuit_id)
+        )
         if not bool(
             advanced_settings.get(
                 CONF_WATER_FLOW_CORRELATION_ENABLED,
@@ -431,7 +446,11 @@ class SetupHealthAggregator:
             return False
         if not bool(advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)):
             return False
-        return not coordinator._flow_entities_for_circuit(advanced_settings)
+        return not flow_entities_for_settings(
+            coordinator.entry_data,
+            coordinator.options,
+            advanced_settings,
+        )
 
     def has_utility_comparison_setup_status(self, circuit_id: str) -> bool:
         return self.utility_comparison_repair_problem(circuit_id) is not None

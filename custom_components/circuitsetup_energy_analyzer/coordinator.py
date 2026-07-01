@@ -41,7 +41,6 @@ from .const import (
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
-    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -53,7 +52,6 @@ from .const import (
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
-    CONF_WATER_FLOW_SENSOR_ENTITIES,
     DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
     DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -63,6 +61,24 @@ from .const import (
     DEFAULT_SENSITIVITY,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
+)
+from .context_sources import (
+    configured_context_entities as _configured_context_entities_from_sources,
+)
+from .context_sources import (
+    configured_context_entity as _configured_context_entity_from_sources,
+)
+from .context_sources import (
+    flow_entities_for_settings as _flow_entities_for_settings,
+)
+from .context_sources import (
+    has_mains_source_configured as _has_mains_source_from_sources,
+)
+from .context_sources import (
+    has_rain_context_source_configured as _has_rain_context_source_from_sources,
+)
+from .context_sources import (
+    string_list_from_sources as _string_list_from_sources,
 )
 from .cost import CostSettings
 from .cycles import (
@@ -2337,30 +2353,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return removed
 
     def _configured_context_entity(self: Self, key: str) -> str:
-        for source in (self.options, self.entry_data):
-            entity_id = str(source.get(key, "") or "").strip()
-            if entity_id:
-                return entity_id
-        return ""
+        return _configured_context_entity_from_sources(
+            self.entry_data,
+            self.options,
+            key,
+        )
 
     def _configured_context_entities(self: Self, key: str) -> tuple[str, ...]:
-        return tuple(_string_list_from_sources(self.entry_data, self.options, key))
+        return _configured_context_entities_from_sources(
+            self.entry_data,
+            self.options,
+            key,
+        )
 
     def _flow_entities_for_circuit(
         self: Self,
         advanced_settings: Mapping[str, Any],
     ) -> tuple[str, ...]:
-        linked = advanced_settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES, [])
-        entities = [
-            entity_id
-            for entity_id in _strings_from_any(linked)
-            if entity_id
-        ]
-        if not entities:
-            entities.extend(
-                self._configured_context_entities(CONF_WATER_FLOW_SENSOR_ENTITIES)
-            )
-        return tuple(dict.fromkeys(entities))
+        return _flow_entities_for_settings(
+            self.entry_data,
+            self.options,
+            advanced_settings,
+        )
 
     def _binary_entity_active(self: Self, entity_id: str | None) -> bool | None:
         if not entity_id:
@@ -2920,18 +2934,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.setup_health.async_sync_setup_health_repairs(circuit_id)
 
     def _has_rain_context_source_configured(self: Self) -> bool:
-        return bool(
-            self._configured_context_entity(CONF_RAIN_SENSOR_ENTITY)
-            or self._configured_context_entity(CONF_RAIN_INTENSITY_ENTITY)
+        return _has_rain_context_source_from_sources(
+            self.entry_data,
+            self.options,
         )
 
     def _has_mains_source_configured(self: Self) -> bool:
-        return bool(
-            _string_list_from_sources(
-                self.entry_data,
-                self.options,
-                CONF_MAINS_SOURCE_ENTITIES,
-            )
+        return _has_mains_source_from_sources(
+            self.entry_data,
+            self.options,
         )
 
     def _nilm_signature_payloads(
@@ -4186,30 +4197,6 @@ def _normalized_leg(leg: str | None) -> str | None:
     if value in {"b", "right", "l2", "line2", "2"}:
         return "b"
     return None
-
-
-def _string_list_from_sources(
-    entry_data: dict[str, Any],
-    options: dict[str, Any] | None,
-    key: str,
-) -> list[str]:
-    options = options or {}
-    raw = options[key] if key in options else entry_data.get(key, [])
-    if isinstance(raw, str):
-        return [raw] if raw else []
-    if not isinstance(raw, (list, tuple, set)):
-        return []
-    return [item for item in raw if isinstance(item, str) and item]
-
-
-def _strings_from_any(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        return (value,) if value else ()
-    if not isinstance(value, (list, tuple, set)):
-        return ()
-    return tuple(item for item in value if isinstance(item, str) and item)
 
 
 def _retention_mode_from_sources(

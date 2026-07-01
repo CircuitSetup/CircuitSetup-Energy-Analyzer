@@ -215,9 +215,7 @@ class SettingsController:
                 appliance_profile=config.appliance_profile.value,
                 circuit_mode=config.mode.value,
                 power_flow=config.power_flow.value,
-                advanced_settings=coordinator._advanced_settings_for_circuit(
-                    config.circuit_id,
-                ),
+                advanced_settings=self.advanced_settings_for_circuit(config.circuit_id),
             ),
             feature_history=self.advisor_feature_history_for_circuit(
                 config,
@@ -393,10 +391,9 @@ class SettingsController:
         if feedback is None:
             return []
 
+        advanced_settings = self.advanced_settings_for_circuit(config.circuit_id)
         current_value = _positive_float_value(
-            coordinator._advanced_settings_for_circuit(config.circuit_id).get(
-                "daily_spike_ratio",
-            ),
+            advanced_settings.get("daily_spike_ratio"),
             default=config.daily_energy_spike_ratio,
         )
         change_ratio = _absolute_float_value(feedback.get("change_ratio"))

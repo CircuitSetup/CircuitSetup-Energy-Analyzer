@@ -133,7 +133,6 @@ class _SettingsCoordinator:
                 daily_energy_spike_ratio=0.25,
             )
         ]
-        self.advanced_settings_calls: list[str] = []
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -174,10 +173,6 @@ class _SettingsCoordinator:
 
     async def _record_settings_recommendation_notification(self) -> None:
         self.notified += 1
-
-    def _advanced_settings_for_circuit(self, circuit_id: str) -> dict[str, Any]:
-        self.advanced_settings_calls.append(circuit_id)
-        return {"daily_spike_ratio": 0.25}
 
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
@@ -279,13 +274,16 @@ def test_settings_controller_builds_advisor_inputs() -> None:
     assert inputs.context.appliance_profile == "refrigerator"
     assert inputs.context.circuit_mode == "single_phase"
     assert inputs.context.power_flow == "load"
-    assert inputs.context.advanced_settings == {"daily_spike_ratio": 0.25}
+    assert dict(inputs.context.advanced_settings) == {
+        "daily_spike_ratio": 0.25,
+        "option_only": "from_entry",
+        "preset": "quiet",
+    }
     assert inputs.feature_history["energy_usage_days"] == [{"date": "2026-06-30"}]
     assert (
         dict(inputs.decisions)
         == coordinator.store_data.settings_recommendation_decisions
     )
-    assert coordinator.advanced_settings_calls == ["fridge"]
 
 
 def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None:
