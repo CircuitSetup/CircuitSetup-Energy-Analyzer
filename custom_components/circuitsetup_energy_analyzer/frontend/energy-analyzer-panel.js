@@ -1323,6 +1323,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
       });
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-appliance-detail-path]")) {
+      button.addEventListener("click", () => {
+        this._navigate(button.dataset.nilmApplianceDetailPath);
+      });
+    }
   }
 
   _renderApplianceDetailBody() {
@@ -2111,6 +2116,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             <span>${this._escape(item.model_status || "candidate")}</span>
             <strong>${this._escape(item.display_name || item.appliance_id || "Estimated appliance")} - ${this._escape(item.is_running ? "running" : "idle")}</strong>
             <p class="muted" data-field="estimated_daily_energy">${this._escape(this._formatMetricValue(item.estimated_power_w))} W, ${this._escape(this._formatMetricValue(item.estimated_energy_kwh_today))} kWh today, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+            <div class="actions">${this._nilmApplianceDetailButton(item)}</div>
           </div>
         `, "Estimated appliances are NILM's current best grouped load guesses.")}
         ${this._renderNilmWorkspaceList("Appliance Assignments", workspace.assignments, "No appliance assignments are saved yet.", (item, index) => `
@@ -2388,12 +2394,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmAssignmentActions(item, index) {
     const actions = item && item.actions;
-    if (!actions || !Object.keys(actions).length) {
+    const detailButton = this._nilmApplianceDetailButton(item);
+    if ((!actions || !Object.keys(actions).length) && !detailButton) {
       return "";
+    }
+    if (!actions || !Object.keys(actions).length) {
+      return `<div class="actions">${detailButton}</div>`;
     }
     const hasSave = actions.rename || actions.change_profile || actions.merge;
     return `
       <div class="actions">
+        ${detailButton}
         ${hasSave ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" ${this._busyAction === `nilm_assignments_${index}_save` ? "disabled" : ""}>Save Assignment</button>` : ""}
         ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>Validate History</button>` : ""}
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Publish Entities</button>` : ""}
@@ -2401,6 +2412,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Remove Assignment</button>` : ""}
       </div>
     `;
+  }
+
+  _nilmApplianceDetailButton(item) {
+    const path = item && item.appliance_detail_path;
+    if (!path) {
+      return "";
+    }
+    return `<button type="button" class="secondary" data-nilm-appliance-detail-path="${this._escape(path)}">Open Appliance Detail</button>`;
   }
 
   _renderNilmValidation(validation) {

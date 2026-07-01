@@ -106,7 +106,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260701-appliance-detail-route"
+PANEL_MODULE_VERSION = "20260701-nilm-detail-links"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
@@ -1570,6 +1570,9 @@ def _nilm_assignment_payload(
     if not assignment_id:
         return payload
 
+    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
+        assignment_id
+    )
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
@@ -1752,9 +1755,19 @@ def _nilm_virtual_appliances_for_assignments(
                     f"{APPLIANCE_DETAIL_API_PATH}?"
                     f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id})}"
                 ),
+                "appliance_detail_path": _nilm_appliance_detail_panel_path(
+                    assignment_id
+                ),
             }
         )
     return virtual_appliances
+
+
+def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:
+    return (
+        f"/{PANEL_URL_PATH}?"
+        f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id, 'appliance_detail': '1'})}"
+    )
 
 
 def _nilm_workspace_lanes(

@@ -1296,6 +1296,13 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assignment_detail_query = parse_qs(
+        urlparse(payload["assignments"][0]["appliance_detail_path"]).query
+    )
+    assert assignment_detail_query == {
+        "assignment_id": ["assignment-dishwasher"],
+        "appliance_detail": ["1"],
+    }
     assert payload["assignments"][0]["actions"]["rename"] == {
         "domain": DOMAIN,
         "service": "rename_nilm_appliance",
@@ -1524,6 +1531,11 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     virtual = payload["virtual_appliances"][0]
     assert virtual["source_type"] == "nilm_estimate"
     assert virtual["source_label"] == "Estimated by NILM"
+    virtual_detail_query = parse_qs(urlparse(virtual["appliance_detail_path"]).query)
+    assert virtual_detail_query == {
+        "assignment_id": ["assignment-assigned"],
+        "appliance_detail": ["1"],
+    }
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
