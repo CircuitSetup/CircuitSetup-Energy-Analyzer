@@ -11430,7 +11430,9 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         now_fn=lambda: now,
     )
     coordinator._refresh_settings_recommendation_state(now)
-    await coordinator._notify_settings_recommendations_if_needed()
+    await (
+        coordinator.notification_controller.async_notify_settings_recommendations_if_needed()
+    )
     coordinator._apply_retention(now)
 
     reloaded = coordinator_module.EnergyAnalyzerCoordinator(
@@ -11441,7 +11443,9 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         now_fn=lambda: now,
     )
     reloaded._refresh_settings_recommendation_state(now)
-    await reloaded._notify_settings_recommendations_if_needed()
+    await (
+        reloaded.notification_controller.async_notify_settings_recommendations_if_needed()
+    )
 
     assert notifications == [{"entry_id": "entry-1", "total_pending": 110}]
 
