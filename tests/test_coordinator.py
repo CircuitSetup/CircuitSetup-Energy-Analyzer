@@ -675,6 +675,8 @@ def test_coordinator_exposes_store_persistence_manager() -> None:
     assert callable(coordinator.store_persistence.prune_energy_usage)
     assert callable(coordinator.store_persistence.prune_demand)
     assert callable(coordinator.store_persistence.prune_standby)
+    assert callable(coordinator.store_persistence.prune_weather_context)
+    assert callable(coordinator.store_persistence.prune_water_context)
     assert callable(coordinator.store_persistence.prune_alert_history)
     assert callable(coordinator.store_persistence.prune_nilm_history)
     assert callable(coordinator.store_persistence.prune_alert_feedback)
@@ -2372,6 +2374,65 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
 
     assert coordinator.store_data.standby_by_circuit["fridge"]["samples"] == [
         retained_sample
+    ]
+
+
+def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
+    retained_weather_sample = {
+        "timestamp": "2026-06-01T04:00:00+00:00",
+        "outdoor_temperature_f": 78.0,
+    }
+    retained_water_sample = {
+        "timestamp": "2026-06-01T04:00:00+00:00",
+        "rain_intensity_mm_per_hour": 0.0,
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        now_fn=lambda: now,
+    )
+    coordinator.store_data.weather_context_history_by_circuit = {
+        "hvac": [
+            {
+                "timestamp": "2026-05-31T03:00:00+00:00",
+                "outdoor_temperature_f": 72.0,
+            },
+            retained_weather_sample,
+        ],
+    }
+    coordinator.store_data.water_context_history_by_circuit = {
+        "hvac": [
+            {
+                "timestamp": "2026-05-31T03:00:00+00:00",
+                "rain_intensity_mm_per_hour": 1.0,
+            },
+            retained_water_sample,
+        ],
+    }
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.weather_context_history_by_circuit["hvac"] == [
+        retained_weather_sample
+    ]
+    assert coordinator.store_data.water_context_history_by_circuit["hvac"] == [
+        retained_water_sample
     ]
 
 

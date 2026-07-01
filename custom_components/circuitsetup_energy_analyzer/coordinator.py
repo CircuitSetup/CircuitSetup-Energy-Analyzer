@@ -984,6 +984,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ha_local_date=_ha_local_date,
             ha_time_zone=self._ha_time_zone,
             sample_timestamp_is_at_or_after=_sample_timestamp_is_at_or_after,
+            weather_context_history_max_samples=WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
+            water_context_history_max_samples=WATER_CONTEXT_HISTORY_MAX_SAMPLES,
             alert_history_max_age=ALERT_HISTORY_MAX_AGE,
             alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
             alert_feedback_is_expired=_alert_feedback_is_expired,
@@ -5984,28 +5986,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_standby(now)
 
     def _prune_weather_context(self: Self, now: datetime) -> None:
-        for circuit_id, history in (
-            self.store_data.weather_context_history_by_circuit.items()
-        ):
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = now - RETENTION_WINDOWS[retention_mode]
-            self.store_data.weather_context_history_by_circuit[circuit_id] = [
-                sample
-                for sample in history
-                if _sample_timestamp_is_at_or_after(sample, cutoff)
-            ][-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES:]
+        self.store_persistence.prune_weather_context(now)
 
     def _prune_water_context(self: Self, now: datetime) -> None:
-        for circuit_id, history in (
-            self.store_data.water_context_history_by_circuit.items()
-        ):
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = now - RETENTION_WINDOWS[retention_mode]
-            self.store_data.water_context_history_by_circuit[circuit_id] = [
-                sample
-                for sample in history
-                if _sample_timestamp_is_at_or_after(sample, cutoff)
-            ][-WATER_CONTEXT_HISTORY_MAX_SAMPLES:]
+        self.store_persistence.prune_water_context(now)
 
     def _prune_contextual_baseline_state(self: Self, now: datetime) -> None:
         pruned_samples: dict[str, list[dict[str, Any]]] = {}

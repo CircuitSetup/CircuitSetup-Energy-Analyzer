@@ -18,6 +18,8 @@ class StorePersistenceManager:
         ha_local_date: Callable[[datetime, str | None], Any],
         ha_time_zone: Callable[[], str | None],
         sample_timestamp_is_at_or_after: Callable[[Any, datetime], bool],
+        weather_context_history_max_samples: int,
+        water_context_history_max_samples: int,
         alert_history_max_age: timedelta,
         alert_history_max_items: int,
         alert_feedback_is_expired: Callable[[Any, datetime], bool],
@@ -45,6 +47,8 @@ class StorePersistenceManager:
         self._ha_local_date = ha_local_date
         self._ha_time_zone = ha_time_zone
         self._sample_timestamp_is_at_or_after = sample_timestamp_is_at_or_after
+        self._weather_context_history_max_samples = weather_context_history_max_samples
+        self._water_context_history_max_samples = water_context_history_max_samples
         self._alert_history_max_age = alert_history_max_age
         self._alert_history_max_items = alert_history_max_items
         self._alert_feedback_is_expired = alert_feedback_is_expired
@@ -131,6 +135,30 @@ class StorePersistenceManager:
                     for sample in samples
                     if self._sample_timestamp_is_at_or_after(sample, cutoff)
                 ]
+
+    def prune_weather_context(self, now: datetime) -> None:
+        """Apply retention caps to stored weather context histories."""
+        store_data = self._coordinator.store_data
+        for circuit_id, history in (
+            store_data.weather_context_history_by_circuit.items()
+        ):
+            cutoff = now - self._retention_window_for_circuit(circuit_id)
+            store_data.weather_context_history_by_circuit[circuit_id] = [
+                sample
+                for sample in history
+                if self._sample_timestamp_is_at_or_after(sample, cutoff)
+            ][-self._weather_context_history_max_samples :]
+
+    def prune_water_context(self, now: datetime) -> None:
+        """Apply retention caps to stored water context histories."""
+        store_data = self._coordinator.store_data
+        for circuit_id, history in store_data.water_context_history_by_circuit.items():
+            cutoff = now - self._retention_window_for_circuit(circuit_id)
+            store_data.water_context_history_by_circuit[circuit_id] = [
+                sample
+                for sample in history
+                if self._sample_timestamp_is_at_or_after(sample, cutoff)
+            ][-self._water_context_history_max_samples :]
 
     def prune_alert_history(self, now: datetime) -> None:
         """Apply retention caps to stored alert history."""
