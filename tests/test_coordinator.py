@@ -731,6 +731,9 @@ def test_coordinator_exposes_notification_controller() -> None:
         notification_controller.NotificationController,
     )
     assert coordinator._notified_alert_ids == set()
+    assert callable(
+        coordinator.notification_controller.async_notify_nilm_virtual_appliances
+    )
 
 
 def test_coordinator_exposes_setup_health_aggregator() -> None:
