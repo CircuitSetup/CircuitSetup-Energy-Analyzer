@@ -1119,16 +1119,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
         return self.settings_controller.advanced_settings_for_circuit(circuit_id)
 
-    def _advisor_feature_history_for_circuit(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> dict[str, Any]:
-        return self.settings_controller.advisor_feature_history_for_circuit(
-            config,
-            now=now,
-        )
-
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         self.settings_controller.refresh_settings_recommendation_state(now)
 
@@ -1592,19 +1582,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_set_dashboard_layout(self: Self, layout: str) -> None:
         """Persist the selected recommended-dashboard layout."""
         await self.dashboard_controller.async_set_dashboard_layout(layout)
-
-    async def _async_create_or_update_lovelace_dashboard(
-        self: Self,
-        payload: Mapping[str, Any],
-    ) -> tuple[str, str | None]:
-        return await (
-            self.dashboard_controller.async_create_or_update_lovelace_dashboard(
-                payload,
-            )
-        )
-
-    async def _async_remove_lovelace_dashboard(self: Self) -> tuple[str, str | None]:
-        return await self.dashboard_controller.async_remove_lovelace_dashboard()
 
     async def async_label_nilm_signature(
         self: Self,
@@ -3421,12 +3398,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             base_min_repeated,
         )
 
-    def _alert_feedback_for_observation(
-        self: Self,
-        observation: Observation,
-    ) -> tuple[str | None, Mapping[str, Any]]:
-        return self.evidence_actions.alert_feedback_for_observation(observation)
-
     def _alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
@@ -3536,9 +3507,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 feature,
             )
         )
-
-    async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> bool:
-        return await self.evidence_actions.async_store_alert_feedback(alert_id, action)
 
     def _apply_nilm_alert_feedback(
         self: Self,
