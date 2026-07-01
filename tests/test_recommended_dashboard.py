@@ -552,6 +552,38 @@ def test_dashboard_hides_nilm_graph_cards_without_defined_appliances() -> None:
     assert "resources" not in dashboard
 
 
+def test_expert_dashboard_adds_nilm_review_card_without_defined_appliances() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+        hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
+        entry_id="entry-1",
+    )
+    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    cards = _dashboard_cards(mains_section)
+
+    custom_graph = next(
+        card
+        for card in cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    )
+
+    assert custom_graph == {
+        "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
+        "title": "NILM mains power",
+        "entry_id": "entry-1",
+        "circuit_id": "mains",
+        "detail_path": (
+            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+        ),
+        "appliance_power_entities": [],
+    }
+    assert not [
+        card for card in cards if card.get("title") == "Defined NILM appliance power"
+    ]
+    assert "resources" not in dashboard
+
+
 def test_standard_dashboard_hides_nilm_graph_cards_for_defined_appliances() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
