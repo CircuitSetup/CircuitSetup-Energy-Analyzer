@@ -6,7 +6,10 @@ from typing import Any
 
 import pytest
 
-from custom_components.circuitsetup_energy_analyzer.const import CONF_ADVANCED_SETTINGS
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_UTILITY_COMPARISON_SETTINGS,
+)
 from custom_components.circuitsetup_energy_analyzer.cycles import (
     RUN_CYCLE_DURATION_FEATURE,
 )
@@ -635,6 +638,36 @@ def test_settings_controller_replaces_advanced_settings() -> None:
     }
     assert coordinator.store_data.solar_flow_settings_by_circuit["fridge"] == {
         "export_tolerance_w": 120.0
+    }
+
+
+def test_settings_controller_applies_config_entry_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.entry_data[CONF_UTILITY_COMPARISON_SETTINGS] = {
+        "mains": {"utility_energy_entity": "sensor.old_utility"},
+        "remove_me": {"utility_energy_entity": "sensor.remove"},
+    }
+    coordinator.options[CONF_UTILITY_COMPARISON_SETTINGS] = {
+        "mains": {"utility_energy_entity": "sensor.new_utility"},
+        "remove_me": {},
+    }
+    coordinator.store_data.utility_comparison_settings_by_circuit["remove_me"] = {
+        "utility_energy_entity": "sensor.remove"
+    }
+    coordinator.options[CONF_ADVANCED_SETTINGS] = {
+        "fridge": {"preset": "sensitive", "daily_spike_ratio": 0.4}
+    }
+
+    controller.apply_config_entry_settings()
+
+    assert coordinator.store_data.utility_comparison_settings_by_circuit == {
+        "mains": {"utility_energy_entity": "sensor.new_utility"}
+    }
+    assert coordinator.store_data.sensitivity_by_circuit["fridge"] == "sensitive"
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "daily_spike_ratio": 0.4
     }
 
 

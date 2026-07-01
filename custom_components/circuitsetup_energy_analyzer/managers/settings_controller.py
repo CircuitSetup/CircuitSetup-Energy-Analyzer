@@ -15,7 +15,7 @@ from ..alert_feedback import (
 from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from ..billing import BillingCycleSettings
 from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
-from ..const import CONF_ADVANCED_SETTINGS
+from ..const import CONF_ADVANCED_SETTINGS, CONF_UTILITY_COMPARISON_SETTINGS
 from ..cost import CostSettings
 from ..cycles import (
     RUN_CYCLE_DURATION_FEATURE,
@@ -472,6 +472,31 @@ class SettingsController:
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
+
+    def apply_config_entry_settings(self) -> None:
+        """Apply setup/options settings to store-backed runtime setting maps."""
+        coordinator = self._coordinator
+        for circuit_id, settings in _merged_entry_settings_map(
+            coordinator.entry_data,
+            coordinator.options,
+            CONF_UTILITY_COMPARISON_SETTINGS,
+        ).items():
+            if settings:
+                coordinator.store_data.utility_comparison_settings_by_circuit[
+                    circuit_id
+                ] = settings
+            else:
+                coordinator.store_data.utility_comparison_settings_by_circuit.pop(
+                    circuit_id,
+                    None,
+                )
+
+        for circuit_id, settings in _merged_entry_settings_map(
+            coordinator.entry_data,
+            coordinator.options,
+            CONF_ADVANCED_SETTINGS,
+        ).items():
+            self.replace_advanced_settings(circuit_id, settings)
 
     async def async_set_circuit_sensitivity(
         self,
@@ -1796,6 +1821,21 @@ class SettingsController:
         self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
+
+
+def _merged_entry_settings_map(
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+    key: str,
+) -> dict[str, dict[str, Any]]:
+    settings: dict[str, dict[str, Any]] = {}
+    for source in (entry_data.get(key, {}), options.get(key, {})):
+        if not isinstance(source, Mapping):
+            continue
+        for circuit_id, value in source.items():
+            if isinstance(value, Mapping):
+                settings[str(circuit_id)] = dict(value)
+    return settings
 
 
 def _recommendation_materially_matches(
