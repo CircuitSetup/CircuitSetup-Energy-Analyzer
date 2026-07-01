@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
 from .. import notifications
-from ..alerting import alert_anomaly_score, alert_feedback_fingerprint
+from ..alert_feedback import (
+    alert_feedback_is_expired,
+    alert_feedback_status,
+    mapping_datetime,
+)
+from ..alerting import (
+    Observation,
+    alert_anomaly_score,
+    alert_feedback_fingerprint,
+    alert_feedback_fingerprint_for_observation,
+)
 from ..models import AlertEvidence
 
 ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
 ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
+ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 
 
 class EvidenceActionController:
@@ -150,6 +163,82 @@ class EvidenceActionController:
         await coordinator._async_save_store(now)
         return True
 
+    def adjusted_min_repeated_for_observation(
+        self,
+        observation: Observation,
+        base_min_repeated: int,
+    ) -> int:
+        """Return adjusted repeated-evidence threshold after feedback."""
+        _fingerprint, feedback = self.alert_feedback_for_observation(observation)
+        if alert_feedback_status(feedback) != "unhelpful":
+            return base_min_repeated
+        return base_min_repeated + ALERT_UNHELPFUL_EXTRA_REPEATED
+
+    def alert_feedback_for_observation(
+        self,
+        observation: Observation,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        """Return matching retained feedback for an observation."""
+        coordinator = self._coordinator
+        candidates = (
+            alert_feedback_fingerprint_for_observation(
+                observation,
+                config=coordinator._config_for_circuit(observation.circuit_id),
+            ),
+            alert_feedback_fingerprint_for_observation(observation),
+            _legacy_alert_feedback_key_for_observation(observation),
+        )
+        return self._first_current_feedback(candidates)
+
+    def has_suppressed_alert_feedback(self, alert: AlertEvidence) -> bool:
+        """Return whether feedback suppresses this alert pattern."""
+        _fingerprint, feedback = self.alert_feedback_for(alert)
+        return alert_feedback_status(feedback) == "expected"
+
+    def alert_feedback_for(
+        self,
+        alert: AlertEvidence,
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        """Return matching retained feedback for an alert."""
+        coordinator = self._coordinator
+        candidates = (
+            _alert_feedback_key(
+                alert,
+                config=coordinator._config_for_circuit(alert.circuit_id),
+            ),
+            _alert_feedback_key(alert),
+            _legacy_alert_feedback_key(alert),
+        )
+        return self._first_current_feedback(candidates)
+
+    def alert_with_feedback(self, alert: AlertEvidence) -> AlertEvidence:
+        """Return alert evidence annotated with matching feedback state."""
+        fingerprint, feedback = self.alert_feedback_for(alert)
+        status = alert_feedback_status(feedback)
+        if fingerprint is None or status is None:
+            return alert
+        return replace(
+            alert,
+            feedback_status=status,
+            feedback_effect=_alert_feedback_effect(status),
+            feedback_expires_at=mapping_datetime(feedback.get("expires_at")),
+            matching_feedback_fingerprint=fingerprint,
+        )
+
+    def _first_current_feedback(
+        self,
+        candidates: tuple[str, ...],
+    ) -> tuple[str | None, Mapping[str, Any]]:
+        now = self._coordinator._now_fn()
+        for fingerprint in candidates:
+            feedback = self._coordinator.store_data.alert_feedback.get(fingerprint)
+            if not isinstance(feedback, Mapping):
+                continue
+            if alert_feedback_is_expired(feedback, now):
+                continue
+            return fingerprint, feedback
+        return None, {}
+
     def retire_alert_id(self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
         coordinator = self._coordinator
@@ -203,6 +292,30 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
+
+
+def _alert_feedback_key(
+    alert: AlertEvidence,
+    *,
+    config: Any = None,
+) -> str:
+    return alert_feedback_fingerprint(alert, config=config)
+
+
+def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
+    return f"{alert.circuit_id}:{_alert_feature(alert)}"
+
+
+def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
+    return f"{observation.circuit_id}:{observation.feature or 'alert'}"
+
+
+def _alert_feedback_effect(status: str) -> str:
+    if status == "expected":
+        return "Notifications suppressed for this expected pattern"
+    if status == "unhelpful":
+        return "Future matching alerts require stronger repeated evidence"
+    return "Feedback recorded for this alert pattern"
 
 
 def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:

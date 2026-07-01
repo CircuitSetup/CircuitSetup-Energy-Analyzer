@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.alerting import (
+    Observation,
     alert_feedback_fingerprint,
+    alert_feedback_fingerprint_for_observation,
 )
 from custom_components.circuitsetup_energy_analyzer.managers.evidence_actions import (
     EvidenceActionController,
@@ -173,3 +175,45 @@ async def test_evidence_action_controller_stores_feedback_and_retires_alert() ->
     assert coordinator.refreshed == [coordinator.now]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
+
+
+def test_evidence_action_controller_annotates_suppressed_feedback() -> None:
+    coordinator = _ActionCoordinator()
+    alert = _alert("fridge", "reactive_power")
+    fingerprint = alert_feedback_fingerprint(alert)
+    coordinator.store_data.alert_feedback[fingerprint] = {
+        "action": "expected",
+        "expires_at": (coordinator.now + timedelta(days=1)).isoformat(),
+    }
+    controller = EvidenceActionController(coordinator)
+
+    found_fingerprint, feedback = controller.alert_feedback_for(alert)
+    annotated = controller.alert_with_feedback(alert)
+
+    assert found_fingerprint == fingerprint
+    assert feedback["action"] == "expected"
+    assert controller.has_suppressed_alert_feedback(alert) is True
+    assert annotated.feedback_status == "expected"
+    assert annotated.feedback_effect == (
+        "Notifications suppressed for this expected pattern"
+    )
+    assert annotated.matching_feedback_fingerprint == fingerprint
+
+
+def test_evidence_action_controller_adjusts_repeated_count_for_unhelpful() -> None:
+    coordinator = _ActionCoordinator()
+    observation = Observation(
+        circuit_id="fridge",
+        feature="reactive_power",
+        score=1.0,
+        baseline_confidence=1.0,
+        observed_at=coordinator.now,
+    )
+    fingerprint = alert_feedback_fingerprint_for_observation(observation)
+    coordinator.store_data.alert_feedback[fingerprint] = {
+        "action": "unhelpful",
+        "expires_at": (coordinator.now + timedelta(days=1)).isoformat(),
+    }
+    controller = EvidenceActionController(coordinator)
+
+    assert controller.adjusted_min_repeated_for_observation(observation, 3) == 5

@@ -24,18 +24,10 @@ from .aggregation import aggregate_dual_phase
 from .alert_feedback import (
     alert_feedback_is_expired as _alert_feedback_is_expired,
 )
-from .alert_feedback import (
-    alert_feedback_status as _alert_feedback_status,
-)
-from .alert_feedback import (
-    mapping_datetime as _mapping_datetime,
-)
 from .alerting import (
     ConservativeAlertPolicy,
     Observation,
     alert_anomaly_score,
-    alert_feedback_fingerprint,
-    alert_feedback_fingerprint_for_observation,
 )
 from .billing import (
     BillingCycleSettings,
@@ -226,7 +218,6 @@ ALERT_HISTORY_MAX_ITEMS = 500
 ALERT_HISTORY_MAX_AGE = timedelta(days=180)
 ALERT_FEEDBACK_MAX_ITEMS = 500
 ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
-ALERT_UNHELPFUL_EXTRA_REPEATED = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
 NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
@@ -3953,31 +3944,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         observation: Observation,
         base_min_repeated: int,
     ) -> int:
-        _fingerprint, feedback = self._alert_feedback_for_observation(observation)
-        if _alert_feedback_status(feedback) != "unhelpful":
-            return base_min_repeated
-        return base_min_repeated + ALERT_UNHELPFUL_EXTRA_REPEATED
+        return self.evidence_actions.adjusted_min_repeated_for_observation(
+            observation,
+            base_min_repeated,
+        )
 
     def _alert_feedback_for_observation(
         self: Self,
         observation: Observation,
     ) -> tuple[str | None, Mapping[str, Any]]:
-        candidates = (
-            alert_feedback_fingerprint_for_observation(
-                observation,
-                config=self._config_for_circuit(observation.circuit_id),
-            ),
-            alert_feedback_fingerprint_for_observation(observation),
-            _legacy_alert_feedback_key_for_observation(observation),
-        )
-        for fingerprint in candidates:
-            feedback = self.store_data.alert_feedback.get(fingerprint)
-            if not isinstance(feedback, Mapping):
-                continue
-            if _alert_feedback_is_expired(feedback, self._now_fn()):
-                continue
-            return fingerprint, feedback
-        return None, {}
+        return self.evidence_actions.alert_feedback_for_observation(observation)
 
     def _alert_policy_for_circuit(
         self: Self,
@@ -4157,42 +4133,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return self.evidence_actions.alert_for_id(alert_id)
 
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
-        _fingerprint, feedback = self._alert_feedback_for(alert)
-        return _alert_feedback_status(feedback) == "expected"
+        return self.evidence_actions.has_suppressed_alert_feedback(alert)
 
     def _alert_feedback_for(
         self: Self,
         alert: AlertEvidence,
     ) -> tuple[str | None, Mapping[str, Any]]:
-        candidates = (
-            _alert_feedback_key(
-                alert,
-                config=self._config_for_circuit(alert.circuit_id),
-            ),
-            _alert_feedback_key(alert),
-            _legacy_alert_feedback_key(alert),
-        )
-        for fingerprint in candidates:
-            feedback = self.store_data.alert_feedback.get(fingerprint)
-            if not isinstance(feedback, Mapping):
-                continue
-            if _alert_feedback_is_expired(feedback, self._now_fn()):
-                continue
-            return fingerprint, feedback
-        return None, {}
+        return self.evidence_actions.alert_feedback_for(alert)
 
     def _alert_with_feedback(self: Self, alert: AlertEvidence) -> AlertEvidence:
-        fingerprint, feedback = self._alert_feedback_for(alert)
-        status = _alert_feedback_status(feedback)
-        if fingerprint is None or status is None:
-            return alert
-        return replace(
-            alert,
-            feedback_status=status,
-            feedback_effect=_alert_feedback_effect(status),
-            feedback_expires_at=_mapping_datetime(feedback.get("expires_at")),
-            matching_feedback_fingerprint=fingerprint,
-        )
+        return self.evidence_actions.alert_with_feedback(alert)
 
     def _nilm_signature_for_review(
         self: Self,
@@ -4688,30 +4638,6 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
-
-
-def _alert_feedback_key(
-    alert: AlertEvidence,
-    *,
-    config: CircuitConfig | None = None,
-) -> str:
-    return alert_feedback_fingerprint(alert, config=config)
-
-
-def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
-    return f"{alert.circuit_id}:{_alert_feature(alert)}"
-
-
-def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
-    return f"{observation.circuit_id}:{observation.feature or 'alert'}"
-
-
-def _alert_feedback_effect(status: str) -> str:
-    if status == "expected":
-        return "Notifications suppressed for this expected pattern"
-    if status == "unhelpful":
-        return "Future matching alerts require stronger repeated evidence"
-    return "Feedback recorded for this alert pattern"
 
 
 def _normalized_temperature_unit(unit: str) -> str:
