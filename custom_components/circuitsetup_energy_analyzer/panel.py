@@ -108,7 +108,8 @@ PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
 PANEL_MODULE_VERSION = (
-    "20260701-appliance-timeline-nilm-lanes-dashboard-nilm-lanes-nilm-review-card"
+    "20260701-appliance-timeline-nilm-lanes-dashboard-nilm-lanes-"
+    "nilm-review-card-candidate-facts"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
