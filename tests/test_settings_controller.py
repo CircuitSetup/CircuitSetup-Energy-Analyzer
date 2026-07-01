@@ -121,6 +121,37 @@ class _SettingsCoordinator:
         self.rebuild_calls.append((now, circuit_id))
         return True
 
+    def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
+        return SimpleNamespace(circuit_id=circuit_id)
+
+    def _energy_usage_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(window_days=7, daily_spike_ratio=0.25)
+
+    def _demand_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(window_minutes=15, demand_limit_w=None)
+
+    def _capacity_settings_for_config(self, circuit_id: str) -> SimpleNamespace:
+        return SimpleNamespace(warning_ratio=0.75, breaker_amps=None)
+
+    def _standby_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            window_hours=12,
+            standby_threshold_w=5.0,
+            always_on_alert_w=None,
+        )
+
 
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
@@ -375,5 +406,39 @@ async def test_settings_controller_sets_threshold_settings() -> None:
         ("mains", coordinator.now),
         ("mains", coordinator.now),
     ]
+    assert coordinator.updated == [coordinator.state] * 4
+    assert coordinator.saved == [coordinator.now] * 4
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_sets_usage_and_load_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_energy_usage_settings("fridge", 14, 0.2)
+    await controller.async_set_demand_settings("fridge", 30, 4500.0)
+    await controller.async_set_capacity_settings("fridge", 20.0, 0.8)
+    await controller.async_set_standby_settings("fridge", 24, 8.0, 25.0)
+
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "window_days": 14,
+        "daily_spike_ratio": 0.2,
+    }
+    assert coordinator.store_data.demand_settings_by_circuit["fridge"] == {
+        "window_minutes": 30,
+        "demand_limit_w": 4500.0,
+    }
+    assert coordinator.store_data.capacity_settings_by_circuit["fridge"] == {
+        "warning_ratio": 0.8,
+        "breaker_amps": 20.0,
+    }
+    assert coordinator.store_data.standby_settings_by_circuit["fridge"] == {
+        "window_hours": 24,
+        "standby_threshold_w": 8.0,
+        "always_on_alert_w": 25.0,
+    }
+    assert coordinator.dirty_count == 4
+    assert coordinator.refreshed_circuits == [("fridge", coordinator.now)] * 4
     assert coordinator.updated == [coordinator.state] * 4
     assert coordinator.saved == [coordinator.now] * 4

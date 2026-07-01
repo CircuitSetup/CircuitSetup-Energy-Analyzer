@@ -1206,24 +1206,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         daily_spike_ratio: Any = None,
     ) -> None:
         """Persist daily energy usage spike settings for one circuit."""
-        config = self._config_for_circuit(circuit_id)
-        current = self._energy_usage_settings_for_config(config, circuit_id)
-        settings = {
-            "window_days": _positive_int_value(
-                window_days,
-                default=current.window_days,
-            ),
-            "daily_spike_ratio": _positive_float_value(
-                daily_spike_ratio,
-                default=current.daily_spike_ratio,
-            ),
-        }
-        self.store_data.energy_usage_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.settings_controller.async_set_energy_usage_settings(
+            circuit_id,
+            window_days,
+            daily_spike_ratio,
+        )
 
     async def async_recalculate_setting_recommendations(
         self: Self,
@@ -1898,26 +1885,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         demand_limit_w: Any = None,
     ) -> None:
         """Persist rolling demand settings for one circuit."""
-        config = self._config_for_circuit(circuit_id)
-        current = self._demand_settings_for_config(config, circuit_id)
-        settings: dict[str, Any] = {
-            "window_minutes": _positive_int_value(
-                window_minutes,
-                default=current.window_minutes,
-            ),
-        }
-        limit_w = _optional_positive_float_value(
+        await self.settings_controller.async_set_demand_settings(
+            circuit_id,
+            window_minutes,
             demand_limit_w,
-            default=current.demand_limit_w,
         )
-        if limit_w is not None:
-            settings["demand_limit_w"] = limit_w
-        self.store_data.demand_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_capacity_settings(
         self: Self,
@@ -1926,25 +1898,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         warning_ratio: Any = None,
     ) -> None:
         """Persist circuit capacity settings for one circuit."""
-        current = self._capacity_settings_for_config(circuit_id)
-        settings: dict[str, Any] = {
-            "warning_ratio": _positive_float_value(
-                warning_ratio,
-                default=current.warning_ratio,
-            ),
-        }
-        capacity_amps = _optional_positive_float_value(
+        await self.settings_controller.async_set_capacity_settings(
+            circuit_id,
             breaker_amps,
-            default=current.breaker_amps,
+            warning_ratio,
         )
-        if capacity_amps is not None:
-            settings["breaker_amps"] = capacity_amps
-        self.store_data.capacity_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_leg_imbalance_settings(
         self: Self,
@@ -2010,30 +1968,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         always_on_alert_w: Any = None,
     ) -> None:
         """Persist Always On and standby settings for one circuit."""
-        config = self._config_for_circuit(circuit_id)
-        current = self._standby_settings_for_config(config, circuit_id)
-        settings: dict[str, Any] = {
-            "window_hours": _positive_int_value(
-                window_hours,
-                default=current.window_hours,
-            ),
-            "standby_threshold_w": _positive_float_value(
-                standby_threshold_w,
-                default=current.standby_threshold_w,
-            ),
-        }
-        alert_w = _optional_positive_float_value(
+        await self.settings_controller.async_set_standby_settings(
+            circuit_id,
+            window_hours,
+            standby_threshold_w,
             always_on_alert_w,
-            default=current.always_on_alert_w,
         )
-        if alert_w is not None:
-            settings["always_on_alert_w"] = alert_w
-        self.store_data.standby_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_utility_comparison_settings(
         self: Self,
