@@ -7,8 +7,17 @@ from typing import Any
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import CONF_ADVANCED_SETTINGS
+from custom_components.circuitsetup_energy_analyzer.cycles import (
+    RUN_CYCLE_DURATION_FEATURE,
+)
 from custom_components.circuitsetup_energy_analyzer.managers import (
     settings_controller,
+)
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitMode,
+    EventType,
+    PowerFlowMode,
 )
 from custom_components.circuitsetup_energy_analyzer.settings_advisor import (
     RecommendationStatus,
@@ -43,7 +52,12 @@ def _recommendation(**overrides: Any) -> SettingRecommendation:
 
 class _SettingsCoordinator:
     def __init__(self, recommendation: SettingRecommendation) -> None:
-        self.state = SimpleNamespace()
+        self.state = SimpleNamespace(
+            leg_imbalance_evidence_by_circuit={},
+            metric_consistency_evidence_by_circuit={},
+            balance_evidence_by_circuit={},
+            solar_flow_evidence_by_circuit={},
+        )
         self.entry_data = {
             CONF_ADVANCED_SETTINGS: {
                 "fridge": {
@@ -76,6 +90,10 @@ class _SettingsCoordinator:
             balance_settings_by_circuit={},
             solar_flow_settings_by_circuit={},
             operating_detection_settings_by_circuit={},
+            energy_usage_by_circuit={},
+            events=[],
+            standby_by_circuit={},
+            demand_by_circuit={},
         )
         self.options = {
             CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}
@@ -93,17 +111,13 @@ class _SettingsCoordinator:
             SimpleNamespace(
                 circuit_id="fridge",
                 name="Kitchen Fridge",
-                appliance_profile=SimpleNamespace(value="refrigerator"),
-                mode=SimpleNamespace(value="single_phase"),
-                power_flow=SimpleNamespace(value="load"),
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                power_flow=PowerFlowMode.LOAD,
                 daily_energy_spike_ratio=0.25,
             )
         ]
         self.advanced_settings_calls: list[str] = []
-        self.feature_history_calls: list[tuple[str, datetime]] = []
-        self.feature_history_by_circuit = {
-            "fridge": {"energy_usage_days": [{"date": "2026-06-30"}]}
-        }
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -149,14 +163,6 @@ class _SettingsCoordinator:
         self.advanced_settings_calls.append(circuit_id)
         return {"daily_spike_ratio": 0.25}
 
-    def _advisor_feature_history_for_circuit(
-        self,
-        config: SimpleNamespace,
-        now: datetime,
-    ) -> dict[str, Any]:
-        self.feature_history_calls.append((config.circuit_id, now))
-        return self.feature_history_by_circuit[config.circuit_id]
-
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
             circuit_id=circuit_id,
@@ -198,6 +204,9 @@ class _SettingsCoordinator:
 
     async def _apply_feature_result(self, result: SimpleNamespace) -> None:
         self.applied_feature_results.append(result)
+
+    def _ha_time_zone(self) -> str:
+        return "UTC"
 
 
 @pytest.mark.asyncio
@@ -241,13 +250,10 @@ def test_settings_controller_builds_advisor_inputs() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
-    config = SimpleNamespace(
-        circuit_id="fridge",
-        name="Kitchen Fridge",
-        appliance_profile=SimpleNamespace(value="refrigerator"),
-        mode=SimpleNamespace(value="single_phase"),
-        power_flow=SimpleNamespace(value="load"),
-    )
+    config = coordinator.circuit_configs[0]
+    coordinator.store_data.energy_usage_by_circuit["fridge"] = {
+        "days": [{"date": "2026-06-30"}]
+    }
 
     inputs = controller.advisor_inputs_for_config(config, coordinator.now)
 
@@ -258,13 +264,87 @@ def test_settings_controller_builds_advisor_inputs() -> None:
     assert inputs.context.circuit_mode == "single_phase"
     assert inputs.context.power_flow == "load"
     assert inputs.context.advanced_settings == {"daily_spike_ratio": 0.25}
-    assert inputs.feature_history == {"energy_usage_days": [{"date": "2026-06-30"}]}
+    assert inputs.feature_history["energy_usage_days"] == [{"date": "2026-06-30"}]
     assert (
         dict(inputs.decisions)
         == coordinator.store_data.settings_recommendation_decisions
     )
     assert coordinator.advanced_settings_calls == ["fridge"]
-    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
+
+
+def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    coordinator.store_data.energy_usage_by_circuit["fridge"] = {
+        "days": [{"date": "2026-06-30", "energy_kwh": 1.8}]
+    }
+    coordinator.store_data.standby_by_circuit["fridge"] = {
+        "samples": [
+            {"timestamp": coordinator.now.isoformat(), "real_power_w": "4.5"},
+            {"real_power_w": "bad"},
+        ]
+    }
+    coordinator.store_data.demand_by_circuit["fridge"] = {
+        "capacity_current_samples": [{"current_amps": "7.25"}],
+        "samples": [{"current_a": "8.5"}],
+    }
+    coordinator.store_data.events = [
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.START,
+            timestamp=coordinator.now,
+            features={"startup_power_w": "610"},
+        )
+    ]
+    coordinator.state.leg_imbalance_evidence_by_circuit = {
+        "fridge": {
+            "leg_imbalance_ratio": "0.12",
+            "left_real_power_w": -400,
+            "right_real_power_w": 380,
+        }
+    }
+    coordinator.state.metric_consistency_evidence_by_circuit = {
+        "fridge": {
+            "apparent_power_difference_percent": "3.5",
+            "power_factor_difference": "0.04",
+            "reported_apparent_power_va": "720",
+        }
+    }
+    coordinator.state.balance_evidence_by_circuit = {
+        "fridge": {"balance_power_w": "-120"}
+    }
+    coordinator.state.solar_flow_evidence_by_circuit = {
+        "fridge": {"grid_export_w": "250"}
+    }
+    config = coordinator.circuit_configs[0]
+
+    monkeypatch.setattr(
+        settings_controller,
+        "cycle_baseline_feature_values",
+        lambda events, **kwargs: {RUN_CYCLE_DURATION_FEATURE: [900]},
+        raising=False,
+    )
+
+    history = settings_controller.SettingsController(
+        coordinator
+    ).advisor_feature_history_for_circuit(config, coordinator.now)
+
+    assert history["energy_usage_days"] == [
+        {"date": "2026-06-30", "energy_kwh": 1.8}
+    ]
+    assert history["cycles"] == [{"duration_minutes": 15.0}]
+    assert history["standby_samples_w"] == [4.5]
+    assert history["current_samples"] == [7.25, 8.5]
+    assert history["operating_start_samples"] == [
+        {"timestamp": coordinator.now.isoformat(), "power_w": 610.0}
+    ]
+    assert history["leg_imbalance_ratios"] == [0.12]
+    assert history["dual_phase_total_power_w"] == [780]
+    assert history["apparent_power_residual_percent"] == [3.5]
+    assert history["power_factor_residual"] == [0.04]
+    assert history["apparent_power_samples_va"] == [720.0]
+    assert history["negative_balance_w"] == [-120.0]
+    assert history["solar_export_w"] == [250.0]
 
 
 def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:
@@ -390,7 +470,6 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
     changed = controller.rebuild_setting_recommendations(coordinator.now)
 
     assert changed is True
-    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
     assert (
         coordinator.store_data.settings_recommendations[stale.recommendation_id].status
         is RecommendationStatus.STALE
@@ -430,7 +509,6 @@ async def test_settings_controller_recalculates_and_records_decisions(
         recommendation.recommendation_id,
     )
 
-    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
     assert coordinator.dirty_count == 2
     assert coordinator.saved == [coordinator.now, coordinator.now]
     assert coordinator.notified == 1
