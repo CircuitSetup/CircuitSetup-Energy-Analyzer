@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.const import CONF_ADVANCED_SETTINGS
 from custom_components.circuitsetup_energy_analyzer.managers import (
     settings_controller,
 )
@@ -48,7 +49,26 @@ class _SettingsCoordinator:
                 recommendation.recommendation_id: recommendation
             },
             settings_recommendation_decisions={},
+            sensitivity_by_circuit={},
+            energy_usage_settings_by_circuit={
+                "fridge": {"daily_spike_ratio": 0.25}
+            },
+            energy_goal_settings_by_circuit={},
+            activity_alert_settings_by_circuit={},
+            billing_settings_by_circuit={},
+            cost_settings_by_circuit={},
+            demand_settings_by_circuit={},
+            capacity_settings_by_circuit={},
+            standby_settings_by_circuit={},
+            leg_imbalance_settings_by_circuit={},
+            metric_consistency_settings_by_circuit={},
+            balance_settings_by_circuit={},
+            solar_flow_settings_by_circuit={},
+            operating_detection_settings_by_circuit={},
         )
+        self.options = {
+            CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}
+        }
         self.now = datetime(2026, 6, 30, 12, 5, tzinfo=UTC)
         self.set_values: list[tuple[str, str, object]] = []
         self.persist_count = 0
@@ -62,14 +82,6 @@ class _SettingsCoordinator:
 
     def _now_fn(self) -> datetime:
         return self.now
-
-    def _set_recommendation_setting_value(
-        self,
-        circuit_id: str,
-        setting_key: str,
-        value: object,
-    ) -> None:
-        self.set_values.append((circuit_id, setting_key, value))
 
     async def _async_persist_config_entry_options(self) -> None:
         self.persist_count += 1
@@ -100,6 +112,14 @@ class _SettingsCoordinator:
     ) -> bool:
         self.rebuild_calls.append((now, circuit_id))
         return True
+
+    def _apply_advanced_settings(
+        self,
+        circuit_id: str,
+        settings: dict[str, object],
+    ) -> None:
+        for setting_key, value in settings.items():
+            self.set_values.append((circuit_id, setting_key, value))
 
 
 @pytest.mark.asyncio
@@ -165,3 +185,24 @@ async def test_settings_controller_recalculates_and_records_decisions() -> None:
     assert decision.status is RecommendationStatus.DISMISSED
     assert decision.denied_value == recommendation.suggested_value
     assert coordinator.refreshed_recommendations[-1] == coordinator.now
+
+
+def test_settings_controller_writes_recommendation_setting_values() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    controller.set_recommendation_setting_value(
+        "fridge",
+        "daily_spike_ratio",
+        0.35,
+    )
+    controller.set_recommendation_setting_value(
+        "fridge",
+        "daily_spike_ratio",
+        None,
+    )
+
+    assert coordinator.options[CONF_ADVANCED_SETTINGS] == {}
+    assert coordinator.store_data.energy_usage_settings_by_circuit == {}
+    assert coordinator.set_values == [("fridge", "daily_spike_ratio", 0.35)]

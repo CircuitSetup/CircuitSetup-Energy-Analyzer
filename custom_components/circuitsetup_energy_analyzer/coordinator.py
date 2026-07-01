@@ -681,22 +681,6 @@ def _replace_if_present_as(
         target[circuit_id] = values
 
 
-def _remove_setting_key(
-    target: dict[str, dict[str, Any]],
-    circuit_id: str,
-    setting_key: str,
-) -> None:
-    current = target.get(circuit_id)
-    if not isinstance(current, dict) or setting_key not in current:
-        return
-    updated = dict(current)
-    updated.pop(setting_key, None)
-    if updated:
-        target[circuit_id] = updated
-    else:
-        target.pop(circuit_id, None)
-
-
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     """Apply a processor-requested update to AnalyzerState."""
     apply_state_update(state, path, value)
@@ -1538,105 +1522,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         setting_key: str,
         value: Any,
     ) -> None:
-        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
-        if not isinstance(advanced_by_circuit, dict):
-            advanced_by_circuit = dict(advanced_by_circuit)
-            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
-        current_settings = advanced_by_circuit.get(circuit_id, {})
-        updated_settings = (
-            dict(current_settings) if isinstance(current_settings, Mapping) else {}
+        self.settings_controller.set_recommendation_setting_value(
+            circuit_id,
+            setting_key,
+            value,
         )
-        self._clear_advanced_setting_value(circuit_id, setting_key)
-        if value is None:
-            updated_settings.pop(setting_key, None)
-        else:
-            updated_settings[setting_key] = value
-            self._apply_advanced_settings(circuit_id, {setting_key: value})
-        if updated_settings:
-            advanced_by_circuit[circuit_id] = updated_settings
-        else:
-            advanced_by_circuit.pop(circuit_id, None)
 
     def _clear_advanced_setting_value(
         self: Self,
         circuit_id: str,
         setting_key: str,
     ) -> None:
-        if setting_key == "preset":
-            self.store_data.sensitivity_by_circuit.pop(circuit_id, None)
-            return
-        _remove_setting_key(
-            self.store_data.energy_usage_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.energy_goal_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.activity_alert_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.billing_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.cost_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.demand_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.capacity_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.standby_settings_by_circuit,
-            circuit_id,
-            "min_samples" if setting_key == "standby_min_samples" else setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.leg_imbalance_settings_by_circuit,
-            circuit_id,
-            {
-                "leg_imbalance_warning_ratio": "warning_ratio",
-                "leg_imbalance_min_total_power_w": "minimum_total_power_w",
-            }.get(setting_key, setting_key),
-        )
-        _remove_setting_key(
-            self.store_data.metric_consistency_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
-        _remove_setting_key(
-            self.store_data.balance_settings_by_circuit,
-            circuit_id,
-            {
-                "balance_negative_tolerance_w": "negative_tolerance_w",
-            }.get(setting_key, setting_key),
-        )
-        _remove_setting_key(
-            self.store_data.solar_flow_settings_by_circuit,
-            circuit_id,
-            {
-                "solar_export_tolerance_w": "export_tolerance_w",
-            }.get(setting_key, setting_key),
-        )
-        _remove_setting_key(
-            self.store_data.operating_detection_settings_by_circuit,
-            circuit_id,
-            setting_key,
-        )
+        self.settings_controller.clear_advanced_setting_value(circuit_id, setting_key)
 
     async def async_deny_setting_recommendation(
         self: Self,
