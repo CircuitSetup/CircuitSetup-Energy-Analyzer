@@ -1499,6 +1499,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "nilm-review-card" in PANEL_MODULE_VERSION
     assert "candidate-facts" in PANEL_MODULE_VERSION
     assert "session-validation-card" in PANEL_MODULE_VERSION
+    assert "interval-running-prompt" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1774,6 +1775,66 @@ for (const expected of [
     )
 
 
+def test_nilm_workspace_hides_already_reviewed_session_validation_cards() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [],
+  virtual_appliances: [],
+  assignments: [
+    {
+      assignment_id: "assignment-dishwasher",
+      confirmed_session_ids: ["session-confirmed"],
+      rejected_session_ids: ["session-rejected"]
+    }
+  ],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [
+    {
+      session_id: "session-confirmed",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_label: "Already Confirmed",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    },
+    {
+      session_id: "session-rejected",
+      start: "2026-06-24T20:12:00Z",
+      end: "2026-06-24T21:03:00Z",
+      display_label: "Already Rejected",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    },
+    {
+      session_id: "session-pending",
+      start: "2026-06-25T18:12:00Z",
+      end: "2026-06-25T19:03:00Z",
+      display_label: "Pending Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    }
+  ],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const hidden of ["Already Confirmed", "Already Rejected"]) {
+  if (html.includes(hidden)) {
+    throw new Error(`reviewed session still visible: ${hidden}: ${html}`);
+  }
+}
+if (!html.includes("Predicted Pending Dishwasher")) {
+  throw new Error(`pending session missing: ${html}`);
+}
+"""
+    )
+
+
 def test_nilm_session_validation_adjust_interval_loads_session_times() -> None:
     _run_panel_node_script(
         """
@@ -1806,6 +1867,37 @@ if (panel._lastActionMessage !== "Loaded NILM session interval.") {
 }
 if (!rendered) {
   throw new Error("adjust interval did not re-render");
+}
+"""
+    )
+
+
+def test_nilm_label_interval_form_asks_whether_appliance_was_running() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmLabelIntervalDraft = {
+  start: "2026-06-24T18:12",
+  end: "2026-06-24T19:03",
+  label: "Dishwasher"
+};
+const html = panel._renderNilmLabelIntervals({
+  label_intervals: [],
+  actions: {
+    sensor_label_interval: {
+      ground_truth_options: []
+    }
+  }
+});
+for (const expected of [
+  "Was this appliance running here?",
+  "Review the selected graph window",
+  "Dishwasher",
+  "Save Interval"
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
 }
 """
     )

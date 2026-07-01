@@ -2453,9 +2453,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const sessions = Array.isArray(workspace && workspace.sessions)
       ? workspace.sessions
       : [];
+    const reviewedSessionIds = this._nilmReviewedSessionIds(workspace);
     const cards = sessions.map((session, index) => ({ session, index })).filter(({ session }) => {
       const actions = session && session.actions;
-      return session && session.assignment_id && actions && (actions.validate || actions.reject);
+      const sessionId = String(session && session.session_id || "").trim();
+      return session
+        && session.assignment_id
+        && (!sessionId || !reviewedSessionIds.has(sessionId))
+        && actions
+        && (actions.validate || actions.reject);
     }).slice(0, 5);
     if (!cards.length) {
       return "";
@@ -2466,6 +2472,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${cards.map(({ session, index }) => this._renderNilmSessionValidationCard(workspace, session, index)).join("")}
       </div>
     `;
+  }
+
+  _nilmReviewedSessionIds(workspace) {
+    const reviewed = new Set();
+    const assignments = Array.isArray(workspace && workspace.assignments)
+      ? workspace.assignments
+      : [];
+    for (const assignment of assignments) {
+      for (const key of ["confirmed_session_ids", "rejected_session_ids"]) {
+        const ids = Array.isArray(assignment && assignment[key]) ? assignment[key] : [];
+        for (const id of ids) {
+          const sessionId = String(id || "").trim();
+          if (sessionId) {
+            reviewed.add(sessionId);
+          }
+        }
+      }
+    }
+    return reviewed;
   }
 
   _renderNilmSessionValidationCard(workspace, session, index) {
@@ -2574,6 +2599,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <h3>Manual Labels</h3>
       <p class="muted">Manual labels teach NILM which appliance was running during a time range.</p>
       <div class="metric">
+        <p class="muted"><strong>Was this appliance running here?</strong> Review the selected graph window, then save the appliance name if the interval matches.</p>
         <div class="nilm-interval-form">
           <label>
             <span class="muted">Start</span>
