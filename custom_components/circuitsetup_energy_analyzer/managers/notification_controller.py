@@ -42,7 +42,7 @@ class NotificationController:
         """Create one persistent alert notification when it is not suppressed."""
         if alert.circuit_id in self._coordinator.paused_circuits:
             return
-        if self._coordinator._has_suppressed_alert_feedback(alert):
+        if self._coordinator.evidence_actions.has_suppressed_alert_feedback(alert):
             return
         alert_id = notifications.notification_id_for_alert(alert)
         if alert_id in self.notified_alert_ids:
@@ -61,7 +61,7 @@ class NotificationController:
         """Create notifications for published NILM virtual appliance alerts."""
         active_alerts: list[AlertEvidence] = []
         for alert in nilm_virtual_appliance_alerts(self._coordinator, now=now):
-            alert = self._coordinator._alert_with_feedback(alert)
+            alert = self._coordinator.evidence_actions.alert_with_feedback(alert)
             alert_id = notifications.notification_id_for_alert(alert)
             if alert.feedback_status != "expected":
                 active_alerts.append(alert)
