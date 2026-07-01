@@ -244,11 +244,6 @@ from .water_correlations import (
 from .weather_context import WeatherContextSample, evaluate_weather_context
 
 _LOGGER = logging.getLogger(__name__)
-_UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS = {
-    "unconfigured": "utility_comparison_source_mismatch",
-    "missing_utility": "utility_comparison_missing_utility_source",
-    "missing_measured": "utility_comparison_missing_measured_source",
-}
 _DEMO_SOURCE_UNIQUE_ID_PREFIX = "demo_source_exact_"
 
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
@@ -4431,64 +4426,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         problem: str,
         source_entities: Iterable[str],
     ) -> dict[str, Any]:
-        config = self._config_for_circuit(circuit_id)
-        circuit_name = getattr(config, "name", None) or circuit_id
-        return {
-            "circuit_name": str(circuit_name),
-            "reason": self._data_quality_repair_reason(problem),
-            "recommended_action": self._data_quality_repair_action(
-                circuit_name,
-                problem,
-            ),
-            "source_entities": list(dict.fromkeys(source_entities)),
-        }
+        return self.setup_health.data_quality_repair_data(
+            circuit_id,
+            problem,
+            list(source_entities),
+        )
 
     def _data_quality_repair_reason(self: Self, problem: str) -> str:
-        reasons = {
-            "missing_required_sensor": (
-                "A configured circuit is missing a required source sensor."
-            ),
-            "missing_source_entities": (
-                "The integration has no configured source sensors."
-            ),
-            "stale_source_sensor": (
-                "One or more selected source sensors have not updated recently."
-            ),
-            "unexpected_negative_real_power": (
-                "A load circuit is reporting sustained negative real power."
-            ),
-        }
-        return reasons.get(problem, "A configured circuit has source-data issues.")
+        return self.setup_health.data_quality_repair_reason(problem)
 
     def _data_quality_repair_action(
         self: Self,
         circuit_name: str,
         problem: str,
     ) -> str:
-        actions = {
-            "missing_required_sensor": f"Review source sensors for {circuit_name}",
-            "missing_source_entities": (
-                f"Add at least one source sensor for {circuit_name}"
-            ),
-            "stale_source_sensor": (
-                f"Fix stale source sensor data for {circuit_name}"
-            ),
-            "unexpected_negative_real_power": (
-                f"Check CT direction or power-flow mode for {circuit_name}"
-            ),
-        }
-        return actions.get(problem, f"Review source data for {circuit_name}")
+        return self.setup_health.data_quality_repair_action(circuit_name, problem)
 
     def _data_quality_repair_source_entities(self: Self, circuit_id: str) -> list[str]:
-        config = self._config_for_circuit(circuit_id)
-        if config is None:
-            return []
-        return [
-            sensor.entity_id
-            for sensor in getattr(config, "sensors", ())
-            if isinstance(getattr(sensor, "entity_id", None), str)
-            and sensor.entity_id
-        ]
+        return self.setup_health.data_quality_repair_source_entities(circuit_id)
 
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
         await self.setup_health.async_sync_setup_health_repairs(circuit_id)
@@ -4497,210 +4452,54 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
         problem: str,
-    ) -> dict[str, str]:
-        config = self._config_for_circuit(circuit_id)
-        circuit_name = getattr(config, "name", None) or circuit_id
-        recommended_actions = {
-            "missing_energy_source": (
-                f"Add a cumulative kWh sensor to {circuit_name}"
-            ),
-            "missing_source_entities": (
-                f"Add at least one source sensor to {circuit_name}"
-            ),
-            "missing_mains_source": "Add a mains or whole-home source",
-            "missing_electrical_metrics": (
-                f"Add matching electrical metrics for {circuit_name}"
-            ),
-            "check_ct_direction": (
-                f"Check CT direction or power-flow mode for {circuit_name}"
-            ),
-            "dual_phase_missing_leg": (
-                f"Review leg A and leg B source sensors for {circuit_name}"
-            ),
-            "missing_rain_context_source": f"Add a rain sensor for {circuit_name}",
-            "missing_water_flow_source": (
-                f"Add a water-flow sensor for {circuit_name}"
-            ),
-            "utility_comparison_source_mismatch": (
-                f"Review utility comparison source settings for {circuit_name}"
-            ),
-            "utility_comparison_missing_utility_source": (
-                f"Add utility comparison source for {circuit_name}"
-            ),
-            "utility_comparison_missing_measured_source": (
-                f"Add measured kWh source for {circuit_name}"
-            ),
-        }
-        return {
-            "circuit_name": str(circuit_name),
-            "reason": self._setup_health_repair_reason(circuit_id, problem),
-            "recommended_action": recommended_actions.get(
-                problem,
-                f"Review setup for {circuit_name}",
-            ),
-            "source_entities": self._setup_health_repair_source_entities(
-                circuit_id,
-                problem,
-            ),
-        }
+    ) -> dict[str, Any]:
+        return self.setup_health.repair_data(circuit_id, problem)
 
     def _setup_health_repair_reason(self: Self, circuit_id: str, problem: str) -> str:
-        config = self._config_for_circuit(circuit_id)
-        circuit_name = getattr(config, "name", None) or circuit_id
-        reasons = {
-            "missing_energy_source": (
-                "Daily Energy Usage needs a cumulative energy source."
-            ),
-            "missing_source_entities": (
-                "No source sensors are configured for this circuit."
-            ),
-            "missing_mains_source": (
-                "Mains balance, NILM, or solar-flow checks need a mains source."
-            ),
-            "missing_electrical_metrics": (
-                "Power Metric Consistency needs matching supporting sensors."
-            ),
-            "check_ct_direction": (
-                "Signed power evidence suggests export, reversed CT orientation, "
-                "or a mapping mismatch."
-            ),
-            "dual_phase_missing_leg": (
-                "One side of this dual-phase circuit is missing real-power data."
-            ),
-            "missing_rain_context_source": (
-                "Rain-pump context is enabled, but no rain source is configured."
-            ),
-            "missing_water_flow_source": (
-                "Water-flow context is enabled, but no flow source is configured."
-            ),
-            "utility_comparison_source_mismatch": (
-                "Utility comparison sources or recorder periods cannot be compared."
-            ),
-            "utility_comparison_missing_utility_source": (
-                "Utility comparison is enabled, but utility kWh has no data."
-            ),
-            "utility_comparison_missing_measured_source": (
-                "Utility comparison is enabled, but measured kWh has no data."
-            ),
-        }
-        return reasons.get(problem, f"Review setup for {circuit_name}.")
+        return self.setup_health.repair_reason(circuit_id, problem)
 
     def _setup_health_has_missing_source_entities(self: Self, circuit_id: str) -> bool:
-        config = self._config_for_circuit(circuit_id)
-        if config is not None and not self._setup_health_source_entities(circuit_id):
-            return True
-        return (
-            str(self.state.data_quality_by_circuit.get(circuit_id, ""))
-            == "missing_source_entities"
-        )
+        return self.setup_health.has_missing_source_entities(circuit_id)
 
     def _setup_health_source_entities(self: Self, circuit_id: str) -> list[str]:
-        config = self._config_for_circuit(circuit_id)
-        if config is None:
-            return []
-        return [
-            sensor.entity_id
-            for sensor in getattr(config, "sensors", ())
-            if isinstance(getattr(sensor, "entity_id", None), str)
-            and sensor.entity_id
-        ]
+        return self.setup_health.source_entities(circuit_id)
 
     def _setup_health_repair_source_entities(
         self: Self,
         circuit_id: str,
         problem: str,
     ) -> list[str]:
-        source_entities = self._setup_health_source_entities(circuit_id)
-        if problem == "dual_phase_missing_leg":
-            return source_entities
-        if problem in {
-            "missing_energy_source",
-            "missing_electrical_metrics",
-            "check_ct_direction",
-        }:
-            return source_entities
-        return []
+        return self.setup_health.repair_source_entities(circuit_id, problem)
 
     def _setup_health_has_missing_mains_status(self: Self, circuit_id: str) -> bool:
-        for field_name in (
-            "balance_status_by_circuit",
-            "solar_flow_status_by_circuit",
-            "solar_surplus_status_by_circuit",
-        ):
-            if getattr(self.state, field_name, {}).get(circuit_id) == "missing_mains":
-                return True
-        return False
+        return self.setup_health.has_missing_mains_status(circuit_id)
 
     def _setup_health_has_ct_direction_status(self: Self, circuit_id: str) -> bool:
-        for field_name in (
-            "balance_status_by_circuit",
-            "solar_flow_status_by_circuit",
-            "solar_surplus_status_by_circuit",
-        ):
-            if getattr(self.state, field_name, {}).get(circuit_id) in {
-                "inconsistent_export",
-                "negative_balance",
-            }:
-                return True
-        return False
+        return self.setup_health.has_ct_direction_status(circuit_id)
 
     def _setup_health_has_missing_rain_context_source(
         self: Self,
         circuit_id: str,
     ) -> bool:
-        config = self._config_for_circuit(circuit_id)
-        if (
-            config is None
-            or config.appliance_profile not in PUMP_WATER_CONTEXT_PROFILES
-        ):
-            return False
-        advanced_settings = self._advanced_settings_for_circuit(circuit_id)
-        if not bool(
-            advanced_settings.get(
-                CONF_RAIN_PUMP_CORRELATION_ENABLED,
-                DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
-            )
-        ):
-            return False
-        return not self._has_rain_context_source_configured()
+        return self.setup_health.has_missing_rain_context_source(circuit_id)
 
     def _setup_health_has_missing_water_flow_source(
         self: Self,
         circuit_id: str,
     ) -> bool:
-        config = self._config_for_circuit(circuit_id)
-        if (
-            config is None
-            or config.appliance_profile not in FLOW_WATER_CONTEXT_PROFILES
-        ):
-            return False
-        advanced_settings = self._advanced_settings_for_circuit(circuit_id)
-        if not bool(
-            advanced_settings.get(
-                CONF_WATER_FLOW_CORRELATION_ENABLED,
-                DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
-            )
-        ):
-            return False
-        if not bool(advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)):
-            return False
-        return not self._flow_entities_for_circuit(advanced_settings)
+        return self.setup_health.has_missing_water_flow_source(circuit_id)
 
     def _setup_health_has_utility_comparison_setup_status(
         self: Self,
         circuit_id: str,
     ) -> bool:
-        return (
-            self._setup_health_utility_comparison_repair_problem(circuit_id)
-            is not None
-        )
+        return self.setup_health.has_utility_comparison_setup_status(circuit_id)
 
     def _setup_health_utility_comparison_repair_problem(
         self: Self,
         circuit_id: str,
     ) -> str | None:
-        status = self.state.utility_comparison_status_by_circuit.get(circuit_id)
-        return _UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS.get(str(status))
+        return self.setup_health.utility_comparison_repair_problem(circuit_id)
 
     def _has_rain_context_source_configured(self: Self) -> bool:
         return bool(
