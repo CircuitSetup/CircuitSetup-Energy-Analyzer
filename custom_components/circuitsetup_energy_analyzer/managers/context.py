@@ -12,6 +12,14 @@ class ProcessingContextBuilder:
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
 
+    def time_zone(self) -> str | None:
+        value = getattr(
+            getattr(self._coordinator.hass, "config", None),
+            "time_zone",
+            None,
+        )
+        return str(value) if value else None
+
     def build(self, now: datetime) -> ProcessingContext:
         coordinator = self._coordinator
         return ProcessingContext(
@@ -23,5 +31,5 @@ class ProcessingContextBuilder:
             entry_data=coordinator.entry_data,
             known_load_circuit_ids=coordinator._known_load_circuit_ids,
             sensitivity=coordinator._sensitivity,
-            time_zone=coordinator._ha_time_zone(),
+            time_zone=self.time_zone(),
         )

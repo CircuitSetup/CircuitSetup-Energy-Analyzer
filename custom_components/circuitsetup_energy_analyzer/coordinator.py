@@ -1263,8 +1263,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _ha_time_zone(self: Self) -> str | None:
         """Return Home Assistant's configured timezone name when available."""
-        value = getattr(getattr(self.hass, "config", None), "time_zone", None)
-        return str(value) if value else None
+        return self.context_builder.time_zone()
 
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
