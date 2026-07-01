@@ -978,12 +978,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self,
             newest_mapping_items=_newest_mapping_items,
             mapping_time=_mapping_time,
+            retention_mode_for_circuit=self._retention_mode_for_circuit,
             retention_window_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ],
             ha_local_date=_ha_local_date,
             ha_time_zone=self._ha_time_zone,
             sample_timestamp_is_at_or_after=_sample_timestamp_is_at_or_after,
+            contextual_baseline_pruner=prune_contextual_baseline_state,
             weather_context_history_max_samples=WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
             water_context_history_max_samples=WATER_CONTEXT_HISTORY_MAX_SAMPLES,
             alert_history_max_age=ALERT_HISTORY_MAX_AGE,
@@ -5992,33 +5994,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_water_context(now)
 
     def _prune_contextual_baseline_state(self: Self, now: datetime) -> None:
-        pruned_samples: dict[str, list[dict[str, Any]]] = {}
-        pruned_stats: dict[str, dict[str, Any]] = {}
-        circuit_ids = set(self.store_data.contextual_baseline_samples_by_circuit) | set(
-            self.store_data.contextual_baselines_by_circuit
-        )
-        for circuit_id in circuit_ids:
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            samples = self.store_data.contextual_baseline_samples_by_circuit.get(
-                circuit_id,
-                [],
-            )
-            stats = self.store_data.contextual_baselines_by_circuit.get(
-                circuit_id,
-                {},
-            )
-            samples_by_circuit, stats_by_circuit = prune_contextual_baseline_state(
-                {circuit_id: samples},
-                {circuit_id: stats},
-                retention_mode,
-                now,
-            )
-            if samples_by_circuit.get(circuit_id):
-                pruned_samples[circuit_id] = samples_by_circuit[circuit_id]
-            if stats_by_circuit.get(circuit_id):
-                pruned_stats[circuit_id] = stats_by_circuit[circuit_id]
-        self.store_data.contextual_baseline_samples_by_circuit = pruned_samples
-        self.store_data.contextual_baselines_by_circuit = pruned_stats
+        self.store_persistence.prune_contextual_baseline_state(now)
 
     def _prune_alert_history(self: Self, now: datetime) -> None:
         self.store_persistence.prune_alert_history(now)

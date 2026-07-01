@@ -4,6 +4,11 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+ContextualBaselinePruner = Callable[
+    [dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], Any, datetime],
+    tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]],
+]
+
 
 class StorePersistenceManager:
     """Manage store dirty tracking and save gating for the coordinator."""
@@ -14,10 +19,12 @@ class StorePersistenceManager:
         *,
         newest_mapping_items: Callable[[Any, int], list[dict[str, Any]]],
         mapping_time: Callable[..., datetime],
+        retention_mode_for_circuit: Callable[[str], Any],
         retention_window_for_circuit: Callable[[str], timedelta],
         ha_local_date: Callable[[datetime, str | None], Any],
         ha_time_zone: Callable[[], str | None],
         sample_timestamp_is_at_or_after: Callable[[Any, datetime], bool],
+        contextual_baseline_pruner: ContextualBaselinePruner,
         weather_context_history_max_samples: int,
         water_context_history_max_samples: int,
         alert_history_max_age: timedelta,
@@ -43,10 +50,12 @@ class StorePersistenceManager:
         self._coordinator = coordinator
         self._newest_mapping_items = newest_mapping_items
         self._mapping_time = mapping_time
+        self._retention_mode_for_circuit = retention_mode_for_circuit
         self._retention_window_for_circuit = retention_window_for_circuit
         self._ha_local_date = ha_local_date
         self._ha_time_zone = ha_time_zone
         self._sample_timestamp_is_at_or_after = sample_timestamp_is_at_or_after
+        self._contextual_baseline_pruner = contextual_baseline_pruner
         self._weather_context_history_max_samples = weather_context_history_max_samples
         self._water_context_history_max_samples = water_context_history_max_samples
         self._alert_history_max_age = alert_history_max_age
@@ -159,6 +168,38 @@ class StorePersistenceManager:
                 for sample in history
                 if self._sample_timestamp_is_at_or_after(sample, cutoff)
             ][-self._water_context_history_max_samples :]
+
+    def prune_contextual_baseline_state(self, now: datetime) -> None:
+        """Apply retention caps to contextual baseline samples and stats."""
+        store_data = self._coordinator.store_data
+        pruned_samples: dict[str, list[dict[str, Any]]] = {}
+        pruned_stats: dict[str, dict[str, Any]] = {}
+        circuit_ids = set(store_data.contextual_baseline_samples_by_circuit) | set(
+            store_data.contextual_baselines_by_circuit
+        )
+        for circuit_id in circuit_ids:
+            samples = store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_id,
+                [],
+            )
+            stats = store_data.contextual_baselines_by_circuit.get(
+                circuit_id,
+                {},
+            )
+            samples_by_circuit, stats_by_circuit = (
+                self._contextual_baseline_pruner(
+                    {circuit_id: samples},
+                    {circuit_id: stats},
+                    self._retention_mode_for_circuit(circuit_id),
+                    now,
+                )
+            )
+            if samples_by_circuit.get(circuit_id):
+                pruned_samples[circuit_id] = samples_by_circuit[circuit_id]
+            if stats_by_circuit.get(circuit_id):
+                pruned_stats[circuit_id] = stats_by_circuit[circuit_id]
+        store_data.contextual_baseline_samples_by_circuit = pruned_samples
+        store_data.contextual_baselines_by_circuit = pruned_stats
 
     def prune_alert_history(self, now: datetime) -> None:
         """Apply retention caps to stored alert history."""
