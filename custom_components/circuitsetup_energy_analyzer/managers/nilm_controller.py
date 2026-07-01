@@ -27,6 +27,9 @@ class NilmController:
         validation_coverage_overlap_seconds: Callable[[Any, Any], float],
         float_or_none: Callable[[Any], float | None],
         datetime_or_none: Callable[[Any], datetime | None],
+        assignment_appliance_id: Callable[[str], str],
+        assignment_id: Callable[[str, str], str],
+        assignment_max_items: int,
     ) -> None:
         self._coordinator = coordinator
         self._clean_string_list = clean_string_list
@@ -45,6 +48,104 @@ class NilmController:
         )
         self._float_or_none = float_or_none
         self._datetime_or_none = datetime_or_none
+        self._assignment_appliance_id = assignment_appliance_id
+        self._assignment_id = assignment_id
+        self._assignment_max_items = assignment_max_items
+
+    def upsert_assignment(
+        self,
+        circuit_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+        signature_fingerprint: Any = None,
+        session_id: str | None = None,
+        label_interval_id: str | None = None,
+        lifecycle_state: str = "assigned",
+        confidence: Any = 1.0,
+    ) -> dict[str, Any]:
+        """Create or update a durable NILM appliance assignment."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        appliance_id_text = (
+            str(appliance_id or "").strip()
+            or self._assignment_appliance_id(label_text)
+        )
+        assignments = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.setdefault(
+                circuit_id,
+                [],
+            )
+        )
+        assignment_id_text = str(assignment_id or "").strip()
+        assignment = next(
+            (
+                item
+                for item in assignments
+                if (
+                    (
+                        assignment_id_text
+                        and item.get("assignment_id") == assignment_id_text
+                    )
+                    or (
+                        not assignment_id_text
+                        and item.get("appliance_id") == appliance_id_text
+                    )
+                )
+            ),
+            None,
+        )
+        now = self._coordinator._now_fn().isoformat()
+        if assignment is None:
+            assignment = {
+                "assignment_id": assignment_id_text
+                or self._assignment_id(circuit_id, appliance_id_text),
+                "appliance_id": appliance_id_text,
+                "display_name": label_text,
+                "appliance_profile": str(appliance_profile or "").strip() or None,
+                "mains_circuit_id": circuit_id,
+                "signature_fingerprints": [],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": lifecycle_state,
+                "confidence": 0.0,
+                "created_at": now,
+                "updated_at": now,
+                "created_device": False,
+                "publish_entities": False,
+            }
+            assignments.append(assignment)
+        else:
+            assignments[:] = [item for item in assignments if item is not assignment]
+            assignments.append(assignment)
+            assignment["display_name"] = label_text
+            if appliance_profile:
+                assignment["appliance_profile"] = str(appliance_profile).strip()
+            assignment["lifecycle_state"] = lifecycle_state
+            assignment["updated_at"] = now
+
+        self._append_unique(
+            assignment.setdefault("signature_fingerprints", []),
+            signature_fingerprint,
+        )
+        self._append_unique(assignment.setdefault("session_ids", []), session_id)
+        self._append_unique(
+            assignment.setdefault("label_interval_ids", []),
+            label_interval_id,
+        )
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            confidence_value = 1.0
+        assignment["confidence"] = max(
+            float(assignment.get("confidence") or 0.0),
+            max(min(confidence_value, 1.0), 0.0),
+        )
+        del assignments[:-self._assignment_max_items]
+        return assignment
 
     async def async_label_nilm_signature(
         self,
@@ -199,7 +300,7 @@ class NilmController:
         coordinator = self._coordinator
         signature = self.signature_for_review(circuit_id, signature_id)
         fingerprint = self._signature_fingerprint_value(signature, signature_id)
-        assignment = coordinator._upsert_nilm_assignment(
+        assignment = self.upsert_assignment(
             circuit_id,
             label=label,
             appliance_id=appliance_id,
@@ -238,7 +339,7 @@ class NilmController:
         if not session_id_text:
             raise ValueError("Missing session_id.")
         coordinator = self._coordinator
-        assignment = coordinator._upsert_nilm_assignment(
+        assignment = self.upsert_assignment(
             circuit_id,
             label=label,
             appliance_id=appliance_id,
@@ -280,7 +381,7 @@ class NilmController:
         )
         if interval is None:
             raise ValueError(f"Unknown interval_id '{interval_id_text}'.")
-        assignment = coordinator._upsert_nilm_assignment(
+        assignment = self.upsert_assignment(
             circuit_id,
             label=label or str(interval.get("label") or ""),
             appliance_id=appliance_id or str(interval.get("appliance_id") or ""),
@@ -641,7 +742,7 @@ class NilmController:
         for signature in signatures:
             if signature.get("signature_id") == signature_id:
                 signature["ignored"] = True
-                assignment = coordinator._upsert_nilm_assignment(
+                assignment = self.upsert_assignment(
                     circuit_id,
                     label=self._signature_assignment_label(signature, signature_id),
                     signature_fingerprint=self._signature_fingerprint_value(
@@ -655,7 +756,7 @@ class NilmController:
                 await self._async_save_nilm_review_change(circuit_id)
                 return
         signature = {"signature_id": signature_id, "ignored": True}
-        assignment = coordinator._upsert_nilm_assignment(
+        assignment = self.upsert_assignment(
             circuit_id,
             label=signature_id,
             signature_fingerprint=signature_id,
@@ -671,11 +772,10 @@ class NilmController:
         signature_id: str,
     ) -> None:
         """Persist an expected NILM signature review decision."""
-        coordinator = self._coordinator
         signature = self.signature_for_review(circuit_id, signature_id)
         signature["expected"] = True
         signature["review_state"] = "expected"
-        assignment = coordinator._upsert_nilm_assignment(
+        assignment = self.upsert_assignment(
             circuit_id,
             label=self._signature_assignment_label(signature, signature_id),
             signature_fingerprint=self._signature_fingerprint_value(
