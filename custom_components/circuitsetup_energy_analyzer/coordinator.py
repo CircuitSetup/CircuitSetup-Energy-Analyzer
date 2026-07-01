@@ -1804,83 +1804,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             target_assignment_id,
         )
 
-    async def _async_record_nilm_session_validation(
-        self: Self,
-        circuit_id: str,
-        session_id: str,
-        *,
-        assignment_id: str | None,
-        correct: bool,
-    ) -> dict[str, Any]:
-        return await self.nilm_controller.async_record_nilm_session_validation(
-            circuit_id,
-            session_id,
-            assignment_id=assignment_id,
-            correct=correct,
-        )
-
-    def _upsert_nilm_assignment(
-        self: Self,
-        circuit_id: str,
-        *,
-        label: str,
-        appliance_id: str | None = None,
-        appliance_profile: str | None = None,
-        assignment_id: str | None = None,
-        signature_fingerprint: Any = None,
-        session_id: str | None = None,
-        label_interval_id: str | None = None,
-        lifecycle_state: str = "assigned",
-        confidence: Any = 1.0,
-    ) -> dict[str, Any]:
-        return self.nilm_controller.upsert_assignment(
-            circuit_id,
-            label=label,
-            appliance_id=appliance_id,
-            appliance_profile=appliance_profile,
-            assignment_id=assignment_id,
-            signature_fingerprint=signature_fingerprint,
-            session_id=session_id,
-            label_interval_id=label_interval_id,
-            lifecycle_state=lifecycle_state,
-            confidence=confidence,
-        )
-
-    def _nilm_assignment_for_session(
-        self: Self,
-        circuit_id: str,
-        session_id: str,
-        *,
-        assignment_id: str | None = None,
-    ) -> dict[str, Any]:
-        return self.nilm_controller.assignment_for_session(
-            circuit_id,
-            session_id,
-            assignment_id=assignment_id,
-        )
-
-    def _remove_nilm_signature_from_other_assignments(
-        self: Self,
-        circuit_id: str,
-        signature_fingerprint: str,
-        assignment_id: str,
-    ) -> None:
-        self.nilm_controller.remove_signature_from_other_assignments(
-            circuit_id,
-            signature_fingerprint,
-            assignment_id,
-        )
-
-    def _nilm_assignment_for_signature(
-        self: Self,
-        circuit_id: str,
-        signature_fingerprint: str,
-    ) -> dict[str, Any] | None:
-        return self.nilm_controller.assignment_for_signature(
-            circuit_id,
-            signature_fingerprint,
-        )
-
     async def async_publish_nilm_appliance_assignment(
         self: Self,
         circuit_id: str,
@@ -1913,16 +1836,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             assignment_id,
         )
-
-    def _nilm_assignment_for_id(
-        self: Self,
-        circuit_id: str,
-        assignment_id: str,
-    ) -> dict[str, Any]:
-        return self.nilm_controller.assignment_for_id(circuit_id, assignment_id)
-
-    async def _async_save_nilm_assignment_change(self: Self) -> None:
-        await self.nilm_controller.async_save_assignment_change()
 
     async def async_ignore_nilm_signature(
         self: Self,
