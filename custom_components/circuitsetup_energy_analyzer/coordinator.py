@@ -5981,16 +5981,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_demand(now)
 
     def _prune_standby(self: Self, now: datetime) -> None:
-        for circuit_id, history in self.store_data.standby_by_circuit.items():
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff = now - RETENTION_WINDOWS[retention_mode]
-            samples = history.get("samples", [])
-            if isinstance(samples, list):
-                history["samples"] = [
-                    sample
-                    for sample in samples
-                    if _sample_timestamp_is_at_or_after(sample, cutoff)
-                ]
+        self.store_persistence.prune_standby(now)
 
     def _prune_weather_context(self: Self, now: datetime) -> None:
         for circuit_id, history in (

@@ -119,6 +119,19 @@ class StorePersistenceManager:
                     and str(peak.get("date", "")) >= cutoff
                 ]
 
+    def prune_standby(self, now: datetime) -> None:
+        """Apply retention caps to stored standby samples."""
+        store_data = self._coordinator.store_data
+        for circuit_id, history in store_data.standby_by_circuit.items():
+            cutoff = now - self._retention_window_for_circuit(circuit_id)
+            samples = history.get("samples", [])
+            if isinstance(samples, list):
+                history["samples"] = [
+                    sample
+                    for sample in samples
+                    if self._sample_timestamp_is_at_or_after(sample, cutoff)
+                ]
+
     def prune_alert_history(self, now: datetime) -> None:
         """Apply retention caps to stored alert history."""
         store_data = self._coordinator.store_data
