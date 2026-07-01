@@ -5912,11 +5912,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.store_persistence.async_save_if_dirty(now)
 
     def _apply_retention(self: Self, now: datetime) -> None:
-        retained_events = [
-            event for event in self.store_data.events if self._keep_event(event, now)
-        ]
-        if len(retained_events) != len(self.store_data.events):
-            self.store_data.events = retained_events
+        self.store_persistence.prune_events(now)
         self._prune_energy_usage(now)
         self._prune_demand(now)
         self._prune_standby(now)
@@ -5973,10 +5969,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if kept:
                 retained[circuit_id] = kept
         self.state.recent_observations_by_circuit = retained
-
-    def _keep_event(self: Self, event: CircuitEvent, now: datetime) -> bool:
-        retention_mode = self._retention_mode_for_circuit(event.circuit_id)
-        return event.timestamp >= now - RETENTION_WINDOWS[retention_mode]
 
     def _prune_energy_usage(self: Self, now: datetime) -> None:
         self.store_persistence.prune_energy_usage(now)

@@ -90,6 +90,18 @@ class StorePersistenceManager:
         await store.async_save()
         self.dirty = False
 
+    def prune_events(self, now: datetime) -> None:
+        """Apply retention caps to stored circuit events."""
+        store_data = self._coordinator.store_data
+        retained_events = [
+            event
+            for event in store_data.events
+            if event.timestamp
+            >= now - self._retention_window_for_circuit(event.circuit_id)
+        ]
+        if len(retained_events) != len(store_data.events):
+            store_data.events = retained_events
+
     def prune_energy_usage(self, now: datetime) -> None:
         """Apply retention caps to stored daily energy rows."""
         store_data = self._coordinator.store_data
