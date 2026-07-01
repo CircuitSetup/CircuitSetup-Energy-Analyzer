@@ -2603,6 +2603,11 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Behavior Watchlist" in readme_text
     assert "Appliance Run Timeline" in readme_text
     assert "NILM Review" in readme_text
+    assert "NILM review lanes" in readme_text
+    assert (
+        "Needs Review, Assigned, Needs Validation, Ready to Publish, "
+        "Published, and Ignored / Expected"
+    ) in readme_text
     assert "instead of service-control cards" in readme_text
     assert "navigation-only evidence buttons" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
@@ -2699,6 +2704,11 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "Validate History",
         "false-positive and false-negative rates",
         "known-load sensors as selectable ground-truth sources",
+        "The workspace groups work into lanes",
+        "Needs Review, Assigned, Needs Validation, Ready to Publish, "
+        "Published, and Ignored / Expected",
+        "dynamic dashboard NILM card can show the same lane counts "
+        "when it is available",
         "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
         "Disable Publishing",
