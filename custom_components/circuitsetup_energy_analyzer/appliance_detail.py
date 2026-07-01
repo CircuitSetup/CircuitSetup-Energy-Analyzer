@@ -362,6 +362,30 @@ def metric_comparisons_for_circuit(
             "latest_real_power_w_by_circuit",
             ("real_power", "current_power_w"),
         ),
+        (
+            "demand_peak_w",
+            "Demand peak",
+            "W",
+            "peak_demand_w_by_circuit",
+            ("demand_peak_w", "peak_demand_w"),
+        ),
+        (
+            "capacity_usage_percent",
+            "Capacity usage",
+            "%",
+            "capacity_usage_by_circuit",
+            ("capacity_usage_percent", "capacity_usage"),
+        ),
+        (
+            "solar_covered_share_percent",
+            "Solar-covered share",
+            "%",
+            "solar_flexible_load_coverage_percent_by_circuit",
+            (
+                "solar_covered_share_percent",
+                "solar_flexible_load_coverage_percent",
+            ),
+        ),
     )
     comparisons: list[MetricComparison] = []
     for metric_id, label, unit, field, baseline_features in specs:

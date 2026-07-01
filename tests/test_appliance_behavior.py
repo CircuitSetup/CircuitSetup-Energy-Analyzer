@@ -143,6 +143,43 @@ def test_contextual_energy_comparison_uses_existing_evidence_range() -> None:
     assert comparison["normal_high"] == 10.0
 
 
+def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
+    state = AnalyzerState()
+    state.peak_demand_w_by_circuit["ev"] = 5200.0
+    state.capacity_usage_by_circuit["ev"] = 86.0
+    state.solar_flexible_load_coverage_percent_by_circuit["ev"] = 74.0
+    store_data = FeatureStoreData(
+        baselines={
+            "ev:demand_peak_w": _baseline("demand_peak_w", 4800.0, 4200.0, 5000.0),
+            "ev:capacity_usage_percent": _baseline(
+                "capacity_usage_percent",
+                70.0,
+                50.0,
+                80.0,
+            ),
+            "ev:solar_covered_share_percent": _baseline(
+                "solar_covered_share_percent",
+                65.0,
+                40.0,
+                90.0,
+            ),
+        }
+    )
+
+    detail = _detail(_config("ev", ApplianceProfile.EV_CHARGER), state, store_data)
+    comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
+
+    assert comparisons["demand_peak_w"]["label"] == "Demand peak"
+    assert comparisons["demand_peak_w"]["current_value"] == 5200.0
+    assert comparisons["demand_peak_w"]["status"] == "higher"
+    assert comparisons["capacity_usage_percent"]["label"] == "Capacity usage"
+    assert comparisons["capacity_usage_percent"]["current_value"] == 86.0
+    assert comparisons["capacity_usage_percent"]["status"] == "higher"
+    assert comparisons["solar_covered_share_percent"]["label"] == "Solar-covered share"
+    assert comparisons["solar_covered_share_percent"]["current_value"] == 74.0
+    assert comparisons["solar_covered_share_percent"]["status"] == "normal"
+
+
 def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() -> None:
     config = _config("hvac", ApplianceProfile.HVAC)
     store_data = FeatureStoreData(
