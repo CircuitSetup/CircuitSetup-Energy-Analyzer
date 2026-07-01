@@ -2204,13 +2204,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for circuit_id, maintenance in self.store_data.maintenance_by_circuit.items():
             if maintenance.get("active") is True:
                 self.paused_circuits.add(circuit_id)
-        for circuit_id, signatures in self.store_data.nilm_signatures.items():
-            for signature in signatures:
-                if signature.get("ignored") is True:
-                    self.ignored_nilm_signatures.add(
-                        (circuit_id, str(signature.get("signature_id", "")))
-                    )
-            self._refresh_nilm_state(circuit_id)
+        self.nilm_controller.hydrate_state_from_store()
         self.state.weather_context_by_circuit = {
             circuit_id: dict(evidence)
             for circuit_id, evidence in (

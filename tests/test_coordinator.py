@@ -1123,6 +1123,48 @@ def test_nilm_controller_seeds_demo_workspace_state() -> None:
     assert coordinator._store_dirty is True
 
 
+def test_nilm_controller_hydrates_ignored_signatures_from_store() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "sig-1", "ignored": True},
+                    {"signature_id": "sig-2", "ignored": False},
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    calls: list[str] = []
+
+    class _Processor:
+        def refresh_state(self, circuit_id: str, context: Any) -> FeatureResult:
+            calls.append(circuit_id)
+            return FeatureResult(
+                state_updates=[
+                    StateUpdate(("nilm_signature_count_by_circuit", circuit_id), 1)
+                ]
+            )
+
+    coordinator._nilm_sample_processor = _Processor()
+
+    coordinator.nilm_controller.hydrate_state_from_store()
+
+    assert coordinator.ignored_nilm_signatures == {("mains", "sig-1")}
+    assert calls == ["mains"]
+    assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
