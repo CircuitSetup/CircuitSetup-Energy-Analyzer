@@ -18,6 +18,9 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     dashboard_graph_module_resource,
     dashboard_preflight_summary,
 )
+from custom_components.circuitsetup_energy_analyzer.managers import (
+    dashboard_controller as dashboard_storage,
+)
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
@@ -1393,8 +1396,6 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
 
 @pytest.mark.asyncio
 async def test_lovelace_dashboard_save_registers_graph_card_resource() -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
-
     resource = dashboard_graph_module_resource()
     expected_resource = {"res_type": resource["type"], "url": resource["url"]}
     resources = _FakeLovelaceResources()
@@ -1413,7 +1414,7 @@ async def test_lovelace_dashboard_save_registers_graph_card_resource() -> None:
         ],
     }
 
-    saved = await module._async_save_lovelace_dashboard_config(
+    saved = await dashboard_storage._async_save_lovelace_dashboard_config(
         SimpleNamespace(),
         lovelace_data,
         {"url_path": DASHBOARD_URL_PATH},
@@ -1432,8 +1433,6 @@ async def test_lovelace_dashboard_save_registers_graph_card_resource() -> None:
 
 @pytest.mark.asyncio
 async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
-
     resource = dashboard_graph_module_resource()
     static_url = resource["url"].split("?", 1)[0]
     old_resource = {
@@ -1457,7 +1456,7 @@ async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> 
         ],
     }
 
-    saved = await module._async_save_lovelace_dashboard_config(
+    saved = await dashboard_storage._async_save_lovelace_dashboard_config(
         SimpleNamespace(),
         lovelace_data,
         {"url_path": DASHBOARD_URL_PATH},
@@ -1478,8 +1477,6 @@ async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> 
 
 @pytest.mark.asyncio
 async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
-
     resources = _FakeReadOnlyLovelaceResources()
     dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
     lovelace_data = SimpleNamespace(
@@ -1501,7 +1498,7 @@ async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() 
         ],
     }
 
-    saved = await module._async_save_lovelace_dashboard_config(
+    saved = await dashboard_storage._async_save_lovelace_dashboard_config(
         SimpleNamespace(),
         lovelace_data,
         {"url_path": DASHBOARD_URL_PATH},
@@ -1658,7 +1655,6 @@ async def test_coordinator_reads_attribute_shaped_lovelace_data() -> None:
 async def test_coordinator_creates_dashboard_from_current_lovelace_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -1676,7 +1672,7 @@ async def test_coordinator_creates_dashboard_from_current_lovelace_data(
         return collection
 
     monkeypatch.setattr(
-        module,
+        dashboard_storage,
         "_async_load_lovelace_dashboards_collection",
         load_collection,
         raising=False,
@@ -1708,7 +1704,6 @@ async def test_coordinator_creates_dashboard_from_current_lovelace_data(
 async def test_coordinator_handles_sync_lovelace_dashboard_items(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -1726,7 +1721,7 @@ async def test_coordinator_handles_sync_lovelace_dashboard_items(
         return collection
 
     monkeypatch.setattr(
-        module,
+        dashboard_storage,
         "_async_load_lovelace_dashboards_collection",
         load_collection,
         raising=False,
@@ -1900,7 +1895,6 @@ async def test_coordinator_does_not_remove_yaml_dashboard_as_orphan() -> None:
 async def test_coordinator_removes_live_dashboard_after_loading_fresh_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -1920,7 +1914,7 @@ async def test_coordinator_removes_live_dashboard_after_loading_fresh_collection
         return collection
 
     monkeypatch.setattr(
-        module,
+        dashboard_storage,
         "_async_load_lovelace_dashboards_collection",
         load_collection,
         raising=False,
