@@ -134,23 +134,19 @@ class ProcessingPipeline:
             samples,
             coordinator._build_processing_context(now),
         )
-        for update in balance_result.state_updates:
-            coordinator.state_reducer.apply_update(
-                coordinator.state,
-                update.path,
-                update.value,
-            )
+        coordinator.state_reducer.apply_updates(
+            coordinator.state,
+            balance_result.state_updates,
+        )
 
         solar_result = coordinator._solar_flow_processor.process(
             samples,
             coordinator._build_processing_context(now),
         )
-        for update in solar_result.state_updates:
-            coordinator.state_reducer.apply_update(
-                coordinator.state,
-                update.path,
-                update.value,
-            )
+        coordinator.state_reducer.apply_updates(
+            coordinator.state,
+            solar_result.state_updates,
+        )
 
         alerts: list[Any] = []
         utility_context = coordinator._build_processing_context(now)

@@ -4729,8 +4729,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._build_processing_context(sample.timestamp),
             events=events,
         )
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
+        self.state_reducer.apply_updates(self.state, result.state_updates)
         if result.store_dirty:
             self._mark_store_dirty()
         return list(result.alerts)
@@ -4760,8 +4759,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             match,
             self._build_processing_context(match.edge.timestamp),
         )
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
+        self.state_reducer.apply_updates(self.state, result.state_updates)
         return result.alerts[0] if result.alerts else None
 
     def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
@@ -4792,8 +4790,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             self._build_processing_context(self._now_fn()),
         )
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
+        self.state_reducer.apply_updates(self.state, result.state_updates)
 
     def _seed_demo_event_history(
         self: Self,
@@ -5757,25 +5754,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
-        stored_alerts = [self._alert_with_feedback(alert) for alert in result.alerts]
-        active_alerts = [
-            alert
-            for alert in stored_alerts
-            if alert.feedback_status != "expected"
-        ]
-        if result.events:
-            self.store_data.events.extend(result.events)
-        if stored_alerts:
-            self.store_data.alerts.extend(stored_alerts)
-        for observation in result.observations:
-            self._record_recent_observation(observation)
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
-        for alert in result.notifications:
-            await self._notify_alert(self._alert_with_feedback(alert))
-        if result.store_dirty or result.events or stored_alerts:
+        applied = self.state_reducer.apply_feature_result(
+            self.state,
+            self.store_data,
+            result,
+            alert_feedback=self._alert_with_feedback,
+            record_observation=self._record_recent_observation,
+        )
+        for alert in applied.notifications:
+            await self._notify_alert(alert)
+        if applied.store_dirty:
             self._mark_store_dirty()
-        return list(result.events), active_alerts
+        return applied.events, applied.active_alerts
 
     async def _async_save_store(self: Self, now: datetime) -> None:
         await self.store_persistence.async_save_if_dirty(now)
