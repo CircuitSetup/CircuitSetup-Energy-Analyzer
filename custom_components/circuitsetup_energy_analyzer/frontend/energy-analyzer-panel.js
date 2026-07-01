@@ -1149,6 +1149,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           fill: var(--warning-color, #f59e0b);
           opacity: 0.12;
         }
+        .nilm-session-band[data-nilm-low-confidence="true"] {
+          stroke: var(--warning-color, #f59e0b);
+          stroke-dasharray: 4 3;
+          stroke-width: 2;
+        }
         .chart .nilm-session-label {
           fill: var(--primary-text-color, #1f2937);
           font-size: 11px;
@@ -2499,6 +2504,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const confidence = session.confidence !== undefined
       ? `<p class="muted">Confidence ${this._escape(this._formatConfidence(session.confidence))}</p>`
       : "";
+    const lowConfidence = this._isLowNilmConfidence(session.confidence)
+      ? `<p class="muted">Low confidence</p>`
+      : "";
     const duration = this._nilmSessionDuration(session);
     const ignoreIndex = this._nilmSignatureIndexForSession(workspace, session);
     const ignoreSignature = ignoreIndex >= 0 && workspace.signatures
@@ -2510,6 +2518,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <strong>Predicted ${this._escape(label)}</strong>
         <p class="muted">Estimated by NILM${duration ? `, ${this._escape(duration)}` : ""}</p>
         ${confidence}
+        ${lowConfidence}
         <p class="muted">${this._escape(this._formatMetricValue(session.median_power_w))} W, ${this._escape(this._formatMetricValue(session.estimated_energy_kwh))} kWh estimated</p>
         <div class="actions">
           ${actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Correct</button>` : ""}
@@ -2938,6 +2947,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const confidence = Number(session && session.confidence);
       const confidenceValue = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null;
       const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
+      const lowConfidenceAttr = this._isLowNilmConfidence(confidenceValue) ? ' data-nilm-low-confidence="true"' : "";
       const confidenceStyle = confidenceValue !== null ? ` style="opacity:${(0.08 + confidenceValue * 0.2).toFixed(2)}"` : "";
       const confidenceLabel = confidenceValue !== null ? `, confidence ${Math.round(confidenceValue * 100)}%` : "";
       const left = x(Math.max(start, minTime));
@@ -2947,7 +2957,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const visibleLabel = bandWidth >= 56 ? this._truncateNilmGraphLabel(label, Math.floor((bandWidth - 10) / 7)) : "";
       const title = label ? `${label} (${session.session_id || "NILM session"})` : session.session_id || "NILM session";
       const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
-      return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
+      return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
     }).join("");
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
@@ -3341,6 +3351,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `${Math.round(normalized)}%`;
   }
 
+  _isLowNilmConfidence(value) {
+    const confidence = Number(value);
+    if (!Number.isFinite(confidence)) {
+      return false;
+    }
+    const normalized = confidence <= 1 ? confidence : confidence / 100;
+    return normalized < 0.6;
+  }
+
   _formatComparisonValue(comparison, value) {
     if (value === null || value === undefined) {
       return "Unknown";
@@ -3615,6 +3634,11 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
           .nilm-session-band {
             cursor: default;
             fill: var(--primary-color, #03a9f4);
+          }
+          .nilm-session-band[data-nilm-low-confidence="true"] {
+            stroke: var(--warning-color, #f59e0b);
+            stroke-dasharray: 4 3;
+            stroke-width: 2;
           }
           .nilm-session-label {
             fill: var(--primary-text-color, #111827);

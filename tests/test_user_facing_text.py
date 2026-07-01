@@ -1500,6 +1500,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "candidate-facts" in PANEL_MODULE_VERSION
     assert "session-validation-card" in PANEL_MODULE_VERSION
     assert "interval-running-prompt" in PANEL_MODULE_VERSION
+    assert "low-confidence-nilm" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1830,6 +1831,65 @@ for (const hidden of ["Already Confirmed", "Already Rejected"]) {
 }
 if (!html.includes("Predicted Pending Dishwasher")) {
   throw new Error(`pending session missing: ${html}`);
+}
+"""
+    )
+
+
+def test_nilm_workspace_marks_low_confidence_estimated_sessions() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspaceHistorySeries = [[
+  {
+    entity_id: "sensor.mains_power",
+    state: "200",
+    last_changed: "2026-06-24T18:00:00Z"
+  },
+  {
+    entity_id: "sensor.mains_power",
+    state: "900",
+    last_changed: "2026-06-24T19:10:00Z"
+  }
+]];
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-24T18:00:00Z",
+    end: "2026-06-24T19:10:00Z"
+  },
+  signatures: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [
+    {
+      session_id: "session-low",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_label: "Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      confidence: 0.41,
+      median_power_w: 720,
+      estimated_energy_kwh: 0.61,
+      actions: { validate: {}, reject: {} }
+    }
+  ],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const expected of [
+  "Estimated by NILM",
+  "Low confidence",
+  "Confidence 41%",
+  'data-nilm-session-confidence="0.41"',
+  'data-nilm-low-confidence="true"'
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
 }
 """
     )
