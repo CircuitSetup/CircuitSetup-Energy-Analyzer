@@ -6,17 +6,33 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import replace
 from typing import Any
 
+from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from ..const import CONF_ADVANCED_SETTINGS
+from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
+from ..metric_consistency import (
+    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+    DEFAULT_MIN_APPARENT_POWER_VA,
+    DEFAULT_POWER_FACTOR_TOLERANCE,
+)
 from ..operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
     OPERATING_DETECTION_SOURCE,
     OperatingThresholdSource,
+)
+from ..phase_balance import (
+    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
 from ..recommendation_guidance import recommendation_setting_default_value
 from ..settings_advisor import (
     RecommendationDecision,
     RecommendationStatus,
     recommendation_evidence_fingerprint,
+)
+from ..solar_flow import (
+    EXPORT_TOLERANCE_W,
+    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+    SOLAR_SURPLUS_THRESHOLD_W,
 )
 from ..ux import normalize_sensitivity
 
@@ -57,6 +73,170 @@ class SettingsController:
         updated_settings = dict(settings)
         advanced_by_circuit[circuit_id] = updated_settings
         self.replace_advanced_settings(circuit_id, updated_settings)
+        coordinator._mark_store_dirty()
+        now = coordinator._now_fn()
+        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+
+    async def async_set_leg_imbalance_settings(
+        self,
+        circuit_id: str,
+        warning_ratio: Any = None,
+        minimum_total_power_w: Any = None,
+    ) -> None:
+        """Persist dual-phase leg imbalance thresholds for one circuit."""
+        current = self._coordinator.store_data.leg_imbalance_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        settings = {
+            "warning_ratio": _positive_float_value(
+                warning_ratio,
+                default=_positive_float_value(
+                    current.get("warning_ratio"),
+                    default=DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
+                ),
+            ),
+            "minimum_total_power_w": _nonnegative_float_value(
+                minimum_total_power_w,
+                default=_nonnegative_float_value(
+                    current.get("minimum_total_power_w"),
+                    default=DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+                ),
+            ),
+        }
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.leg_imbalance_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_metric_consistency_settings(
+        self,
+        circuit_id: str,
+        apparent_power_tolerance_percent: Any = None,
+        power_factor_tolerance: Any = None,
+        minimum_apparent_power_va: Any = None,
+    ) -> None:
+        """Persist W/VA/PF consistency thresholds for one circuit."""
+        current = (
+            self._coordinator.store_data.metric_consistency_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+        settings = {
+            "apparent_power_tolerance_percent": _positive_float_value(
+                apparent_power_tolerance_percent,
+                default=_positive_float_value(
+                    current.get("apparent_power_tolerance_percent"),
+                    default=DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+                ),
+            ),
+            "power_factor_tolerance": _positive_float_value(
+                power_factor_tolerance,
+                default=_positive_float_value(
+                    current.get("power_factor_tolerance"),
+                    default=DEFAULT_POWER_FACTOR_TOLERANCE,
+                ),
+            ),
+            "minimum_apparent_power_va": _nonnegative_float_value(
+                minimum_apparent_power_va,
+                default=_nonnegative_float_value(
+                    current.get("minimum_apparent_power_va"),
+                    default=DEFAULT_MIN_APPARENT_POWER_VA,
+                ),
+            ),
+        }
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.metric_consistency_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_mains_balance_settings(
+        self,
+        circuit_id: str,
+        negative_tolerance_w: Any = None,
+    ) -> None:
+        """Persist mains-minus-monitored balance thresholds."""
+        current = self._coordinator.store_data.balance_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        settings = {
+            "negative_tolerance_w": _nonnegative_float_value(
+                negative_tolerance_w,
+                default=_nonnegative_float_value(
+                    current.get("negative_tolerance_w"),
+                    default=DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+                ),
+            ),
+        }
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.balance_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_solar_flow_settings(
+        self,
+        circuit_id: str,
+        export_tolerance_w: Any = None,
+        solar_surplus_threshold_w: Any = None,
+        high_solar_surplus_threshold_w: Any = None,
+        flexible_load_running_threshold_w: Any = None,
+    ) -> None:
+        """Persist solar flow and flexible-load thresholds."""
+        current = self._coordinator.store_data.solar_flow_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        settings = {
+            "export_tolerance_w": _nonnegative_float_value(
+                export_tolerance_w,
+                default=_nonnegative_float_value(
+                    current.get("export_tolerance_w"),
+                    default=EXPORT_TOLERANCE_W,
+                ),
+            ),
+            "solar_surplus_threshold_w": _nonnegative_float_value(
+                solar_surplus_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("solar_surplus_threshold_w"),
+                    default=SOLAR_SURPLUS_THRESHOLD_W,
+                ),
+            ),
+            "high_solar_surplus_threshold_w": _nonnegative_float_value(
+                high_solar_surplus_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("high_solar_surplus_threshold_w"),
+                    default=HIGH_SOLAR_SURPLUS_THRESHOLD_W,
+                ),
+            ),
+            "flexible_load_running_threshold_w": _nonnegative_float_value(
+                flexible_load_running_threshold_w,
+                default=_nonnegative_float_value(
+                    current.get("flexible_load_running_threshold_w"),
+                    default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+                ),
+            ),
+        }
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.solar_flow_settings_by_circuit,
+            settings,
+        )
+
+    async def _async_save_circuit_settings(
+        self,
+        circuit_id: str,
+        settings_by_circuit: MutableMapping[str, dict[str, Any]],
+        settings: dict[str, Any],
+    ) -> None:
+        coordinator = self._coordinator
+        settings_by_circuit[circuit_id] = settings
         coordinator._mark_store_dirty()
         now = coordinator._now_fn()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
@@ -600,3 +780,19 @@ def _replace_if_present_as(
     }
     if values:
         target[circuit_id] = values
+
+
+def _positive_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0.0 else default
+
+
+def _nonnegative_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0.0 else default

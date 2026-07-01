@@ -28,9 +28,6 @@ from .alerting import (
     alert_feedback_fingerprint,
     alert_feedback_fingerprint_for_observation,
 )
-from .balance import (
-    DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
-)
 from .billing import (
     BillingCycleSettings,
 )
@@ -119,9 +116,6 @@ from .energy_dashboard import (
 from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
-from .load_shift import (
-    FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-)
 from .local_time import local_date, local_day_time
 from .managers.context import ProcessingContextBuilder
 from .managers.dashboard_controller import DashboardController
@@ -135,11 +129,6 @@ from .managers.setup_health import SetupHealthAggregator
 from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
 from .managers.store_persistence import StorePersistenceManager
-from .metric_consistency import (
-    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
-    DEFAULT_MIN_APPARENT_POWER_VA,
-    DEFAULT_POWER_FACTOR_TOLERANCE,
-)
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -160,10 +149,6 @@ from .nilm import (
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
     resolve_operating_detection_from_settings,
-)
-from .phase_balance import (
-    DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-    DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
 from .processors import (
     ActivityAlertProcessor,
@@ -201,11 +186,6 @@ from .settings_advisor import (
     recommendation_to_dict,
     recommendation_unique_key,
     should_suppress_recommendation,
-)
-from .solar_flow import (
-    EXPORT_TOLERANCE_W,
-    HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-    SOLAR_SURPLUS_THRESHOLD_W,
 )
 from .standby import StandbySettings
 from .storage import (
@@ -1973,32 +1953,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         minimum_total_power_w: Any = None,
     ) -> None:
         """Persist dual-phase leg imbalance thresholds for one circuit."""
-        current = self.store_data.leg_imbalance_settings_by_circuit.get(
+        await self.settings_controller.async_set_leg_imbalance_settings(
             circuit_id,
-            {},
+            warning_ratio,
+            minimum_total_power_w,
         )
-        settings = {
-            "warning_ratio": _positive_float_value(
-                warning_ratio,
-                default=_positive_float_value(
-                    current.get("warning_ratio"),
-                    default=DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
-                ),
-            ),
-            "minimum_total_power_w": _nonnegative_float_value(
-                minimum_total_power_w,
-                default=_nonnegative_float_value(
-                    current.get("minimum_total_power_w"),
-                    default=DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
-                ),
-            ),
-        }
-        self.store_data.leg_imbalance_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_metric_consistency_settings(
         self: Self,
@@ -2008,39 +1967,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         minimum_apparent_power_va: Any = None,
     ) -> None:
         """Persist W/VA/PF consistency thresholds for one circuit."""
-        current = self.store_data.metric_consistency_settings_by_circuit.get(
+        await self.settings_controller.async_set_metric_consistency_settings(
             circuit_id,
-            {},
+            apparent_power_tolerance_percent,
+            power_factor_tolerance,
+            minimum_apparent_power_va,
         )
-        settings = {
-            "apparent_power_tolerance_percent": _positive_float_value(
-                apparent_power_tolerance_percent,
-                default=_positive_float_value(
-                    current.get("apparent_power_tolerance_percent"),
-                    default=DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
-                ),
-            ),
-            "power_factor_tolerance": _positive_float_value(
-                power_factor_tolerance,
-                default=_positive_float_value(
-                    current.get("power_factor_tolerance"),
-                    default=DEFAULT_POWER_FACTOR_TOLERANCE,
-                ),
-            ),
-            "minimum_apparent_power_va": _nonnegative_float_value(
-                minimum_apparent_power_va,
-                default=_nonnegative_float_value(
-                    current.get("minimum_apparent_power_va"),
-                    default=DEFAULT_MIN_APPARENT_POWER_VA,
-                ),
-            ),
-        }
-        self.store_data.metric_consistency_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_mains_balance_settings(
         self: Self,
@@ -2048,22 +1980,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         negative_tolerance_w: Any = None,
     ) -> None:
         """Persist mains-minus-monitored balance thresholds."""
-        current = self.store_data.balance_settings_by_circuit.get(circuit_id, {})
-        settings = {
-            "negative_tolerance_w": _nonnegative_float_value(
-                negative_tolerance_w,
-                default=_nonnegative_float_value(
-                    current.get("negative_tolerance_w"),
-                    default=DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
-                ),
-            ),
-        }
-        self.store_data.balance_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.settings_controller.async_set_mains_balance_settings(
+            circuit_id,
+            negative_tolerance_w,
+        )
 
     async def async_set_solar_flow_settings(
         self: Self,
@@ -2074,43 +1994,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         flexible_load_running_threshold_w: Any = None,
     ) -> None:
         """Persist solar flow and flexible-load thresholds."""
-        current = self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
-        settings = {
-            "export_tolerance_w": _nonnegative_float_value(
-                export_tolerance_w,
-                default=_nonnegative_float_value(
-                    current.get("export_tolerance_w"),
-                    default=EXPORT_TOLERANCE_W,
-                ),
-            ),
-            "solar_surplus_threshold_w": _nonnegative_float_value(
-                solar_surplus_threshold_w,
-                default=_nonnegative_float_value(
-                    current.get("solar_surplus_threshold_w"),
-                    default=SOLAR_SURPLUS_THRESHOLD_W,
-                ),
-            ),
-            "high_solar_surplus_threshold_w": _nonnegative_float_value(
-                high_solar_surplus_threshold_w,
-                default=_nonnegative_float_value(
-                    current.get("high_solar_surplus_threshold_w"),
-                    default=HIGH_SOLAR_SURPLUS_THRESHOLD_W,
-                ),
-            ),
-            "flexible_load_running_threshold_w": _nonnegative_float_value(
-                flexible_load_running_threshold_w,
-                default=_nonnegative_float_value(
-                    current.get("flexible_load_running_threshold_w"),
-                    default=FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
-                ),
-            ),
-        }
-        self.store_data.solar_flow_settings_by_circuit[circuit_id] = settings
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.settings_controller.async_set_solar_flow_settings(
+            circuit_id,
+            export_tolerance_w,
+            solar_surplus_threshold_w,
+            high_solar_surplus_threshold_w,
+            flexible_load_running_threshold_w,
+        )
 
     async def async_set_standby_settings(
         self: Self,
