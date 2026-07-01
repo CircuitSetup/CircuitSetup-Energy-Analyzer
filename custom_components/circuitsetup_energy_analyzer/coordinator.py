@@ -768,7 +768,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 lambda config, match, _context: [
                     alert
                     for alert in [
-                        self._observe_nilm_known_load_topology(config, match)
+                        self.nilm_controller.observe_known_load_topology(config, match)
                     ]
                     if alert is not None
                 ]
@@ -3391,16 +3391,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         sample: NormalizedCircuitSample,
         events: Iterable[CircuitEvent],
     ) -> list[AlertEvidence]:
-        result = self._nilm_sample_processor.process(
-            sample,
-            config,
-            self._build_processing_context(sample.timestamp),
-            events=events,
-        )
-        self.state_reducer.apply_updates(self.state, result.state_updates)
-        if result.store_dirty:
-            self._mark_store_dirty()
-        return list(result.alerts)
+        return self.nilm_controller.process_sample(config, sample, events)
 
     def _known_load_events(
         self: Self,
@@ -3422,43 +3413,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         mains_config: CircuitConfig,
         match: KnownLoadMatch,
     ) -> AlertEvidence | None:
-        result = self._nilm_topology_processor.process(
-            mains_config,
-            match,
-            self._build_processing_context(match.edge.timestamp),
-        )
-        self.state_reducer.apply_updates(self.state, result.state_updates)
-        return result.alerts[0] if result.alerts else None
+        return self.nilm_controller.observe_known_load_topology(mains_config, match)
 
     def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
-        enabled = bool(
-            self.options.get(
-                CONF_ENABLE_EXPERIMENTAL_NILM,
-                self.entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
-            )
-        )
-        return enabled and (
-            config.mode is CircuitMode.MAINS_NILM
-            or config.appliance_profile is ApplianceProfile.MAINS_NILM
-        )
+        return self.nilm_controller.enabled_for_config(config)
 
     def _nilm_signature_payloads(
         self: Self,
         circuit_id: str,
         signatures: Iterable[Any],
     ) -> list[dict[str, Any]]:
-        return self._nilm_sample_processor._nilm_signature_payloads(
-            circuit_id,
-            signatures,
-            self._build_processing_context(self._now_fn()),
-        )
+        return self.nilm_controller.signature_payloads(circuit_id, signatures)
 
     def _refresh_nilm_state(self: Self, circuit_id: str) -> None:
-        result = self._nilm_sample_processor.refresh_state(
-            circuit_id,
-            self._build_processing_context(self._now_fn()),
-        )
-        self.state_reducer.apply_updates(self.state, result.state_updates)
+        self.nilm_controller.refresh_state(circuit_id)
 
     def _seed_demo_event_history(
         self: Self,
@@ -4367,9 +4335,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.power_factor_drift_by_circuit.pop(circuit_id, None)
 
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
-        self.state.nilm_topology_status_by_circuit.pop(circuit_id, None)
-        self.state.nilm_topology_evidence_by_circuit.pop(circuit_id, None)
-        self.settings_controller.clear_nilm_topology_alert_policies(circuit_id)
+        self.nilm_controller.clear_topology_state(circuit_id)
 
     def _clear_standby_state(self: Self, circuit_id: str) -> None:
         self.state.always_on_power_w_by_circuit.pop(circuit_id, None)

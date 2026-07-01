@@ -834,6 +834,257 @@ def test_nilm_controller_exposes_history_validation_action() -> None:
     )
 
 
+def test_nilm_controller_reports_enabled_mains_nilm_configs() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+    )
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    direct_config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    assert coordinator.nilm_controller.enabled_for_config(mains_config) is True
+    assert coordinator.nilm_controller.enabled_for_config(direct_config) is False
+
+
+def test_nilm_controller_clears_topology_state_and_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    coordinator.state.nilm_topology_status_by_circuit["fridge"] = "topology_mismatch"
+    coordinator.state.nilm_topology_evidence_by_circuit["fridge"] = {
+        "status": "topology_mismatch",
+    }
+    cached_policy = (
+        coordinator.settings_controller.nilm_topology_alert_policy_for_circuit("fridge")
+    )
+    cached_policy.observe(
+        Observation(
+            circuit_id="fridge",
+            feature="nilm_topology_mismatch",
+            score=1.0,
+            baseline_confidence=1.0,
+            observed_at=now,
+        )
+    )
+
+    coordinator.nilm_controller.clear_topology_state("fridge")
+
+    assert "fridge" not in coordinator.state.nilm_topology_status_by_circuit
+    assert "fridge" not in coordinator.state.nilm_topology_evidence_by_circuit
+    assert (
+        coordinator.settings_controller.nilm_topology_alert_policy_for_circuit("fridge")
+        is not cached_policy
+    )
+
+
+def test_nilm_controller_refresh_state_applies_processor_updates() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    calls: list[tuple[str, datetime]] = []
+
+    class _Processor:
+        def refresh_state(self, circuit_id: str, context: Any) -> FeatureResult:
+            calls.append((circuit_id, context.now))
+            return FeatureResult(
+                state_updates=[
+                    StateUpdate(("nilm_signature_count_by_circuit", circuit_id), 2)
+                ]
+            )
+
+    coordinator._nilm_sample_processor = _Processor()
+
+    coordinator.nilm_controller.refresh_state("mains")
+
+    assert calls == [("mains", now)]
+    assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 2
+
+
+def test_nilm_controller_builds_signature_payloads_with_processing_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    calls: list[tuple[str, list[dict[str, Any]], datetime]] = []
+    signatures = [{"signature_id": "sig-1"}]
+    payloads = [{"signature_id": "sig-1", "confidence": 0.8}]
+
+    class _Processor:
+        def _nilm_signature_payloads(
+            self,
+            circuit_id: str,
+            raw_signatures: list[dict[str, Any]],
+            context: Any,
+        ) -> list[dict[str, Any]]:
+            calls.append((circuit_id, raw_signatures, context.now))
+            return payloads
+
+    coordinator._nilm_sample_processor = _Processor()
+
+    assert coordinator.nilm_controller.signature_payloads("mains", signatures) is (
+        payloads
+    )
+    assert calls == [("mains", signatures, now)]
+
+
+def test_nilm_controller_process_sample_applies_updates_and_dirty_flag() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    sample = SimpleNamespace(timestamp=now)
+    event = CircuitEvent(
+        timestamp=now,
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="NILM alert",
+        feature="nilm_signature",
+    )
+    calls: list[tuple[Any, str, datetime, list[CircuitEvent]]] = []
+
+    class _Processor:
+        def process(
+            self,
+            raw_sample: Any,
+            raw_config: CircuitConfig,
+            context: Any,
+            *,
+            events: list[CircuitEvent],
+        ) -> FeatureResult:
+            calls.append((raw_sample, raw_config.circuit_id, context.now, events))
+            return FeatureResult(
+                alerts=[alert],
+                state_updates=[
+                    StateUpdate(("nilm_signature_count_by_circuit", "mains"), 3)
+                ],
+                store_dirty=True,
+            )
+
+    coordinator._nilm_sample_processor = _Processor()
+
+    assert coordinator.nilm_controller.process_sample(config, sample, [event]) == [
+        alert
+    ]
+    assert calls == [(sample, "mains", now, [event])]
+    assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 3
+    assert coordinator._store_dirty is True
+
+
+def test_nilm_controller_observes_known_load_topology() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    match = SimpleNamespace(edge=SimpleNamespace(timestamp=now))
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Topology mismatch",
+        feature="nilm_topology_mismatch",
+    )
+    calls: list[tuple[str, Any, datetime]] = []
+
+    class _Processor:
+        def process(
+            self,
+            raw_config: CircuitConfig,
+            raw_match: Any,
+            context: Any,
+        ) -> FeatureResult:
+            calls.append((raw_config.circuit_id, raw_match, context.now))
+            return FeatureResult(
+                alerts=[alert],
+                state_updates=[
+                    StateUpdate(
+                        ("nilm_topology_status_by_circuit", "fridge"),
+                        "topology_mismatch",
+                    )
+                ],
+            )
+
+    coordinator._nilm_topology_processor = _Processor()
+
+    assert coordinator.nilm_controller.observe_known_load_topology(config, match) == (
+        alert
+    )
+    assert calls == [("mains", match, now)]
+    assert coordinator.state.nilm_topology_status_by_circuit["fridge"] == (
+        "topology_mismatch"
+    )
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (

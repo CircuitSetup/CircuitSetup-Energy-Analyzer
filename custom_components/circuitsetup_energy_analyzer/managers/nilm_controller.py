@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from statistics import median
 from typing import Any
 
-from ..models import AlertEvidence
+from ..const import CONF_ENABLE_EXPERIMENTAL_NILM
+from ..models import AlertEvidence, ApplianceProfile, CircuitMode
 
 
 class NilmController:
@@ -53,6 +54,92 @@ class NilmController:
         self._assignment_appliance_id = assignment_appliance_id
         self._assignment_id = assignment_id
         self._assignment_max_items = assignment_max_items
+
+    def enabled_for_config(self, config: Any) -> bool:
+        """Return whether NILM processing is enabled for one circuit config."""
+        coordinator = self._coordinator
+        enabled = bool(
+            coordinator.options.get(
+                CONF_ENABLE_EXPERIMENTAL_NILM,
+                coordinator.entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
+            )
+        )
+        return enabled and (
+            config.mode is CircuitMode.MAINS_NILM
+            or config.appliance_profile is ApplianceProfile.MAINS_NILM
+        )
+
+    def clear_topology_state(self, circuit_id: str) -> None:
+        """Clear retained NILM topology state and cached alert policy."""
+        coordinator = self._coordinator
+        coordinator.state.nilm_topology_status_by_circuit.pop(circuit_id, None)
+        coordinator.state.nilm_topology_evidence_by_circuit.pop(circuit_id, None)
+        coordinator.settings_controller.clear_nilm_topology_alert_policies(circuit_id)
+
+    def process_sample(
+        self,
+        config: Any,
+        sample: Any,
+        events: Iterable[Any],
+    ) -> list[AlertEvidence]:
+        """Process one NILM mains sample and apply resulting state updates."""
+        coordinator = self._coordinator
+        result = coordinator._nilm_sample_processor.process(
+            sample,
+            config,
+            coordinator._build_processing_context(sample.timestamp),
+            events=events,
+        )
+        coordinator.state_reducer.apply_updates(
+            coordinator.state,
+            result.state_updates,
+        )
+        if result.store_dirty:
+            coordinator._mark_store_dirty()
+        return list(result.alerts)
+
+    def observe_known_load_topology(
+        self,
+        mains_config: Any,
+        match: Any,
+    ) -> AlertEvidence | None:
+        """Fold one known-load NILM topology match into analyzer state."""
+        coordinator = self._coordinator
+        result = coordinator._nilm_topology_processor.process(
+            mains_config,
+            match,
+            coordinator._build_processing_context(match.edge.timestamp),
+        )
+        coordinator.state_reducer.apply_updates(
+            coordinator.state,
+            result.state_updates,
+        )
+        return result.alerts[0] if result.alerts else None
+
+    def signature_payloads(
+        self,
+        circuit_id: str,
+        signatures: Iterable[Any],
+    ) -> list[dict[str, Any]]:
+        """Build NILM signature review payloads for one circuit."""
+        coordinator = self._coordinator
+        return coordinator._nilm_sample_processor._nilm_signature_payloads(
+            circuit_id,
+            signatures,
+            coordinator._build_processing_context(coordinator._now_fn()),
+        )
+
+    def refresh_state(self, circuit_id: str) -> None:
+        """Refresh derived NILM state for one circuit."""
+        coordinator = self._coordinator
+        result = coordinator._nilm_sample_processor.refresh_state(
+            circuit_id,
+            coordinator._build_processing_context(coordinator._now_fn()),
+        )
+        coordinator.state_reducer.apply_updates(
+            coordinator.state,
+            result.state_updates,
+        )
 
     def upsert_assignment(
         self,
