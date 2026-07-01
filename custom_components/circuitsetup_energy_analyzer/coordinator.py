@@ -3150,86 +3150,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             sample_or_problem,
         )
 
-    def _data_quality_repair_data(
-        self: Self,
-        circuit_id: str,
-        problem: str,
-        source_entities: Iterable[str],
-    ) -> dict[str, Any]:
-        return self.setup_health.data_quality_repair_data(
-            circuit_id,
-            problem,
-            list(source_entities),
-        )
-
-    def _data_quality_repair_reason(self: Self, problem: str) -> str:
-        return self.setup_health.data_quality_repair_reason(problem)
-
-    def _data_quality_repair_action(
-        self: Self,
-        circuit_name: str,
-        problem: str,
-    ) -> str:
-        return self.setup_health.data_quality_repair_action(circuit_name, problem)
-
-    def _data_quality_repair_source_entities(self: Self, circuit_id: str) -> list[str]:
-        return self.setup_health.data_quality_repair_source_entities(circuit_id)
-
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
         await self.setup_health.async_sync_setup_health_repairs(circuit_id)
-
-    def _setup_health_repair_data(
-        self: Self,
-        circuit_id: str,
-        problem: str,
-    ) -> dict[str, Any]:
-        return self.setup_health.repair_data(circuit_id, problem)
-
-    def _setup_health_repair_reason(self: Self, circuit_id: str, problem: str) -> str:
-        return self.setup_health.repair_reason(circuit_id, problem)
-
-    def _setup_health_has_missing_source_entities(self: Self, circuit_id: str) -> bool:
-        return self.setup_health.has_missing_source_entities(circuit_id)
-
-    def _setup_health_source_entities(self: Self, circuit_id: str) -> list[str]:
-        return self.setup_health.source_entities(circuit_id)
-
-    def _setup_health_repair_source_entities(
-        self: Self,
-        circuit_id: str,
-        problem: str,
-    ) -> list[str]:
-        return self.setup_health.repair_source_entities(circuit_id, problem)
-
-    def _setup_health_has_missing_mains_status(self: Self, circuit_id: str) -> bool:
-        return self.setup_health.has_missing_mains_status(circuit_id)
-
-    def _setup_health_has_ct_direction_status(self: Self, circuit_id: str) -> bool:
-        return self.setup_health.has_ct_direction_status(circuit_id)
-
-    def _setup_health_has_missing_rain_context_source(
-        self: Self,
-        circuit_id: str,
-    ) -> bool:
-        return self.setup_health.has_missing_rain_context_source(circuit_id)
-
-    def _setup_health_has_missing_water_flow_source(
-        self: Self,
-        circuit_id: str,
-    ) -> bool:
-        return self.setup_health.has_missing_water_flow_source(circuit_id)
-
-    def _setup_health_has_utility_comparison_setup_status(
-        self: Self,
-        circuit_id: str,
-    ) -> bool:
-        return self.setup_health.has_utility_comparison_setup_status(circuit_id)
-
-    def _setup_health_utility_comparison_repair_problem(
-        self: Self,
-        circuit_id: str,
-    ) -> str | None:
-        return self.setup_health.utility_comparison_repair_problem(circuit_id)
 
     def _has_rain_context_source_configured(self: Self) -> bool:
         return bool(
