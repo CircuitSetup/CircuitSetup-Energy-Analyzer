@@ -122,6 +122,7 @@ from .load_shift import (
     FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
 )
 from .local_time import local_date, local_day_time
+from .managers.context import ProcessingContextBuilder
 from .managers.dashboard_controller import DashboardController
 from .managers.entity_profile_controller import EntityProfileController
 from .managers.evidence_actions import EvidenceActionController
@@ -799,6 +800,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment_max_items=NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
         )
         self.settings_controller = SettingsController(self)
+        self.context_builder = ProcessingContextBuilder(self)
         self.state_reducer = StateReducer()
         self._apply_config_entry_settings()
         self._detectors = {
@@ -1257,22 +1259,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
         """Build immutable runtime context for feature processors."""
-        return ProcessingContext(
-            now=now,
-            hass=self.hass,
-            state=self.state,
-            store_data=self.store_data,
-            options=self.options,
-            entry_data=self.entry_data,
-            known_load_circuit_ids=self._known_load_circuit_ids,
-            sensitivity=self._sensitivity,
-            time_zone=self._ha_time_zone(),
-        )
+        return self.context_builder.build(now)
 
     def _ha_time_zone(self: Self) -> str | None:
         """Return Home Assistant's configured timezone name when available."""
-        value = getattr(getattr(self.hass, "config", None), "time_zone", None)
-        return str(value) if value else None
+        return self.context_builder.time_zone()
 
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
