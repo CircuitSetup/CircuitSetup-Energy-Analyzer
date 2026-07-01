@@ -123,7 +123,10 @@ from .managers.evidence_actions import EvidenceActionController
 from .managers.nilm_controller import NilmController
 from .managers.notification_controller import NotificationController
 from .managers.processing_pipeline import ProcessingPipeline
-from .managers.settings_controller import SettingsController
+from .managers.settings_controller import (
+    SettingsController,
+    material_recommendation_evidence_key,
+)
 from .managers.setup_health import SetupHealthAggregator
 from .managers.source_updates import SourceUpdateManager
 from .managers.state_reducer import StateReducer, apply_state_update
@@ -179,7 +182,6 @@ from .settings_advisor import (
     AdvisorInputs,
     RecommendationStatus,
     SettingRecommendation,
-    build_settings_recommendations,
     recommendation_evidence_fingerprint,
     recommendation_id_for,
     recommendation_unique_key,
@@ -568,54 +570,6 @@ def _merged_entry_settings_map(
     return settings
 
 
-def _recommendation_materially_matches(
-    existing: SettingRecommendation,
-    candidate: SettingRecommendation,
-) -> bool:
-    return _recommendation_material_key(existing) == _recommendation_material_key(
-        candidate,
-    )
-
-
-def _recommendation_material_key(
-    recommendation: SettingRecommendation,
-) -> tuple[Any, ...]:
-    return (
-        recommendation.recommendation_id,
-        recommendation.unique_key,
-        recommendation.circuit_id,
-        recommendation.circuit_name,
-        recommendation.setting_key,
-        recommendation.setting_label,
-        recommendation.current_value,
-        recommendation.suggested_value,
-        recommendation.unit,
-        recommendation.feature,
-        recommendation.group,
-        round(recommendation.confidence, 3),
-        recommendation.reason,
-        tuple(sorted(dict(recommendation.apply_payload).items())),
-        _material_evidence_key(recommendation.feature, recommendation.evidence),
-        recommendation.advisor_version,
-    )
-
-
-def _material_evidence_key(
-    feature: str,
-    evidence: Mapping[str, Any],
-) -> tuple[tuple[str, Any], ...]:
-    ignored_keys: set[str] = set()
-    if feature == "capacity_warning_ratio":
-        ignored_keys.add("observed_samples")
-    return tuple(
-        sorted(
-            (key, value)
-            for key, value in dict(evidence).items()
-            if key not in ignored_keys
-        )
-    )
-
-
 def _compact_settings_recommendation_episode_key(
     episode_key: tuple[tuple[str, ...], ...],
 ) -> tuple[tuple[str, ...], ...]:
@@ -933,7 +887,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             compact_settings_recommendation_episode_key=(
                 _compact_settings_recommendation_episode_key
             ),
-            material_evidence_key=_material_evidence_key,
+            material_evidence_key=material_recommendation_evidence_key,
         )
         self.setup_health = SetupHealthAggregator(self)
         self.paused_circuits: set[str] = set()
@@ -1221,63 +1175,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str | None = None,
     ) -> bool:
         """Rebuild pending recommendations without saving or notifying."""
-        target_configs = [
-            config
-            for config in self.circuit_configs
-            if circuit_id is None or config.circuit_id == circuit_id
-        ]
-        changed = False
-
-        for config in target_configs:
-            advisor_inputs = self._advisor_inputs_for_config(config, now)
-            recommendations = build_settings_recommendations(advisor_inputs)
-            recommendations.extend(
-                self._unhelpful_alert_setting_recommendations(
-                    config,
-                    now,
-                    existing_recommendation_ids={
-                        recommendation.recommendation_id
-                        for recommendation in recommendations
-                    },
-                ),
-            )
-            recommendation_ids = {
-                recommendation.recommendation_id
-                for recommendation in recommendations
-            }
-            for stored_id, stored in list(
-                self.store_data.settings_recommendations.items(),
-            ):
-                if (
-                    stored.circuit_id == config.circuit_id
-                    and stored.status is RecommendationStatus.PENDING
-                    and stored_id not in recommendation_ids
-                ):
-                    self.store_data.settings_recommendations[stored_id] = replace(
-                        stored,
-                        status=RecommendationStatus.STALE,
-                    )
-                    changed = True
-
-            for recommendation in recommendations:
-                stored = self.store_data.settings_recommendations.get(
-                    recommendation.recommendation_id,
-                )
-                if (
-                    stored is not None
-                    and stored.status is RecommendationStatus.PENDING
-                    and stored.expires_at > now
-                    and _recommendation_materially_matches(stored, recommendation)
-                ):
-                    continue
-                if stored != recommendation:
-                    self.store_data.settings_recommendations[
-                        recommendation.recommendation_id
-                    ] = recommendation
-                    changed = True
-
-        self._refresh_settings_recommendation_state(now)
-        return changed
+        return self.settings_controller.rebuild_setting_recommendations(
+            now,
+            circuit_id=circuit_id,
+        )
 
     async def async_apply_setting_recommendation(
         self: Self,

@@ -33,6 +33,8 @@ from ..recommendation_guidance import recommendation_setting_default_value
 from ..settings_advisor import (
     RecommendationDecision,
     RecommendationStatus,
+    SettingRecommendation,
+    build_settings_recommendations,
     recommendation_evidence_fingerprint,
     recommendation_to_dict,
 )
@@ -64,11 +66,79 @@ class SettingsController:
         """Rebuild pending advanced-setting recommendations from retained data."""
         coordinator = self._coordinator
         now = coordinator._now_fn()
-        if coordinator._rebuild_setting_recommendations(now, circuit_id=circuit_id):
+        if self.rebuild_setting_recommendations(now, circuit_id=circuit_id):
             coordinator._mark_store_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
         await coordinator._notify_settings_recommendations_if_needed()
+
+    def rebuild_setting_recommendations(
+        self,
+        now: Any,
+        *,
+        circuit_id: str | None = None,
+    ) -> bool:
+        """Rebuild pending recommendations without saving or notifying."""
+        coordinator = self._coordinator
+        target_configs = [
+            config
+            for config in coordinator.circuit_configs
+            if circuit_id is None or config.circuit_id == circuit_id
+        ]
+        changed = False
+
+        for config in target_configs:
+            advisor_inputs = coordinator._advisor_inputs_for_config(config, now)
+            recommendations = build_settings_recommendations(advisor_inputs)
+            recommendations.extend(
+                coordinator._unhelpful_alert_setting_recommendations(
+                    config,
+                    now,
+                    existing_recommendation_ids={
+                        recommendation.recommendation_id
+                        for recommendation in recommendations
+                    },
+                ),
+            )
+            recommendation_ids = {
+                recommendation.recommendation_id
+                for recommendation in recommendations
+            }
+            for stored_id, stored in list(
+                coordinator.store_data.settings_recommendations.items(),
+            ):
+                if (
+                    stored.circuit_id == config.circuit_id
+                    and stored.status is RecommendationStatus.PENDING
+                    and stored_id not in recommendation_ids
+                ):
+                    coordinator.store_data.settings_recommendations[stored_id] = (
+                        replace(
+                            stored,
+                            status=RecommendationStatus.STALE,
+                        )
+                    )
+                    changed = True
+
+            for recommendation in recommendations:
+                stored = coordinator.store_data.settings_recommendations.get(
+                    recommendation.recommendation_id,
+                )
+                if (
+                    stored is not None
+                    and stored.status is RecommendationStatus.PENDING
+                    and stored.expires_at > now
+                    and _recommendation_materially_matches(stored, recommendation)
+                ):
+                    continue
+                if stored != recommendation:
+                    coordinator.store_data.settings_recommendations[
+                        recommendation.recommendation_id
+                    ] = recommendation
+                    changed = True
+
+        self.refresh_settings_recommendation_state(now)
+        return changed
 
     async def async_replace_advanced_settings(
         self,
@@ -1416,6 +1486,57 @@ class SettingsController:
         self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
+
+
+def _recommendation_materially_matches(
+    existing: SettingRecommendation,
+    candidate: SettingRecommendation,
+) -> bool:
+    return _recommendation_material_key(existing) == _recommendation_material_key(
+        candidate,
+    )
+
+
+def _recommendation_material_key(
+    recommendation: SettingRecommendation,
+) -> tuple[Any, ...]:
+    return (
+        recommendation.recommendation_id,
+        recommendation.unique_key,
+        recommendation.circuit_id,
+        recommendation.circuit_name,
+        recommendation.setting_key,
+        recommendation.setting_label,
+        recommendation.current_value,
+        recommendation.suggested_value,
+        recommendation.unit,
+        recommendation.feature,
+        recommendation.group,
+        round(recommendation.confidence, 3),
+        recommendation.reason,
+        tuple(sorted(dict(recommendation.apply_payload).items())),
+        material_recommendation_evidence_key(
+            recommendation.feature,
+            recommendation.evidence,
+        ),
+        recommendation.advisor_version,
+    )
+
+
+def material_recommendation_evidence_key(
+    feature: str,
+    evidence: Mapping[str, Any],
+) -> tuple[tuple[str, Any], ...]:
+    ignored_keys: set[str] = set()
+    if feature == "capacity_warning_ratio":
+        ignored_keys.add("observed_samples")
+    return tuple(
+        sorted(
+            (key, value)
+            for key, value in dict(evidence).items()
+            if key not in ignored_keys
+        )
+    )
 
 
 def _remove_setting_key(
