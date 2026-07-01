@@ -2279,6 +2279,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmReviewQueue(workspace)}
+        ${this._renderNilmWorkspaceLanes(workspace)}
         ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
@@ -2379,6 +2380,47 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <strong>${this._escape(title)}</strong>
           ${signature.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(Math.round(Number(signature.confidence || 0) * 100))}%</p>` : ""}
           ${this._renderNilmSignatureReview(signature, index)}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderNilmWorkspaceLanes(workspace) {
+    const lanes = workspace && workspace.lanes && typeof workspace.lanes === "object"
+      ? workspace.lanes
+      : {};
+    const laneCounts = workspace && workspace.lane_counts && typeof workspace.lane_counts === "object"
+      ? workspace.lane_counts
+      : {};
+    const laneOrder = [
+      ["needs_review", "Needs Review"],
+      ["assigned", "Assigned"],
+      ["needs_validation", "Needs Validation"],
+      ["ready_to_publish", "Ready to Publish"],
+      ["published", "Published"],
+      ["ignored_expected", "Ignored / Expected"],
+    ];
+    if (!Object.keys(lanes).length && !Object.keys(laneCounts).length) {
+      return "";
+    }
+    return `
+      <div class="action-group">
+        <h3>Review lanes</h3>
+        <div class="summary">
+          ${laneOrder.map(([key, fallbackLabel]) => {
+            const lane = lanes[key] || {};
+            const countValue = Number(laneCounts[key]);
+            const count = Number.isFinite(countValue)
+              ? countValue
+              : (Array.isArray(lane.assignment_ids) ? lane.assignment_ids.length : 0)
+                + (Array.isArray(lane.signature_ids) ? lane.signature_ids.length : 0);
+            return `
+              <div class="metric">
+                <span>${this._escape(lane.label || fallbackLabel)}</span>
+                <strong>${this._escape(count)} ${count === 1 ? "item" : "items"}</strong>
+              </div>
+            `;
+          }).join("")}
         </div>
       </div>
     `;

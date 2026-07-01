@@ -1267,6 +1267,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderNilmWorkspaceBody",
         "NILM Workspace",
         "_renderNilmReviewQueue(workspace)",
+        "_renderNilmWorkspaceLanes(workspace)",
         "_nilmReviewItems",
         "Needs review",
         "Next to review",
@@ -1493,21 +1494,98 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     )
 
     assert "timeline" in PANEL_MODULE_VERSION
+    assert "nilm-lanes" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
     review = asset.index("_renderNilmReviewQueue(workspace)")
+    lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
     signatures = asset.index('_renderNilmWorkspaceList("NILM Signatures"')
     overlays = asset.index("_renderNilmOverlayToggles(workspace)")
     graph_controls = asset.index("_renderNilmGraphControls(graphWindow)")
     prediction = asset.index("_renderNilmValidation(workspace.validation)")
     edges = asset.index('_renderNilmWorkspaceList("NILM Edges"')
 
-    assert review < signatures < overlays < graph_controls < prediction < edges
+    assert review < lanes < signatures < overlays < graph_controls < prediction < edges
     assert "Needs review" in asset
     assert "Next to review" in asset
+
+
+def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {},
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: ["sig-new"],
+      assignment_ids: []
+    },
+    assigned: {
+      label: "Assigned",
+      signature_ids: [],
+      assignment_ids: ["assignment-1"]
+    },
+    needs_validation: {
+      label: "Needs Validation",
+      signature_ids: [],
+      assignment_ids: ["assignment-2"]
+    },
+    ready_to_publish: {
+      label: "Ready to Publish",
+      signature_ids: [],
+      assignment_ids: ["assignment-3", "assignment-4"]
+    },
+    published: {
+      label: "Published",
+      signature_ids: [],
+      assignment_ids: ["assignment-5"]
+    },
+    ignored_expected: {
+      label: "Ignored / Expected",
+      signature_ids: ["sig-ignored"],
+      assignment_ids: []
+    }
+  },
+  lane_counts: {
+    needs_review: 1,
+    assigned: 1,
+    needs_validation: 1,
+    ready_to_publish: 2,
+    published: 1,
+    ignored_expected: 1
+  }
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const expected of [
+  "Review lanes",
+  "Needs Review",
+  "Needs Validation",
+  "Ready to Publish",
+  "Published",
+  "Ignored / Expected",
+  "2 items"
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
 
 
 def test_nilm_workspace_review_queue_shows_next_review_item_actions() -> None:
