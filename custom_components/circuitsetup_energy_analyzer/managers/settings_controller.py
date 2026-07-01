@@ -358,6 +358,77 @@ class SettingsController:
             (*OPERATING_DETECTION_OVERRIDE_FIELDS, OPERATING_DETECTION_SOURCE),
         )
 
+    def advanced_settings_for_circuit(self, circuit_id: str) -> dict[str, Any]:
+        """Return merged advanced settings for one circuit."""
+        coordinator = self._coordinator
+        settings: dict[str, Any] = {}
+        for source in (
+            coordinator.entry_data.get(CONF_ADVANCED_SETTINGS, {}),
+            coordinator.options.get(CONF_ADVANCED_SETTINGS, {}),
+        ):
+            if not isinstance(source, Mapping):
+                continue
+            raw_settings = source.get(circuit_id, {})
+            if isinstance(raw_settings, Mapping):
+                settings.update(dict(raw_settings))
+
+        store_data = coordinator.store_data
+        settings.update(
+            store_data.energy_usage_settings_by_circuit.get(circuit_id, {}),
+        )
+        settings.update(
+            store_data.activity_alert_settings_by_circuit.get(circuit_id, {}),
+        )
+        settings.update(store_data.demand_settings_by_circuit.get(circuit_id, {}))
+        settings.update(store_data.capacity_settings_by_circuit.get(circuit_id, {}))
+        settings.update(store_data.standby_settings_by_circuit.get(circuit_id, {}))
+        settings.update(
+            store_data.metric_consistency_settings_by_circuit.get(
+                circuit_id,
+                {},
+            ),
+        )
+
+        leg_imbalance = store_data.leg_imbalance_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if "warning_ratio" in leg_imbalance:
+            settings["leg_imbalance_warning_ratio"] = leg_imbalance["warning_ratio"]
+        if "minimum_total_power_w" in leg_imbalance:
+            settings["leg_imbalance_min_total_power_w"] = leg_imbalance[
+                "minimum_total_power_w"
+            ]
+
+        balance = store_data.balance_settings_by_circuit.get(circuit_id, {})
+        if "negative_tolerance_w" in balance:
+            settings["balance_negative_tolerance_w"] = balance[
+                "negative_tolerance_w"
+            ]
+
+        solar_flow = store_data.solar_flow_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if "export_tolerance_w" in solar_flow:
+            settings["solar_export_tolerance_w"] = solar_flow["export_tolerance_w"]
+        for key in (
+            "solar_surplus_threshold_w",
+            "high_solar_surplus_threshold_w",
+            "flexible_load_running_threshold_w",
+        ):
+            if key in solar_flow:
+                settings[key] = solar_flow[key]
+
+        settings.update(
+            store_data.operating_detection_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+
+        return settings
+
     def clear_advanced_setting_value(self, circuit_id: str, setting_key: str) -> None:
         """Clear one recommendation-backed value from stored setting groups."""
         store_data = self._coordinator.store_data

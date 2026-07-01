@@ -44,6 +44,15 @@ def _recommendation(**overrides: Any) -> SettingRecommendation:
 class _SettingsCoordinator:
     def __init__(self, recommendation: SettingRecommendation) -> None:
         self.state = SimpleNamespace()
+        self.entry_data = {
+            CONF_ADVANCED_SETTINGS: {
+                "fridge": {
+                    "preset": "quiet",
+                    "daily_spike_ratio": 0.2,
+                    "option_only": "from_entry",
+                }
+            }
+        }
         self.store_data = SimpleNamespace(
             settings_recommendations={
                 recommendation.recommendation_id: recommendation
@@ -290,3 +299,35 @@ async def test_settings_controller_async_replaces_advanced_settings() -> None:
     assert coordinator.refreshed_circuits == [("fridge", coordinator.now)]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
+
+
+def test_settings_controller_reads_advanced_settings_for_circuit() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.standby_settings_by_circuit["fridge"] = {
+        "min_samples": 12
+    }
+    coordinator.store_data.leg_imbalance_settings_by_circuit["fridge"] = {
+        "warning_ratio": 0.35,
+        "minimum_total_power_w": 700.0,
+    }
+    coordinator.store_data.balance_settings_by_circuit["fridge"] = {
+        "negative_tolerance_w": 250.0
+    }
+    coordinator.store_data.solar_flow_settings_by_circuit["fridge"] = {
+        "export_tolerance_w": 120.0,
+        "solar_surplus_threshold_w": 500.0,
+    }
+
+    settings = controller.advanced_settings_for_circuit("fridge")
+
+    assert settings["preset"] == "quiet"
+    assert settings["option_only"] == "from_entry"
+    assert settings["daily_spike_ratio"] == 0.25
+    assert settings["min_samples"] == 12
+    assert settings["leg_imbalance_warning_ratio"] == 0.35
+    assert settings["leg_imbalance_min_total_power_w"] == 700.0
+    assert settings["balance_negative_tolerance_w"] == 250.0
+    assert settings["solar_export_tolerance_w"] == 120.0
+    assert settings["solar_surplus_threshold_w"] == 500.0
