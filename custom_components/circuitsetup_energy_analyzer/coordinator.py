@@ -162,7 +162,6 @@ from .processors import (
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
-    AdvisorInputs,
     RecommendationStatus,
     SettingRecommendation,
 )
@@ -634,7 +633,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.context_builder = ProcessingContextBuilder(self)
         self.pipeline = ProcessingPipeline(self)
         self.state_reducer = StateReducer()
-        self._apply_config_entry_settings()
+        self.settings_controller.apply_config_entry_settings()
         self._detectors = {
             config.circuit_id: CircuitEventDetector()
             for config in self.circuit_configs
@@ -856,27 +855,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def last_source_update_entities(self: Self, value: Iterable[str]) -> None:
         self.source_updates.last_source_update_entities = tuple(value)
 
-    def _apply_config_entry_settings(self: Self) -> None:
-        """Apply setup/options settings to store-backed runtime setting maps."""
-        self.settings_controller.apply_config_entry_settings()
-
-    def _replace_advanced_settings(
-        self: Self,
-        circuit_id: str,
-        settings: dict[str, Any],
-    ) -> None:
-        self.settings_controller.replace_advanced_settings(circuit_id, settings)
-
-    def _clear_advanced_settings(self: Self, circuit_id: str) -> None:
-        self.settings_controller.clear_advanced_settings(circuit_id)
-
-    def _apply_advanced_settings(
-        self: Self,
-        circuit_id: str,
-        settings: dict[str, Any],
-    ) -> None:
-        self.settings_controller.apply_advanced_settings(circuit_id, settings)
-
     def _build_processing_context(self: Self, now: datetime) -> ProcessingContext:
         """Build immutable runtime context for feature processors."""
         return self.context_builder.build(now)
@@ -1094,25 +1072,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             recommendation_id,
         )
 
-    def _set_recommendation_setting_value(
-        self: Self,
-        circuit_id: str,
-        setting_key: str,
-        value: Any,
-    ) -> None:
-        self.settings_controller.set_recommendation_setting_value(
-            circuit_id,
-            setting_key,
-            value,
-        )
-
-    def _clear_advanced_setting_value(
-        self: Self,
-        circuit_id: str,
-        setting_key: str,
-    ) -> None:
-        self.settings_controller.clear_advanced_setting_value(circuit_id, setting_key)
-
     async def async_deny_setting_recommendation(
         self: Self,
         recommendation_id: str,
@@ -1156,49 +1115,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result = reload_entry(self.entry_id)
         if isawaitable(result):
             await result
-
-    async def _async_record_setting_recommendation_decision(
-        self: Self,
-        recommendation_id: str,
-        status: RecommendationStatus,
-    ) -> None:
-        await self.settings_controller.async_record_setting_recommendation_decision(
-            recommendation_id,
-            status,
-        )
-
-    def _advisor_inputs_for_config(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> AdvisorInputs:
-        return self.settings_controller.advisor_inputs_for_config(
-            config,
-            now,
-        )
-
-    def _unhelpful_alert_setting_recommendations(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-        *,
-        existing_recommendation_ids: set[str],
-    ) -> list[SettingRecommendation]:
-        return self.settings_controller.unhelpful_alert_setting_recommendations(
-            config,
-            now,
-            existing_recommendation_ids=existing_recommendation_ids,
-        )
-
-    def _repeated_unhelpful_daily_spike_feedback(
-        self: Self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> Mapping[str, Any] | None:
-        return self.settings_controller.repeated_unhelpful_daily_spike_feedback(
-            config,
-            now,
-        )
 
     def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
         return self.settings_controller.advanced_settings_for_circuit(circuit_id)
