@@ -1374,6 +1374,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "pause_alerts",
         "relearn_baseline",
         "open_appliance_detail",
+        'this._listen("#open_appliance_detail", () => '
+        'this._callAction("open_appliance_detail"))',
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
         "Alert evidence chart",

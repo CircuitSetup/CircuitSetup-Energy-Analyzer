@@ -1242,6 +1242,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
+    this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
       button.addEventListener("click", () => {
