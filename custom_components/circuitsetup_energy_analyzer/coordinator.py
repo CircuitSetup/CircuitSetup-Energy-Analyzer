@@ -177,15 +177,9 @@ from .processors import (
 )
 from .profiles import get_profile_definition
 from .settings_advisor import (
-    DEFAULT_RECOMMENDATION_TTL,
-    AdvisorCircuitContext,
     AdvisorInputs,
     RecommendationStatus,
     SettingRecommendation,
-    recommendation_evidence_fingerprint,
-    recommendation_id_for,
-    recommendation_unique_key,
-    should_suppress_recommendation,
 )
 from .standby import StandbySettings
 from .storage import (
@@ -1285,20 +1279,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> AdvisorInputs:
-        return AdvisorInputs(
-            now=now,
-            context=AdvisorCircuitContext(
-                circuit_id=config.circuit_id,
-                circuit_name=config.name,
-                appliance_profile=config.appliance_profile.value,
-                circuit_mode=config.mode.value,
-                power_flow=config.power_flow.value,
-                advanced_settings=self._advanced_settings_for_circuit(
-                    config.circuit_id,
-                ),
-            ),
-            feature_history=self._advisor_feature_history_for_circuit(config, now),
-            decisions=self.store_data.settings_recommendation_decisions,
+        return self.settings_controller.advisor_inputs_for_config(
+            config,
+            now,
         )
 
     def _unhelpful_alert_setting_recommendations(
@@ -1308,76 +1291,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         *,
         existing_recommendation_ids: set[str],
     ) -> list[SettingRecommendation]:
-        recommendation_id = recommendation_id_for(
-            config.circuit_id,
-            "daily_spike_ratio",
+        return self.settings_controller.unhelpful_alert_setting_recommendations(
+            config,
+            now,
+            existing_recommendation_ids=existing_recommendation_ids,
         )
-        if recommendation_id in existing_recommendation_ids:
-            return []
-
-        feedback = self._repeated_unhelpful_daily_spike_feedback(config, now)
-        if feedback is None:
-            return []
-
-        current_value = _positive_float_value(
-            self._advanced_settings_for_circuit(config.circuit_id).get(
-                "daily_spike_ratio",
-            ),
-            default=config.daily_energy_spike_ratio,
-        )
-        change_ratio = _absolute_float_value(feedback.get("change_ratio"))
-        suggested_value = round(
-            min(1.0, max(current_value + 0.05, change_ratio + 0.10)),
-            1,
-        )
-        if suggested_value <= current_value:
-            return []
-
-        unique_key = recommendation_unique_key(config.circuit_id, "daily_spike_ratio")
-        evidence = {
-            "source": "unhelpful_alert_feedback",
-            "feedback_fingerprint": str(feedback.get("fingerprint") or ""),
-            "unhelpful_feedback_count": _positive_int_value(
-                feedback.get("evidence_count"),
-                default=1,
-            ),
-            "change_ratio": round(change_ratio, 3),
-            "observed_value": _optional_float_value(feedback.get("observed_value")),
-            "baseline_value": _optional_float_value(feedback.get("baseline_value")),
-            "suggested_daily_spike_ratio": suggested_value,
-        }
-        recommendation = SettingRecommendation(
-            recommendation_id=recommendation_id,
-            unique_key=unique_key,
-            circuit_id=config.circuit_id,
-            circuit_name=config.name,
-            setting_key="daily_spike_ratio",
-            setting_label="Daily Spike Ratio",
-            current_value=current_value,
-            suggested_value=suggested_value,
-            unit="ratio",
-            feature="energy_usage_spikes",
-            group="Energy Usage",
-            confidence=0.72,
-            reason=(
-                "This daily energy spike pattern was repeatedly marked not "
-                "helpful. Increase the daily spike ratio to make future "
-                "matching alerts more conservative."
-            ),
-            evidence=evidence,
-            apply_payload={"daily_spike_ratio": suggested_value},
-            status=RecommendationStatus.PENDING,
-            created_at=now,
-            expires_at=now + DEFAULT_RECOMMENDATION_TTL,
-        )
-        if should_suppress_recommendation(
-            self.store_data.settings_recommendation_decisions.get(unique_key),
-            now=now,
-            suggested_value=recommendation.suggested_value,
-            evidence_fingerprint=recommendation_evidence_fingerprint(recommendation),
-        ):
-            return []
-        return [recommendation]
 
     def _repeated_unhelpful_daily_spike_feedback(
         self: Self,
@@ -6182,19 +6100,6 @@ def _positive_float_value(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
-
-
-def _optional_float_value(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed
-
-
-def _absolute_float_value(value: Any) -> float:
-    parsed = _optional_float_value(value)
-    return abs(parsed) if parsed is not None else 0.0
 
 
 def _nonnegative_float_value(value: Any, *, default: float) -> float:

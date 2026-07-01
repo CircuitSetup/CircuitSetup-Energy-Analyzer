@@ -89,17 +89,22 @@ class _SettingsCoordinator:
         self.notified = 0
         self.episode_keys: list[tuple[tuple[str, ...], ...]] = []
         self.circuit_configs = [
-            SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+            SimpleNamespace(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=SimpleNamespace(value="refrigerator"),
+                mode=SimpleNamespace(value="single_phase"),
+                power_flow=SimpleNamespace(value="load"),
+                daily_energy_spike_ratio=0.25,
+            )
         ]
-        self.advisor_inputs_by_circuit = {
-            "fridge": SimpleNamespace(circuit_id="fridge")
+        self.advanced_settings_calls: list[str] = []
+        self.feature_history_calls: list[tuple[str, datetime]] = []
+        self.feature_history_by_circuit = {
+            "fridge": {"energy_usage_days": [{"date": "2026-06-30"}]}
         }
-        self.advisor_inputs_calls: list[tuple[str, datetime]] = []
-        self.unhelpful_recommendations_by_circuit: dict[
-            str,
-            list[SettingRecommendation],
-        ] = {}
-        self.unhelpful_calls: list[tuple[str, datetime, set[str]]] = []
+        self.repeated_feedback_by_circuit: dict[str, dict[str, Any] | None] = {}
+        self.repeated_feedback_calls: list[tuple[str, datetime]] = []
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -141,25 +146,25 @@ class _SettingsCoordinator:
     async def _notify_settings_recommendations_if_needed(self) -> None:
         self.notified += 1
 
-    def _advisor_inputs_for_config(
-        self,
-        config: SimpleNamespace,
-        now: datetime,
-    ) -> SimpleNamespace:
-        self.advisor_inputs_calls.append((config.circuit_id, now))
-        return self.advisor_inputs_by_circuit[config.circuit_id]
+    def _advanced_settings_for_circuit(self, circuit_id: str) -> dict[str, Any]:
+        self.advanced_settings_calls.append(circuit_id)
+        return {"daily_spike_ratio": 0.25}
 
-    def _unhelpful_alert_setting_recommendations(
+    def _advisor_feature_history_for_circuit(
         self,
         config: SimpleNamespace,
         now: datetime,
-        *,
-        existing_recommendation_ids: set[str],
-    ) -> list[SettingRecommendation]:
-        self.unhelpful_calls.append(
-            (config.circuit_id, now, set(existing_recommendation_ids))
-        )
-        return self.unhelpful_recommendations_by_circuit.get(config.circuit_id, [])
+    ) -> dict[str, Any]:
+        self.feature_history_calls.append((config.circuit_id, now))
+        return self.feature_history_by_circuit[config.circuit_id]
+
+    def _repeated_unhelpful_daily_spike_feedback(
+        self,
+        config: SimpleNamespace,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        self.repeated_feedback_calls.append((config.circuit_id, now))
+        return self.repeated_feedback_by_circuit.get(config.circuit_id)
 
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
@@ -241,6 +246,75 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     ]
 
 
+def test_settings_controller_builds_advisor_inputs() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    config = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=SimpleNamespace(value="refrigerator"),
+        mode=SimpleNamespace(value="single_phase"),
+        power_flow=SimpleNamespace(value="load"),
+    )
+
+    inputs = controller.advisor_inputs_for_config(config, coordinator.now)
+
+    assert inputs.now == coordinator.now
+    assert inputs.context.circuit_id == "fridge"
+    assert inputs.context.circuit_name == "Kitchen Fridge"
+    assert inputs.context.appliance_profile == "refrigerator"
+    assert inputs.context.circuit_mode == "single_phase"
+    assert inputs.context.power_flow == "load"
+    assert inputs.context.advanced_settings == {"daily_spike_ratio": 0.25}
+    assert inputs.feature_history == {"energy_usage_days": [{"date": "2026-06-30"}]}
+    assert (
+        dict(inputs.decisions)
+        == coordinator.store_data.settings_recommendation_decisions
+    )
+    assert coordinator.advanced_settings_calls == ["fridge"]
+    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
+
+
+def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    coordinator.repeated_feedback_by_circuit["fridge"] = {
+        "fingerprint": "alert-123",
+        "evidence_count": 3,
+        "change_ratio": 0.31,
+        "observed_value": "2.4",
+        "baseline_value": "1.6",
+    }
+    controller = settings_controller.SettingsController(coordinator)
+    config = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        daily_energy_spike_ratio=0.25,
+    )
+
+    recommendations = controller.unhelpful_alert_setting_recommendations(
+        config,
+        coordinator.now,
+        existing_recommendation_ids=set(),
+    )
+
+    assert len(recommendations) == 1
+    generated = recommendations[0]
+    assert generated.recommendation_id == "fridge:daily_spike_ratio:v1"
+    assert generated.unique_key == "fridge:daily_spike_ratio"
+    assert generated.current_value == 0.25
+    assert generated.suggested_value == 0.4
+    assert generated.evidence["source"] == "unhelpful_alert_feedback"
+    assert generated.evidence["unhelpful_feedback_count"] == 3
+    assert generated.evidence["change_ratio"] == 0.31
+    assert generated.evidence["observed_value"] == 2.4
+    assert generated.evidence["baseline_value"] == 1.6
+    assert generated.apply_payload == {"daily_spike_ratio": 0.4}
+    assert generated.expires_at > generated.created_at
+    assert coordinator.repeated_feedback_calls == [("fridge", coordinator.now)]
+
+
 def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> None:
     stale = _recommendation(
         recommendation_id="fridge:old_threshold:v1",
@@ -270,10 +344,8 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
     changed = controller.rebuild_setting_recommendations(coordinator.now)
 
     assert changed is True
-    assert coordinator.advisor_inputs_calls == [("fridge", coordinator.now)]
-    assert coordinator.unhelpful_calls == [
-        ("fridge", coordinator.now, {generated.recommendation_id})
-    ]
+    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
+    assert coordinator.repeated_feedback_calls == [("fridge", coordinator.now)]
     assert (
         coordinator.store_data.settings_recommendations[stale.recommendation_id].status
         is RecommendationStatus.STALE
@@ -313,7 +385,7 @@ async def test_settings_controller_recalculates_and_records_decisions(
         recommendation.recommendation_id,
     )
 
-    assert coordinator.advisor_inputs_calls == [("fridge", coordinator.now)]
+    assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
     assert coordinator.dirty_count == 2
     assert coordinator.saved == [coordinator.now, coordinator.now]
     assert coordinator.notified == 1
