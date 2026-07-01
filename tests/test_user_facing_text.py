@@ -1498,6 +1498,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "dashboard-nilm-lanes" in PANEL_MODULE_VERSION
     assert "nilm-review-card" in PANEL_MODULE_VERSION
     assert "candidate-facts" in PANEL_MODULE_VERSION
+    assert "session-validation-card" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1705,6 +1706,106 @@ for (const id of ['id="nilm_label_0"', 'id="nilm_merge_targets_0"']) {
   if (count !== 1) {
     throw new Error(`${id} rendered ${count} times: ${html}`);
   }
+}
+"""
+    )
+
+
+def test_nilm_workspace_renders_session_validation_cards() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [
+    {
+      signature_id: "sig-dishwasher",
+      feedback_fingerprint: "dishwasher-fingerprint",
+      actions: { ignore: {} }
+    }
+  ],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [
+    {
+      session_id: "session-dishwasher",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_label: "Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      signature_fingerprint: "dishwasher-fingerprint",
+      confidence: 0.82,
+      median_power_w: 720,
+      estimated_energy_kwh: 0.61,
+      actions: {
+        validate: {},
+        reject: {}
+      }
+    }
+  ],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const expected of [
+  "Session Validation",
+  "Predicted Dishwasher",
+  "2026-06-24",
+  "51m",
+  "Estimated by NILM",
+  "Confidence 82%",
+  "Correct",
+  "Wrong appliance",
+  "Adjust Interval",
+  "Ignore Similar",
+  'data-nilm-session-action="validate"',
+  'data-nilm-session-action="reject"',
+  'data-nilm-session-interval-index="0"',
+  'data-nilm-action="ignore"'
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_session_validation_adjust_interval_loads_session_times() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+let rendered = false;
+panel._renderAndScrollToTop = () => { rendered = true; };
+panel._nilmWorkspace = {
+  sessions: [
+    {
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+    }
+  ]
+};
+panel._selectNilmSessionIntervalByIndex(0);
+const expectedStart = panel._datetimeLocalFromMillis(
+  Date.parse("2026-06-24T18:12:00Z")
+);
+const expectedEnd = panel._datetimeLocalFromMillis(
+  Date.parse("2026-06-24T19:03:00Z")
+);
+if (panel._nilmLabelIntervalDraft.start !== expectedStart) {
+  throw new Error(`wrong start ${panel._nilmLabelIntervalDraft.start}`);
+}
+if (panel._nilmLabelIntervalDraft.end !== expectedEnd) {
+  throw new Error(`wrong end ${panel._nilmLabelIntervalDraft.end}`);
+}
+if (panel._lastActionMessage !== "Loaded NILM session interval.") {
+  throw new Error(`wrong message ${panel._lastActionMessage}`);
+}
+if (!rendered) {
+  throw new Error("adjust interval did not re-render");
 }
 """
     )

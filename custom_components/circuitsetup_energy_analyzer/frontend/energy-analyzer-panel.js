@@ -1352,6 +1352,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
       band.addEventListener("click", () => this._selectNilmSessionInterval(band));
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-session-interval-index]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmSessionIntervalIndex || "-1", 10);
+        this._selectNilmSessionIntervalByIndex(index);
+      });
+    }
     for (const marker of this.shadowRoot.querySelectorAll("[data-nilm-edge-time]")) {
       marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
     }
@@ -1860,8 +1866,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _selectNilmSessionInterval(band) {
-    const start = Date.parse(band && band.dataset.nilmSessionStart || "");
-    const end = Date.parse(band && band.dataset.nilmSessionEnd || "");
+    this._loadNilmSessionInterval({
+      start: band && band.dataset.nilmSessionStart,
+      end: band && band.dataset.nilmSessionEnd,
+    });
+  }
+
+  _selectNilmSessionIntervalByIndex(index) {
+    const sessions = Array.isArray(this._nilmWorkspace && this._nilmWorkspace.sessions)
+      ? this._nilmWorkspace.sessions
+      : [];
+    this._loadNilmSessionInterval(sessions[index]);
+  }
+
+  _loadNilmSessionInterval(session) {
+    const start = Date.parse(session && session.start || "");
+    const end = Date.parse(session && session.end || "");
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return;
     }
@@ -2280,6 +2300,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
         ${this._renderNilmReviewQueue(workspace)}
         ${this._renderNilmWorkspaceLanes(workspace)}
+        ${this._renderNilmSessionValidationCards(workspace)}
         ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
           <div class="metric">
             <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
@@ -2426,6 +2447,84 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </div>
     `;
+  }
+
+  _renderNilmSessionValidationCards(workspace) {
+    const sessions = Array.isArray(workspace && workspace.sessions)
+      ? workspace.sessions
+      : [];
+    const cards = sessions.map((session, index) => ({ session, index })).filter(({ session }) => {
+      const actions = session && session.actions;
+      return session && session.assignment_id && actions && (actions.validate || actions.reject);
+    }).slice(0, 5);
+    if (!cards.length) {
+      return "";
+    }
+    return `
+      <h3>Session Validation</h3>
+      <div class="entity-list">
+        ${cards.map(({ session, index }) => this._renderNilmSessionValidationCard(workspace, session, index)).join("")}
+      </div>
+    `;
+  }
+
+  _renderNilmSessionValidationCard(workspace, session, index) {
+    const actions = session && session.actions ? session.actions : {};
+    const label = session.display_label || session.display_name || session.appliance_id || session.assignment_id || "appliance";
+    const confidence = session.confidence !== undefined
+      ? `<p class="muted">Confidence ${this._escape(this._formatConfidence(session.confidence))}</p>`
+      : "";
+    const duration = this._nilmSessionDuration(session);
+    const ignoreIndex = this._nilmSignatureIndexForSession(workspace, session);
+    const ignoreSignature = ignoreIndex >= 0 && workspace.signatures
+      ? workspace.signatures[ignoreIndex]
+      : null;
+    return `
+      <div class="metric">
+        <span>${this._escape(this._formatNilmSessionRange(session))}</span>
+        <strong>Predicted ${this._escape(label)}</strong>
+        <p class="muted">Estimated by NILM${duration ? `, ${this._escape(duration)}` : ""}</p>
+        ${confidence}
+        <p class="muted">${this._escape(this._formatMetricValue(session.median_power_w))} W, ${this._escape(this._formatMetricValue(session.estimated_energy_kwh))} kWh estimated</p>
+        <div class="actions">
+          ${actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Correct</button>` : ""}
+          ${actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong appliance</button>` : ""}
+          ${session.start && session.end ? `<button type="button" class="secondary" data-nilm-session-interval-index="${index}">Adjust Interval</button>` : ""}
+          ${ignoreSignature && ignoreSignature.actions && ignoreSignature.actions.ignore ? this._nilmActionButton(ignoreIndex, "ignore", "Ignore Similar", true) : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  _nilmSessionDuration(session) {
+    const explicitDuration = Number(session && session.duration_seconds);
+    if (Number.isFinite(explicitDuration)) {
+      return this._formatDuration(explicitDuration);
+    }
+    const start = Date.parse(session && session.start || "");
+    const end = Date.parse(session && session.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return "";
+    }
+    return this._formatDuration((end - start) / 1000);
+  }
+
+  _formatNilmSessionRange(session) {
+    const start = this._formatDateTime(session && session.start);
+    if (!session || !session.end) {
+      return `${start} - open`;
+    }
+    return `${start} - ${this._formatDateTime(session.end)}`;
+  }
+
+  _nilmSignatureIndexForSession(workspace, session) {
+    const fingerprint = String(session && session.signature_fingerprint || "").trim();
+    if (!fingerprint || !Array.isArray(workspace && workspace.signatures)) {
+      return -1;
+    }
+    return workspace.signatures.findIndex((signature) => (
+      this._nilmSignatureFingerprint(signature) === fingerprint
+    ));
   }
 
   _renderNilmSignatureFacts(signature) {
