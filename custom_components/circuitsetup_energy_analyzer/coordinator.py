@@ -983,6 +983,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ],
             ha_local_date=_ha_local_date,
             ha_time_zone=self._ha_time_zone,
+            sample_timestamp_is_at_or_after=_sample_timestamp_is_at_or_after,
             alert_history_max_age=ALERT_HISTORY_MAX_AGE,
             alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
             alert_feedback_is_expired=_alert_feedback_is_expired,
@@ -5977,28 +5978,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_energy_usage(now)
 
     def _prune_demand(self: Self, now: datetime) -> None:
-        for circuit_id, history in self.store_data.demand_by_circuit.items():
-            retention_mode = self._retention_mode_for_circuit(circuit_id)
-            cutoff_datetime = now - RETENTION_WINDOWS[retention_mode]
-            cutoff = (
-                _ha_local_date(now, self._ha_time_zone())
-                - RETENTION_WINDOWS[retention_mode]
-            ).isoformat()
-            capacity_samples = history.get("capacity_current_samples")
-            if isinstance(capacity_samples, list):
-                history["capacity_current_samples"] = [
-                    sample
-                    for sample in capacity_samples
-                    if _sample_timestamp_is_at_or_after(sample, cutoff_datetime)
-                ]
-            daily_peaks = history.get("daily_peaks", [])
-            if isinstance(daily_peaks, list):
-                history["daily_peaks"] = [
-                    peak
-                    for peak in daily_peaks
-                    if isinstance(peak, dict)
-                    and str(peak.get("date", "")) >= cutoff
-                ]
+        self.store_persistence.prune_demand(now)
 
     def _prune_standby(self: Self, now: datetime) -> None:
         for circuit_id, history in self.store_data.standby_by_circuit.items():
