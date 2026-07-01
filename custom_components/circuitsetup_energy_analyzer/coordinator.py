@@ -978,6 +978,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self,
             newest_mapping_items=_newest_mapping_items,
             mapping_time=_mapping_time,
+            alert_feedback_is_expired=_alert_feedback_is_expired,
+            alert_feedback_max_age=ALERT_FEEDBACK_MAX_AGE,
+            alert_feedback_max_items=ALERT_FEEDBACK_MAX_ITEMS,
             nilm_signatures_max_items=NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
             nilm_unknown_loads_max_items=NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
             nilm_session_history_max_age=NILM_SESSION_HISTORY_MAX_AGE,
@@ -6071,20 +6074,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_nilm_history(now)
 
     def _prune_alert_feedback(self: Self, now: datetime) -> None:
-        cutoff = now - ALERT_FEEDBACK_MAX_AGE
-        retained = {
-            key: value
-            for key, value in self.store_data.alert_feedback.items()
-            if not _alert_feedback_is_expired(value, now)
-            and _mapping_time(value, "created_at", "timestamp") >= cutoff
-        }
-        self.store_data.alert_feedback = dict(
-            sorted(
-                retained.items(),
-                key=lambda item: _mapping_time(item[1], "created_at", "timestamp"),
-                reverse=True,
-            )[:ALERT_FEEDBACK_MAX_ITEMS]
-        )
+        self.store_persistence.prune_alert_feedback(now)
 
     def _prune_recommendation_history(self: Self, now: datetime) -> None:
         cutoff = now - RECOMMENDATION_HISTORY_MAX_AGE
