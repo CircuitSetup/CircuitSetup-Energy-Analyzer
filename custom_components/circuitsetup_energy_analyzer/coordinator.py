@@ -131,7 +131,6 @@ from .models import (
     SensorRole,
 )
 from .nilm import (
-    KnownLoadMatch,
     NilmEdge,
     NilmEdgeDetector,
 )
@@ -747,7 +746,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
         self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self._nilm_sample_processor = NilmSampleProcessor(
-            nilm_enabled=self._nilm_enabled,
+            nilm_enabled=self.nilm_controller.enabled_for_config,
             seed_demo_nilm_state=self.nilm_controller.seed_demo_state,
             min_delta_w_for_circuit=self.settings_controller.nilm_min_delta_w,
             detectors=self._nilm_detectors,
@@ -928,7 +927,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alerts.extend(new_alerts)
 
         for config, sample in samples:
-            for nilm_alert in self._process_nilm_sample(config, sample, events):
+            for nilm_alert in self.nilm_controller.process_sample(
+                config,
+                sample,
+                events,
+            ):
                 nilm_alert = self._alert_with_feedback(nilm_alert)
                 if nilm_alert.feedback_status != "expected":
                     alerts.append(nilm_alert)
@@ -2193,7 +2196,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._refresh_alert_evidence_state(circuit_id)
         self._refresh_recent_activity_state(circuit_id, now)
-        self._refresh_nilm_state(circuit_id)
+        self.nilm_controller.refresh_state(circuit_id)
 
         status, summary = health_summary(
             data_quality_problem=bool(
@@ -3168,40 +3171,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-    def _process_nilm_sample(
-        self: Self,
-        config: CircuitConfig,
-        sample: NormalizedCircuitSample,
-        events: Iterable[CircuitEvent],
-    ) -> list[AlertEvidence]:
-        return self.nilm_controller.process_sample(config, sample, events)
-
-    def _known_load_events(
-        self: Self,
-        nilm_circuit_id: str,
-        events: Iterable[CircuitEvent],
-    ) -> Iterable[CircuitEvent]:
-        return self.nilm_controller.known_load_events(nilm_circuit_id, events)
-
-    def _observe_nilm_known_load_topology(
-        self: Self,
-        mains_config: CircuitConfig,
-        match: KnownLoadMatch,
-    ) -> AlertEvidence | None:
-        return self.nilm_controller.observe_known_load_topology(mains_config, match)
-
-    def _nilm_enabled(self: Self, config: CircuitConfig) -> bool:
-        return self.nilm_controller.enabled_for_config(config)
-
     def _nilm_signature_payloads(
         self: Self,
         circuit_id: str,
         signatures: Iterable[Any],
     ) -> list[dict[str, Any]]:
         return self.nilm_controller.signature_payloads(circuit_id, signatures)
-
-    def _refresh_nilm_state(self: Self, circuit_id: str) -> None:
-        self.nilm_controller.refresh_state(circuit_id)
 
     def _seed_demo_event_history(
         self: Self,
@@ -3788,13 +3763,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _alert_with_feedback(self: Self, alert: AlertEvidence) -> AlertEvidence:
         return self.evidence_actions.alert_with_feedback(alert)
-
-    def _nilm_signature_for_review(
-        self: Self,
-        circuit_id: str,
-        signature_id: str,
-    ) -> dict[str, Any]:
-        return self.nilm_controller.signature_for_review(circuit_id, signature_id)
 
     def _mark_store_dirty(self: Self) -> None:
         self.store_persistence.mark_dirty()
