@@ -1242,6 +1242,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
+    this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
       button.addEventListener("click", () => {
@@ -1544,6 +1545,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           this._actionButton("pause_alerts", "Pause Alerts", true),
         ])}
         ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
           this._actionButton("relearn_baseline", "Relearn Baseline", true),
           this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
         ])}
@@ -2817,6 +2819,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           this._actionButton("pause_alerts", "Pause Alerts", true),
         ])}
         ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
           this._actionButton("relearn_baseline", "Relearn Baseline", true),
           this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
         ])}

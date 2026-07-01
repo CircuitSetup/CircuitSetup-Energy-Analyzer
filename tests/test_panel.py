@@ -122,6 +122,12 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert "start_maintenance" not in payload["actions"]
     assert "end_maintenance" not in payload["actions"]
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "hvac"}
+    detail_action = payload["actions"]["open_appliance_detail"]
+    assert detail_action["type"] == "navigate"
+    assert parse_qs(urlparse(detail_action["path"]).query) == {
+        "circuit_id": ["hvac"],
+        "appliance_detail": ["1"],
+    }
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
     )

@@ -106,7 +106,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260701-nilm-detail-links"
+PANEL_MODULE_VERSION = "20260701-direct-detail-action"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
@@ -763,6 +763,11 @@ def _actions_for_context(
                     "service": SERVICE_RELEARN_BASELINE,
                     "data": circuit_data,
                 },
+                "open_appliance_detail": {
+                    "type": "navigate",
+                    "label": "Open Appliance Detail",
+                    "path": _circuit_appliance_detail_panel_path(circuit_id),
+                },
                 "open_advanced_circuit_settings": (
                     _advanced_circuit_settings_action(coordinator, config)
                 ),
@@ -810,6 +815,13 @@ def _advanced_circuit_settings_action(
         action[ATTR_CIRCUIT_ID] = config.circuit_id
         action["options_step"] = "advanced_settings"
     return action
+
+
+def _circuit_appliance_detail_panel_path(circuit_id: str) -> str:
+    return (
+        f"/{PANEL_URL_PATH}?"
+        f"{urlencode({ATTR_CIRCUIT_ID: circuit_id, 'appliance_detail': '1'})}"
+    )
 
 
 def _advanced_circuit_settings_path(
