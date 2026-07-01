@@ -677,6 +677,7 @@ def test_coordinator_exposes_store_persistence_manager() -> None:
     assert callable(coordinator.store_persistence.prune_standby)
     assert callable(coordinator.store_persistence.prune_weather_context)
     assert callable(coordinator.store_persistence.prune_water_context)
+    assert callable(coordinator.store_persistence.prune_contextual_baseline_state)
     assert callable(coordinator.store_persistence.prune_alert_history)
     assert callable(coordinator.store_persistence.prune_nilm_history)
     assert callable(coordinator.store_persistence.prune_alert_feedback)
