@@ -134,8 +134,9 @@ questions instead of raw diagnostic entity lists:
   alerts, first checks, and actions for one appliance or circuit.
 - **Behavior Watchlist** highlights appliances that are higher than normal,
   still learning, expected because of context, or worth validating.
-- **Today vs Normal** compares current daily energy, runtime, run count, or
-  power against learned normal ranges when enough baseline data exists.
+- **Today vs Normal** compares current daily energy, runtime, run count,
+  power, demand peak, configured capacity usage, and solar-covered share
+  against learned normal ranges when enough baseline data exists.
 - **Direct meter vs Estimated by NILM** labels show whether a value is directly
   measured or inferred from mains power. NILM appliances show confidence and
   validation state; low-confidence NILM asks for review instead of implying a
