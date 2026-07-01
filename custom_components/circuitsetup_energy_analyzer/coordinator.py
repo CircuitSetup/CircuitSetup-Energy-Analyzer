@@ -75,7 +75,6 @@ from .const import (
 )
 from .cost import CostSettings
 from .cycles import (
-    MIN_CYCLE_BASELINE_CONFIDENCE,
     cycle_summary_payload,
     summarize_circuit_cycles,
 )
@@ -201,7 +200,6 @@ from .utility_comparison import (
 )
 from .ux import (
     alert_evidence_detail,
-    alert_policy_name_for_sensitivity,
     canonicalize_sensitivity_config,
     data_quality_checklist,
     friendly_feature_name,
@@ -771,11 +769,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._nilm_sample_processor = NilmSampleProcessor(
             nilm_enabled=self._nilm_enabled,
             seed_demo_nilm_state=self._seed_demo_nilm_state,
-            min_delta_w_for_circuit=(
-                lambda circuit_id: _nilm_min_delta_w(
-                    self._sensitivity_for_circuit(circuit_id),
-                )
-            ),
+            min_delta_w_for_circuit=self.settings_controller.nilm_min_delta_w,
             detectors=self._nilm_detectors,
             total_events_by_circuit=self._nilm_total_events_by_circuit,
             unmatched_edges_by_circuit=self._nilm_unmatched_edges,
@@ -794,44 +788,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._water_context_alert_processor = WaterContextAlertProcessor(
             alert_policy_for_circuit=self._water_context_alert_policy_for_circuit,
         )
-        self._alert_policy = _alert_policy_for_sensitivity(self._sensitivity)
-        self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
-        self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
-        self._goal_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
-        self._billing_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
-        self._capacity_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._leg_imbalance_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._standby_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._utility_comparison_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._nilm_topology_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
-        self._activity_alert_policies: dict[
-            tuple[str, str],
-            ConservativeAlertPolicy,
-        ] = {}
-        self._water_context_alert_policies: dict[
-            tuple[str, str, str],
-            ConservativeAlertPolicy,
-        ] = {}
         self.store_persistence = StorePersistenceManager(
             self,
             newest_mapping_items=_newest_mapping_items,
@@ -4029,243 +3985,111 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._alert_policies.get(key)
-        if policy is None:
-            policy = _alert_policy_for_sensitivity(policy_name)
-            self._alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.alert_policy_for_circuit(circuit_id)
+        )
 
     def _usage_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._usage_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=0.8,
-            )
-            self._usage_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.usage_alert_policy_for_circuit(circuit_id)
+        )
 
     def _goal_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._goal_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._goal_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.goal_alert_policy_for_circuit(circuit_id)
+        )
 
     def _billing_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._billing_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._billing_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.billing_alert_policy_for_circuit(circuit_id)
+        )
 
     def _demand_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._demand_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._demand_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.demand_alert_policy_for_circuit(circuit_id)
+        )
 
     def _capacity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._capacity_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._capacity_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.capacity_alert_policy_for_circuit(circuit_id)
+        )
 
     def _leg_imbalance_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._leg_imbalance_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._leg_imbalance_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.leg_imbalance_alert_policy_for_circuit(circuit_id)
+        )
 
     def _standby_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._standby_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._standby_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.standby_alert_policy_for_circuit(circuit_id)
+        )
 
     def _utility_comparison_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._utility_comparison_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.utility_comparison_alert_policy_for_circuit(
+                circuit_id
             )
-            self._utility_comparison_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        )
 
     def _nilm_topology_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._nilm_topology_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._nilm_topology_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.nilm_topology_alert_policy_for_circuit(circuit_id)
+        )
 
     def _cycle_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._cycle_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=min_repeated * 1.5,
-                min_average_score=1.5,
-                min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
-            )
-            self._cycle_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.cycle_alert_policy_for_circuit(circuit_id)
+        )
 
     def _activity_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, policy_name)
-        policy = self._activity_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=1.0,
-            )
-            self._activity_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.activity_alert_policy_for_circuit(circuit_id)
+        )
 
     def _water_context_alert_policy_for_circuit(
         self: Self,
         circuit_id: str,
         feature: str,
     ) -> _FeedbackAwareAlertPolicy:
-        sensitivity = self._sensitivity_for_circuit(circuit_id)
-        policy_name = alert_policy_name_for_sensitivity(sensitivity)
-        key = (circuit_id, feature, policy_name)
-        policy = self._water_context_alert_policies.get(key)
-        if policy is None:
-            min_repeated = 4 if policy_name == "low" else 3
-            policy = ConservativeAlertPolicy(
-                min_repeated=min_repeated,
-                min_total_score=float(min_repeated),
-                min_average_score=1.0,
-                min_baseline_confidence=0.7,
+        return self._feedback_aware_alert_policy(
+            self.settings_controller.water_context_alert_policy_for_circuit(
+                circuit_id,
+                feature,
             )
-            self._water_context_alert_policies[key] = policy
-        return self._feedback_aware_alert_policy(policy)
+        )
 
     async def _store_alert_feedback(self: Self, alert_id: str, action: str) -> bool:
         alert = self._alert_for_id(alert_id)
@@ -4682,9 +4506,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
         self.state.nilm_topology_status_by_circuit.pop(circuit_id, None)
         self.state.nilm_topology_evidence_by_circuit.pop(circuit_id, None)
-        for key in list(self._nilm_topology_alert_policies):
-            if key[0] == circuit_id:
-                self._nilm_topology_alert_policies.pop(key, None)
+        self.settings_controller.clear_nilm_topology_alert_policies(circuit_id)
 
     def _clear_standby_state(self: Self, circuit_id: str) -> None:
         self.state.always_on_power_w_by_circuit.pop(circuit_id, None)
@@ -5216,32 +5038,6 @@ def _retention_mode_from_sources(
         return RetentionMode(str(raw))
     except ValueError:
         return RetentionMode.STANDARD
-
-
-def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:
-    policy_name = alert_policy_name_for_sensitivity(sensitivity)
-    if policy_name == "high":
-        return ConservativeAlertPolicy(
-            min_repeated=3,
-            min_total_score=2.4,
-            min_average_score=1.2,
-        )
-    if policy_name == "low":
-        return ConservativeAlertPolicy(
-            min_repeated=4,
-            min_total_score=6.0,
-            min_average_score=1.8,
-        )
-    return ConservativeAlertPolicy()
-
-
-def _nilm_min_delta_w(sensitivity: str) -> float:
-    policy_name = alert_policy_name_for_sensitivity(sensitivity)
-    if policy_name == "high":
-        return 75.0
-    if policy_name == "low":
-        return 150.0
-    return 100.0
 
 
 def _circuit_configs_from_entry_data(

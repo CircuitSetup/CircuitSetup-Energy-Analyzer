@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
 from typing import Any
 
@@ -12,12 +12,14 @@ from ..alert_feedback import (
     alert_feedback_status,
     mapping_datetime,
 )
+from ..alerting import ConservativeAlertPolicy
 from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from ..billing import BillingCycleSettings
 from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
 from ..const import CONF_ADVANCED_SETTINGS, CONF_UTILITY_COMPARISON_SETTINGS
 from ..cost import CostSettings
 from ..cycles import (
+    MIN_CYCLE_BASELINE_CONFIDENCE,
     RUN_CYCLE_DURATION_FEATURE,
     cycle_baseline_feature_values,
 )
@@ -67,7 +69,7 @@ from ..utility_comparison import (
     DEFAULT_UTILITY_STATISTIC_PERIOD,
     UtilityComparisonSettings,
 )
-from ..ux import normalize_sensitivity
+from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 
@@ -77,6 +79,43 @@ class SettingsController:
 
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
+        self._alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._usage_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._goal_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._billing_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._demand_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._capacity_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._leg_imbalance_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._standby_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._utility_comparison_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._nilm_topology_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._activity_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._water_context_alert_policies: dict[
+            tuple[str, str, str],
+            ConservativeAlertPolicy,
+        ] = {}
 
     async def async_recalculate_setting_recommendations(
         self,
@@ -517,6 +556,224 @@ class SettingsController:
                 circuit_id,
                 self._coordinator._sensitivity,
             )
+        )
+
+    def alert_policy_for_circuit(self, circuit_id: str) -> ConservativeAlertPolicy:
+        """Return the default alert policy for one circuit."""
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        return self._cached_alert_policy(
+            self._alert_policies,
+            (circuit_id, policy_name),
+            lambda: _alert_policy_for_sensitivity(policy_name),
+        )
+
+    def usage_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the daily usage spike alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._usage_alert_policies,
+            circuit_id,
+            min_baseline_confidence=0.8,
+        )
+
+    def goal_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the daily energy goal alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._goal_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def billing_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the billing-cycle budget alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._billing_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def demand_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the demand alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._demand_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def capacity_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the capacity alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._capacity_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def leg_imbalance_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the leg imbalance alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._leg_imbalance_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def standby_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the standby alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._standby_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def utility_comparison_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the utility comparison alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._utility_comparison_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def nilm_topology_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the NILM topology alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._nilm_topology_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def cycle_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the run-cycle alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._cycle_alert_policies,
+            circuit_id,
+            min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
+            min_total_score_multiplier=1.5,
+            min_average_score=1.5,
+        )
+
+    def activity_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the configured activity alert policy for one circuit."""
+        return self._repeated_alert_policy_for_circuit(
+            self._activity_alert_policies,
+            circuit_id,
+            min_baseline_confidence=1.0,
+        )
+
+    def water_context_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+        feature: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the water context alert policy for one circuit feature."""
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        key = (circuit_id, feature, policy_name)
+        return self._cached_alert_policy(
+            self._water_context_alert_policies,
+            key,
+            lambda: self._repeated_alert_policy(
+                policy_name,
+                min_baseline_confidence=0.7,
+            ),
+        )
+
+    def nilm_min_delta_w(self, circuit_id: str) -> float:
+        """Return the NILM edge detector minimum delta for one circuit."""
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        if policy_name == "high":
+            return 75.0
+        if policy_name == "low":
+            return 150.0
+        return 100.0
+
+    def clear_nilm_topology_alert_policies(self, circuit_id: str) -> None:
+        """Clear cached NILM topology policies for one circuit."""
+        for key in list(self._nilm_topology_alert_policies):
+            if key[0] == circuit_id:
+                self._nilm_topology_alert_policies.pop(key, None)
+
+    def _alert_policy_name_for_circuit(self, circuit_id: str) -> str:
+        return alert_policy_name_for_sensitivity(
+            self.sensitivity_for_circuit(circuit_id)
+        )
+
+    @staticmethod
+    def _cached_alert_policy(
+        cache: MutableMapping[tuple[str, ...], ConservativeAlertPolicy],
+        key: tuple[str, ...],
+        factory: Callable[[], ConservativeAlertPolicy],
+    ) -> ConservativeAlertPolicy:
+        policy = cache.get(key)
+        if policy is None:
+            policy = factory()
+            cache[key] = policy
+        return policy
+
+    def _repeated_alert_policy_for_circuit(
+        self,
+        cache: MutableMapping[tuple[str, str], ConservativeAlertPolicy],
+        circuit_id: str,
+        *,
+        min_baseline_confidence: float,
+        min_total_score_multiplier: float = 1.0,
+        min_average_score: float = 1.0,
+    ) -> ConservativeAlertPolicy:
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        return self._cached_alert_policy(
+            cache,
+            (circuit_id, policy_name),
+            lambda: self._repeated_alert_policy(
+                policy_name,
+                min_baseline_confidence=min_baseline_confidence,
+                min_total_score_multiplier=min_total_score_multiplier,
+                min_average_score=min_average_score,
+            ),
+        )
+
+    @staticmethod
+    def _repeated_alert_policy(
+        policy_name: str,
+        *,
+        min_baseline_confidence: float,
+        min_total_score_multiplier: float = 1.0,
+        min_average_score: float = 1.0,
+    ) -> ConservativeAlertPolicy:
+        min_repeated = 4 if policy_name == "low" else 3
+        return ConservativeAlertPolicy(
+            min_repeated=min_repeated,
+            min_total_score=min_repeated * min_total_score_multiplier,
+            min_average_score=min_average_score,
+            min_baseline_confidence=min_baseline_confidence,
         )
 
     def activity_alert_settings_for_config(
@@ -2058,6 +2315,23 @@ def _weekday_tuple_value(
 
 def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
     return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
+
+
+def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:
+    policy_name = alert_policy_name_for_sensitivity(sensitivity)
+    if policy_name == "high":
+        return ConservativeAlertPolicy(
+            min_repeated=3,
+            min_total_score=2.4,
+            min_average_score=1.2,
+        )
+    if policy_name == "low":
+        return ConservativeAlertPolicy(
+            min_repeated=4,
+            min_total_score=6.0,
+            min_average_score=1.8,
+        )
+    return ConservativeAlertPolicy()
 
 
 def _utility_statistic_period_value(value: Any) -> str:
