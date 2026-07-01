@@ -19,7 +19,8 @@ class EntityProfileController:
 
         coordinator = self._coordinator
         level = normalize_entity_detail_level(detail_level)
-        coordinator.options[CONF_ENTITY_DETAIL_LEVEL] = level
-        await coordinator._async_persist_config_entry_options()
+        await coordinator.config_entry_controller.async_update_options(
+            {CONF_ENTITY_DETAIL_LEVEL: level},
+        )
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_reload_config_entry()
+        await coordinator.config_entry_controller.async_reload()

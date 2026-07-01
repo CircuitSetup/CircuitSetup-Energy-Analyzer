@@ -1347,7 +1347,7 @@ class NilmController:
         await self._coordinator.store_persistence.async_save_if_dirty(
             self._coordinator._now_fn()
         )
-        await self._coordinator._async_reload_config_entry()
+        await self._coordinator.config_entry_controller.async_reload()
 
 
 def _alert_feature(alert: AlertEvidence) -> str:

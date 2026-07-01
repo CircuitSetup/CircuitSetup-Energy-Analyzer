@@ -7,7 +7,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
-from inspect import isawaitable
 from statistics import median
 from typing import Any, Self
 
@@ -109,6 +108,7 @@ from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
 from .local_time import local_date, local_day_time
+from .managers.config_entry_controller import ConfigEntryController
 from .managers.context import ProcessingContextBuilder
 from .managers.dashboard_controller import DashboardController
 from .managers.entity_profile_controller import EntityProfileController
@@ -192,7 +192,6 @@ from .ux import (
     friendly_feature_name,
     health_summary,
     learning_progress,
-    mutable_config_copy,
     normalize_sensitivity,
 )
 from .water_correlations import (
@@ -611,6 +610,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if self.store_data.dashboard_status
             else None
         )
+        self.config_entry_controller = ConfigEntryController(self)
         self.dashboard_controller = DashboardController(self)
         self.entity_profile_controller = EntityProfileController(self)
         self.evidence_actions = EvidenceActionController(self)
@@ -1098,32 +1098,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.settings_controller.async_dismiss_setting_recommendation(
             recommendation_id,
         )
-
-    async def _async_persist_config_entry_options(self: Self) -> None:
-        if self._config_entry is None:
-            return
-        config_entries = getattr(self.hass, "config_entries", None)
-        update_entry = getattr(config_entries, "async_update_entry", None)
-        if update_entry is None:
-            return
-
-        options = mutable_config_copy(self.options)
-        result = update_entry(self._config_entry, options=options)
-        if isawaitable(result):
-            await result
-        self.options = mutable_config_copy(options)
-
-    async def _async_reload_config_entry(self: Self) -> None:
-        if self._config_entry is None:
-            return
-        config_entries = getattr(self.hass, "config_entries", None)
-        reload_entry = getattr(config_entries, "async_reload", None)
-        if reload_entry is None:
-            return
-
-        result = reload_entry(self.entry_id)
-        if isawaitable(result):
-            await result
 
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         self.settings_controller.refresh_settings_recommendation_state(now)

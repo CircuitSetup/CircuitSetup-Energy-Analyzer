@@ -115,6 +115,9 @@ class _SettingsCoordinator:
             async_save_if_dirty=self._record_store_save,
             mark_dirty=self._record_store_dirty,
         )
+        self.config_entry_controller = SimpleNamespace(
+            async_persist_options=self._record_config_entry_persist,
+        )
         self.notification_controller = SimpleNamespace(
             async_notify_settings_recommendations_if_needed=(
                 self._record_settings_recommendation_notification
@@ -147,7 +150,7 @@ class _SettingsCoordinator:
     def _now_fn(self) -> datetime:
         return self.now
 
-    async def _async_persist_config_entry_options(self) -> None:
+    async def _record_config_entry_persist(self) -> None:
         self.persist_count += 1
 
     def _record_store_dirty(self) -> None:

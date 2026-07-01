@@ -20,14 +20,19 @@ class _EntityProfileCoordinator:
         self.persisted = 0
         self.reloaded = 0
         self.updated: list[object] = []
+        self.config_entry_controller = SimpleNamespace(
+            async_update_options=self._record_config_entry_update,
+            async_reload=self._record_config_entry_reload,
+        )
 
-    async def _async_persist_config_entry_options(self) -> None:
+    async def _record_config_entry_update(self, updates: dict[str, object]) -> None:
         self.persisted += 1
+        self.options.update(updates)
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated.append(state)
 
-    async def _async_reload_config_entry(self) -> None:
+    async def _record_config_entry_reload(self) -> None:
         self.reloaded += 1
 
 

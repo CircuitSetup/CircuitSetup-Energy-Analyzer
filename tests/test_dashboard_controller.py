@@ -87,6 +87,10 @@ class _StorageDashboardCoordinator:
         }
         self.options: dict[str, object] = {}
         self._config_entry = SimpleNamespace(options={})
+        self.config_entry_updates: list[dict[str, object]] = []
+        self.config_entry_controller = SimpleNamespace(
+            async_update_options=self._record_config_entry_update,
+        )
         self.store_data = SimpleNamespace(dashboard_status=None)
         self.saved: list[object] = []
         self.dirty_count = 0
@@ -120,6 +124,10 @@ class _StorageDashboardCoordinator:
         self.last_dashboard_remove_request: dict[str, object] | None = None
         self.dashboard_status: dict[str, object] | None = None
         self.updated_data: list[object] = []
+
+    async def _record_config_entry_update(self, updates: dict[str, object]) -> None:
+        self.config_entry_updates.append(dict(updates))
+        self.options.update(updates)
 
     def _now_fn(self) -> object:
         return "now"
@@ -190,6 +198,7 @@ async def test_dashboard_controller_removes_dashboard_and_persists_layout() -> N
     assert coordinator.last_dashboard_remove_request == removed
     assert coordinator.dashboard_layout == DASHBOARD_LAYOUT_EXPERT
     assert coordinator.options[CONF_DASHBOARD_LAYOUT] == DASHBOARD_LAYOUT_EXPERT
-    assert coordinator.hass.config_entries.updated == [
-        (coordinator._config_entry, {CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT})
+    assert coordinator.config_entry_updates == [
+        {CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT}
     ]
+    assert coordinator.hass.config_entries.updated == []

@@ -1620,7 +1620,7 @@ class SettingsController:
                 OPERATING_DETECTION_SOURCE,
                 OperatingThresholdSource.LEARNED_RECOMMENDATION.value,
             )
-        await coordinator._async_persist_config_entry_options()
+        await coordinator.config_entry_controller.async_persist_options()
 
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
@@ -1653,7 +1653,7 @@ class SettingsController:
             recommendation.setting_key,
             recommendation.current_value,
         )
-        await coordinator._async_persist_config_entry_options()
+        await coordinator.config_entry_controller.async_persist_options()
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.PENDING,
@@ -1686,7 +1686,7 @@ class SettingsController:
             recommendation.setting_key,
             default_value,
         )
-        await coordinator._async_persist_config_entry_options()
+        await coordinator.config_entry_controller.async_persist_options()
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.STALE,
