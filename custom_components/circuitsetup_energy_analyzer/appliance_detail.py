@@ -178,6 +178,7 @@ class ApplianceDetail:
     cost_today: float | None
     today_vs_normal: tuple[MetricComparison, ...]
     expectations: tuple[ApplianceExpectation, ...]
+    recent_timeline: dict[str, Any] | None
     active_alerts: tuple[ApplianceAlertSummary, ...]
     next_step: str | None
     what_to_check_first: tuple[str, ...]
@@ -252,6 +253,7 @@ def appliance_detail_for_circuit(
         cost_today=None,
         today_vs_normal=comparisons,
         expectations=expectations,
+        recent_timeline=_recent_timeline(state, config.circuit_id),
         active_alerts=active_alerts,
         next_step=str(health_attrs.get("next_step") or "") or None,
         what_to_check_first=first_checks,
@@ -306,6 +308,7 @@ def _nilm_detail(
             review_needed=review_needed,
             evidence_path=evidence_path,
         ),
+        recent_timeline=_recent_timeline(analyzer_state, state.mains_circuit_id),
         active_alerts=_active_alert_summaries(
             analyzer_state,
             state.mains_circuit_id,
@@ -855,6 +858,15 @@ def _mapping_for_circuit(state: Any, field: str, circuit_id: str) -> dict[str, A
         return {}
     value = values.get(circuit_id)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _recent_timeline(state: Any, circuit_id: str) -> dict[str, Any] | None:
+    timeline = _mapping_for_circuit(
+        state,
+        "recent_activity_timeline_by_circuit",
+        circuit_id,
+    )
+    return timeline or None
 
 
 def _mapping_status(state: Any, field: str, circuit_id: str) -> str:

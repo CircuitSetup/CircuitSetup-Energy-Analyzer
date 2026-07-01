@@ -198,6 +198,40 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
 
 
+def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.recent_activity_timeline_by_circuit["fridge"] = {
+        "status": "activity",
+        "window_hours": 24,
+        "total_count": 1,
+        "event_count": 1,
+        "alert_count": 0,
+        "observation_count": 0,
+        "latest_title": "Start",
+        "latest_timestamp": "2026-06-30T12:00:00+00:00",
+        "items": [
+            {
+                "timestamp": "2026-06-30T12:00:00+00:00",
+                "kind": "event",
+                "title": "Start",
+                "detail": "Observed start event.",
+                "severity": "info",
+            }
+        ],
+    }
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    timeline = payload["detail"]["recent_timeline"]
+    assert timeline["status"] == "activity"
+    assert timeline["latest_title"] == "Start"
+    assert timeline["items"][0]["detail"] == "Observed start event."
+
+
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
