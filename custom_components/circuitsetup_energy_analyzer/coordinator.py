@@ -974,7 +974,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tuple[str, str, str],
             ConservativeAlertPolicy,
         ] = {}
-        self.store_persistence = StorePersistenceManager(self)
+        self.store_persistence = StorePersistenceManager(
+            self,
+            newest_mapping_items=_newest_mapping_items,
+            mapping_time=_mapping_time,
+            nilm_signatures_max_items=NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+            nilm_unknown_loads_max_items=NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
+            nilm_session_history_max_age=NILM_SESSION_HISTORY_MAX_AGE,
+            nilm_session_history_max_items=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+        )
         self.notification_controller = NotificationController(
             self,
             compact_settings_recommendation_episode_key=(
@@ -6060,48 +6068,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )[:ALERT_HISTORY_MAX_ITEMS]
 
     def _prune_nilm_history(self: Self, now: datetime) -> None:
-        for circuit_id, signatures in self.store_data.nilm_signatures.items():
-            self.store_data.nilm_signatures[circuit_id] = _newest_mapping_items(
-                signatures,
-                NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
-            )
-        for inventory in self.store_data.nilm_unknown_loads_by_circuit.values():
-            unknown_loads = inventory.get("unknown_loads")
-            if isinstance(unknown_loads, list):
-                inventory["unknown_loads"] = _newest_mapping_items(
-                    unknown_loads,
-                    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
-                )
-        cutoff = now - NILM_SESSION_HISTORY_MAX_AGE
-        for circuit_id, sessions in list(
-            self.store_data.nilm_session_history_by_circuit.items()
-        ):
-            retained = [
-                dict(session)
-                for session in sessions
-                if isinstance(session, Mapping)
-                and _mapping_time(
-                    session,
-                    "end",
-                    "start",
-                    "updated_at",
-                    "created_at",
-                    "timestamp",
-                )
-                >= cutoff
-            ]
-            self.store_data.nilm_session_history_by_circuit[circuit_id] = sorted(
-                retained,
-                key=lambda session: _mapping_time(
-                    session,
-                    "end",
-                    "start",
-                    "updated_at",
-                    "created_at",
-                    "timestamp",
-                ),
-                reverse=True,
-            )[:NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT]
+        self.store_persistence.prune_nilm_history(now)
 
     def _prune_alert_feedback(self: Self, now: datetime) -> None:
         cutoff = now - ALERT_FEEDBACK_MAX_AGE
