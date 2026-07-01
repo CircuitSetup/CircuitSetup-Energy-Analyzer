@@ -1544,6 +1544,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           this._actionButton("pause_alerts", "Pause Alerts", true),
         ])}
         ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
           this._actionButton("relearn_baseline", "Relearn Baseline", true),
           this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
         ])}
@@ -2817,6 +2818,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           this._actionButton("pause_alerts", "Pause Alerts", true),
         ])}
         ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
+          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
           this._actionButton("relearn_baseline", "Relearn Baseline", true),
           this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
         ])}

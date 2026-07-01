@@ -1373,6 +1373,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "mark_alert_unhelpful",
         "pause_alerts",
         "relearn_baseline",
+        "open_appliance_detail",
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
         "Alert evidence chart",
