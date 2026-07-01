@@ -955,6 +955,52 @@ def test_settings_controller_reads_circuit_sensitivity() -> None:
     assert controller.sensitivity_for_circuit("hvac") == "quiet"
 
 
+def test_settings_controller_builds_sensitivity_alert_policies() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "sensitive"
+    coordinator.store_data.sensitivity_by_circuit["hvac"] = "quiet"
+
+    assert controller.alert_policy_for_circuit("fridge").min_repeated == 3
+    assert controller.alert_policy_for_circuit("hvac").min_repeated == 4
+    assert (
+        controller.alert_policy_for_circuit("fridge")
+        is controller.alert_policy_for_circuit("fridge")
+    )
+
+
+def test_settings_controller_builds_feature_alert_policies() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "quiet"
+
+    usage_policy = controller.usage_alert_policy_for_circuit("fridge")
+    cycle_policy = controller.cycle_alert_policy_for_circuit("fridge")
+    water_policy = controller.water_context_alert_policy_for_circuit(
+        "fridge",
+        "pump_without_flow",
+    )
+
+    assert usage_policy.min_repeated == 4
+    assert usage_policy.min_baseline_confidence == pytest.approx(0.8)
+    assert cycle_policy.min_total_score == pytest.approx(6.0)
+    assert water_policy.min_baseline_confidence == pytest.approx(0.7)
+
+
+def test_settings_controller_returns_nilm_min_delta_for_sensitivity() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "sensitive"
+    coordinator.store_data.sensitivity_by_circuit["hvac"] = "quiet"
+
+    assert controller.nilm_min_delta_w("fridge") == pytest.approx(75.0)
+    assert controller.nilm_min_delta_w("hvac") == pytest.approx(150.0)
+    assert controller.nilm_min_delta_w("unknown") == pytest.approx(100.0)
+
+
 def test_settings_controller_reads_runtime_setting_defaults() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)

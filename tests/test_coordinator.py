@@ -8649,7 +8649,10 @@ async def test_relearn_clears_nilm_topology_state_and_policy() -> None:
     coordinator.state.nilm_topology_evidence_by_circuit["fridge"] = {
         "status": "topology_mismatch"
     }
-    coordinator._nilm_topology_alert_policy_for_circuit("fridge").observe(
+    cached_policy = (
+        coordinator.settings_controller.nilm_topology_alert_policy_for_circuit("fridge")
+    )
+    cached_policy.observe(
         Observation(
             circuit_id="fridge",
             feature="nilm_topology_mismatch",
@@ -8663,7 +8666,10 @@ async def test_relearn_clears_nilm_topology_state_and_policy() -> None:
 
     assert "fridge" not in coordinator.state.nilm_topology_status_by_circuit
     assert "fridge" not in coordinator.state.nilm_topology_evidence_by_circuit
-    assert coordinator._nilm_topology_alert_policies == {}
+    assert (
+        coordinator.settings_controller.nilm_topology_alert_policy_for_circuit("fridge")
+        is not cached_policy
+    )
 
 
 @pytest.mark.asyncio
