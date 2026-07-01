@@ -345,6 +345,26 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     assert "button.fridge_relearn_baseline" not in refs
 
 
+def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        entry_id="entry-1",
+    )
+    household = _dashboard_section(dashboard, "Household Overview")
+    setup_health = next(
+        card for card in _dashboard_cards(household)
+        if card.get("name") == "Setup Health"
+    )
+
+    assert setup_health["tap_action"] == {
+        "action": "navigate",
+        "navigation_path": (
+            "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
+        ),
+    }
+
+
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
     dashboard = build_recommended_dashboard(
         (_config for _config in _example_circuits() if _config.circuit_id != "mains"),

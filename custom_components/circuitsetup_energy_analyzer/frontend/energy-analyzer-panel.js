@@ -4,11 +4,14 @@ const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspac
 const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
 const APPLIANCE_DETAIL_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_detail";
 const APPLIANCE_DETAIL_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_detail";
+const SETUP_HEALTH_API_PATH = "/api/circuitsetup_energy_analyzer/setup_health";
+const SETUP_HEALTH_CALL_API_PATH = "circuitsetup_energy_analyzer/setup_health";
 const HISTORY_CALL_API_PREFIX = "history/period";
 const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
+const SETUP_HEALTH_QUERY_PARAM = "setup_health";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
@@ -78,6 +81,12 @@ class CircuitSetupApplianceDetail extends CircuitSetupPanelComponent {
   }
 }
 
+class CircuitSetupSetupHealth extends CircuitSetupPanelComponent {
+  render() {
+    return this.host._renderSetupHealthContent();
+  }
+}
+
 class CircuitSetupRecommendationCards extends CircuitSetupPanelComponent {
   renderSection(title, recommendationItems) {
     return this.host._renderRecommendationSectionContent(title, recommendationItems);
@@ -91,21 +100,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceSummary = new CircuitSetupEvidenceSummary(this);
     this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);
     this._applianceDetailComponent = new CircuitSetupApplianceDetail(this);
+    this._setupHealthComponent = new CircuitSetupSetupHealth(this);
     this._recommendationCards = new CircuitSetupRecommendationCards(this);
     this._hass = null;
     this._payload = null;
     this._historySeries = [];
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._setupHealth = null;
     this._nilmWorkspaceHistorySeries = [];
     this._loading = true;
     this._historyLoading = false;
     this._nilmWorkspaceLoading = false;
     this._applianceDetailLoading = false;
+    this._setupHealthLoading = false;
     this._error = "";
     this._historyError = "";
     this._nilmWorkspaceError = "";
     this._applianceDetailError = "";
+    this._setupHealthError = "";
     this._busyAction = "";
     this._lastActionMessage = "";
     this._loadedRouteKey = "";
@@ -179,8 +192,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historySeries = [];
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._setupHealth = null;
     this._nilmWorkspaceError = "";
     this._applianceDetailError = "";
+    this._setupHealthError = "";
+    this._setupHealthLoading = false;
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
     this._nilmSessionLabelDrafts.clear();
@@ -206,6 +222,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._render();
       if (this._routeRequestsApplianceDetail(routeKey)) {
         await this._loadApplianceDetail(requestId, routeKey);
+      }
+      if (this._routeRequestsSetupHealth(routeKey)) {
+        await this._loadSetupHealth(requestId, routeKey);
       }
       const alert = this._payload && this._payload.alert;
       if (alert && alert.graph_entities && alert.graph_entities.length) {
@@ -344,6 +363,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._applianceDetailLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _loadSetupHealth(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    if (!this._routeRequestsSetupHealth(routeKey)) {
+      return;
+    }
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const params = new URLSearchParams();
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    if (entryId) {
+      params.set("entry_id", entryId);
+    }
+    const query = params.toString();
+    const apiPath = `${SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : ""}`;
+    const fetchPath = `${SETUP_HEALTH_API_PATH}${query ? `?${query}` : ""}`;
+
+    this._setupHealthLoading = true;
+    this._setupHealthError = "";
+    this._render();
+
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._setupHealth = payload;
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._setupHealthError = `Could not load Setup Health from ${fetchPath}: ${error.message}`;
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._setupHealthLoading = false;
         this._render();
       }
     }
@@ -839,6 +895,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       && routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) !== "1";
   }
 
+  _routeRequestsSetupHealth(routeKey = this._routeKey()) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    return routeUrl.searchParams.get(SETUP_HEALTH_QUERY_PARAM) === "1";
+  }
+
   _actionRefreshRouteKey(actionKey) {
     const routeUrl = new URL(this._routeKey(), window.location.origin);
     const alert = this._payload && this._payload.alert;
@@ -965,22 +1026,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const circuit = payload && payload.circuit;
     const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
     const applianceDetailRoute = this._routeRequestsApplianceDetail();
+    const setupHealthRoute = this._routeRequestsSetupHealth();
     const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
-    const statusText = applianceDetailRoute
+    const statusText = setupHealthRoute
+      ? "Setup Health"
+      : applianceDetailRoute
       ? "Appliance Detail"
       : nilmWorkspaceRoute
       ? "NILM Workspace"
       : this._statusText(payload && payload.status);
-    const headerTitle = applianceDetailRoute
+    const headerTitle = setupHealthRoute
+      ? "Setup Health"
+      : applianceDetailRoute
       ? (applianceDetail && applianceDetail.display_name) || "Appliance Detail"
       : nilmWorkspaceRoute
       ? "NILM Workspace"
       : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
-    const headerMessage = applianceDetailRoute
+    const headerMessage = setupHealthRoute
+      ? (this._setupHealth && this._setupHealth.next_step) || "Guided setup checklist for appliance energy analysis."
+      : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
       : nilmWorkspaceRoute
       ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
       : (alert && alert.message) || "Historical alert not found";
+    const loadingText = setupHealthRoute ? "Loading Setup Health..." : "Loading alert evidence...";
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1228,11 +1297,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
         </section>
-      ${this._loading ? `<section class="panel"><p>Loading alert evidence...</p></section>` : ""}
+      ${this._loading ? `<section class="panel"><p>${this._escape(loadingText)}</p></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
-      ${this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit))}
+      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))}
       </main>
     `;
 
@@ -1333,6 +1402,92 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderApplianceDetailBody() {
     return `${this._renderApplianceDetail()}${this._renderRecommendations()}`;
+  }
+
+  _renderSetupHealthBody() {
+    return this._renderSetupHealth();
+  }
+
+  _renderSetupHealth() {
+    return this._setupHealthComponent.render();
+  }
+
+  _renderSetupHealthContent() {
+    if (this._setupHealthLoading) {
+      return `<section class="panel"><h2>Setup Health</h2><p class="muted">Loading Setup Health...</p></section>`;
+    }
+    if (this._setupHealthError) {
+      return `<section class="panel error"><h2>Setup Health</h2><p>${this._escape(this._setupHealthError)}</p></section>`;
+    }
+    const payload = this._setupHealth || {};
+    if (payload.status && payload.status !== "ok") {
+      return `
+        <section class="panel">
+          <h2>Setup Health</h2>
+          <p>${this._escape(payload.message || "Setup Health is not available right now.")}</p>
+          <p class="muted">${this._escape(payload.next_step || "Reload the integration, then try again.")}</p>
+        </section>
+      `;
+    }
+    const readyCount = payload.checklist_ready_count === null || payload.checklist_ready_count === undefined
+      ? "Unknown"
+      : payload.checklist_ready_count;
+    const totalCount = payload.checklist_total_count === null || payload.checklist_total_count === undefined
+      ? "Unknown"
+      : payload.checklist_total_count;
+    return `
+      <section class="panel summary">
+        ${this._metric("Status", payload.state || "Learning")}
+        ${this._metric("Next Step", payload.next_step || "No setup action needed")}
+        ${this._metric("Checklist", `${readyCount} / ${totalCount}`)}
+        ${this._metric("Issues", this._formatMetricValue(payload.issue_count))}
+      </section>
+      <section class="panel">
+        <h2>Setup Checklist</h2>
+        <p class="muted">${this._escape(payload.message || "Review setup items that affect appliance analysis.")}</p>
+        ${this._renderSetupHealthChecklist(payload.checklist, payload.open_path)}
+      </section>
+      <section class="panel">
+        <h2>What To Check First</h2>
+        ${this._renderSetupHealthIssues(payload.issues, payload.next_step)}
+      </section>
+    `;
+  }
+
+  _renderSetupHealthChecklist(items, fallbackOpenPath) {
+    const safeItems = Array.isArray(items) ? items : [];
+    if (!safeItems.length) {
+      return `<p class="muted">No setup checklist items are available yet.</p>`;
+    }
+    return `<div class="entity-list">${safeItems.map((item) => {
+      const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
+      const path = item.open_path || fallbackOpenPath || "";
+      return `
+        <div class="metric">
+          <span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>
+          <strong>${this._escape(item.title || item.item_id || "Setup item")}</strong>
+          <p>${this._escape(item.why_it_matters || "This affects appliance analysis quality.")}</p>
+          ${affected.length ? `<p class="muted">Affected: ${this._escape(affected.join(", "))}</p>` : ""}
+          ${item.fix ? (path ? `<a class="button secondary" href="${this._escape(path)}">${this._escape(item.fix)}</a>` : `<p class="muted">${this._escape(item.fix)}</p>`) : ""}
+        </div>
+      `;
+    }).join("")}</div>`;
+  }
+
+  _renderSetupHealthIssues(issues, fallbackText) {
+    const safeIssues = Array.isArray(issues) ? issues : [];
+    if (!safeIssues.length) {
+      return `<p class="muted">${this._escape(fallbackText || "No setup problems were found.")}</p>`;
+    }
+    return `<div class="entity-list">${safeIssues.map((item) => `
+      <div class="metric">
+        <span>${this._escape(item.severity || item.state || "review")}</span>
+        <strong>${this._escape(item.fix || item.recommended_action || item.state || "Review setup")}</strong>
+        <p>${this._escape(item.reason || "Review this setup item before relying on appliance guidance.")}</p>
+        ${item.affected_circuit_name || item.affected_circuit ? `<p class="muted">Circuit: ${this._escape(item.affected_circuit_name || item.affected_circuit)}</p>` : ""}
+        ${item.open_path ? `<a class="button secondary" href="${this._escape(item.open_path)}">Open Setup</a>` : ""}
+      </div>
+    `).join("")}</div>`;
   }
 
   _renderApplianceDetail() {

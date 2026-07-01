@@ -2656,6 +2656,45 @@ def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback(
     assert payload["alert"]["feature"] == "demand_monthly_peak"
 
 
+def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    coordinator = _coordinator(config=_config("hvac"))
+
+    payload = setup_health_payload([coordinator])
+
+    assert payload["status"] == "ok"
+    assert payload["state"] == "Configure breaker amps"
+    assert payload["next_step"] == "Configure breaker amps for HVAC"
+    assert payload["checklist"][0] == {
+        "item_id": "source_data_found",
+        "status": "ok",
+        "title": "Source data found",
+        "why_it_matters": "Appliance status needs fresh source sensors.",
+    }
+    assert payload["checklist_total_count"] == 10
+    assert payload["open_path"].startswith("/config/integrations/")
+
+
+def test_setup_health_payload_uses_requested_entry_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    first = _coordinator(config=_config("fridge"))
+    first.entry_id = "entry-1"
+    second = _coordinator(config=_config("hvac"))
+    second.entry_id = "entry-2"
+
+    payload = setup_health_payload([first, second], entry_id="entry-2")
+
+    assert payload["status"] == "ok"
+    assert payload["requested_entry_id"] == "entry-2"
+    assert payload["next_step"] == "Configure breaker amps for HVAC"
+
+
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
@@ -2666,6 +2705,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         PANEL_ELEMENT_NAME,
         PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
+        SETUP_HEALTH_API_PATH,
         STATIC_URL_PATH,
         async_setup_panel,
         async_unload_panel,
@@ -2713,6 +2753,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert [view.url for view in http.views] == [
         EVIDENCE_API_PATH,
         APPLIANCE_DETAIL_API_PATH,
+        SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
     ]
@@ -2837,7 +2878,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 4
+    assert len(http.views) == 5
 
     assert await async_unload_entry(hass, entry) is True
 
