@@ -1127,7 +1127,7 @@ class NilmController:
     async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
         coordinator = self._coordinator
         coordinator._mark_store_dirty()
-        coordinator._refresh_nilm_state(circuit_id)
+        self.refresh_state(circuit_id)
         coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(coordinator._now_fn())
