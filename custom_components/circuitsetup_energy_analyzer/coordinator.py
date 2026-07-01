@@ -1216,12 +1216,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         self.settings_controller.refresh_settings_recommendation_state(now)
 
-    def _visible_settings_recommendations(
-        self: Self,
-        now: datetime,
-    ) -> list[SettingRecommendation]:
-        return self.settings_controller.visible_settings_recommendations(now)
-
     def _pending_settings_recommendations(
         self: Self,
         now: datetime,
@@ -1232,11 +1226,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await (
             self.notification_controller.async_notify_settings_recommendations_if_needed()
         )
-
-    def _settings_recommendation_episode_key(
-        self: Self,
-    ) -> tuple[tuple[str, ...], ...]:
-        return self.notification_controller.settings_recommendation_episode_key()
 
     def _set_settings_recommendation_notification_episode_key(
         self: Self,
@@ -3744,14 +3733,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     @property
     def _notified_alert_ids(self: Self) -> set[str]:
         return self.notification_controller.notified_alert_ids
-
-    @property
-    def _settings_recommendation_notification_episode_key(
-        self: Self,
-    ) -> tuple[tuple[str, ...], ...]:
-        return (
-            self.notification_controller.settings_recommendation_notification_episode_key
-        )
 
     @property
     def _active_repair_issues(self: Self) -> set[tuple[str, str]]:
