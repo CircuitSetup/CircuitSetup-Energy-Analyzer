@@ -674,6 +674,7 @@ def test_coordinator_exposes_store_persistence_manager() -> None:
     )
     assert callable(coordinator.store_persistence.prune_energy_usage)
     assert callable(coordinator.store_persistence.prune_demand)
+    assert callable(coordinator.store_persistence.prune_standby)
     assert callable(coordinator.store_persistence.prune_alert_history)
     assert callable(coordinator.store_persistence.prune_nilm_history)
     assert callable(coordinator.store_persistence.prune_alert_feedback)
@@ -2324,6 +2325,53 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     ]
     assert coordinator.store_data.demand_by_circuit["fridge"]["daily_peaks"] == [
         {"date": "2026-05-31", "peak_demand_w": 1200.0}
+    ]
+
+
+def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
+    retained_sample = {
+        "timestamp": "2026-06-01T04:00:00+00:00",
+        "standby_w": 8.0,
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            standby_by_circuit={
+                "fridge": {
+                    "samples": [
+                        {
+                            "timestamp": "2026-05-31T03:00:00+00:00",
+                            "standby_w": 9.0,
+                        },
+                        retained_sample,
+                    ],
+                }
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.standby_by_circuit["fridge"]["samples"] == [
+        retained_sample
     ]
 
 
