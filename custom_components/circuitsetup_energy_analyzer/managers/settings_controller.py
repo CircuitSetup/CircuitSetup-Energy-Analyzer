@@ -34,6 +34,7 @@ from ..settings_advisor import (
     RecommendationDecision,
     RecommendationStatus,
     recommendation_evidence_fingerprint,
+    recommendation_to_dict,
 )
 from ..solar_flow import (
     EXPORT_TOLERANCE_W,
@@ -374,6 +375,64 @@ class SettingsController:
                 default=DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
             ),
         )
+
+    def refresh_settings_recommendation_state(self, now: Any) -> None:
+        """Refresh Home Assistant state payloads for visible recommendations."""
+        coordinator = self._coordinator
+        by_circuit: dict[str, list[dict[str, Any]]] = {}
+        pending_count_by_circuit: dict[str, int] = {}
+        for recommendation in sorted(
+            self.visible_settings_recommendations(now),
+            key=lambda item: (
+                item.circuit_name,
+                item.status is not RecommendationStatus.PENDING,
+                item.group,
+                item.setting_label,
+                item.recommendation_id,
+            ),
+        ):
+            by_circuit.setdefault(recommendation.circuit_id, []).append(
+                recommendation_to_dict(recommendation),
+            )
+            if recommendation.status is RecommendationStatus.PENDING:
+                pending_count_by_circuit[recommendation.circuit_id] = (
+                    pending_count_by_circuit.get(recommendation.circuit_id, 0) + 1
+                )
+        coordinator.state.settings_recommendations_by_circuit = by_circuit
+        coordinator.state.settings_recommendation_count_by_circuit = {
+            circuit_id: count
+            for circuit_id, count in pending_count_by_circuit.items()
+            if count > 0
+        }
+        if not pending_count_by_circuit:
+            coordinator._set_settings_recommendation_notification_episode_key(())
+
+    def visible_settings_recommendations(
+        self,
+        now: Any,
+    ) -> list[Any]:
+        """Return unexpired recommendations shown in entity/panel payloads."""
+        recommendations = self._coordinator.store_data.settings_recommendations
+        return [
+            recommendation
+            for recommendation in recommendations.values()
+            if recommendation.status
+            in {RecommendationStatus.PENDING, RecommendationStatus.APPLIED}
+            and recommendation.expires_at > now
+        ]
+
+    def pending_settings_recommendations(
+        self,
+        now: Any,
+    ) -> list[Any]:
+        """Return unexpired pending recommendations."""
+        recommendations = self._coordinator.store_data.settings_recommendations
+        return [
+            recommendation
+            for recommendation in recommendations.values()
+            if recommendation.status is RecommendationStatus.PENDING
+            and recommendation.expires_at > now
+        ]
 
     async def async_set_energy_usage_settings(
         self,
@@ -897,7 +956,7 @@ class SettingsController:
         )
         coordinator._mark_store_dirty()
         now = coordinator._now_fn()
-        coordinator._refresh_settings_recommendation_state(now)
+        self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
@@ -929,7 +988,7 @@ class SettingsController:
         )
         coordinator._mark_store_dirty()
         now = coordinator._now_fn()
-        coordinator._refresh_settings_recommendation_state(now)
+        self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
@@ -962,7 +1021,7 @@ class SettingsController:
         )
         coordinator._mark_store_dirty()
         now = coordinator._now_fn()
-        coordinator._refresh_settings_recommendation_state(now)
+        self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
@@ -1354,7 +1413,7 @@ class SettingsController:
             ),
         )
         coordinator._mark_store_dirty()
-        coordinator._refresh_settings_recommendation_state(now)
+        self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
 

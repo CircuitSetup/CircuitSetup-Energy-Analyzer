@@ -87,6 +87,7 @@ class _SettingsCoordinator:
         self.updated: list[object] = []
         self.saved: list[datetime] = []
         self.notified = 0
+        self.episode_keys: list[tuple[tuple[str, ...], ...]] = []
         self.rebuild_calls: list[tuple[datetime, str | None]] = []
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
@@ -110,6 +111,12 @@ class _SettingsCoordinator:
 
     def _refresh_settings_recommendation_state(self, now: datetime) -> None:
         self.refreshed_recommendations.append(now)
+
+    def _set_settings_recommendation_notification_episode_key(
+        self,
+        episode_key: tuple[tuple[str, ...], ...],
+    ) -> None:
+        self.episode_keys.append(episode_key)
 
     def _refresh_ux_state_for_circuit(self, circuit_id: str, now: datetime) -> None:
         self.refreshed_circuits.append((circuit_id, now))
@@ -238,7 +245,9 @@ async def test_settings_controller_recalculates_and_records_decisions() -> None:
     ]
     assert decision.status is RecommendationStatus.DISMISSED
     assert decision.denied_value == recommendation.suggested_value
-    assert coordinator.refreshed_recommendations[-1] == coordinator.now
+    assert coordinator.state.settings_recommendations_by_circuit == {}
+    assert coordinator.state.settings_recommendation_count_by_circuit == {}
+    assert coordinator.episode_keys == [()]
 
 
 def test_settings_controller_writes_recommendation_setting_values() -> None:
@@ -259,6 +268,59 @@ def test_settings_controller_writes_recommendation_setting_values() -> None:
 
     assert coordinator.options[CONF_ADVANCED_SETTINGS] == {}
     assert coordinator.store_data.energy_usage_settings_by_circuit == {}
+
+
+def test_settings_controller_refreshes_recommendation_state() -> None:
+    recommendation = _recommendation()
+    applied = _recommendation(
+        recommendation_id="fridge:standby_threshold_w:v1",
+        unique_key="fridge:standby_threshold_w",
+        setting_key="standby_threshold_w",
+        setting_label="Standby Threshold",
+        status=RecommendationStatus.APPLIED,
+    )
+    expired = _recommendation(
+        recommendation_id="fridge:expired:v1",
+        unique_key="fridge:expired",
+        setting_key="expired",
+        setting_label="Expired",
+        expires_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+    )
+    dismissed = _recommendation(
+        recommendation_id="fridge:dismissed:v1",
+        unique_key="fridge:dismissed",
+        setting_key="dismissed",
+        setting_label="Dismissed",
+        status=RecommendationStatus.DISMISSED,
+    )
+    coordinator = _SettingsCoordinator(recommendation)
+    coordinator.store_data.settings_recommendations = {
+        recommendation.recommendation_id: recommendation,
+        applied.recommendation_id: applied,
+        expired.recommendation_id: expired,
+        dismissed.recommendation_id: dismissed,
+    }
+    controller = settings_controller.SettingsController(coordinator)
+
+    controller.refresh_settings_recommendation_state(coordinator.now)
+
+    visible_ids = {
+        item.recommendation_id
+        for item in controller.visible_settings_recommendations(coordinator.now)
+    }
+    pending_ids = {
+        item.recommendation_id
+        for item in controller.pending_settings_recommendations(coordinator.now)
+    }
+    payloads = coordinator.state.settings_recommendations_by_circuit["fridge"]
+
+    assert visible_ids == {
+        recommendation.recommendation_id,
+        applied.recommendation_id,
+    }
+    assert pending_ids == {recommendation.recommendation_id}
+    assert coordinator.state.settings_recommendation_count_by_circuit == {"fridge": 1}
+    assert {item["recommendation_id"] for item in payloads} == visible_ids
 
 
 def test_settings_controller_replaces_advanced_settings() -> None:
