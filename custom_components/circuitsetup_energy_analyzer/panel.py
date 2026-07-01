@@ -2622,24 +2622,18 @@ def _nilm_session_payload_with_actions(
             }
         }
         assignment_id = str(payload.get("assignment_id") or "").strip()
-        reviewed_ids = (
-            reviewed_session_ids.get(assignment_id, set())
-            if reviewed_session_ids is not None
-            else set()
-        )
-        reviewed_elsewhere = (
-            any(session_id in ids for ids in reviewed_session_ids.values())
-            if reviewed_session_ids is not None
-            else False
-        )
-        has_current_assignment = (
-            reviewed_session_ids is None or assignment_id in reviewed_session_ids
-        )
         if (
             assignment_id
-            and has_current_assignment
-            and session_id not in reviewed_ids
-            and not reviewed_elsewhere
+            and (
+                reviewed_session_ids is None
+                or (
+                    assignment_id in reviewed_session_ids
+                    and all(
+                        session_id not in ids
+                        for ids in reviewed_session_ids.values()
+                    )
+                )
+            )
         ):
             action_data = {
                 ATTR_CIRCUIT_ID: circuit_id,
