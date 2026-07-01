@@ -730,7 +730,7 @@ def test_coordinator_exposes_notification_controller() -> None:
         coordinator.notification_controller,
         notification_controller.NotificationController,
     )
-    assert coordinator._notified_alert_ids == set()
+    assert coordinator.notification_controller.notified_alert_ids == set()
     assert callable(
         coordinator.notification_controller.async_notify_nilm_virtual_appliances
     )

@@ -68,7 +68,7 @@ class NotificationController:
             if alert_id in self.notified_alert_ids:
                 continue
             self._coordinator.store_data.alerts.append(alert)
-            self._coordinator._mark_store_dirty()
+            self._coordinator.store_persistence.mark_dirty()
             await self.async_notify_alert(alert)
         return active_alerts
 
@@ -91,8 +91,10 @@ class NotificationController:
             self._coordinator.entry_id,
             total_pending=total_pending,
         )
-        self._coordinator._mark_store_dirty()
-        await self._coordinator._async_save_store(self._coordinator._now_fn())
+        self._coordinator.store_persistence.mark_dirty()
+        await self._coordinator.store_persistence.async_save_if_dirty(
+            self._coordinator._now_fn()
+        )
 
     def settings_recommendation_episode_key(
         self,
@@ -133,7 +135,7 @@ class NotificationController:
         self.settings_recommendation_notification_episode_key = episode_key
         store_data = self._coordinator.store_data
         store_data.settings_recommendation_notification_episode_key = episode_key
-        self._coordinator._mark_store_dirty()
+        self._coordinator.store_persistence.mark_dirty()
 
     def _stored_settings_recommendation_episode_key(
         self,
