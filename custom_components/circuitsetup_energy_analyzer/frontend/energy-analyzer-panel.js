@@ -2574,6 +2574,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <h3>Manual Labels</h3>
       <p class="muted">Manual labels teach NILM which appliance was running during a time range.</p>
       <div class="metric">
+        <p class="muted"><strong>Was this appliance running here?</strong> Review the selected graph window, then save the appliance name if the interval matches.</p>
         <div class="nilm-interval-form">
           <label>
             <span class="muted">Start</span>

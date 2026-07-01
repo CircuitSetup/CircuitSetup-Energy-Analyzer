@@ -1499,6 +1499,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "nilm-review-card" in PANEL_MODULE_VERSION
     assert "candidate-facts" in PANEL_MODULE_VERSION
     assert "session-validation-card" in PANEL_MODULE_VERSION
+    assert "interval-running-prompt" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1806,6 +1807,37 @@ if (panel._lastActionMessage !== "Loaded NILM session interval.") {
 }
 if (!rendered) {
   throw new Error("adjust interval did not re-render");
+}
+"""
+    )
+
+
+def test_nilm_label_interval_form_asks_whether_appliance_was_running() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmLabelIntervalDraft = {
+  start: "2026-06-24T18:12",
+  end: "2026-06-24T19:03",
+  label: "Dishwasher"
+};
+const html = panel._renderNilmLabelIntervals({
+  label_intervals: [],
+  actions: {
+    sensor_label_interval: {
+      ground_truth_options: []
+    }
+  }
+});
+for (const expected of [
+  "Was this appliance running here?",
+  "Review the selected graph window",
+  "Dishwasher",
+  "Save Interval"
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
 }
 """
     )
