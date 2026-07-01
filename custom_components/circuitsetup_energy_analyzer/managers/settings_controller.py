@@ -7,6 +7,11 @@ from dataclasses import replace
 from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings
+from ..alert_feedback import (
+    alert_feedback_is_expired,
+    alert_feedback_status,
+    mapping_datetime,
+)
 from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from ..billing import BillingCycleSettings
 from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
@@ -57,6 +62,8 @@ from ..utility_comparison import (
     UtilityComparisonSettings,
 )
 from ..ux import normalize_sensitivity
+
+ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 
 
 class SettingsController:
@@ -188,7 +195,7 @@ class SettingsController:
         if recommendation_id in existing_recommendation_ids:
             return []
 
-        feedback = coordinator._repeated_unhelpful_daily_spike_feedback(config, now)
+        feedback = self.repeated_unhelpful_daily_spike_feedback(config, now)
         if feedback is None:
             return []
 
@@ -251,6 +258,44 @@ class SettingsController:
         ):
             return []
         return [recommendation]
+
+    def repeated_unhelpful_daily_spike_feedback(
+        self,
+        config: Any,
+        now: Any,
+    ) -> Mapping[str, Any] | None:
+        """Return the best repeated unhelpful daily-spike feedback for a circuit."""
+        matches: list[Mapping[str, Any]] = []
+        for feedback in self._coordinator.store_data.alert_feedback.values():
+            if not isinstance(feedback, Mapping):
+                continue
+            if alert_feedback_status(feedback) != "unhelpful":
+                continue
+            if alert_feedback_is_expired(feedback, now):
+                continue
+            if str(feedback.get("circuit_id") or "") != config.circuit_id:
+                continue
+            if str(feedback.get("feature") or "") != "daily_energy_usage_spike":
+                continue
+            if (
+                _positive_int_value(feedback.get("evidence_count"), default=1)
+                < ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT
+            ):
+                continue
+            matches.append(feedback)
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda feedback: (
+                _positive_int_value(feedback.get("evidence_count"), default=1),
+                (
+                    mapping_datetime(feedback.get("last_seen")).timestamp()
+                    if mapping_datetime(feedback.get("last_seen")) is not None
+                    else 0.0
+                ),
+            ),
+        )
 
     async def async_replace_advanced_settings(
         self,

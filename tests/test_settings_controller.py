@@ -58,6 +58,7 @@ class _SettingsCoordinator:
                 recommendation.recommendation_id: recommendation
             },
             settings_recommendation_decisions={},
+            alert_feedback={},
             sensitivity_by_circuit={},
             energy_usage_settings_by_circuit={
                 "fridge": {"daily_spike_ratio": 0.25}
@@ -103,8 +104,6 @@ class _SettingsCoordinator:
         self.feature_history_by_circuit = {
             "fridge": {"energy_usage_days": [{"date": "2026-06-30"}]}
         }
-        self.repeated_feedback_by_circuit: dict[str, dict[str, Any] | None] = {}
-        self.repeated_feedback_calls: list[tuple[str, datetime]] = []
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -157,14 +156,6 @@ class _SettingsCoordinator:
     ) -> dict[str, Any]:
         self.feature_history_calls.append((config.circuit_id, now))
         return self.feature_history_by_circuit[config.circuit_id]
-
-    def _repeated_unhelpful_daily_spike_feedback(
-        self,
-        config: SimpleNamespace,
-        now: datetime,
-    ) -> dict[str, Any] | None:
-        self.repeated_feedback_calls.append((config.circuit_id, now))
-        return self.repeated_feedback_by_circuit.get(config.circuit_id)
 
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
@@ -279,12 +270,17 @@ def test_settings_controller_builds_advisor_inputs() -> None:
 def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
-    coordinator.repeated_feedback_by_circuit["fridge"] = {
-        "fingerprint": "alert-123",
-        "evidence_count": 3,
-        "change_ratio": 0.31,
-        "observed_value": "2.4",
-        "baseline_value": "1.6",
+    coordinator.store_data.alert_feedback = {
+        "daily_spike": {
+            "status": "unhelpful",
+            "circuit_id": "fridge",
+            "feature": "daily_energy_usage_spike",
+            "fingerprint": "alert-123",
+            "evidence_count": 3,
+            "change_ratio": 0.31,
+            "observed_value": "2.4",
+            "baseline_value": "1.6",
+        }
     }
     controller = settings_controller.SettingsController(coordinator)
     config = SimpleNamespace(
@@ -312,7 +308,57 @@ def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:
     assert generated.evidence["baseline_value"] == 1.6
     assert generated.apply_payload == {"daily_spike_ratio": 0.4}
     assert generated.expires_at > generated.created_at
-    assert coordinator.repeated_feedback_calls == [("fridge", coordinator.now)]
+
+
+def test_settings_controller_selects_repeated_unhelpful_feedback() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    config = SimpleNamespace(circuit_id="fridge")
+    older = datetime(2026, 6, 30, 10, 0, tzinfo=UTC).isoformat()
+    newer = datetime(2026, 6, 30, 11, 0, tzinfo=UTC).isoformat()
+    coordinator.store_data.alert_feedback = {
+        "wrong_status": {
+            "status": "expected",
+            "circuit_id": "fridge",
+            "feature": "daily_energy_usage_spike",
+            "evidence_count": 5,
+        },
+        "too_few": {
+            "status": "unhelpful",
+            "circuit_id": "fridge",
+            "feature": "daily_energy_usage_spike",
+            "evidence_count": 1,
+        },
+        "wrong_circuit": {
+            "status": "unhelpful",
+            "circuit_id": "hvac",
+            "feature": "daily_energy_usage_spike",
+            "evidence_count": 4,
+        },
+        "older": {
+            "status": "unhelpful",
+            "circuit_id": "fridge",
+            "feature": "daily_energy_usage_spike",
+            "evidence_count": 2,
+            "last_seen": older,
+        },
+        "newer": {
+            "action": "unhelpful",
+            "circuit_id": "fridge",
+            "feature": "daily_energy_usage_spike",
+            "evidence_count": 2,
+            "last_seen": newer,
+            "expires_at": datetime(2026, 7, 1, 12, 0, tzinfo=UTC).isoformat(),
+        },
+    }
+
+    selected = controller.repeated_unhelpful_daily_spike_feedback(
+        config,
+        coordinator.now,
+    )
+
+    assert selected is coordinator.store_data.alert_feedback["newer"]
 
 
 def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> None:
@@ -345,7 +391,6 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
 
     assert changed is True
     assert coordinator.feature_history_calls == [("fridge", coordinator.now)]
-    assert coordinator.repeated_feedback_calls == [("fridge", coordinator.now)]
     assert (
         coordinator.store_data.settings_recommendations[stale.recommendation_id].status
         is RecommendationStatus.STALE
