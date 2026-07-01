@@ -13,6 +13,14 @@ from .ux import friendly_feature_name
 ALERT_FINGERPRINT_SCHEMA_VERSION = "alert:v2"
 
 
+def alert_anomaly_score(alert: AlertEvidence) -> float:
+    if alert.change_ratio != 0.0:
+        return abs(alert.change_ratio)
+    if alert.baseline_value != 0.0:
+        return abs((alert.observed_value - alert.baseline_value) / alert.baseline_value)
+    return abs(alert.observed_value)
+
+
 @dataclass(frozen=True, slots=True)
 class Observation:
     """Single scored baseline deviation observation."""
