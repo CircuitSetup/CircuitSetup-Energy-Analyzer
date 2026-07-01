@@ -21,6 +21,15 @@ from .activity_timeline import (
     timeline_payload,
 )
 from .aggregation import aggregate_dual_phase
+from .alert_feedback import (
+    alert_feedback_is_expired as _alert_feedback_is_expired,
+)
+from .alert_feedback import (
+    alert_feedback_status as _alert_feedback_status,
+)
+from .alert_feedback import (
+    mapping_datetime as _mapping_datetime,
+)
 from .alerting import (
     ConservativeAlertPolicy,
     Observation,
@@ -226,7 +235,6 @@ ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
 ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
 ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
 ALERT_UNHELPFUL_EXTRA_REPEATED = 2
-ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
 NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
@@ -1302,36 +1310,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> Mapping[str, Any] | None:
-        matches: list[Mapping[str, Any]] = []
-        for feedback in self.store_data.alert_feedback.values():
-            if not isinstance(feedback, Mapping):
-                continue
-            if _alert_feedback_status(feedback) != "unhelpful":
-                continue
-            if _alert_feedback_is_expired(feedback, now):
-                continue
-            if str(feedback.get("circuit_id") or "") != config.circuit_id:
-                continue
-            if str(feedback.get("feature") or "") != "daily_energy_usage_spike":
-                continue
-            if (
-                _positive_int_value(feedback.get("evidence_count"), default=1)
-                < ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT
-            ):
-                continue
-            matches.append(feedback)
-        if not matches:
-            return None
-        return max(
-            matches,
-            key=lambda feedback: (
-                _positive_int_value(feedback.get("evidence_count"), default=1),
-                (
-                    _mapping_datetime(feedback.get("last_seen")).timestamp()
-                    if _mapping_datetime(feedback.get("last_seen")) is not None
-                    else 0.0
-                ),
-            ),
+        return self.settings_controller.repeated_unhelpful_daily_spike_feedback(
+            config,
+            now,
         )
 
     def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
@@ -5118,14 +5099,6 @@ def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
     return f"{observation.circuit_id}:{observation.feature or 'alert'}"
 
 
-def _alert_feedback_status(feedback: Mapping[str, Any]) -> str | None:
-    status = feedback.get("status") or feedback.get("action")
-    if not isinstance(status, str):
-        return None
-    normalized = status.strip().lower()
-    return normalized or None
-
-
 def _alert_feedback_effect(status: str) -> str:
     if status == "expected":
         return "Notifications suppressed for this expected pattern"
@@ -5140,28 +5113,6 @@ def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:
     if action == "unhelpful":
         return now + ALERT_UNHELPFUL_FEEDBACK_TTL
     return None
-
-
-def _alert_feedback_is_expired(
-    feedback: Mapping[str, Any],
-    now: datetime,
-) -> bool:
-    expires_at = _mapping_datetime(feedback.get("expires_at"))
-    if expires_at is None:
-        return False
-    return expires_at <= _datetime_with_matching_timezone(now, expires_at)
-
-
-def _mapping_datetime(value: Any) -> datetime | None:
-    return _datetime_or_none(value)
-
-
-def _datetime_with_matching_timezone(now: datetime, target: datetime) -> datetime:
-    if target.tzinfo is None and now.tzinfo is not None:
-        return now.replace(tzinfo=None)
-    if target.tzinfo is not None and now.tzinfo is None:
-        return now.replace(tzinfo=target.tzinfo)
-    return now
 
 
 def _normalized_temperature_unit(unit: str) -> str:
