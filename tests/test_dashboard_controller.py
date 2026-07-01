@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_DASHBOARD_LAYOUT,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     DASHBOARD_LAYOUT_EXPERT,
     DASHBOARD_LAYOUT_STANDARD,
 )
@@ -81,8 +82,18 @@ class _StorageDashboardCoordinator:
     def __init__(self) -> None:
         self.entry_id = "entry-1"
         self.dashboard_layout = DASHBOARD_LAYOUT_STANDARD
+        self.entry_data = {
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
+        }
         self.options: dict[str, object] = {}
         self._config_entry = SimpleNamespace(options={})
+        self.store_data = SimpleNamespace(dashboard_status=None)
+        self.saved: list[object] = []
+        self.dirty_count = 0
+        self.store_persistence = SimpleNamespace(
+            async_save_if_dirty=self._record_store_save,
+            mark_dirty=self._record_store_dirty,
+        )
         self.dashboard_stores: dict[str, _FakeLovelaceStorage] = {}
         self.collection = _FakeDashboardCollection(self.dashboard_stores)
         self.hass = SimpleNamespace(
@@ -110,8 +121,14 @@ class _StorageDashboardCoordinator:
         self.dashboard_status: dict[str, object] | None = None
         self.updated_data: list[object] = []
 
-    def _outdoor_temperature_entity(self) -> str:
-        return "sensor.outdoor_temperature"
+    def _now_fn(self) -> object:
+        return "now"
+
+    async def _record_store_save(self, now: object) -> None:
+        self.saved.append(now)
+
+    def _record_store_dirty(self) -> None:
+        self.dirty_count += 1
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated_data.append(state)
@@ -129,6 +146,9 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
     assert coordinator.collection.created
     assert coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved
     assert coordinator.last_dashboard_create_request == payload
+    assert coordinator.store_data.dashboard_status == payload
+    assert coordinator.dirty_count == 1
+    assert coordinator.saved == ["now"]
     assert coordinator.hass.bus.events == [
         ("circuitsetup_energy_analyzer_create_dashboard", payload)
     ]

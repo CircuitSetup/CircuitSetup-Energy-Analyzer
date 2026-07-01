@@ -6,7 +6,8 @@ from collections.abc import Mapping, MutableMapping
 from inspect import isawaitable
 from typing import Any
 
-from ..const import CONF_DASHBOARD_LAYOUT, DOMAIN
+from ..const import CONF_DASHBOARD_LAYOUT, CONF_OUTDOOR_TEMPERATURE_ENTITY, DOMAIN
+from ..context_sources import configured_context_entity
 from ..dashboard import (
     DASHBOARD_TITLE,
     DASHBOARD_URL_PATH,
@@ -33,7 +34,11 @@ class DashboardController:
             layout,
             hass=coordinator.hass,
             entry_id=coordinator.entry_id,
-            outdoor_temperature_entity=coordinator._outdoor_temperature_entity(),
+            outdoor_temperature_entity=configured_context_entity(
+                coordinator.entry_data,
+                coordinator.options,
+                CONF_OUTDOOR_TEMPERATURE_ENTITY,
+            ),
         )
         action, reason = await self.async_create_or_update_lovelace_dashboard(
             dashboard_payload,
@@ -52,12 +57,11 @@ class DashboardController:
         store_data = getattr(coordinator, "store_data", None)
         if store_data is not None:
             store_data.dashboard_status = dict(payload)
-            mark_store_dirty = getattr(coordinator, "_mark_store_dirty", None)
-            save_store = getattr(coordinator, "_async_save_store", None)
+            store_persistence = getattr(coordinator, "store_persistence", None)
             now_fn = getattr(coordinator, "_now_fn", None)
-            if callable(mark_store_dirty) and callable(save_store) and callable(now_fn):
-                mark_store_dirty()
-                await save_store(now_fn())
+            if store_persistence is not None and callable(now_fn):
+                store_persistence.mark_dirty()
+                await store_persistence.async_save_if_dirty(now_fn())
         self._fire_event(f"{DOMAIN}_create_dashboard", payload)
         coordinator.async_set_updated_data(coordinator.state)
         return payload
