@@ -147,6 +147,7 @@ def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     state = AnalyzerState()
     state.peak_demand_w_by_circuit["ev"] = 5200.0
     state.capacity_usage_by_circuit["ev"] = 86.0
+    state.capacity_status_by_circuit["ev"] = "over_limit"
     state.solar_flexible_load_coverage_percent_by_circuit["ev"] = 74.0
     store_data = FeatureStoreData(
         baselines={
@@ -178,6 +179,38 @@ def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     assert comparisons["solar_covered_share_percent"]["label"] == "Solar-covered share"
     assert comparisons["solar_covered_share_percent"]["current_value"] == 74.0
     assert comparisons["solar_covered_share_percent"]["status"] == "normal"
+
+
+def test_today_vs_normal_skips_unconfigured_capacity_metric() -> None:
+    state = AnalyzerState()
+    state.capacity_usage_by_circuit["fridge"] = 0.0
+    state.capacity_status_by_circuit["fridge"] = "unconfigured"
+
+    detail = _detail(_config("fridge", ApplianceProfile.REFRIGERATOR), state)
+
+    comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
+    assert "capacity_usage_percent" not in comparisons
+
+
+def test_demand_peak_comparison_uses_contextual_demand_evidence() -> None:
+    state = AnalyzerState()
+    state.peak_demand_w_by_circuit["ev"] = 5200.0
+    state.demand_evidence_by_circuit["ev"] = {
+        "contextual_expected_range_w": [4200.0, 5000.0],
+        "contextual_baseline_median_w": 4600.0,
+        "contextual_baseline_confidence": 0.77,
+    }
+
+    detail = _detail(_config("ev", ApplianceProfile.EV_CHARGER), state)
+    comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
+
+    demand = comparisons["demand_peak_w"]
+    assert demand["status"] == "higher"
+    assert demand["source"] == "contextual_baseline"
+    assert demand["normal_low"] == 4200.0
+    assert demand["normal_high"] == 5000.0
+    assert demand["normal_median"] == 4600.0
+    assert demand["confidence"] == 0.77
 
 
 def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() -> None:
