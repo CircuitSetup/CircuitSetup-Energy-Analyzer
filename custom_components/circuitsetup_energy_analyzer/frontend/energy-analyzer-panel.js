@@ -3492,6 +3492,7 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
       return Boolean(
         Number(workspace.assignment_count || 0) > 0
         || Number(workspace.virtual_appliance_count || 0) > 0
+        || this._nilmWorkspaceHasLaneItems(workspace)
         || (Array.isArray(workspace.assignments) && workspace.assignments.length)
         || (Array.isArray(workspace.virtual_appliances) && workspace.virtual_appliances.length)
       );
@@ -3499,6 +3500,25 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
     return (this._dashboardConfig.appliance_power_entities || []).some(
       (entityId) => this._hass && this._hass.states && this._hass.states[entityId],
     );
+  }
+
+  _nilmWorkspaceHasLaneItems(workspace) {
+    const laneCounts = workspace && workspace.lane_counts && typeof workspace.lane_counts === "object"
+      ? workspace.lane_counts
+      : {};
+    if (Object.values(laneCounts).some((value) => Number(value || 0) > 0)) {
+      return true;
+    }
+    const lanes = workspace && workspace.lanes && typeof workspace.lanes === "object"
+      ? workspace.lanes
+      : {};
+    return Object.values(lanes).some((lane) => {
+      if (!lane || typeof lane !== "object") {
+        return false;
+      }
+      return (Array.isArray(lane.assignment_ids) && lane.assignment_ids.length > 0)
+        || (Array.isArray(lane.signature_ids) && lane.signature_ids.length > 0);
+    });
   }
 
   _renderDashboardNotificationGraph(alert) {

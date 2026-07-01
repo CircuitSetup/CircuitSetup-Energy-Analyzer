@@ -1065,8 +1065,6 @@ def _nilm_dashboard_graphs_card(
     entry_id: str | None,
     appliance_power_rows: Sequence[Mapping[str, str]],
 ) -> dict[str, Any] | None:
-    if not appliance_power_rows:
-        return None
     return {
         "type": NILM_DASHBOARD_GRAPHS_CARD,
         "title": "NILM mains power",

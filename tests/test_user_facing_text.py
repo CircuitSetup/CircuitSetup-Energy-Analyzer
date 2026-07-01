@@ -1496,6 +1496,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "timeline" in PANEL_MODULE_VERSION
     assert "nilm-lanes" in PANEL_MODULE_VERSION
     assert "dashboard-nilm-lanes" in PANEL_MODULE_VERSION
+    assert "nilm-review-card" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1716,6 +1717,34 @@ hidden._nilmWorkspace = {
 hidden._render();
 if (hidden.shadowRoot.innerHTML !== "") {
   throw new Error("dashboard graph card should hide when no NILM appliance is defined");
+}
+
+const reviewOnly = new context.DashboardGraphs();
+reviewOnly.setConfig({ appliance_power_entities: [] });
+reviewOnly._loading = false;
+reviewOnly._nilmWorkspaceLoading = false;
+reviewOnly._nilmWorkspace = {
+  status: "ok",
+  assignment_count: 0,
+  virtual_appliance_count: 0,
+  assignments: [],
+  virtual_appliances: [],
+  history: {},
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: ["sig-new"],
+      assignment_ids: []
+    }
+  },
+  lane_counts: { needs_review: 1 }
+};
+reviewOnly._render();
+if (!reviewOnly.shadowRoot.innerHTML.includes("Review lanes")) {
+  throw new Error("dashboard graph card should show live NILM review lanes");
 }
 
 const card = new context.DashboardGraphs();
