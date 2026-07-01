@@ -216,7 +216,7 @@ class SetupHealthAggregator:
         source_entities: list[str] | tuple[str, ...],
     ) -> dict[str, Any]:
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         circuit_name = getattr(config, "name", None) or circuit_id
         return {
             "circuit_name": str(circuit_name),
@@ -263,7 +263,7 @@ class SetupHealthAggregator:
 
     def repair_data(self, circuit_id: str, problem: str) -> dict[str, Any]:
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         circuit_name = getattr(config, "name", None) or circuit_id
         recommended_actions = {
             "missing_energy_source": (
@@ -305,7 +305,7 @@ class SetupHealthAggregator:
         }
 
     def repair_reason(self, circuit_id: str, problem: str) -> str:
-        config = self._coordinator._config_for_circuit(circuit_id)
+        config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
         circuit_name = getattr(config, "name", None) or circuit_id
         reasons = {
             "missing_energy_source": (
@@ -347,7 +347,7 @@ class SetupHealthAggregator:
 
     def has_missing_source_entities(self, circuit_id: str) -> bool:
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         if config is not None and not self.source_entities(circuit_id):
             return True
         return (
@@ -356,7 +356,7 @@ class SetupHealthAggregator:
         )
 
     def source_entities(self, circuit_id: str) -> list[str]:
-        config = self._coordinator._config_for_circuit(circuit_id)
+        config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
         if config is None:
             return []
         return [
@@ -405,7 +405,7 @@ class SetupHealthAggregator:
 
     def has_missing_rain_context_source(self, circuit_id: str) -> bool:
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         if (
             config is None
             or config.appliance_profile not in _PUMP_WATER_CONTEXT_PROFILES
@@ -428,7 +428,7 @@ class SetupHealthAggregator:
 
     def has_missing_water_flow_source(self, circuit_id: str) -> bool:
         coordinator = self._coordinator
-        config = coordinator._config_for_circuit(circuit_id)
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         if (
             config is None
             or config.appliance_profile not in _FLOW_WATER_CONTEXT_PROFILES

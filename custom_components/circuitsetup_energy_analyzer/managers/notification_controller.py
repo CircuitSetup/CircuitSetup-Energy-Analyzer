@@ -51,7 +51,9 @@ class NotificationController:
         await notifications.async_create_alert_notification(
             self._coordinator.hass,
             alert,
-            config=self._coordinator._config_for_circuit(alert.circuit_id),
+            config=self._coordinator.circuit_registry.config_for_circuit(
+                alert.circuit_id
+            ),
         )
 
     async def async_notify_nilm_virtual_appliances(

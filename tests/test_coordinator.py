@@ -282,7 +282,7 @@ def test_processing_context_uses_home_assistant_time_zone() -> None:
         now_fn=lambda: now,
     )
 
-    context = coordinator._build_processing_context(now)
+    context = coordinator.context_builder.build(now)
 
     assert context.time_zone == "America/New_York"
 

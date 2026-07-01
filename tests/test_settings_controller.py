@@ -136,6 +136,9 @@ class _SettingsCoordinator:
                 daily_energy_spike_ratio=0.25,
             )
         ]
+        self.circuit_registry = SimpleNamespace(
+            config_for_circuit=self._lookup_config_for_circuit,
+        )
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -143,6 +146,10 @@ class _SettingsCoordinator:
         ] = []
         self.context_calls: list[datetime] = []
         self.applied_feature_results: list[SimpleNamespace] = []
+        self.context_builder = SimpleNamespace(
+            build=self._record_processing_context,
+            time_zone=self._context_time_zone,
+        )
         self._energy_goal_processor = SimpleNamespace(
             refresh_state=self._refresh_energy_goal_state
         )
@@ -177,7 +184,7 @@ class _SettingsCoordinator:
     async def _record_settings_recommendation_notification(self) -> None:
         self.notified += 1
 
-    def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
+    def _lookup_config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
             circuit_id=circuit_id,
             energy_usage_window_days=7,
@@ -203,7 +210,7 @@ class _SettingsCoordinator:
             standby_min_samples=24,
         )
 
-    def _build_processing_context(self, now: datetime) -> SimpleNamespace:
+    def _record_processing_context(self, now: datetime) -> SimpleNamespace:
         self.context_calls.append(now)
         return self.goal_context
 
@@ -219,7 +226,7 @@ class _SettingsCoordinator:
     async def _apply_feature_result(self, result: SimpleNamespace) -> None:
         self.applied_feature_results.append(result)
 
-    def _ha_time_zone(self) -> str:
+    def _context_time_zone(self) -> str:
         return "UTC"
 
 

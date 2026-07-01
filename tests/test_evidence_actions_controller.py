@@ -41,6 +41,9 @@ class _ActionCoordinator:
             async_save_if_dirty=self._record_store_save,
             mark_dirty=self._record_store_dirty,
         )
+        self.circuit_registry = SimpleNamespace(
+            config_for_circuit=self._lookup_config_for_circuit,
+        )
 
     def _now_fn(self) -> datetime:
         return self.now
@@ -64,7 +67,7 @@ class _ActionCoordinator:
     def _record_store_dirty(self) -> None:
         self.dirty_count += 1
 
-    def _config_for_circuit(self, circuit_id: str) -> None:
+    def _lookup_config_for_circuit(self, circuit_id: str) -> None:
         del circuit_id
         return None
 
