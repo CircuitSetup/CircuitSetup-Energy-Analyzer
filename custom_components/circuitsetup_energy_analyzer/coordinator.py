@@ -1173,14 +1173,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         preset: str,
     ) -> None:
         """Persist an alert sensitivity preset for one circuit."""
-        self.store_data.sensitivity_by_circuit[circuit_id] = normalize_sensitivity(
-            preset
+        await self.settings_controller.async_set_circuit_sensitivity(
+            circuit_id,
+            preset,
         )
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
         """Persist the entity detail level and reload desired entities."""

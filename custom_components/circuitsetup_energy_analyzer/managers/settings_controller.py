@@ -79,6 +79,18 @@ class SettingsController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
 
+    async def async_set_circuit_sensitivity(
+        self,
+        circuit_id: str,
+        preset: str,
+    ) -> None:
+        """Persist an alert sensitivity preset for one circuit."""
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.sensitivity_by_circuit,
+            normalize_sensitivity(preset),
+        )
+
     async def async_set_energy_usage_settings(
         self,
         circuit_id: str,
@@ -552,8 +564,8 @@ class SettingsController:
     async def _async_save_circuit_settings(
         self,
         circuit_id: str,
-        settings_by_circuit: MutableMapping[str, dict[str, Any]],
-        settings: dict[str, Any],
+        settings_by_circuit: MutableMapping[str, Any],
+        settings: Any,
     ) -> None:
         coordinator = self._coordinator
         settings_by_circuit[circuit_id] = settings
