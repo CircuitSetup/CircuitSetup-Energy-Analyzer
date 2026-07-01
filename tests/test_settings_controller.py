@@ -88,7 +88,18 @@ class _SettingsCoordinator:
         self.saved: list[datetime] = []
         self.notified = 0
         self.episode_keys: list[tuple[tuple[str, ...], ...]] = []
-        self.rebuild_calls: list[tuple[datetime, str | None]] = []
+        self.circuit_configs = [
+            SimpleNamespace(circuit_id="fridge", name="Kitchen Fridge")
+        ]
+        self.advisor_inputs_by_circuit = {
+            "fridge": SimpleNamespace(circuit_id="fridge")
+        }
+        self.advisor_inputs_calls: list[tuple[str, datetime]] = []
+        self.unhelpful_recommendations_by_circuit: dict[
+            str,
+            list[SettingRecommendation],
+        ] = {}
+        self.unhelpful_calls: list[tuple[str, datetime, set[str]]] = []
         self.goal_context = SimpleNamespace(name="goal_context")
         self.goal_result = SimpleNamespace(name="goal_result")
         self.energy_goal_refreshes: list[
@@ -130,14 +141,25 @@ class _SettingsCoordinator:
     async def _notify_settings_recommendations_if_needed(self) -> None:
         self.notified += 1
 
-    def _rebuild_setting_recommendations(
+    def _advisor_inputs_for_config(
         self,
+        config: SimpleNamespace,
+        now: datetime,
+    ) -> SimpleNamespace:
+        self.advisor_inputs_calls.append((config.circuit_id, now))
+        return self.advisor_inputs_by_circuit[config.circuit_id]
+
+    def _unhelpful_alert_setting_recommendations(
+        self,
+        config: SimpleNamespace,
         now: datetime,
         *,
-        circuit_id: str | None = None,
-    ) -> bool:
-        self.rebuild_calls.append((now, circuit_id))
-        return True
+        existing_recommendation_ids: set[str],
+    ) -> list[SettingRecommendation]:
+        self.unhelpful_calls.append(
+            (config.circuit_id, now, set(existing_recommendation_ids))
+        )
+        return self.unhelpful_recommendations_by_circuit.get(config.circuit_id, [])
 
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
         return SimpleNamespace(
@@ -219,18 +241,79 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     ]
 
 
+def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> None:
+    stale = _recommendation(
+        recommendation_id="fridge:old_threshold:v1",
+        unique_key="fridge:old_threshold",
+        setting_key="old_threshold",
+        setting_label="Old Threshold",
+    )
+    generated = _recommendation(
+        recommendation_id="fridge:new_threshold:v1",
+        unique_key="fridge:new_threshold",
+        setting_key="new_threshold",
+        setting_label="New Threshold",
+        current_value=1.0,
+        suggested_value=2.0,
+        apply_payload={"new_threshold": 2.0},
+    )
+    coordinator = _SettingsCoordinator(stale)
+    controller = settings_controller.SettingsController(coordinator)
+
+    monkeypatch.setattr(
+        settings_controller,
+        "build_settings_recommendations",
+        lambda inputs: [generated],
+        raising=False,
+    )
+
+    changed = controller.rebuild_setting_recommendations(coordinator.now)
+
+    assert changed is True
+    assert coordinator.advisor_inputs_calls == [("fridge", coordinator.now)]
+    assert coordinator.unhelpful_calls == [
+        ("fridge", coordinator.now, {generated.recommendation_id})
+    ]
+    assert (
+        coordinator.store_data.settings_recommendations[stale.recommendation_id].status
+        is RecommendationStatus.STALE
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[generated.recommendation_id]
+        == generated
+    )
+    assert coordinator.state.settings_recommendation_count_by_circuit == {"fridge": 1}
+    assert [
+        item["recommendation_id"]
+        for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
+    ] == [generated.recommendation_id]
+
+
 @pytest.mark.asyncio
-async def test_settings_controller_recalculates_and_records_decisions() -> None:
+async def test_settings_controller_recalculates_and_records_decisions(
+    monkeypatch,
+) -> None:
     recommendation = _recommendation()
+    updated_recommendation = _recommendation(
+        suggested_value=0.4,
+        apply_payload={"daily_spike_ratio": 0.4},
+        reason="Updated recommendation.",
+    )
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
+
+    monkeypatch.setattr(
+        settings_controller,
+        "build_settings_recommendations",
+        lambda inputs: [updated_recommendation],
+    )
 
     await controller.async_recalculate_setting_recommendations("fridge")
     await controller.async_dismiss_setting_recommendation(
         recommendation.recommendation_id,
     )
 
-    assert coordinator.rebuild_calls == [(coordinator.now, "fridge")]
+    assert coordinator.advisor_inputs_calls == [("fridge", coordinator.now)]
     assert coordinator.dirty_count == 2
     assert coordinator.saved == [coordinator.now, coordinator.now]
     assert coordinator.notified == 1
@@ -244,7 +327,7 @@ async def test_settings_controller_recalculates_and_records_decisions() -> None:
         recommendation.unique_key
     ]
     assert decision.status is RecommendationStatus.DISMISSED
-    assert decision.denied_value == recommendation.suggested_value
+    assert decision.denied_value == updated_recommendation.suggested_value
     assert coordinator.state.settings_recommendations_by_circuit == {}
     assert coordinator.state.settings_recommendation_count_by_circuit == {}
     assert coordinator.episode_keys == [()]
