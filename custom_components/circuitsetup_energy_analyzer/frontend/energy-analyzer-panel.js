@@ -2,10 +2,13 @@ const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_evidence";
 const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
 const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspace";
 const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
+const APPLIANCE_DETAIL_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_detail";
+const APPLIANCE_DETAIL_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_detail";
 const HISTORY_CALL_API_PREFIX = "history/period";
 const MAX_CHART_POINTS_PER_SERIES = 240;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
+const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
@@ -69,6 +72,12 @@ class CircuitSetupNilmWorkspace extends CircuitSetupPanelComponent {
   }
 }
 
+class CircuitSetupApplianceDetail extends CircuitSetupPanelComponent {
+  render() {
+    return this.host._renderApplianceDetailContent();
+  }
+}
+
 class CircuitSetupRecommendationCards extends CircuitSetupPanelComponent {
   renderSection(title, recommendationItems) {
     return this.host._renderRecommendationSectionContent(title, recommendationItems);
@@ -81,18 +90,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._evidenceSummary = new CircuitSetupEvidenceSummary(this);
     this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);
+    this._applianceDetailComponent = new CircuitSetupApplianceDetail(this);
     this._recommendationCards = new CircuitSetupRecommendationCards(this);
     this._hass = null;
     this._payload = null;
     this._historySeries = [];
     this._nilmWorkspace = null;
+    this._applianceDetail = null;
     this._nilmWorkspaceHistorySeries = [];
     this._loading = true;
     this._historyLoading = false;
     this._nilmWorkspaceLoading = false;
+    this._applianceDetailLoading = false;
     this._error = "";
     this._historyError = "";
     this._nilmWorkspaceError = "";
+    this._applianceDetailError = "";
     this._busyAction = "";
     this._lastActionMessage = "";
     this._loadedRouteKey = "";
@@ -165,7 +178,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historyError = "";
     this._historySeries = [];
     this._nilmWorkspace = null;
+    this._applianceDetail = null;
     this._nilmWorkspaceError = "";
+    this._applianceDetailError = "";
     this._nilmWorkspaceHistorySeries = [];
     this._nilmLabelDrafts.clear();
     this._nilmSessionLabelDrafts.clear();
@@ -189,6 +204,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._payload = payload;
       this._loading = false;
       this._render();
+      if (this._routeRequestsApplianceDetail(routeKey)) {
+        await this._loadApplianceDetail(requestId, routeKey);
+      }
       const alert = this._payload && this._payload.alert;
       if (alert && alert.graph_entities && alert.graph_entities.length) {
         await this._loadHistory(alert, requestId, routeKey);
@@ -289,6 +307,48 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
+  async _loadApplianceDetail(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    if (!this._routeRequestsApplianceDetail(routeKey)) {
+      return;
+    }
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const params = new URLSearchParams();
+    const circuit = this._payload && this._payload.circuit;
+    const circuitId = routeUrl.searchParams.get("circuit_id") || (circuit && circuit.circuit_id) || "";
+    const assignmentId = routeUrl.searchParams.get("assignment_id") || "";
+    if (circuitId) {
+      params.set("circuit_id", circuitId);
+    }
+    if (assignmentId) {
+      params.set("assignment_id", assignmentId);
+    }
+    const query = params.toString();
+    const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
+    const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
+
+    this._applianceDetailLoading = true;
+    this._applianceDetailError = "";
+    this._render();
+
+    try {
+      const detail = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceDetail = detail;
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceDetailError = `Could not load Appliance Detail from ${fetchPath}: ${error.message}`;
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._applianceDetailLoading = false;
+        this._render();
+      }
+    }
+  }
+
   async _requestJson(apiPath, fetchPath) {
     if (this._hass && this._hass.callApi) {
       return this._hass.callApi("GET", apiPath);
@@ -325,6 +385,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._lastActionMessage = this._alertActionMessage(actionKey);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
+      this._scrollToTop();
+    } catch (error) {
+      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._busyAction = "";
+      this._renderAndScrollToTop();
+    }
+  }
+
+  async _callApplianceDetailAction(actionKey) {
+    const payload = this._applianceDetail || {};
+    const actions = payload.actions || {};
+    const action = actions[actionKey];
+    if (!this._guardActionCall(action, `appliance detail ${actionKey}`)) {
+      return;
+    }
+    if (action.path) {
+      this._navigate(action.path);
+      return;
+    }
+    const busyKey = `appliance_detail_${actionKey}`;
+    this._busyAction = busyKey;
+    this._render();
+    try {
+      if (action.domain) {
+        await this._hass.callService(action.domain, action.service, action.data || {});
+      } else {
+        await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
+      }
+      this._lastActionMessage = this._applianceDetailActionMessage(actionKey);
+      this._busyAction = "";
+      await this._loadEvidence({ routeKey: this._routeKey() });
       this._scrollToTop();
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
@@ -739,6 +830,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1";
   }
 
+  _routeRequestsApplianceDetail(routeKey = this._routeKey()) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    if (routeUrl.searchParams.get(APPLIANCE_DETAIL_QUERY_PARAM) === "1") {
+      return true;
+    }
+    return routeUrl.searchParams.has("assignment_id")
+      && routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) !== "1";
+  }
+
   _actionRefreshRouteKey(actionKey) {
     const routeUrl = new URL(this._routeKey(), window.location.origin);
     const alert = this._payload && this._payload.alert;
@@ -792,6 +892,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       mark_unhelpful: "Marked as not helpful.",
       pause_alerts: "Alert pause updated.",
       relearn_baseline: "Baseline relearn requested.",
+    };
+    return messages[actionKey] || "Action complete.";
+  }
+
+  _applianceDetailActionMessage(actionKey) {
+    const messages = {
+      pause_alerts: "Alert pause updated.",
+      relearn_baseline: "Baseline relearn requested.",
+      open_advanced_circuit_settings: "Opening Advanced Circuit Settings.",
+      open_evidence: "Opening evidence.",
+      review_nilm_assignment: "Opening NILM assignment review.",
     };
     return messages[actionKey] || "Action complete.";
   }
@@ -853,13 +964,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const alert = payload && payload.alert;
     const circuit = payload && payload.circuit;
     const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
-    const statusText = nilmWorkspaceRoute
+    const applianceDetailRoute = this._routeRequestsApplianceDetail();
+    const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
+    const statusText = applianceDetailRoute
+      ? "Appliance Detail"
+      : nilmWorkspaceRoute
       ? "NILM Workspace"
       : this._statusText(payload && payload.status);
-    const headerTitle = nilmWorkspaceRoute
+    const headerTitle = applianceDetailRoute
+      ? (applianceDetail && applianceDetail.display_name) || "Appliance Detail"
+      : nilmWorkspaceRoute
       ? "NILM Workspace"
       : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
-    const headerMessage = nilmWorkspaceRoute
+    const headerMessage = applianceDetailRoute
+      ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
+      : nilmWorkspaceRoute
       ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
       : (alert && alert.message) || "Historical alert not found";
 
@@ -1113,7 +1232,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
-      ${this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)}
+      ${this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit))}
       </main>
     `;
 
@@ -1124,6 +1243,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
+      button.addEventListener("click", () => {
+        this._callApplianceDetailAction(button.dataset.applianceDetailAction);
+      });
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.recommendationIndex, 10);
@@ -1199,6 +1323,161 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
       });
     }
+  }
+
+  _renderApplianceDetailBody() {
+    return `${this._renderApplianceDetail()}${this._renderRecommendations()}`;
+  }
+
+  _renderApplianceDetail() {
+    return this._applianceDetailComponent.render();
+  }
+
+  _renderApplianceDetailContent() {
+    if (this._applianceDetailLoading) {
+      return `<section class="panel"><p>Loading Appliance Detail...</p></section>`;
+    }
+    if (this._applianceDetailError) {
+      return `<section class="panel error"><p>${this._escape(this._applianceDetailError)}</p></section>`;
+    }
+    const payload = this._applianceDetail || {};
+    const detail = payload.detail;
+    if (!detail) {
+      return `
+        <section class="panel">
+          <h2>Appliance Detail</h2>
+          <p>${this._escape(payload.message || "No appliance detail is available for the requested appliance.")}</p>
+          <p class="muted">${this._escape(payload.next_step || "Open the generated dashboard or review the appliance summary sensors.")}</p>
+        </section>
+      `;
+    }
+    return `
+      <section class="panel summary">
+        ${this._metric("Activity", detail.activity_state)}
+        ${this._metric("Power", this._formatPower(detail.current_power_w))}
+        ${this._metric("Source", this._sourceLabel(detail.source_type))}
+        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric("Confidence", this._formatConfidence(detail.confidence)) : ""}
+      </section>
+      <section class="panel summary">
+        ${this._metric("Health", detail.health_state)}
+        ${this._metric("Electrical", detail.electrical_state)}
+        ${this._metric("Energy", detail.energy_state)}
+        ${this._metric("Model", detail.model_status || "Direct meter")}
+      </section>
+      <section class="panel summary">
+        ${this._metric("Energy Today", this._formatKwh(detail.daily_energy_kwh))}
+        ${this._metric("Runtime Today", this._formatDuration(detail.runtime_today_seconds))}
+        ${this._metric("Runs Today", detail.run_count_today)}
+        ${this._metric("Cost Today", this._formatCost(detail.cost_today))}
+      </section>
+      <section class="panel">
+        <h2>Today vs Normal</h2>
+        ${this._renderApplianceComparisons(detail.today_vs_normal)}
+      </section>
+      <section class="panel">
+        <h2>Behavior Expectations</h2>
+        ${this._renderApplianceExpectations(detail.expectations)}
+      </section>
+      <section class="panel">
+        <h2>What To Check First</h2>
+        ${this._renderSimpleList(detail.what_to_check_first, detail.next_step || "No immediate check is needed.")}
+      </section>
+      <section class="panel">
+        <h2>Alerts and Evidence</h2>
+        ${this._renderApplianceAlerts(detail.active_alerts)}
+      </section>
+      <section class="panel">
+        <h2>Actions</h2>
+        ${this._renderApplianceActions(payload.actions)}
+      </section>
+    `;
+  }
+
+  _renderApplianceComparisons(comparisons) {
+    const items = Array.isArray(comparisons) ? comparisons : [];
+    if (!items.length) {
+      return `<p class="muted">Learning normal ranges for this appliance.</p>`;
+    }
+    return `<div class="entity-list">${items.map((item) => {
+      const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
+        ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
+        : "Learning";
+      return `
+        <div class="metric">
+          <span>${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
+          <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
+          <p class="muted">Normal ${this._escape(normal)}. Status ${this._escape(this._friendlyFeature(item.status))}.</p>
+          ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(this._formatConfidence(item.confidence))}</p>` : ""}
+          ${item.source ? `<p class="muted">Source ${this._escape(this._friendlyFeature(item.source))}</p>` : ""}
+        </div>
+      `;
+    }).join("")}</div>`;
+  }
+
+  _renderApplianceExpectations(expectations) {
+    const items = Array.isArray(expectations) ? expectations : [];
+    if (!items.length) {
+      return `<p class="muted">Not enough data for appliance-specific expectations yet.</p>`;
+    }
+    return `<div class="entity-list">${items.map((item) => `
+      <div class="metric">
+        <span>${this._escape(this._friendlyFeature(item.status))}</span>
+        <strong>${this._escape(item.title || "Appliance expectation")}</strong>
+        <p>${this._escape(item.observed || "Observed behavior is still learning.")}</p>
+        <p class="muted">Expected: ${this._escape(item.expected || "Normal appliance behavior is still learning.")}</p>
+        <p class="muted">${this._escape(item.why_it_matters || "")}</p>
+        ${this._renderSimpleList(item.what_to_check_first, "")}
+      </div>
+    `).join("")}</div>`;
+  }
+
+  _renderApplianceAlerts(alerts) {
+    const items = Array.isArray(alerts) ? alerts : [];
+    if (!items.length) {
+      return `<p class="muted">No active appliance alerts were found.</p>`;
+    }
+    return `<div class="entity-list">${items.map((item) => `
+      <div class="metric">
+        <span>${this._escape(this._friendlyFeature(item.severity || item.feature))}</span>
+        <strong>${this._escape(item.message || this._friendlyFeature(item.feature))}</strong>
+        <p class="muted">Repeated ${this._escape(this._formatMetricValue(item.repeated_count))} times.</p>
+        ${item.evidence_path ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">Open Evidence</a>` : ""}
+      </div>
+    `).join("")}</div>`;
+  }
+
+  _renderApplianceActions(actions) {
+    const available = actions || {};
+    const buttons = [
+      this._applianceActionButton(available, "open_evidence", "Open Evidence"),
+      this._applianceActionButton(available, "review_nilm_assignment", "Review NILM Assignment", true),
+      this._applianceActionButton(available, "mark_expected", "Mark Expected", true),
+      this._applianceActionButton(available, "mark_unhelpful", "Not Helpful", true),
+      this._applianceActionButton(available, "pause_alerts", "Pause Alerts", true),
+      this._applianceActionButton(available, "relearn_baseline", "Relearn Baseline", true),
+      this._applianceActionButton(available, "open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+    ].filter(Boolean);
+    return buttons.length ? `<div class="actions">${buttons.join("")}</div>` : `<p class="muted">No actions are available for this appliance right now.</p>`;
+  }
+
+  _applianceActionButton(actions, actionKey, label, secondary = false) {
+    const action = actions && actions[actionKey];
+    if (!action) {
+      return "";
+    }
+    const busyKey = `appliance_detail_${actionKey}`;
+    const disabled = this._busyAction === busyKey || action.enabled === false ? "disabled" : "";
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    return `<button type="button" data-appliance-detail-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${disabled}>${this._escape(action.label || label)}</button>`;
+  }
+
+  _renderSimpleList(items, emptyText) {
+    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!safeItems.length) {
+      return emptyText ? `<p class="muted">${this._escape(emptyText)}</p>` : "";
+    }
+    return `<ul>${safeItems.map((item) => `<li>${this._escape(item)}</li>`).join("")}</ul>`;
   }
 
   _renderEvidenceBody(alert, circuit) {
@@ -2624,6 +2903,62 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _actionDisabled(actionKey, action) {
     return this._busyAction === actionKey || (action && action.enabled === false) ? "disabled" : "";
+  }
+
+  _formatPower(value) {
+    return value === null || value === undefined ? "Unknown" : `${this._formatNumber(value)} W`;
+  }
+
+  _formatKwh(value) {
+    return value === null || value === undefined ? "Unknown" : `${this._formatNumber(value)} kWh`;
+  }
+
+  _formatCost(value) {
+    return value === null || value === undefined ? "Unknown" : `$${this._formatNumber(value)}`;
+  }
+
+  _formatDuration(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds)) {
+      return "Unknown";
+    }
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.round((seconds % 3600) / 60);
+    if (hours && minutes) {
+      return `${hours}h ${minutes}m`;
+    }
+    if (hours) {
+      return `${hours}h`;
+    }
+    return `${minutes}m`;
+  }
+
+  _formatConfidence(value) {
+    const confidence = Number(value);
+    if (!Number.isFinite(confidence)) {
+      return "Unknown";
+    }
+    const normalized = confidence <= 1 ? confidence * 100 : confidence;
+    return `${Math.round(normalized)}%`;
+  }
+
+  _formatComparisonValue(comparison, value) {
+    if (value === null || value === undefined) {
+      return "Unknown";
+    }
+    const unit = comparison && comparison.unit ? ` ${comparison.unit}` : "";
+    return `${this._formatNumber(value)}${unit}`;
+  }
+
+  _sourceLabel(sourceType) {
+    const labels = {
+      direct_meter: "Direct meter",
+      nilm_estimate: "Estimated by NILM",
+      mixed: "Mixed circuit",
+      mains: "Mains",
+      unknown: "Unknown",
+    };
+    return labels[sourceType] || "Unknown";
   }
 
   _formatNumber(value) {
