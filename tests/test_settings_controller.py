@@ -70,7 +70,6 @@ class _SettingsCoordinator:
             CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}
         }
         self.now = datetime(2026, 6, 30, 12, 5, tzinfo=UTC)
-        self.set_values: list[tuple[str, str, object]] = []
         self.persist_count = 0
         self.dirty_count = 0
         self.refreshed_recommendations: list[datetime] = []
@@ -113,14 +112,6 @@ class _SettingsCoordinator:
         self.rebuild_calls.append((now, circuit_id))
         return True
 
-    def _apply_advanced_settings(
-        self,
-        circuit_id: str,
-        settings: dict[str, object],
-    ) -> None:
-        for setting_key, value in settings.items():
-            self.set_values.append((circuit_id, setting_key, value))
-
 
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
@@ -144,11 +135,12 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     assert applied.status is RecommendationStatus.APPLIED
     assert undo_result is True
     assert reset_result is True
-    assert coordinator.set_values == [
-        ("fridge", "daily_spike_ratio", 0.35),
-        ("fridge", "daily_spike_ratio", 0.25),
-        ("fridge", "daily_spike_ratio", 0.25),
-    ]
+    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"] == {
+        "daily_spike_ratio": 0.25
+    }
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "daily_spike_ratio": 0.25
+    }
     assert coordinator.persist_count == 3
     assert coordinator.dirty_count == 3
     assert coordinator.updated == [
@@ -205,4 +197,96 @@ def test_settings_controller_writes_recommendation_setting_values() -> None:
 
     assert coordinator.options[CONF_ADVANCED_SETTINGS] == {}
     assert coordinator.store_data.energy_usage_settings_by_circuit == {}
-    assert coordinator.set_values == [("fridge", "daily_spike_ratio", 0.35)]
+
+
+def test_settings_controller_replaces_advanced_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    controller.replace_advanced_settings(
+        "fridge",
+        {
+            "preset": "sensitive",
+            "daily_spike_ratio": 0.4,
+            "min_samples": 12,
+            "leg_imbalance_warning_ratio": 0.35,
+            "leg_imbalance_min_total_power_w": 700.0,
+            "balance_negative_tolerance_w": 250.0,
+            "solar_export_tolerance_w": 120.0,
+        },
+    )
+
+    assert coordinator.store_data.sensitivity_by_circuit["fridge"] == "sensitive"
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "daily_spike_ratio": 0.4
+    }
+    assert coordinator.store_data.standby_settings_by_circuit["fridge"] == {
+        "min_samples": 12
+    }
+    assert coordinator.store_data.leg_imbalance_settings_by_circuit["fridge"] == {
+        "warning_ratio": 0.35,
+        "minimum_total_power_w": 700.0,
+    }
+    assert coordinator.store_data.balance_settings_by_circuit["fridge"] == {
+        "negative_tolerance_w": 250.0
+    }
+    assert coordinator.store_data.solar_flow_settings_by_circuit["fridge"] == {
+        "export_tolerance_w": 120.0
+    }
+
+
+def test_settings_controller_clears_advanced_setting_aliases() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    coordinator.store_data.standby_settings_by_circuit["fridge"] = {
+        "min_samples": 12
+    }
+    coordinator.store_data.leg_imbalance_settings_by_circuit["fridge"] = {
+        "warning_ratio": 0.35,
+        "minimum_total_power_w": 700.0,
+    }
+    coordinator.store_data.balance_settings_by_circuit["fridge"] = {
+        "negative_tolerance_w": 250.0
+    }
+    coordinator.store_data.solar_flow_settings_by_circuit["fridge"] = {
+        "export_tolerance_w": 120.0
+    }
+
+    controller.clear_advanced_setting_value("fridge", "standby_min_samples")
+    controller.clear_advanced_setting_value("fridge", "leg_imbalance_warning_ratio")
+    controller.clear_advanced_setting_value(
+        "fridge",
+        "leg_imbalance_min_total_power_w",
+    )
+    controller.clear_advanced_setting_value("fridge", "balance_negative_tolerance_w")
+    controller.clear_advanced_setting_value("fridge", "solar_export_tolerance_w")
+
+    assert "fridge" not in coordinator.store_data.standby_settings_by_circuit
+    assert "fridge" not in coordinator.store_data.leg_imbalance_settings_by_circuit
+    assert "fridge" not in coordinator.store_data.balance_settings_by_circuit
+    assert "fridge" not in coordinator.store_data.solar_flow_settings_by_circuit
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_async_replaces_advanced_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_replace_advanced_settings(
+        "fridge",
+        {"daily_spike_ratio": 0.4},
+    )
+
+    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"] == {
+        "daily_spike_ratio": 0.4
+    }
+    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
+        "daily_spike_ratio": 0.4
+    }
+    assert coordinator.dirty_count == 1
+    assert coordinator.refreshed_circuits == [("fridge", coordinator.now)]
+    assert coordinator.updated == [coordinator.state]
+    assert coordinator.saved == [coordinator.now]
