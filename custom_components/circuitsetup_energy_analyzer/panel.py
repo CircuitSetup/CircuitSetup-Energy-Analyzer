@@ -1570,6 +1570,9 @@ def _nilm_assignment_payload(
     if not assignment_id:
         return payload
 
+    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
+        assignment_id
+    )
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
@@ -1752,9 +1755,19 @@ def _nilm_virtual_appliances_for_assignments(
                     f"{APPLIANCE_DETAIL_API_PATH}?"
                     f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id})}"
                 ),
+                "appliance_detail_path": _nilm_appliance_detail_panel_path(
+                    assignment_id
+                ),
             }
         )
     return virtual_appliances
+
+
+def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:
+    return (
+        f"/{PANEL_URL_PATH}?"
+        f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id, 'appliance_detail': '1'})}"
+    )
 
 
 def _nilm_workspace_lanes(
