@@ -12,7 +12,7 @@ from inspect import isawaitable
 from statistics import median
 from typing import Any, Self
 
-from . import notifications
+from . import notifications as notifications  # noqa: F401 - compatibility for tests
 from . import repairs as repairs  # noqa: F401 - compatibility for test monkeypatching
 from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
@@ -24,6 +24,7 @@ from .aggregation import aggregate_dual_phase
 from .alerting import (
     ConservativeAlertPolicy,
     Observation,
+    alert_anomaly_score,
     alert_feedback_fingerprint,
     alert_feedback_fingerprint_for_observation,
 )
@@ -568,7 +569,7 @@ def process_events_into_state(
 
     state.active_alerts_by_circuit = dict(alerts_by_circuit)
     state.anomaly_score_by_circuit = {
-        circuit_id: max(_alert_anomaly_score(alert) for alert in circuit_alerts)
+        circuit_id: max(alert_anomaly_score(alert) for alert in circuit_alerts)
         for circuit_id, circuit_alerts in alerts_by_circuit.items()
     }
 
@@ -576,16 +577,6 @@ def process_events_into_state(
         state.anomaly_score_by_circuit.setdefault(circuit_id, 0.0)
 
     return state
-
-
-def _alert_anomaly_score(alert: AlertEvidence) -> float:
-    if alert.change_ratio != 0.0:
-        return abs(alert.change_ratio)
-
-    if alert.baseline_value != 0.0:
-        return abs((alert.observed_value - alert.baseline_value) / alert.baseline_value)
-
-    return abs(alert.observed_value)
 
 
 def _merged_entry_settings_map(
@@ -5442,38 +5433,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
-        self.store_data.alerts = [
-            alert
-            for alert in self.store_data.alerts
-            if notifications.notification_id_for_alert(alert) != alert_id
-        ]
-        self.state.active_alerts_by_circuit = {
-            circuit_id: [
-                alert
-                for alert in alerts
-                if notifications.notification_id_for_alert(alert) != alert_id
-            ]
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-        }
-        self.state.active_alerts_by_circuit = {
-            circuit_id: alerts
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-            if alerts
-        }
-        self.state.anomaly_score_by_circuit = {
-            circuit_id: max(_alert_anomaly_score(alert) for alert in alerts)
-            for circuit_id, alerts in self.state.active_alerts_by_circuit.items()
-        }
-        self._mark_store_dirty()
+        self.evidence_actions.retire_alert_id(alert_id)
 
     def _alert_for_id(self: Self, alert_id: str) -> AlertEvidence | None:
-        alerts = list(self.store_data.alerts)
-        for active_alerts in self.state.active_alerts_by_circuit.values():
-            alerts.extend(active_alerts)
-        for alert in alerts:
-            if notifications.notification_id_for_alert(alert) == alert_id:
-                return alert
-        return None
+        return self.evidence_actions.alert_for_id(alert_id)
 
     def _has_suppressed_alert_feedback(self: Self, alert: AlertEvidence) -> bool:
         _fingerprint, feedback = self._alert_feedback_for(alert)

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import notifications
+from ..alerting import alert_anomaly_score
+from ..models import AlertEvidence
+
 
 class EvidenceActionController:
     """Own user-triggered evidence and alert lifecycle actions."""
@@ -26,9 +30,9 @@ class EvidenceActionController:
     async def async_acknowledge_alert(self, alert_id: str) -> bool:
         """Acknowledge an active alert evidence item."""
         coordinator = self._coordinator
-        if coordinator._alert_for_id(alert_id) is None:
+        if self.alert_for_id(alert_id) is None:
             return False
-        coordinator._retire_alert_id(alert_id)
+        self.retire_alert_id(alert_id)
         now = coordinator._now_fn()
         coordinator._refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -101,3 +105,49 @@ class EvidenceActionController:
             alert_id,
             "wrong_appliance",
         )
+
+    def retire_alert_id(self, alert_id: str) -> None:
+        """Remove an alert from stored and active evidence after user action."""
+        coordinator = self._coordinator
+        coordinator.store_data.alerts = [
+            alert
+            for alert in coordinator.store_data.alerts
+            if notifications.notification_id_for_alert(alert) != alert_id
+        ]
+        active_alerts_by_circuit = getattr(
+            coordinator.state,
+            "active_alerts_by_circuit",
+            {},
+        )
+        coordinator.state.active_alerts_by_circuit = {
+            circuit_id: [
+                alert
+                for alert in alerts
+                if notifications.notification_id_for_alert(alert) != alert_id
+            ]
+            for circuit_id, alerts in active_alerts_by_circuit.items()
+        }
+        coordinator.state.active_alerts_by_circuit = {
+            circuit_id: alerts
+            for circuit_id, alerts in coordinator.state.active_alerts_by_circuit.items()
+            if alerts
+        }
+        coordinator.state.anomaly_score_by_circuit = {
+            circuit_id: max(alert_anomaly_score(alert) for alert in alerts)
+            for circuit_id, alerts in coordinator.state.active_alerts_by_circuit.items()
+        }
+        coordinator._mark_store_dirty()
+
+    def alert_for_id(self, alert_id: str) -> AlertEvidence | None:
+        """Return a stored or active alert by notification id."""
+        alerts = list(self._coordinator.store_data.alerts)
+        for active_alerts in getattr(
+            self._coordinator.state,
+            "active_alerts_by_circuit",
+            {},
+        ).values():
+            alerts.extend(active_alerts)
+        for alert in alerts:
+            if notifications.notification_id_for_alert(alert) == alert_id:
+                return alert
+        return None
