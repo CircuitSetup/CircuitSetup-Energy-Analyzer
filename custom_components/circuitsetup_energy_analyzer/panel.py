@@ -15,6 +15,7 @@ from .appliance_detail import (
     appliance_detail_for_circuit,
 )
 from .const import DOMAIN
+from .entities.setup_health import setup_health_attributes, setup_health_value
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
@@ -106,9 +107,10 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260701-null-runtime"
+PANEL_MODULE_VERSION = "20260701-setup-health-route"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
+SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
@@ -178,6 +180,20 @@ class ApplianceDetailView(HomeAssistantView):
             circuit_id=request.query.get("circuit_id"),
             assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
         )
+        return web.json_response(payload)
+
+
+class SetupHealthView(HomeAssistantView):
+    """Authenticated read-only Setup Health endpoint."""
+
+    url = SETUP_HEALTH_API_PATH
+    name = f"api:{DOMAIN}:setup_health"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return the current integration setup checklist."""
+        hass = request.app[KEY_HASS]
+        payload = setup_health_payload(_loaded_coordinators(hass))
         return web.json_response(payload)
 
 
@@ -457,6 +473,48 @@ def appliance_detail_payload(
         "next_step": (
             "Open the generated dashboard or review the appliance summary sensors."
         ),
+    }
+
+
+def setup_health_payload(coordinators: Iterable[Any]) -> dict[str, Any]:
+    """Return bounded Setup Health data for the panel."""
+    coordinator = next(iter(coordinators), None)
+    if coordinator is None:
+        return {
+            "status": "not_found",
+            "state": "Unavailable",
+            "attributes": {},
+            "checklist": [],
+            "issues": [],
+            "message": (
+                "Setup Health is not available because the integration is not loaded."
+            ),
+            "next_step": "Reload the integration, then open Setup Health again.",
+            "open_path": None,
+            "checklist_ready_count": 0,
+            "checklist_total_count": 0,
+        }
+
+    attributes = setup_health_attributes(coordinator)
+    checklist = list(attributes.get("checklist") or [])
+    issues = list(attributes.get("issues") or [])
+    state = setup_health_value(coordinator)
+    return {
+        "status": "ok",
+        "state": state,
+        "attributes": attributes,
+        "checklist": checklist,
+        "issues": issues,
+        "message": attributes.get("issue_summary") or state,
+        "next_step": (
+            attributes.get("next_step") or attributes.get("recommended_action")
+        ),
+        "open_path": attributes.get("open_path"),
+        "ready": attributes.get("ready"),
+        "issue_count": attributes.get("issue_count"),
+        "warning_count": attributes.get("warning_count"),
+        "checklist_ready_count": attributes.get("checklist_ready_count"),
+        "checklist_total_count": attributes.get("checklist_total_count"),
     }
 
 
@@ -2821,6 +2879,7 @@ def _register_view(hass: Any) -> None:
     if register_view is not None:
         register_view(AlertEvidenceView())
         register_view(ApplianceDetailView())
+        register_view(SetupHealthView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceHistoryView())
 

@@ -1807,6 +1807,25 @@ def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
     assert formatter.index(null_guard) < formatter.index(coercion)
 
 
+def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    setup_health_api_path = (
+        'const SETUP_HEALTH_API_PATH = '
+        '"/api/circuitsetup_energy_analyzer/setup_health";'
+    )
+    setup_health_call_api_path = (
+        'const SETUP_HEALTH_CALL_API_PATH = '
+        '"circuitsetup_energy_analyzer/setup_health";'
+    )
+
+    assert setup_health_api_path in asset
+    assert setup_health_call_api_path in asset
+    assert 'const SETUP_HEALTH_QUERY_PARAM = "setup_health";' in asset
+    assert "_routeRequestsSetupHealth" in asset
+    assert "_loadSetupHealth" in asset
+    assert "_renderSetupHealthBody" in asset
+
+
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
     asset_path = (
         INTEGRATION_DIR

@@ -18,6 +18,7 @@ DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
 NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-graphs"
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
+SETUP_HEALTH_PANEL_PATH = f"{DEFAULT_ALERT_EVIDENCE_PATH}?setup_health=1"
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
     ("sensor", "activity_summary", "Activity"),
@@ -381,6 +382,10 @@ def _household_overview_section(
                 "entity": setup_health,
                 "name": "Setup Health",
                 "vertical": False,
+                "tap_action": {
+                    "action": "navigate",
+                    "navigation_path": SETUP_HEALTH_PANEL_PATH,
+                },
             }
         )
 
