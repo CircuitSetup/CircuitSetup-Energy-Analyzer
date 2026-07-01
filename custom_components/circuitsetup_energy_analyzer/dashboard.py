@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import (
@@ -18,7 +18,6 @@ DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
 NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-graphs"
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
-SETUP_HEALTH_PANEL_PATH = f"{DEFAULT_ALERT_EVIDENCE_PATH}?setup_health=1"
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
     ("sensor", "activity_summary", "Activity"),
@@ -384,7 +383,7 @@ def _household_overview_section(
                 "vertical": False,
                 "tap_action": {
                     "action": "navigate",
-                    "navigation_path": SETUP_HEALTH_PANEL_PATH,
+                    "navigation_path": _setup_health_panel_path(entry_id),
                 },
             }
         )
@@ -1204,6 +1203,13 @@ def _published_nilm_power_rows(
         )
 
     return list(_dedupe_entity_rows(sorted(rows, key=lambda row: row["entity"])))
+
+
+def _setup_health_panel_path(entry_id: str | None) -> str:
+    params = {"setup_health": "1"}
+    if entry_id:
+        params["entry_id"] = entry_id
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode(params)}"
 
 
 def _resolved_setup_health_entity_id(

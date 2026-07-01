@@ -1823,6 +1823,8 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     assert 'const SETUP_HEALTH_QUERY_PARAM = "setup_health";' in asset
     assert "_routeRequestsSetupHealth" in asset
     assert "_loadSetupHealth" in asset
+    assert 'routeUrl.searchParams.get("entry_id")' in asset
+    assert "SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : \"\"}" in asset
     assert "_renderSetupHealthBody" in asset
 
 

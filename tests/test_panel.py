@@ -2678,6 +2678,23 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     assert payload["open_path"].startswith("/config/integrations/")
 
 
+def test_setup_health_payload_uses_requested_entry_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    first = _coordinator(config=_config("fridge"))
+    first.entry_id = "entry-1"
+    second = _coordinator(config=_config("hvac"))
+    second.entry_id = "entry-2"
+
+    payload = setup_health_payload([first, second], entry_id="entry-2")
+
+    assert payload["status"] == "ok"
+    assert payload["requested_entry_id"] == "entry-2"
+    assert payload["next_step"] == "Configure breaker amps for HVAC"
+
+
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (

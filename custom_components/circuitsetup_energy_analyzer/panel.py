@@ -193,7 +193,10 @@ class SetupHealthView(HomeAssistantView):
     async def get(self, request: Any) -> Any:
         """Return the current integration setup checklist."""
         hass = request.app[KEY_HASS]
-        payload = setup_health_payload(_loaded_coordinators(hass))
+        payload = setup_health_payload(
+            _loaded_coordinators(hass),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
+        )
         return web.json_response(payload)
 
 
@@ -476,12 +479,18 @@ def appliance_detail_payload(
     }
 
 
-def setup_health_payload(coordinators: Iterable[Any]) -> dict[str, Any]:
+def setup_health_payload(
+    coordinators: Iterable[Any],
+    *,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
     """Return bounded Setup Health data for the panel."""
-    coordinator = next(iter(coordinators), None)
+    requested_entry_id = str(entry_id or "").strip() or None
+    coordinator = _setup_health_coordinator(coordinators, requested_entry_id)
     if coordinator is None:
         return {
             "status": "not_found",
+            "requested_entry_id": requested_entry_id,
             "state": "Unavailable",
             "attributes": {},
             "checklist": [],
@@ -501,6 +510,7 @@ def setup_health_payload(coordinators: Iterable[Any]) -> dict[str, Any]:
     state = setup_health_value(coordinator)
     return {
         "status": "ok",
+        "requested_entry_id": requested_entry_id,
         "state": state,
         "attributes": attributes,
         "checklist": checklist,
@@ -516,6 +526,19 @@ def setup_health_payload(coordinators: Iterable[Any]) -> dict[str, Any]:
         "checklist_ready_count": attributes.get("checklist_ready_count"),
         "checklist_total_count": attributes.get("checklist_total_count"),
     }
+
+
+def _setup_health_coordinator(
+    coordinators: Iterable[Any],
+    entry_id: str | None,
+) -> Any | None:
+    first = None
+    for coordinator in coordinators:
+        if first is None:
+            first = coordinator
+        if entry_id and str(getattr(coordinator, "entry_id", "")) == entry_id:
+            return coordinator
+    return first if entry_id is None else None
 
 
 def _appliance_detail_payload(

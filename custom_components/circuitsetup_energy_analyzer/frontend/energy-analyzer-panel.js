@@ -372,12 +372,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!this._routeRequestsSetupHealth(routeKey)) {
       return;
     }
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const params = new URLSearchParams();
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    if (entryId) {
+      params.set("entry_id", entryId);
+    }
+    const query = params.toString();
+    const apiPath = `${SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : ""}`;
+    const fetchPath = `${SETUP_HEALTH_API_PATH}${query ? `?${query}` : ""}`;
+
     this._setupHealthLoading = true;
     this._setupHealthError = "";
     this._render();
 
     try {
-      const payload = await this._requestJson(SETUP_HEALTH_CALL_API_PATH, SETUP_HEALTH_API_PATH);
+      const payload = await this._requestJson(apiPath, fetchPath);
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
@@ -386,7 +396,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._setupHealthError = `Could not load Setup Health from ${SETUP_HEALTH_API_PATH}: ${error.message}`;
+      this._setupHealthError = `Could not load Setup Health from ${fetchPath}: ${error.message}`;
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._setupHealthLoading = false;

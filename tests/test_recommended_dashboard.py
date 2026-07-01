@@ -349,6 +349,7 @@ def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
+        entry_id="entry-1",
     )
     household = _dashboard_section(dashboard, "Household Overview")
     setup_health = next(
@@ -359,7 +360,7 @@ def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
     assert setup_health["tap_action"] == {
         "action": "navigate",
         "navigation_path": (
-            "/circuitsetup-energy-analyzer-evidence?setup_health=1"
+            "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
         ),
     }
 
