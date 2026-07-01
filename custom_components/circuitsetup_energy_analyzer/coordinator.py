@@ -159,8 +159,6 @@ from .nilm import (
 )
 from .normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
 from .operating_detection import (
-    OPERATING_DETECTION_OVERRIDE_FIELDS,
-    OPERATING_DETECTION_SOURCE,
     resolve_operating_detection_from_settings,
 )
 from .phase_balance import (
@@ -655,32 +653,6 @@ def _compact_settings_recommendation_episode_key(
     )
 
 
-def _replace_if_present(
-    target: dict[str, dict[str, Any]],
-    circuit_id: str,
-    source: Mapping[str, Any],
-    keys: tuple[str, ...],
-) -> None:
-    values = {key: source[key] for key in keys if key in source}
-    if values:
-        target[circuit_id] = values
-
-
-def _replace_if_present_as(
-    target: dict[str, dict[str, Any]],
-    circuit_id: str,
-    source: Mapping[str, Any],
-    key_map: Mapping[str, str],
-) -> None:
-    values = {
-        output_key: source[input_key]
-        for input_key, output_key in key_map.items()
-        if input_key in source
-    }
-    if values:
-        target[circuit_id] = values
-
-
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     """Apply a processor-requested update to AnalyzerState."""
     apply_state_update(state, path, value)
@@ -1069,151 +1041,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str,
         settings: dict[str, Any],
     ) -> None:
-        self._clear_advanced_settings(circuit_id)
-        self._apply_advanced_settings(circuit_id, settings)
+        self.settings_controller.replace_advanced_settings(circuit_id, settings)
 
     def _clear_advanced_settings(self: Self, circuit_id: str) -> None:
-        self.store_data.sensitivity_by_circuit.pop(circuit_id, None)
-        self.store_data.energy_usage_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.energy_goal_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.activity_alert_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.billing_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.cost_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.demand_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.capacity_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.standby_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.leg_imbalance_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.metric_consistency_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.balance_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.solar_flow_settings_by_circuit.pop(circuit_id, None)
-        self.store_data.operating_detection_settings_by_circuit.pop(circuit_id, None)
+        self.settings_controller.clear_advanced_settings(circuit_id)
 
     def _apply_advanced_settings(
         self: Self,
         circuit_id: str,
         settings: dict[str, Any],
     ) -> None:
-        if not settings:
-            return
-
-        sensitivity = settings.get("preset")
-        if sensitivity:
-            self.store_data.sensitivity_by_circuit[circuit_id] = (
-                normalize_sensitivity(str(sensitivity))
-            )
-
-        _replace_if_present(
-            self.store_data.energy_usage_settings_by_circuit,
-            circuit_id,
-            settings,
-            ("window_days", "daily_spike_ratio"),
-        )
-        _replace_if_present(
-            self.store_data.energy_goal_settings_by_circuit,
-            circuit_id,
-            settings,
-            ("daily_goal_kwh", "goal_alert_ratio"),
-        )
-        _replace_if_present(
-            self.store_data.activity_alert_settings_by_circuit,
-            circuit_id,
-            settings,
-            ("max_active_minutes", "max_idle_minutes"),
-        )
-        _replace_if_present(
-            self.store_data.billing_settings_by_circuit,
-            circuit_id,
-            settings,
-            (
-                "cycle_start_day",
-                "budget_kwh",
-                "budget_alert_ratio",
-                "min_elapsed_days",
-            ),
-        )
-        _replace_if_present(
-            self.store_data.cost_settings_by_circuit,
-            circuit_id,
-            settings,
-            (
-                "cycle_start_day",
-                "default_rate_per_kwh",
-                "tou_rate_per_kwh",
-                "tou_start",
-                "tou_end",
-                "tou_weekdays",
-                "tou_name",
-            ),
-        )
-        _replace_if_present(
-            self.store_data.demand_settings_by_circuit,
-            circuit_id,
-            settings,
-            ("window_minutes", "demand_limit_w"),
-        )
-        _replace_if_present(
-            self.store_data.capacity_settings_by_circuit,
-            circuit_id,
-            settings,
-            ("breaker_amps", "warning_ratio"),
-        )
-        _replace_if_present(
-            self.store_data.standby_settings_by_circuit,
-            circuit_id,
-            settings,
-            (
-                "window_hours",
-                "standby_threshold_w",
-                "always_on_alert_w",
-                "min_samples",
-            ),
-        )
-        _replace_if_present_as(
-            self.store_data.leg_imbalance_settings_by_circuit,
-            circuit_id,
-            settings,
-            {
-                "leg_imbalance_warning_ratio": "warning_ratio",
-                "leg_imbalance_min_total_power_w": "minimum_total_power_w",
-            },
-        )
-        _replace_if_present(
-            self.store_data.metric_consistency_settings_by_circuit,
-            circuit_id,
-            settings,
-            (
-                "apparent_power_tolerance_percent",
-                "power_factor_tolerance",
-                "minimum_apparent_power_va",
-            ),
-        )
-        _replace_if_present_as(
-            self.store_data.balance_settings_by_circuit,
-            circuit_id,
-            settings,
-            {"balance_negative_tolerance_w": "negative_tolerance_w"},
-        )
-        _replace_if_present_as(
-            self.store_data.solar_flow_settings_by_circuit,
-            circuit_id,
-            settings,
-            {
-                "solar_export_tolerance_w": "export_tolerance_w",
-                "solar_surplus_threshold_w": "solar_surplus_threshold_w",
-                "high_solar_surplus_threshold_w": (
-                    "high_solar_surplus_threshold_w"
-                ),
-                "flexible_load_running_threshold_w": (
-                    "flexible_load_running_threshold_w"
-                ),
-            },
-        )
-        _replace_if_present(
-            self.store_data.operating_detection_settings_by_circuit,
-            circuit_id,
-            settings,
-            (*OPERATING_DETECTION_OVERRIDE_FIELDS, OPERATING_DETECTION_SOURCE),
-        )
+        self.settings_controller.apply_advanced_settings(circuit_id, settings)
 
     async def _async_handle_source_state_change(self: Self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
@@ -1376,18 +1214,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         settings: Mapping[str, Any],
     ) -> None:
         """Replace store-backed advanced settings for one circuit."""
-        advanced_by_circuit = self.options.setdefault(CONF_ADVANCED_SETTINGS, {})
-        if not isinstance(advanced_by_circuit, dict):
-            advanced_by_circuit = dict(advanced_by_circuit)
-            self.options[CONF_ADVANCED_SETTINGS] = advanced_by_circuit
-        updated_settings = dict(settings)
-        advanced_by_circuit[circuit_id] = updated_settings
-        self._replace_advanced_settings(circuit_id, updated_settings)
-        self._mark_store_dirty()
-        now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self.settings_controller.async_replace_advanced_settings(
+            circuit_id,
+            settings,
+        )
 
     async def async_set_energy_usage_settings(
         self: Self,
