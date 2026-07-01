@@ -133,87 +133,29 @@ class _SettingsCoordinator:
         return True
 
     def _config_for_circuit(self, circuit_id: str) -> SimpleNamespace:
-        return SimpleNamespace(circuit_id=circuit_id)
-
-    def _energy_usage_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(window_days=7, daily_spike_ratio=0.25)
-
-    def _energy_goal_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(daily_goal_kwh=None, goal_alert_ratio=1.0)
-
-    def _activity_alert_settings_for_config(
-        self,
-        config: SimpleNamespace | None,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(max_active_minutes=None, max_idle_minutes=None)
-
-    def _demand_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(window_minutes=15, demand_limit_w=None)
-
-    def _capacity_settings_for_config(self, circuit_id: str) -> SimpleNamespace:
-        return SimpleNamespace(warning_ratio=0.75, breaker_amps=None)
-
-    def _standby_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
         return SimpleNamespace(
-            window_hours=12,
-            standby_threshold_w=5.0,
-            always_on_alert_w=None,
-        )
-
-    def _billing_cycle_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            cycle_start_day=1,
-            budget_kwh=None,
-            budget_alert_ratio=1.0,
-        )
-
-    def _cost_settings_for_config(
-        self,
-        config: SimpleNamespace,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            cycle_start_day=1,
+            circuit_id=circuit_id,
+            energy_usage_window_days=7,
+            daily_energy_spike_ratio=0.25,
+            daily_energy_goal_kwh=None,
+            energy_goal_alert_ratio=1.0,
+            billing_cycle_start_day=1,
+            billing_cycle_budget_kwh=None,
+            billing_cycle_budget_alert_ratio=1.0,
+            billing_cycle_min_elapsed_days=3,
+            cost_cycle_start_day=1,
             default_rate_per_kwh=None,
             tou_rate_per_kwh=None,
             tou_start="",
             tou_end="",
             tou_weekdays=(),
             tou_name="Peak",
-        )
-
-    def _utility_comparison_settings_for_circuit(
-        self,
-        circuit_id: str,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            utility_energy_entity="",
-            utility_statistic_id="",
-            utility_source_type="auto",
-            utility_statistic_period="day",
-            measured_energy_entities=(),
-            tolerance_percent=5.0,
+            demand_window_minutes=15,
+            demand_limit_w=None,
+            standby_window_hours=12,
+            standby_threshold_w=5.0,
+            always_on_alert_w=None,
+            standby_min_samples=24,
         )
 
     def _build_processing_context(self, now: datetime) -> SimpleNamespace:
@@ -626,3 +568,110 @@ async def test_settings_controller_sets_circuit_sensitivity() -> None:
     assert coordinator.refreshed_circuits == [("fridge", coordinator.now)]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
+
+
+def test_settings_controller_reads_runtime_setting_defaults() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    config = SimpleNamespace(
+        energy_usage_window_days=7,
+        daily_energy_spike_ratio=0.25,
+        daily_energy_goal_kwh=2.5,
+        energy_goal_alert_ratio=0.9,
+        billing_cycle_start_day=15,
+        billing_cycle_budget_kwh=90.0,
+        billing_cycle_budget_alert_ratio=0.85,
+        billing_cycle_min_elapsed_days=5,
+        cost_cycle_start_day=10,
+        default_rate_per_kwh=0.18,
+        tou_rate_per_kwh=0.35,
+        tou_start="16:00",
+        tou_end="20:00",
+        tou_weekdays=(0, 1, 2, 3, 4),
+        tou_name="Peak",
+        demand_window_minutes=30,
+        demand_limit_w=1200.0,
+        standby_window_hours=72,
+        standby_threshold_w=6.0,
+        always_on_alert_w=12.0,
+        standby_min_samples=36,
+    )
+    coordinator.store_data.activity_alert_settings_by_circuit["fridge"] = {
+        "max_active_minutes": "45"
+    }
+    coordinator.store_data.energy_usage_settings_by_circuit["fridge"] = {
+        "window_days": "14",
+        "daily_spike_ratio": "0.35",
+    }
+    coordinator.store_data.billing_settings_by_circuit["fridge"] = {
+        "budget_kwh": "95.0"
+    }
+    coordinator.store_data.cost_settings_by_circuit["fridge"] = {
+        "tou_weekdays": "1,3,5",
+        "tou_name": "Critical Peak",
+    }
+    coordinator.store_data.demand_settings_by_circuit["fridge"] = {
+        "demand_limit_w": "1500"
+    }
+    coordinator.store_data.capacity_settings_by_circuit["fridge"] = {
+        "breaker_amps": "20",
+        "warning_ratio": "0.75",
+    }
+    coordinator.store_data.standby_settings_by_circuit["fridge"] = {
+        "always_on_alert_w": "15"
+    }
+    coordinator.store_data.utility_comparison_settings_by_circuit["fridge"] = {
+        "utility_energy_entity": "sensor.utility_energy",
+        "measured_energy_entities": "sensor.panel_energy,sensor.solar_energy",
+        "utility_statistic_period": "hour",
+        "tolerance_percent": "8.5",
+    }
+
+    assert (
+        controller.activity_alert_settings_for_config(
+            config,
+            "fridge",
+        ).max_active_minutes
+        == 45.0
+    )
+    assert (
+        controller.activity_alert_settings_for_config(config, "fridge").max_idle_minutes
+        is None
+    )
+    energy_usage = controller.energy_usage_settings_for_config(config, "fridge")
+    assert energy_usage.window_days == 14
+    assert energy_usage.daily_spike_ratio == 0.35
+    energy_goal = controller.energy_goal_settings_for_config(config, "fridge")
+    assert energy_goal.daily_goal_kwh == 2.5
+    assert energy_goal.goal_alert_ratio == 0.9
+    billing = controller.billing_cycle_settings_for_config(config, "fridge")
+    assert billing.cycle_start_day == 15
+    assert billing.budget_kwh == 95.0
+    assert billing.budget_alert_ratio == 0.85
+    assert billing.min_elapsed_days == 5
+    cost = controller.cost_settings_for_config(config, "fridge")
+    assert cost.cycle_start_day == 10
+    assert cost.default_rate_per_kwh == 0.18
+    assert cost.tou_rate_per_kwh == 0.35
+    assert cost.tou_weekdays == (1, 3, 5)
+    assert cost.tou_name == "Critical Peak"
+    demand = controller.demand_settings_for_config(config, "fridge")
+    assert demand.window_minutes == 30
+    assert demand.demand_limit_w == 1500.0
+    capacity = controller.capacity_settings_for_config("fridge")
+    assert capacity.breaker_amps == 20.0
+    assert capacity.warning_ratio == 0.75
+    standby = controller.standby_settings_for_config(config, "fridge")
+    assert standby.window_hours == 72
+    assert standby.standby_threshold_w == 6.0
+    assert standby.always_on_alert_w == 15.0
+    assert standby.min_samples == 36
+    utility = controller.utility_comparison_settings_for_circuit("fridge")
+    assert utility.utility_energy_entity == "sensor.utility_energy"
+    assert utility.utility_statistic_period == "hour"
+    assert utility.measured_energy_entities == (
+        "sensor.panel_energy",
+        "sensor.solar_energy",
+    )
+    assert utility.tolerance_percent == 8.5

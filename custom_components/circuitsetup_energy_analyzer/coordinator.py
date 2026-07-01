@@ -32,7 +32,6 @@ from .billing import (
     BillingCycleSettings,
 )
 from .capacity import (
-    DEFAULT_CAPACITY_WARNING_RATIO,
     CapacitySettings,
 )
 from .const import (
@@ -195,7 +194,6 @@ from .storage import (
 )
 from .usage import EnergyUsageSettings
 from .utility_comparison import (
-    DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
     DEFAULT_UTILITY_STATISTIC_PERIOD,
     UtilityComparisonSettings,
     select_latest_statistics_energy,
@@ -5004,20 +5002,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> ActivityAlertSettings:
-        del config
-        overrides = self.store_data.activity_alert_settings_by_circuit.get(
+        return self.settings_controller.activity_alert_settings_for_config(
+            config,
             circuit_id,
-            {},
-        )
-        return ActivityAlertSettings(
-            max_active_minutes=_optional_positive_float_value(
-                overrides.get("max_active_minutes"),
-                default=None,
-            ),
-            max_idle_minutes=_optional_positive_float_value(
-                overrides.get("max_idle_minutes"),
-                default=None,
-            ),
         )
 
     def _energy_usage_settings_for_config(
@@ -5025,25 +5012,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> EnergyUsageSettings:
-        overrides = self.store_data.energy_usage_settings_by_circuit.get(
+        return self.settings_controller.energy_usage_settings_for_config(
+            config,
             circuit_id,
-            {},
-        )
-        default_window_days = (
-            config.energy_usage_window_days if config is not None else 7
-        )
-        default_spike_ratio = (
-            config.daily_energy_spike_ratio if config is not None else 0.25
-        )
-        return EnergyUsageSettings(
-            window_days=_positive_int_value(
-                overrides.get("window_days"),
-                default=default_window_days,
-            ),
-            daily_spike_ratio=_positive_float_value(
-                overrides.get("daily_spike_ratio"),
-                default=default_spike_ratio,
-            ),
         )
 
     def _energy_goal_settings_for_config(
@@ -5051,29 +5022,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> EnergyGoalSettings:
-        overrides = self.store_data.energy_goal_settings_by_circuit.get(
+        return self.settings_controller.energy_goal_settings_for_config(
+            config,
             circuit_id,
-            {},
-        )
-        default_goal_kwh = (
-            config.daily_energy_goal_kwh if config is not None else None
-        )
-        default_alert_ratio = (
-            config.energy_goal_alert_ratio if config is not None else 1.0
-        )
-        if "daily_goal_kwh" in overrides:
-            goal_kwh = _optional_positive_float_value(
-                overrides.get("daily_goal_kwh"),
-                default=None,
-            )
-        else:
-            goal_kwh = default_goal_kwh
-        return EnergyGoalSettings(
-            daily_goal_kwh=goal_kwh,
-            goal_alert_ratio=_positive_float_value(
-                overrides.get("goal_alert_ratio"),
-                default=default_alert_ratio,
-            ),
         )
 
     def _billing_cycle_settings_for_config(
@@ -5081,36 +5032,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> BillingCycleSettings:
-        overrides = self.store_data.billing_settings_by_circuit.get(circuit_id, {})
-        default_start_day = (
-            config.billing_cycle_start_day if config is not None else 1
-        )
-        default_budget_kwh = (
-            config.billing_cycle_budget_kwh if config is not None else None
-        )
-        default_alert_ratio = (
-            config.billing_cycle_budget_alert_ratio if config is not None else 1.0
-        )
-        default_min_elapsed_days = (
-            config.billing_cycle_min_elapsed_days if config is not None else 3
-        )
-        return BillingCycleSettings(
-            cycle_start_day=_positive_int_value(
-                overrides.get("cycle_start_day"),
-                default=default_start_day,
-            ),
-            budget_kwh=_optional_positive_float_value(
-                overrides.get("budget_kwh"),
-                default=default_budget_kwh,
-            ),
-            budget_alert_ratio=_positive_float_value(
-                overrides.get("budget_alert_ratio"),
-                default=default_alert_ratio,
-            ),
-            min_elapsed_days=_positive_int_value(
-                overrides.get("min_elapsed_days"),
-                default=default_min_elapsed_days,
-            ),
+        return self.settings_controller.billing_cycle_settings_for_config(
+            config,
+            circuit_id,
         )
 
     def _cost_settings_for_config(
@@ -5118,34 +5042,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> CostSettings:
-        overrides = self.store_data.cost_settings_by_circuit.get(circuit_id, {})
-        default_start_day = config.cost_cycle_start_day if config is not None else 1
-        default_rate = config.default_rate_per_kwh if config is not None else None
-        default_tou_rate = config.tou_rate_per_kwh if config is not None else None
-        default_tou_start = config.tou_start if config is not None else None
-        default_tou_end = config.tou_end if config is not None else None
-        default_tou_weekdays = config.tou_weekdays if config is not None else ()
-        default_tou_name = config.tou_name if config is not None else "Peak"
-        return CostSettings(
-            cycle_start_day=_positive_int_value(
-                overrides.get("cycle_start_day"),
-                default=default_start_day,
-            ),
-            default_rate_per_kwh=_optional_positive_float_value(
-                overrides.get("default_rate_per_kwh"),
-                default=default_rate,
-            ),
-            tou_rate_per_kwh=_optional_positive_float_value(
-                overrides.get("tou_rate_per_kwh"),
-                default=default_tou_rate,
-            ),
-            tou_start=str(overrides.get("tou_start") or default_tou_start or ""),
-            tou_end=str(overrides.get("tou_end") or default_tou_end or ""),
-            tou_weekdays=_weekday_tuple_value(
-                overrides.get("tou_weekdays"),
-                default=default_tou_weekdays,
-            ),
-            tou_name=str(overrides.get("tou_name") or default_tou_name or "Peak"),
+        return self.settings_controller.cost_settings_for_config(
+            config,
+            circuit_id,
         )
 
     def _demand_settings_for_config(
@@ -5153,89 +5052,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> DemandSettings:
-        overrides = self.store_data.demand_settings_by_circuit.get(circuit_id, {})
-        default_window_minutes = (
-            config.demand_window_minutes if config is not None else 15
-        )
-        default_limit_w = config.demand_limit_w if config is not None else None
-        return DemandSettings(
-            window_minutes=_positive_int_value(
-                overrides.get("window_minutes"),
-                default=default_window_minutes,
-            ),
-            demand_limit_w=_optional_positive_float_value(
-                overrides.get("demand_limit_w"),
-                default=default_limit_w,
-            ),
+        return self.settings_controller.demand_settings_for_config(
+            config,
+            circuit_id,
         )
 
     def _capacity_settings_for_config(self: Self, circuit_id: str) -> CapacitySettings:
-        overrides = self.store_data.capacity_settings_by_circuit.get(circuit_id, {})
-        return CapacitySettings(
-            breaker_amps=_optional_positive_float_value(
-                overrides.get("breaker_amps"),
-                default=None,
-            ),
-            warning_ratio=_positive_float_value(
-                overrides.get("warning_ratio"),
-                default=DEFAULT_CAPACITY_WARNING_RATIO,
-            ),
-        )
+        return self.settings_controller.capacity_settings_for_config(circuit_id)
 
     def _standby_settings_for_config(
         self: Self,
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> StandbySettings:
-        overrides = self.store_data.standby_settings_by_circuit.get(circuit_id, {})
-        default_window_hours = (
-            config.standby_window_hours if config is not None else 48
-        )
-        default_threshold_w = config.standby_threshold_w if config is not None else 8.0
-        default_alert_w = config.always_on_alert_w if config is not None else None
-        default_min_samples = config.standby_min_samples if config is not None else 24
-        return StandbySettings(
-            window_hours=_positive_int_value(
-                overrides.get("window_hours"),
-                default=default_window_hours,
-            ),
-            standby_threshold_w=_positive_float_value(
-                overrides.get("standby_threshold_w"),
-                default=default_threshold_w,
-            ),
-            always_on_alert_w=_optional_positive_float_value(
-                overrides.get("always_on_alert_w"),
-                default=default_alert_w,
-            ),
-            min_samples=_positive_int_value(
-                overrides.get("min_samples"),
-                default=default_min_samples,
-            ),
+        return self.settings_controller.standby_settings_for_config(
+            config,
+            circuit_id,
         )
 
     def _utility_comparison_settings_for_circuit(
         self: Self,
         circuit_id: str,
     ) -> UtilityComparisonSettings:
-        overrides = self.store_data.utility_comparison_settings_by_circuit.get(
-            circuit_id,
-            {},
-        )
-        return UtilityComparisonSettings(
-            utility_energy_entity=str(overrides.get("utility_energy_entity") or ""),
-            utility_statistic_id=str(overrides.get("utility_statistic_id") or ""),
-            utility_source_type=str(overrides.get("utility_source_type") or "auto"),
-            utility_statistic_period=_utility_statistic_period_value(
-                overrides.get("utility_statistic_period")
-            ),
-            measured_energy_entities=_entity_id_tuple_value(
-                overrides.get("measured_energy_entities"),
-                default=(),
-            ),
-            tolerance_percent=_nonnegative_float_value(
-                overrides.get("tolerance_percent"),
-                default=DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
-            ),
+        return self.settings_controller.utility_comparison_settings_for_circuit(
+            circuit_id
         )
 
     def _clear_power_quality_state(self: Self, circuit_id: str) -> None:

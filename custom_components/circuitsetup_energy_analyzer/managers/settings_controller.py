@@ -6,8 +6,14 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import replace
 from typing import Any
 
+from ..activity_alerts import ActivityAlertSettings
 from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
+from ..billing import BillingCycleSettings
+from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
 from ..const import CONF_ADVANCED_SETTINGS
+from ..cost import CostSettings
+from ..demand import DemandSettings
+from ..goals import EnergyGoalSettings
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from ..metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -33,6 +39,13 @@ from ..solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     SOLAR_SURPLUS_THRESHOLD_W,
+)
+from ..standby import StandbySettings
+from ..usage import EnergyUsageSettings
+from ..utility_comparison import (
+    DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+    DEFAULT_UTILITY_STATISTIC_PERIOD,
+    UtilityComparisonSettings,
 )
 from ..ux import normalize_sensitivity
 
@@ -91,6 +104,277 @@ class SettingsController:
             normalize_sensitivity(preset),
         )
 
+    def activity_alert_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> ActivityAlertSettings:
+        """Return activity alert settings for one circuit."""
+        del config
+        overrides = (
+            self._coordinator.store_data.activity_alert_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+        return ActivityAlertSettings(
+            max_active_minutes=_optional_positive_float_value(
+                overrides.get("max_active_minutes"),
+                default=None,
+            ),
+            max_idle_minutes=_optional_positive_float_value(
+                overrides.get("max_idle_minutes"),
+                default=None,
+            ),
+        )
+
+    def energy_usage_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> EnergyUsageSettings:
+        """Return daily energy usage spike settings for one circuit."""
+        overrides = (
+            self._coordinator.store_data.energy_usage_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+        default_window_days = (
+            config.energy_usage_window_days if config is not None else 7
+        )
+        default_spike_ratio = (
+            config.daily_energy_spike_ratio if config is not None else 0.25
+        )
+        return EnergyUsageSettings(
+            window_days=_positive_int_value(
+                overrides.get("window_days"),
+                default=default_window_days,
+            ),
+            daily_spike_ratio=_positive_float_value(
+                overrides.get("daily_spike_ratio"),
+                default=default_spike_ratio,
+            ),
+        )
+
+    def energy_goal_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> EnergyGoalSettings:
+        """Return daily energy goal settings for one circuit."""
+        overrides = (
+            self._coordinator.store_data.energy_goal_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+        default_goal_kwh = (
+            config.daily_energy_goal_kwh if config is not None else None
+        )
+        default_alert_ratio = (
+            config.energy_goal_alert_ratio if config is not None else 1.0
+        )
+        if "daily_goal_kwh" in overrides:
+            goal_kwh = _optional_positive_float_value(
+                overrides.get("daily_goal_kwh"),
+                default=None,
+            )
+        else:
+            goal_kwh = default_goal_kwh
+        return EnergyGoalSettings(
+            daily_goal_kwh=goal_kwh,
+            goal_alert_ratio=_positive_float_value(
+                overrides.get("goal_alert_ratio"),
+                default=default_alert_ratio,
+            ),
+        )
+
+    def billing_cycle_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> BillingCycleSettings:
+        """Return billing-cycle usage forecast settings for one circuit."""
+        overrides = self._coordinator.store_data.billing_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_start_day = (
+            config.billing_cycle_start_day if config is not None else 1
+        )
+        default_budget_kwh = (
+            config.billing_cycle_budget_kwh if config is not None else None
+        )
+        default_alert_ratio = (
+            config.billing_cycle_budget_alert_ratio if config is not None else 1.0
+        )
+        default_min_elapsed_days = (
+            config.billing_cycle_min_elapsed_days if config is not None else 3
+        )
+        return BillingCycleSettings(
+            cycle_start_day=_positive_int_value(
+                overrides.get("cycle_start_day"),
+                default=default_start_day,
+            ),
+            budget_kwh=_optional_positive_float_value(
+                overrides.get("budget_kwh"),
+                default=default_budget_kwh,
+            ),
+            budget_alert_ratio=_positive_float_value(
+                overrides.get("budget_alert_ratio"),
+                default=default_alert_ratio,
+            ),
+            min_elapsed_days=_positive_int_value(
+                overrides.get("min_elapsed_days"),
+                default=default_min_elapsed_days,
+            ),
+        )
+
+    def cost_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> CostSettings:
+        """Return cost and Time-of-Use settings for one circuit."""
+        overrides = self._coordinator.store_data.cost_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_start_day = config.cost_cycle_start_day if config is not None else 1
+        default_rate = config.default_rate_per_kwh if config is not None else None
+        default_tou_rate = config.tou_rate_per_kwh if config is not None else None
+        default_tou_start = config.tou_start if config is not None else None
+        default_tou_end = config.tou_end if config is not None else None
+        default_tou_weekdays = config.tou_weekdays if config is not None else ()
+        default_tou_name = config.tou_name if config is not None else "Peak"
+        return CostSettings(
+            cycle_start_day=_positive_int_value(
+                overrides.get("cycle_start_day"),
+                default=default_start_day,
+            ),
+            default_rate_per_kwh=_optional_positive_float_value(
+                overrides.get("default_rate_per_kwh"),
+                default=default_rate,
+            ),
+            tou_rate_per_kwh=_optional_positive_float_value(
+                overrides.get("tou_rate_per_kwh"),
+                default=default_tou_rate,
+            ),
+            tou_start=str(overrides.get("tou_start") or default_tou_start or ""),
+            tou_end=str(overrides.get("tou_end") or default_tou_end or ""),
+            tou_weekdays=_weekday_tuple_value(
+                overrides.get("tou_weekdays"),
+                default=default_tou_weekdays,
+            ),
+            tou_name=str(overrides.get("tou_name") or default_tou_name or "Peak"),
+        )
+
+    def demand_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> DemandSettings:
+        """Return rolling demand settings for one circuit."""
+        overrides = self._coordinator.store_data.demand_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_window_minutes = (
+            config.demand_window_minutes if config is not None else 15
+        )
+        default_limit_w = config.demand_limit_w if config is not None else None
+        return DemandSettings(
+            window_minutes=_positive_int_value(
+                overrides.get("window_minutes"),
+                default=default_window_minutes,
+            ),
+            demand_limit_w=_optional_positive_float_value(
+                overrides.get("demand_limit_w"),
+                default=default_limit_w,
+            ),
+        )
+
+    def capacity_settings_for_config(self, circuit_id: str) -> CapacitySettings:
+        """Return circuit capacity settings for one circuit."""
+        overrides = self._coordinator.store_data.capacity_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        return CapacitySettings(
+            breaker_amps=_optional_positive_float_value(
+                overrides.get("breaker_amps"),
+                default=None,
+            ),
+            warning_ratio=_positive_float_value(
+                overrides.get("warning_ratio"),
+                default=DEFAULT_CAPACITY_WARNING_RATIO,
+            ),
+        )
+
+    def standby_settings_for_config(
+        self,
+        config: Any | None,
+        circuit_id: str,
+    ) -> StandbySettings:
+        """Return Always On and standby settings for one circuit."""
+        overrides = self._coordinator.store_data.standby_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        default_window_hours = (
+            config.standby_window_hours if config is not None else 48
+        )
+        default_threshold_w = config.standby_threshold_w if config is not None else 8.0
+        default_alert_w = config.always_on_alert_w if config is not None else None
+        default_min_samples = config.standby_min_samples if config is not None else 24
+        return StandbySettings(
+            window_hours=_positive_int_value(
+                overrides.get("window_hours"),
+                default=default_window_hours,
+            ),
+            standby_threshold_w=_positive_float_value(
+                overrides.get("standby_threshold_w"),
+                default=default_threshold_w,
+            ),
+            always_on_alert_w=_optional_positive_float_value(
+                overrides.get("always_on_alert_w"),
+                default=default_alert_w,
+            ),
+            min_samples=_positive_int_value(
+                overrides.get("min_samples"),
+                default=default_min_samples,
+            ),
+        )
+
+    def utility_comparison_settings_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> UtilityComparisonSettings:
+        """Return utility-vs-measured kWh comparison settings."""
+        overrides = (
+            self._coordinator.store_data.utility_comparison_settings_by_circuit.get(
+                circuit_id,
+                {},
+            )
+        )
+        return UtilityComparisonSettings(
+            utility_energy_entity=str(overrides.get("utility_energy_entity") or ""),
+            utility_statistic_id=str(overrides.get("utility_statistic_id") or ""),
+            utility_source_type=str(overrides.get("utility_source_type") or "auto"),
+            utility_statistic_period=_utility_statistic_period_value(
+                overrides.get("utility_statistic_period")
+            ),
+            measured_energy_entities=_entity_id_tuple_value(
+                overrides.get("measured_energy_entities"),
+                default=(),
+            ),
+            tolerance_percent=_nonnegative_float_value(
+                overrides.get("tolerance_percent"),
+                default=DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
+            ),
+        )
+
     async def async_set_energy_usage_settings(
         self,
         circuit_id: str,
@@ -100,7 +384,7 @@ class SettingsController:
         """Persist daily energy usage spike settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._energy_usage_settings_for_config(config, circuit_id)
+        current = self.energy_usage_settings_for_config(config, circuit_id)
         settings = {
             "window_days": _positive_int_value(
                 window_days,
@@ -126,7 +410,7 @@ class SettingsController:
         """Persist daily energy goal settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._energy_goal_settings_for_config(config, circuit_id)
+        current = self.energy_goal_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "goal_alert_ratio": _positive_float_value(
                 goal_alert_ratio,
@@ -163,7 +447,7 @@ class SettingsController:
     ) -> None:
         """Persist user-configured activity alert settings for one circuit."""
         coordinator = self._coordinator
-        current = coordinator._activity_alert_settings_for_config(None, circuit_id)
+        current = self.activity_alert_settings_for_config(None, circuit_id)
         max_minutes = _optional_positive_float_value(
             max_active_minutes,
             default=current.max_active_minutes,
@@ -192,7 +476,7 @@ class SettingsController:
         """Persist rolling demand settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._demand_settings_for_config(config, circuit_id)
+        current = self.demand_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "window_minutes": _positive_int_value(
                 window_minutes,
@@ -219,7 +503,7 @@ class SettingsController:
     ) -> None:
         """Persist circuit capacity settings for one circuit."""
         coordinator = self._coordinator
-        current = coordinator._capacity_settings_for_config(circuit_id)
+        current = self.capacity_settings_for_config(circuit_id)
         settings: dict[str, Any] = {
             "warning_ratio": _positive_float_value(
                 warning_ratio,
@@ -248,7 +532,7 @@ class SettingsController:
         """Persist Always On and standby settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._standby_settings_for_config(config, circuit_id)
+        current = self.standby_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "window_hours": _positive_int_value(
                 window_hours,
@@ -281,7 +565,7 @@ class SettingsController:
         """Persist billing-cycle usage forecast settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._billing_cycle_settings_for_config(config, circuit_id)
+        current = self.billing_cycle_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "cycle_start_day": _positive_int_value(
                 cycle_start_day,
@@ -318,7 +602,7 @@ class SettingsController:
         """Persist cost and Time-of-Use settings for one circuit."""
         coordinator = self._coordinator
         config = coordinator._config_for_circuit(circuit_id)
-        current = coordinator._cost_settings_for_config(config, circuit_id)
+        current = self.cost_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
             "cycle_start_day": _positive_int_value(
                 cycle_start_day,
@@ -364,7 +648,7 @@ class SettingsController:
     ) -> None:
         """Persist utility-vs-measured kWh comparison settings."""
         coordinator = self._coordinator
-        current = coordinator._utility_comparison_settings_for_circuit(circuit_id)
+        current = self.utility_comparison_settings_for_circuit(circuit_id)
         utility_entity = (
             current.utility_energy_entity
             if utility_energy_entity is None
@@ -1184,6 +1468,13 @@ def _weekday_tuple_value(
 
 def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
     return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
+
+
+def _utility_statistic_period_value(value: Any) -> str:
+    normalized = str(value or DEFAULT_UTILITY_STATISTIC_PERIOD).strip().lower()
+    if normalized not in {"hour", "day", "month"}:
+        return DEFAULT_UTILITY_STATISTIC_PERIOD
+    return normalized
 
 
 def _nonnegative_float_value(value: Any, *, default: float) -> float:
