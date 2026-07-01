@@ -1487,6 +1487,14 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
 
 
+def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_MODULE_VERSION,
+    )
+
+    assert "timeline" in PANEL_MODULE_VERSION
+
+
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
