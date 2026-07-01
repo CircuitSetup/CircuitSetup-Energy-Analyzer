@@ -1775,6 +1775,66 @@ for (const expected of [
     )
 
 
+def test_nilm_workspace_hides_already_reviewed_session_validation_cards() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [],
+  virtual_appliances: [],
+  assignments: [
+    {
+      assignment_id: "assignment-dishwasher",
+      confirmed_session_ids: ["session-confirmed"],
+      rejected_session_ids: ["session-rejected"]
+    }
+  ],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [
+    {
+      session_id: "session-confirmed",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_label: "Already Confirmed",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    },
+    {
+      session_id: "session-rejected",
+      start: "2026-06-24T20:12:00Z",
+      end: "2026-06-24T21:03:00Z",
+      display_label: "Already Rejected",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    },
+    {
+      session_id: "session-pending",
+      start: "2026-06-25T18:12:00Z",
+      end: "2026-06-25T19:03:00Z",
+      display_label: "Pending Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      actions: { validate: {}, reject: {} }
+    }
+  ],
+  edges: [],
+  validation: {}
+};
+const html = panel._renderNilmWorkspaceBody();
+for (const hidden of ["Already Confirmed", "Already Rejected"]) {
+  if (html.includes(hidden)) {
+    throw new Error(`reviewed session still visible: ${hidden}: ${html}`);
+  }
+}
+if (!html.includes("Predicted Pending Dishwasher")) {
+  throw new Error(`pending session missing: ${html}`);
+}
+"""
+    )
+
+
 def test_nilm_session_validation_adjust_interval_loads_session_times() -> None:
     _run_panel_node_script(
         """
