@@ -182,7 +182,6 @@ from .settings_advisor import (
     build_settings_recommendations,
     recommendation_evidence_fingerprint,
     recommendation_id_for,
-    recommendation_to_dict,
     recommendation_unique_key,
     should_suppress_recommendation,
 )
@@ -1659,54 +1658,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return feature_history
 
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
-        by_circuit: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
-        pending_count_by_circuit: defaultdict[str, int] = defaultdict(int)
-        for recommendation in sorted(
-            self._visible_settings_recommendations(now),
-            key=lambda item: (
-                item.circuit_name,
-                item.status is not RecommendationStatus.PENDING,
-                item.group,
-                item.setting_label,
-                item.recommendation_id,
-            ),
-        ):
-            by_circuit[recommendation.circuit_id].append(
-                recommendation_to_dict(recommendation),
-            )
-            if recommendation.status is RecommendationStatus.PENDING:
-                pending_count_by_circuit[recommendation.circuit_id] += 1
-        self.state.settings_recommendations_by_circuit = dict(by_circuit)
-        self.state.settings_recommendation_count_by_circuit = {
-            circuit_id: count
-            for circuit_id, count in pending_count_by_circuit.items()
-            if count > 0
-        }
-        if not pending_count_by_circuit:
-            self._set_settings_recommendation_notification_episode_key(())
+        self.settings_controller.refresh_settings_recommendation_state(now)
 
     def _visible_settings_recommendations(
         self: Self,
         now: datetime,
     ) -> list[SettingRecommendation]:
-        return [
-            recommendation
-            for recommendation in self.store_data.settings_recommendations.values()
-            if recommendation.status
-            in {RecommendationStatus.PENDING, RecommendationStatus.APPLIED}
-            and recommendation.expires_at > now
-        ]
+        return self.settings_controller.visible_settings_recommendations(now)
 
     def _pending_settings_recommendations(
         self: Self,
         now: datetime,
     ) -> list[SettingRecommendation]:
-        return [
-            recommendation
-            for recommendation in self.store_data.settings_recommendations.values()
-            if recommendation.status is RecommendationStatus.PENDING
-            and recommendation.expires_at > now
-        ]
+        return self.settings_controller.pending_settings_recommendations(now)
 
     async def _notify_settings_recommendations_if_needed(self: Self) -> None:
         await (
