@@ -1165,6 +1165,41 @@ def test_nilm_controller_hydrates_ignored_signatures_from_store() -> None:
     assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
 
 
+def test_nilm_controller_filters_known_load_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        options={CONF_KNOWN_LOAD_CIRCUITS: ["fridge"]},
+        now_fn=lambda: now,
+    )
+    mains_event = CircuitEvent(
+        timestamp=now,
+        circuit_id="mains",
+        event_type=EventType.START,
+    )
+    fridge_event = CircuitEvent(
+        timestamp=now,
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    hvac_event = CircuitEvent(
+        timestamp=now,
+        circuit_id="hvac",
+        event_type=EventType.START,
+    )
+
+    assert tuple(
+        coordinator.nilm_controller.known_load_events(
+            "mains",
+            [mains_event, fridge_event, hvac_event],
+        )
+    ) == (fridge_event,)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (

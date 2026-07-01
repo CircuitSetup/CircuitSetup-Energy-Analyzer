@@ -760,7 +760,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             total_events_by_circuit=self._nilm_total_events_by_circuit,
             unmatched_edges_by_circuit=self._nilm_unmatched_edges,
             ignored_signatures=self.ignored_nilm_signatures,
-            known_load_events=self._known_load_events,
+            known_load_events=self.nilm_controller.known_load_events,
             observe_topology=(
                 lambda config, match, _context: [
                     alert
@@ -3389,15 +3389,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         nilm_circuit_id: str,
         events: Iterable[CircuitEvent],
     ) -> Iterable[CircuitEvent]:
-        for event in events:
-            if event.circuit_id == nilm_circuit_id:
-                continue
-            if (
-                self._known_load_circuit_ids
-                and event.circuit_id not in self._known_load_circuit_ids
-            ):
-                continue
-            yield event
+        return self.nilm_controller.known_load_events(nilm_circuit_id, events)
 
     def _observe_nilm_known_load_topology(
         self: Self,
