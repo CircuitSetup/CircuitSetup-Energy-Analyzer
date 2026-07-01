@@ -44,7 +44,6 @@ from .capacity import (
     CapacitySettings,
 )
 from .const import (
-    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
@@ -62,7 +61,6 @@ from .const import (
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
-    CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DEFAULT_DASHBOARD_LAYOUT,
@@ -555,21 +553,6 @@ def process_events_into_state(
     return state
 
 
-def _merged_entry_settings_map(
-    entry_data: Mapping[str, Any],
-    options: Mapping[str, Any],
-    key: str,
-) -> dict[str, dict[str, Any]]:
-    settings: dict[str, dict[str, Any]] = {}
-    for source in (entry_data.get(key, {}), options.get(key, {})):
-        if not isinstance(source, Mapping):
-            continue
-        for circuit_id, value in source.items():
-            if isinstance(value, Mapping):
-                settings[str(circuit_id)] = dict(value)
-    return settings
-
-
 def _compact_settings_recommendation_episode_key(
     episode_key: tuple[tuple[str, ...], ...],
 ) -> tuple[tuple[str, ...], ...]:
@@ -945,27 +928,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _apply_config_entry_settings(self: Self) -> None:
         """Apply setup/options settings to store-backed runtime setting maps."""
-        for circuit_id, settings in _merged_entry_settings_map(
-            self.entry_data,
-            self.options,
-            CONF_UTILITY_COMPARISON_SETTINGS,
-        ).items():
-            if settings:
-                self.store_data.utility_comparison_settings_by_circuit[circuit_id] = (
-                    settings
-                )
-            else:
-                self.store_data.utility_comparison_settings_by_circuit.pop(
-                    circuit_id,
-                    None,
-                )
-
-        for circuit_id, settings in _merged_entry_settings_map(
-            self.entry_data,
-            self.options,
-            CONF_ADVANCED_SETTINGS,
-        ).items():
-            self._replace_advanced_settings(circuit_id, settings)
+        self.settings_controller.apply_config_entry_settings()
 
     def _replace_advanced_settings(
         self: Self,
