@@ -5660,6 +5660,59 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     assert assignment["false_positive_rate"] == pytest.approx(0.0)
 
 
+def test_nilm_controller_applies_alert_feedback_validation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "published",
+                        "confidence": 0.8,
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": ["session-1"],
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher appears finished. Estimated from mains power by NILM.",
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_key": "assignment-dishwasher:session-1",
+        },
+    )
+
+    coordinator.nilm_controller.apply_alert_feedback(alert, "correct", now)
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["confidence"] == pytest.approx(0.85)
+    assert assignment["last_validation"] == "correct"
+    assert assignment["confirmed_session_ids"] == ["session-1"]
+    assert assignment["rejected_session_ids"] == []
+    assert assignment["confirmed_sessions"] == 1
+    assert assignment["rejected_sessions"] == 0
+    assert assignment["false_positive_rate"] == pytest.approx(0.0)
+
+
 @pytest.mark.asyncio
 async def test_nilm_non_session_notification_feedback_keeps_session_counts_empty() -> (
     None
