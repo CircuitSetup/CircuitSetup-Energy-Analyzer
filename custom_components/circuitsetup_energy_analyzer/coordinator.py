@@ -90,9 +90,6 @@ from .demo import (
     demo_circuit_key as _demo_circuit_key,
 )
 from .demo import (
-    demo_nilm_workspace_seed as _demo_nilm_workspace_seed,
-)
-from .demo import (
     demo_prior_usage as _demo_prior_usage,
 )
 from .demo import (
@@ -757,7 +754,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.ignored_nilm_signatures: set[tuple[str, str]] = set()
         self._nilm_sample_processor = NilmSampleProcessor(
             nilm_enabled=self._nilm_enabled,
-            seed_demo_nilm_state=self._seed_demo_nilm_state,
+            seed_demo_nilm_state=self.nilm_controller.seed_demo_state,
             min_delta_w_for_circuit=self.settings_controller.nilm_min_delta_w,
             detectors=self._nilm_detectors,
             total_events_by_circuit=self._nilm_total_events_by_circuit,
@@ -3693,56 +3690,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         now: datetime,
     ) -> None:
-        if not _is_demo_config(config):
-            return
-
-        seed = _demo_nilm_workspace_seed(now, circuit_id=config.circuit_id)
-
-        if not self.store_data.nilm_signatures.get(config.circuit_id):
-            self.store_data.nilm_signatures[config.circuit_id] = _demo_seed_list(
-                seed.get("signatures"),
-            )
-            self._mark_store_dirty()
-
-        if not self.store_data.nilm_unknown_loads_by_circuit.get(config.circuit_id):
-            unknown_loads = seed.get("unknown_loads")
-            if isinstance(unknown_loads, Mapping):
-                self.store_data.nilm_unknown_loads_by_circuit[config.circuit_id] = (
-                    dict(unknown_loads)
-                )
-            self._mark_store_dirty()
-
-        if not self.store_data.nilm_session_history_by_circuit.get(config.circuit_id):
-            self.store_data.nilm_session_history_by_circuit[config.circuit_id] = (
-                _demo_seed_list(seed.get("sessions"))
-            )
-            self._mark_store_dirty()
-
-        if not self.store_data.nilm_label_intervals_by_circuit.get(config.circuit_id):
-            self.store_data.nilm_label_intervals_by_circuit[config.circuit_id] = (
-                _demo_seed_list(seed.get("label_intervals"))
-            )
-            self._mark_store_dirty()
-
-        if not self.store_data.nilm_appliance_assignments_by_circuit.get(
-            config.circuit_id
-        ):
-            self.store_data.nilm_appliance_assignments_by_circuit[config.circuit_id] = (
-                _demo_seed_list(seed.get("assignments"))
-            )
-            self._mark_store_dirty()
-
-        self._nilm_total_events_by_circuit[config.circuit_id] = max(
-            self._nilm_total_events_by_circuit[config.circuit_id],
-            int(seed.get("total_events") or 0),
-        )
-        if not self._nilm_unmatched_edges[config.circuit_id]:
-            self._nilm_unmatched_edges[config.circuit_id] = _demo_nilm_edges(
-                seed.get("edges"),
-            )
-        self._nilm_unmatched_edges[config.circuit_id] = self._nilm_unmatched_edges[
-            config.circuit_id
-        ][:8]
+        self.nilm_controller.seed_demo_state(config, now)
 
     def _energy_kwh_sum_for_entities(
         self: Self,
@@ -4451,25 +4399,6 @@ def _statistics_lookback_start(now: datetime, period: str) -> datetime:
     if period == "month":
         return now - timedelta(days=400)
     return now - timedelta(days=45)
-
-
-def _demo_seed_list(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
-
-
-def _demo_nilm_edges(value: Any) -> list[NilmEdge]:
-    edges: list[NilmEdge] = []
-    for raw_edge in _demo_seed_list(value):
-        timestamp = _datetime_or_none(raw_edge.pop("timestamp", None))
-        if timestamp is None:
-            continue
-        try:
-            edges.append(NilmEdge(timestamp=timestamp, **raw_edge))
-        except TypeError:
-            continue
-    return edges
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

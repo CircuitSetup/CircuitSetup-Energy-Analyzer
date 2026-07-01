@@ -1085,6 +1085,44 @@ def test_nilm_controller_observes_known_load_topology() -> None:
     )
 
 
+def test_nilm_controller_seeds_demo_workspace_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    config = CircuitConfig(
+        circuit_id="cs_energy_analyzer_demo_mains_nilm",
+        name="Demo Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef(
+                entity_id=(
+                    "sensor.cs_energy_analyzer_demo_mains_nilm_active_power"
+                ),
+                role=SensorRole.REAL_POWER,
+            ),
+        ),
+    )
+
+    coordinator.nilm_controller.seed_demo_state(config, now)
+
+    circuit_id = config.circuit_id
+    assert coordinator.store_data.nilm_signatures[circuit_id]
+    assert coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id]
+    assert coordinator.store_data.nilm_session_history_by_circuit[circuit_id]
+    assert coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id]
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit[circuit_id]
+    assert coordinator._nilm_total_events_by_circuit[circuit_id] > 0
+    assert coordinator._nilm_unmatched_edges[circuit_id]
+    assert coordinator._store_dirty is True
+
+
 @pytest.mark.asyncio
 async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (

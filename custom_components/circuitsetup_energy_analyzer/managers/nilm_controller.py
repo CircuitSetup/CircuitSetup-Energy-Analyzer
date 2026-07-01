@@ -6,7 +6,9 @@ from statistics import median
 from typing import Any
 
 from ..const import CONF_ENABLE_EXPERIMENTAL_NILM
+from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
+from ..nilm import NilmEdge
 
 
 class NilmController:
@@ -140,6 +142,61 @@ class NilmController:
             coordinator.state,
             result.state_updates,
         )
+
+    def seed_demo_state(self, config: Any, now: datetime) -> None:
+        """Seed bundled NILM workspace demo data when the demo source is active."""
+        if not is_demo_config(config):
+            return
+
+        coordinator = self._coordinator
+        circuit_id = config.circuit_id
+        seed = demo_nilm_workspace_seed(now, circuit_id=circuit_id)
+
+        if not coordinator.store_data.nilm_signatures.get(circuit_id):
+            coordinator.store_data.nilm_signatures[circuit_id] = _demo_seed_list(
+                seed.get("signatures"),
+            )
+            coordinator._mark_store_dirty()
+
+        if not coordinator.store_data.nilm_unknown_loads_by_circuit.get(circuit_id):
+            unknown_loads = seed.get("unknown_loads")
+            if isinstance(unknown_loads, Mapping):
+                coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id] = (
+                    dict(unknown_loads)
+                )
+            coordinator._mark_store_dirty()
+
+        if not coordinator.store_data.nilm_session_history_by_circuit.get(circuit_id):
+            coordinator.store_data.nilm_session_history_by_circuit[circuit_id] = (
+                _demo_seed_list(seed.get("sessions"))
+            )
+            coordinator._mark_store_dirty()
+
+        if not coordinator.store_data.nilm_label_intervals_by_circuit.get(circuit_id):
+            coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = (
+                _demo_seed_list(seed.get("label_intervals"))
+            )
+            coordinator._mark_store_dirty()
+
+        if not coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+        ):
+            coordinator.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = (
+                _demo_seed_list(seed.get("assignments"))
+            )
+            coordinator._mark_store_dirty()
+
+        coordinator._nilm_total_events_by_circuit[circuit_id] = max(
+            coordinator._nilm_total_events_by_circuit[circuit_id],
+            int(seed.get("total_events") or 0),
+        )
+        if not coordinator._nilm_unmatched_edges[circuit_id]:
+            coordinator._nilm_unmatched_edges[circuit_id] = _demo_nilm_edges(
+                seed.get("edges"),
+                self._datetime_or_none,
+            )
+        unmatched_edges = coordinator._nilm_unmatched_edges[circuit_id]
+        coordinator._nilm_unmatched_edges[circuit_id] = unmatched_edges[:8]
 
     def upsert_assignment(
         self,
@@ -1265,3 +1322,25 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
+
+
+def _demo_seed_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _demo_nilm_edges(
+    value: Any,
+    datetime_or_none: Callable[[Any], datetime | None],
+) -> list[NilmEdge]:
+    edges: list[NilmEdge] = []
+    for raw_edge in _demo_seed_list(value):
+        timestamp = datetime_or_none(raw_edge.pop("timestamp", None))
+        if timestamp is None:
+            continue
+        try:
+            edges.append(NilmEdge(timestamp=timestamp, **raw_edge))
+        except TypeError:
+            continue
+    return edges
