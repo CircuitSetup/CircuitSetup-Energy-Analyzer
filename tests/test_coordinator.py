@@ -672,6 +672,21 @@ def test_coordinator_exposes_processing_context_builder() -> None:
     assert coordinator.context_builder.time_zone() is None
 
 
+def test_coordinator_exposes_processing_pipeline() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert isinstance(coordinator.pipeline, processing_pipeline.ProcessingPipeline)
+    assert callable(coordinator.pipeline.async_process_circuit)
+    assert callable(coordinator.pipeline.async_process_cross_circuit)
+
+
 def test_coordinator_exposes_store_persistence_manager() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
