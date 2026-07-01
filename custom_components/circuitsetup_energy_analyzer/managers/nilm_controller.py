@@ -198,6 +198,17 @@ class NilmController:
         unmatched_edges = coordinator._nilm_unmatched_edges[circuit_id]
         coordinator._nilm_unmatched_edges[circuit_id] = unmatched_edges[:8]
 
+    def hydrate_state_from_store(self) -> None:
+        """Hydrate NILM runtime state from retained store data."""
+        coordinator = self._coordinator
+        for circuit_id, signatures in coordinator.store_data.nilm_signatures.items():
+            for signature in signatures:
+                if signature.get("ignored") is True:
+                    coordinator.ignored_nilm_signatures.add(
+                        (circuit_id, str(signature.get("signature_id", "")))
+                    )
+            self.refresh_state(circuit_id)
+
     def upsert_assignment(
         self,
         circuit_id: str,
