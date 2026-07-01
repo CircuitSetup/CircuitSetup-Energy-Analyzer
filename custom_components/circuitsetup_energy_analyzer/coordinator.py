@@ -128,6 +128,7 @@ from .managers.entity_profile_controller import EntityProfileController
 from .managers.evidence_actions import EvidenceActionController
 from .managers.nilm_controller import NilmController
 from .managers.notification_controller import NotificationController
+from .managers.processing_pipeline import ProcessingPipeline
 from .managers.settings_controller import SettingsController
 from .managers.setup_health import SetupHealthAggregator
 from .managers.source_updates import SourceUpdateManager
@@ -801,6 +802,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self.settings_controller = SettingsController(self)
         self.context_builder = ProcessingContextBuilder(self)
+        self.pipeline = ProcessingPipeline(self)
         self.state_reducer = StateReducer()
         self._apply_config_entry_settings()
         self._detectors = {
@@ -1281,95 +1283,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._refresh_latest_real_power_state(config, sample)
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
-            event_result = self._event_processor.process(sample, config, context)
-            new_events, _ = await self._apply_feature_result(
-                event_result,
+            new_events, new_alerts = await self.pipeline.async_process_circuit(
+                config,
+                sample,
+                context,
             )
             events.extend(new_events)
-
-            power_quality_result = self._power_quality_processor.process(
-                sample,
-                config,
-                context,
-            )
-            if power_quality_result.clear_power_quality_state is not None:
-                self._clear_power_quality_state(
-                    power_quality_result.clear_power_quality_state
-                )
-            _, power_quality_alerts = await self._apply_feature_result(
-                power_quality_result
-            )
-            alerts.extend(power_quality_alerts)
-
-            usage_result = self._energy_usage_processor.process(sample, config, context)
-            _, usage_alerts = await self._apply_feature_result(usage_result)
-            alerts.extend(usage_alerts)
-
-            goal_result = self._energy_goal_processor.process(sample, config, context)
-            _, goal_alerts = await self._apply_feature_result(goal_result)
-            alerts.extend(goal_alerts)
-
-            cycle_result = self._run_cycle_processor.process(sample, config, context)
-            _, cycle_alerts = await self._apply_feature_result(cycle_result)
-            alerts.extend(cycle_alerts)
-
-            activity_result = self._activity_alert_processor.process(
-                sample,
-                config,
-                context,
-            )
-            _, activity_alerts = await self._apply_feature_result(activity_result)
-            alerts.extend(activity_alerts)
-
-            billing_result = self._billing_cycle_processor.process(
-                sample,
-                config,
-                context,
-            )
-            _, billing_alerts = await self._apply_feature_result(billing_result)
-            alerts.extend(billing_alerts)
-
-            cost_result = self._cost_processor.process(sample, config, context)
-            await self._apply_feature_result(cost_result)
-
-            demand_result = self._demand_processor.process(sample, config, context)
-            _, demand_alerts = await self._apply_feature_result(demand_result)
-            alerts.extend(demand_alerts)
-
-            capacity_result = self._capacity_processor.process(sample, config, context)
-            _, capacity_alerts = await self._apply_feature_result(capacity_result)
-            alerts.extend(capacity_alerts)
-
-            leg_imbalance_result = self._leg_imbalance_processor.process(
-                sample,
-                config,
-                context,
-            )
-            _, leg_imbalance_alerts = await self._apply_feature_result(
-                leg_imbalance_result
-            )
-            alerts.extend(leg_imbalance_alerts)
-
-            metric_consistency_result = self._metric_consistency_processor.process(
-                sample,
-                config,
-                context,
-            )
-            await self._apply_feature_result(metric_consistency_result)
-
-            if (
-                config.power_flow is PowerFlowMode.GENERATION
-                or config.appliance_profile is ApplianceProfile.SOLAR_INVERTER
-            ):
-                self._clear_standby_state(config.circuit_id)
-            else:
-                standby_result = self._standby_processor.process(
-                    sample,
-                    config,
-                    context,
-                )
-                _, standby_alerts = await self._apply_feature_result(standby_result)
-                alerts.extend(standby_alerts)
+            alerts.extend(new_alerts)
 
         for config, sample in samples:
             for nilm_alert in self._process_nilm_sample(config, sample, events):
@@ -1380,9 +1300,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
         alerts.extend(await self._notify_nilm_virtual_appliances(now))
-        self._refresh_balance_state(samples, now)
-        self._refresh_solar_flow_state(samples, now)
-        alerts.extend(await self._observe_utility_comparisons(now))
+        alerts.extend(await self.pipeline.async_process_cross_circuit(samples, now))
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -5192,46 +5110,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._nilm_unmatched_edges[config.circuit_id] = self._nilm_unmatched_edges[
             config.circuit_id
         ][:8]
-
-    def _refresh_balance_state(
-        self: Self,
-        samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
-        now: datetime,
-    ) -> None:
-        result = self._mains_balance_processor.process(
-            samples,
-            self._build_processing_context(now),
-        )
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
-
-    def _refresh_solar_flow_state(
-        self: Self,
-        samples: list[tuple[CircuitConfig, NormalizedCircuitSample]],
-        now: datetime,
-    ) -> None:
-        result = self._solar_flow_processor.process(
-            samples,
-            self._build_processing_context(now),
-        )
-        for update in result.state_updates:
-            self.state_reducer.apply_update(self.state, update.path, update.value)
-
-    async def _observe_utility_comparisons(
-        self: Self,
-        now: datetime,
-    ) -> list[AlertEvidence]:
-        alerts: list[AlertEvidence] = []
-        context = self._build_processing_context(now)
-        for circuit_id in self.store_data.utility_comparison_settings_by_circuit:
-            config = self._config_for_circuit(circuit_id)
-            if config is None:
-                continue
-            result = await self._utility_comparison_processor.process(config, context)
-            _, new_alerts = await self._apply_feature_result(result)
-            await self._sync_setup_health_repairs(circuit_id)
-            alerts.extend(new_alerts)
-        return alerts
 
     def _energy_kwh_sum_for_entities(
         self: Self,
