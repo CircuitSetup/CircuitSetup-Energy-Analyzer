@@ -37,6 +37,10 @@ class _ActionCoordinator:
         self.dirty_count = 0
         self.relearned: list[str] = []
         self.now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+        self.store_persistence = SimpleNamespace(
+            async_save_if_dirty=self._record_store_save,
+            mark_dirty=self._record_store_dirty,
+        )
 
     def _now_fn(self) -> datetime:
         return self.now
@@ -54,10 +58,10 @@ class _ActionCoordinator:
     def async_set_updated_data(self, state: object) -> None:
         self.updated.append(state)
 
-    async def _async_save_store(self, now: datetime) -> None:
+    async def _record_store_save(self, now: datetime) -> None:
         self.saved.append(now)
 
-    def _mark_store_dirty(self) -> None:
+    def _record_store_dirty(self) -> None:
         self.dirty_count += 1
 
     def _config_for_circuit(self, circuit_id: str) -> None:

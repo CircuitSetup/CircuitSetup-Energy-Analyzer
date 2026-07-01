@@ -125,9 +125,9 @@ class SettingsController:
         coordinator = self._coordinator
         now = coordinator._now_fn()
         if self.rebuild_setting_recommendations(now, circuit_id=circuit_id):
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
         await (
             coordinator.notification_controller.async_notify_settings_recommendations_if_needed()
         )
@@ -508,11 +508,11 @@ class SettingsController:
         updated_settings = dict(settings)
         advanced_by_circuit[circuit_id] = updated_settings
         self.replace_advanced_settings(circuit_id, updated_settings)
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     def apply_config_entry_settings(self) -> None:
         """Apply setup/options settings to store-backed runtime setting maps."""
@@ -1161,7 +1161,7 @@ class SettingsController:
             )
             settings["daily_goal_kwh"] = goal_kwh if goal_kwh is not None else 0.0
         coordinator.store_data.energy_goal_settings_by_circuit[circuit_id] = settings
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         goal_result = coordinator._energy_goal_processor.refresh_state(
             circuit_id,
@@ -1171,7 +1171,7 @@ class SettingsController:
         await coordinator._apply_feature_result(goal_result)
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     async def async_set_activity_alert_settings(
         self,
@@ -1587,11 +1587,11 @@ class SettingsController:
     ) -> None:
         coordinator = self._coordinator
         settings_by_circuit[circuit_id] = settings
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     async def async_apply_setting_recommendation(
         self,
@@ -1629,12 +1629,12 @@ class SettingsController:
             recommendation,
             status=RecommendationStatus.APPLIED,
         )
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     async def async_undo_setting_recommendation(
         self,
@@ -1661,12 +1661,12 @@ class SettingsController:
             recommendation,
             status=RecommendationStatus.PENDING,
         )
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
         return True
 
     async def async_reset_setting_recommendation(
@@ -1694,12 +1694,12 @@ class SettingsController:
             recommendation,
             status=RecommendationStatus.STALE,
         )
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         now = coordinator._now_fn()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
         return True
 
     def set_recommendation_setting_value(
@@ -2087,10 +2087,10 @@ class SettingsController:
                 recommendation,
             ),
         )
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
 
 def _merged_entry_settings_map(

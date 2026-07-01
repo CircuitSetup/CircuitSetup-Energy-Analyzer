@@ -97,7 +97,7 @@ class NilmController:
             result.state_updates,
         )
         if result.store_dirty:
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
         return list(result.alerts)
 
     def known_load_events(
@@ -173,7 +173,7 @@ class NilmController:
             coordinator.store_data.nilm_signatures[circuit_id] = _demo_seed_list(
                 seed.get("signatures"),
             )
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
 
         if not coordinator.store_data.nilm_unknown_loads_by_circuit.get(circuit_id):
             unknown_loads = seed.get("unknown_loads")
@@ -181,19 +181,19 @@ class NilmController:
                 coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id] = (
                     dict(unknown_loads)
                 )
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
 
         if not coordinator.store_data.nilm_session_history_by_circuit.get(circuit_id):
             coordinator.store_data.nilm_session_history_by_circuit[circuit_id] = (
                 _demo_seed_list(seed.get("sessions"))
             )
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
 
         if not coordinator.store_data.nilm_label_intervals_by_circuit.get(circuit_id):
             coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = (
                 _demo_seed_list(seed.get("label_intervals"))
             )
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
 
         if not coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
             circuit_id,
@@ -201,7 +201,7 @@ class NilmController:
             coordinator.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = (
                 _demo_seed_list(seed.get("assignments"))
             )
-            coordinator._mark_store_dirty()
+            coordinator.store_persistence.mark_dirty()
 
         coordinator._nilm_total_events_by_circuit[circuit_id] = max(
             coordinator._nilm_total_events_by_circuit[circuit_id],
@@ -427,9 +427,9 @@ class NilmController:
             existing.update(payload)
         del intervals[:-self._label_interval_max_items]
 
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now_dt)
+        await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(payload)
 
     async def async_delete_nilm_label_interval(
@@ -455,9 +455,9 @@ class NilmController:
             return False
         coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
         now_dt = coordinator._now_fn()
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now_dt)
+        await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return True
 
     async def async_assign_nilm_signature(
@@ -523,9 +523,11 @@ class NilmController:
             session_id=session_id_text,
             lifecycle_state="assigned",
         )
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(coordinator._now_fn())
+        await coordinator.store_persistence.async_save_if_dirty(
+            coordinator._now_fn()
+        )
         return dict(assignment)
 
     async def async_assign_nilm_interval(
@@ -566,9 +568,11 @@ class NilmController:
             confidence=interval.get("confidence", 1.0),
         )
         interval["assignment_id"] = assignment["assignment_id"]
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(coordinator._now_fn())
+        await coordinator.store_persistence.async_save_if_dirty(
+            coordinator._now_fn()
+        )
         return dict(assignment)
 
     async def async_validate_nilm_session(
@@ -786,9 +790,9 @@ class NilmController:
         if has_conflicts:
             assignment["last_rejected_at"] = now
         assignment["updated_at"] = now
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now_dt)
+        await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
 
     async def async_record_nilm_session_validation(
@@ -866,9 +870,9 @@ class NilmController:
             assignment.get("energy_estimate_error"),
         )
         assignment["updated_at"] = now
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(now_dt)
+        await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
 
     def apply_alert_feedback(
@@ -1126,11 +1130,11 @@ class NilmController:
 
     async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
         coordinator = self._coordinator
-        coordinator._mark_store_dirty()
+        coordinator.store_persistence.mark_dirty()
         self.refresh_state(circuit_id)
         coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator._async_save_store(coordinator._now_fn())
+        await coordinator.store_persistence.async_save_if_dirty(coordinator._now_fn())
 
     async def async_rename_nilm_appliance(
         self,
@@ -1338,9 +1342,11 @@ class NilmController:
 
     async def async_save_assignment_change(self) -> None:
         """Persist assignment changes and reload published NILM entities."""
-        self._coordinator._mark_store_dirty()
+        self._coordinator.store_persistence.mark_dirty()
         self._coordinator.async_set_updated_data(self._coordinator.state)
-        await self._coordinator._async_save_store(self._coordinator._now_fn())
+        await self._coordinator.store_persistence.async_save_if_dirty(
+            self._coordinator._now_fn()
+        )
         await self._coordinator._async_reload_config_entry()
 
 

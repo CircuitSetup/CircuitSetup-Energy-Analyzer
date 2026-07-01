@@ -111,6 +111,10 @@ class _SettingsCoordinator:
         self.saved: list[datetime] = []
         self.notified = 0
         self.episode_keys: list[tuple[tuple[str, ...], ...]] = []
+        self.store_persistence = SimpleNamespace(
+            async_save_if_dirty=self._record_store_save,
+            mark_dirty=self._record_store_dirty,
+        )
         self.notification_controller = SimpleNamespace(
             async_notify_settings_recommendations_if_needed=(
                 self._record_settings_recommendation_notification
@@ -147,7 +151,7 @@ class _SettingsCoordinator:
     async def _async_persist_config_entry_options(self) -> None:
         self.persist_count += 1
 
-    def _mark_store_dirty(self) -> None:
+    def _record_store_dirty(self) -> None:
         self.dirty_count += 1
 
     def _refresh_settings_recommendation_state(self, now: datetime) -> None:
@@ -165,7 +169,7 @@ class _SettingsCoordinator:
     def async_set_updated_data(self, state: object) -> None:
         self.updated.append(state)
 
-    async def _async_save_store(self, now: datetime) -> None:
+    async def _record_store_save(self, now: datetime) -> None:
         self.saved.append(now)
 
     async def _record_settings_recommendation_notification(self) -> None:
