@@ -14,6 +14,9 @@ class StorePersistenceManager:
         *,
         newest_mapping_items: Callable[[Any, int], list[dict[str, Any]]],
         mapping_time: Callable[..., datetime],
+        alert_feedback_is_expired: Callable[[Any, datetime], bool],
+        alert_feedback_max_age: timedelta,
+        alert_feedback_max_items: int,
         nilm_signatures_max_items: int,
         nilm_unknown_loads_max_items: int,
         nilm_session_history_max_age: timedelta,
@@ -22,6 +25,9 @@ class StorePersistenceManager:
         self._coordinator = coordinator
         self._newest_mapping_items = newest_mapping_items
         self._mapping_time = mapping_time
+        self._alert_feedback_is_expired = alert_feedback_is_expired
+        self._alert_feedback_max_age = alert_feedback_max_age
+        self._alert_feedback_max_items = alert_feedback_max_items
         self._nilm_signatures_max_items = nilm_signatures_max_items
         self._nilm_unknown_loads_max_items = nilm_unknown_loads_max_items
         self._nilm_session_history_max_age = nilm_session_history_max_age
@@ -85,3 +91,25 @@ class StorePersistenceManager:
                 ),
                 reverse=True,
             )[: self._nilm_session_history_max_items]
+
+    def prune_alert_feedback(self, now: datetime) -> None:
+        """Apply retention caps to alert feedback state."""
+        store_data = self._coordinator.store_data
+        cutoff = now - self._alert_feedback_max_age
+        retained = {
+            key: value
+            for key, value in store_data.alert_feedback.items()
+            if not self._alert_feedback_is_expired(value, now)
+            and self._mapping_time(value, "created_at", "timestamp") >= cutoff
+        }
+        store_data.alert_feedback = dict(
+            sorted(
+                retained.items(),
+                key=lambda item: self._mapping_time(
+                    item[1],
+                    "created_at",
+                    "timestamp",
+                ),
+                reverse=True,
+            )[: self._alert_feedback_max_items]
+        )
