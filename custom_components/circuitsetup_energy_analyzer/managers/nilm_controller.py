@@ -5,6 +5,8 @@ from datetime import datetime
 from statistics import median
 from typing import Any
 
+from ..models import AlertEvidence
+
 
 class NilmController:
     """Own NILM appliance assignment lifecycle workflows."""
@@ -697,6 +699,64 @@ class NilmController:
         await coordinator._async_save_store(now_dt)
         return dict(assignment)
 
+    def apply_alert_feedback(
+        self,
+        alert: AlertEvidence,
+        action: str,
+        now: datetime,
+    ) -> None:
+        """Apply alert feedback to a NILM assignment."""
+        if alert.features.get("source") != "nilm":
+            return
+        assignment_id = str(alert.features.get("assignment_id") or "").strip()
+        if not assignment_id:
+            return
+        try:
+            assignment = self.assignment_for_id(alert.circuit_id, assignment_id)
+        except ValueError:
+            return
+        current_confidence = self._nonnegative_float_value(
+            assignment.get("confidence"),
+            default=0.0,
+        )
+        session_id = ""
+        if _alert_feature(alert) == "nilm_appliance_finished":
+            notification_key = str(alert.features.get("notification_key") or "").strip()
+            notification_key_parts = notification_key.split(":", 1)
+            if len(notification_key_parts) == 2:
+                session_id = notification_key_parts[1].strip()
+        confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
+        rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
+        if action == "correct":
+            assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
+            assignment["last_validation"] = "correct"
+            if session_id:
+                self._append_unique(confirmed, session_id)
+                rejected = [value for value in rejected if value != session_id]
+        elif action == "wrong_appliance":
+            assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
+            assignment["last_validation"] = "wrong_appliance"
+            assignment["lifecycle_state"] = "needs_validation"
+            if session_id:
+                self._append_unique(rejected, session_id)
+                confirmed = [value for value in confirmed if value != session_id]
+        else:
+            return
+        assignment["confirmed_session_ids"] = confirmed
+        assignment["rejected_session_ids"] = rejected
+        assignment["confirmed_sessions"] = len(confirmed)
+        assignment["rejected_sessions"] = len(rejected)
+        assignment["adjusted_sessions"] = len(
+            self._clean_string_list(assignment.get("adjusted_session_ids")),
+        )
+        false_positive_denominator = len(confirmed) + len(rejected)
+        assignment["false_positive_rate"] = (
+            round(len(rejected) / false_positive_denominator, 3)
+            if false_positive_denominator
+            else 0.0
+        )
+        assignment["updated_at"] = now.isoformat()
+
     def assignment_for_session(
         self,
         circuit_id: str,
@@ -1110,3 +1170,11 @@ class NilmController:
         self._coordinator.async_set_updated_data(self._coordinator.state)
         await self._coordinator._async_save_store(self._coordinator._now_fn())
         await self._coordinator._async_reload_config_entry()
+
+
+def _alert_feature(alert: AlertEvidence) -> str:
+    if alert.feature:
+        return alert.feature
+    if alert.event_type is not None:
+        return alert.event_type.value
+    return "alert"

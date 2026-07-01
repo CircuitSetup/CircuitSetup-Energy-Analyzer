@@ -4074,56 +4074,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         action: str,
         now: datetime,
     ) -> None:
-        if alert.features.get("source") != "nilm":
-            return
-        assignment_id = str(alert.features.get("assignment_id") or "").strip()
-        if not assignment_id:
-            return
-        try:
-            assignment = self._nilm_assignment_for_id(alert.circuit_id, assignment_id)
-        except ValueError:
-            return
-        current_confidence = _nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
-        )
-        session_id = ""
-        if _alert_feature(alert) == "nilm_appliance_finished":
-            notification_key = str(alert.features.get("notification_key") or "").strip()
-            notification_key_parts = notification_key.split(":", 1)
-            if len(notification_key_parts) == 2:
-                session_id = notification_key_parts[1].strip()
-        confirmed = _clean_string_list(assignment.get("confirmed_session_ids"))
-        rejected = _clean_string_list(assignment.get("rejected_session_ids"))
-        if action == "correct":
-            assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
-            assignment["last_validation"] = "correct"
-            if session_id:
-                _append_unique(confirmed, session_id)
-                rejected = [value for value in rejected if value != session_id]
-        elif action == "wrong_appliance":
-            assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
-            assignment["last_validation"] = "wrong_appliance"
-            assignment["lifecycle_state"] = "needs_validation"
-            if session_id:
-                _append_unique(rejected, session_id)
-                confirmed = [value for value in confirmed if value != session_id]
-        else:
-            return
-        assignment["confirmed_session_ids"] = confirmed
-        assignment["rejected_session_ids"] = rejected
-        assignment["confirmed_sessions"] = len(confirmed)
-        assignment["rejected_sessions"] = len(rejected)
-        assignment["adjusted_sessions"] = len(
-            _clean_string_list(assignment.get("adjusted_session_ids")),
-        )
-        false_positive_denominator = len(confirmed) + len(rejected)
-        assignment["false_positive_rate"] = (
-            round(len(rejected) / false_positive_denominator, 3)
-            if false_positive_denominator
-            else 0.0
-        )
-        assignment["updated_at"] = now.isoformat()
+        self.nilm_controller.apply_alert_feedback(alert, action, now)
 
     def _retire_alert_id(self: Self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
@@ -4630,14 +4581,6 @@ def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
         return False
     sample_time = _datetime_or_none(sample.get("timestamp"))
     return sample_time is not None and sample_time >= cutoff
-
-
-def _alert_feature(alert: AlertEvidence) -> str:
-    if alert.feature:
-        return alert.feature
-    if alert.event_type is not None:
-        return alert.event_type.value
-    return "alert"
 
 
 def _normalized_temperature_unit(unit: str) -> str:
