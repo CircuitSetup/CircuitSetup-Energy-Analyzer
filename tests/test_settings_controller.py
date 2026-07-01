@@ -88,6 +88,16 @@ class _SettingsCoordinator:
         self.saved: list[datetime] = []
         self.notified = 0
         self.rebuild_calls: list[tuple[datetime, str | None]] = []
+        self.goal_context = SimpleNamespace(name="goal_context")
+        self.goal_result = SimpleNamespace(name="goal_result")
+        self.energy_goal_refreshes: list[
+            tuple[str, SimpleNamespace, SimpleNamespace]
+        ] = []
+        self.context_calls: list[datetime] = []
+        self.applied_feature_results: list[SimpleNamespace] = []
+        self._energy_goal_processor = SimpleNamespace(
+            refresh_state=self._refresh_energy_goal_state
+        )
 
     def _now_fn(self) -> datetime:
         return self.now
@@ -131,6 +141,20 @@ class _SettingsCoordinator:
         circuit_id: str,
     ) -> SimpleNamespace:
         return SimpleNamespace(window_days=7, daily_spike_ratio=0.25)
+
+    def _energy_goal_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(daily_goal_kwh=None, goal_alert_ratio=1.0)
+
+    def _activity_alert_settings_for_config(
+        self,
+        config: SimpleNamespace | None,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(max_active_minutes=None, max_idle_minutes=None)
 
     def _demand_settings_for_config(
         self,
@@ -191,6 +215,22 @@ class _SettingsCoordinator:
             measured_energy_entities=(),
             tolerance_percent=5.0,
         )
+
+    def _build_processing_context(self, now: datetime) -> SimpleNamespace:
+        self.context_calls.append(now)
+        return self.goal_context
+
+    def _refresh_energy_goal_state(
+        self,
+        circuit_id: str,
+        config: SimpleNamespace,
+        context: SimpleNamespace,
+    ) -> SimpleNamespace:
+        self.energy_goal_refreshes.append((circuit_id, config, context))
+        return self.goal_result
+
+    async def _apply_feature_result(self, result: SimpleNamespace) -> None:
+        self.applied_feature_results.append(result)
 
 
 @pytest.mark.asyncio
@@ -541,3 +581,33 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
     ]
     assert coordinator.updated == [coordinator.state] * 3
     assert coordinator.saved == [coordinator.now] * 3
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_sets_goal_and_activity_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_energy_goal_settings("fridge", 12.0, 1.0)
+    await controller.async_set_activity_alert_settings("fridge", 45.0, 120.0)
+
+    assert coordinator.store_data.energy_goal_settings_by_circuit["fridge"] == {
+        "daily_goal_kwh": 12.0,
+        "goal_alert_ratio": 1.0,
+    }
+    assert coordinator.store_data.activity_alert_settings_by_circuit["fridge"] == {
+        "max_active_minutes": 45.0,
+        "max_idle_minutes": 120.0,
+    }
+    assert coordinator.context_calls == [coordinator.now]
+    assert coordinator.applied_feature_results == [coordinator.goal_result]
+    assert len(coordinator.energy_goal_refreshes) == 1
+    circuit_id, config, context = coordinator.energy_goal_refreshes[0]
+    assert circuit_id == "fridge"
+    assert config.circuit_id == "fridge"
+    assert context is coordinator.goal_context
+    assert coordinator.dirty_count == 2
+    assert coordinator.refreshed_circuits == [("fridge", coordinator.now)] * 2
+    assert coordinator.updated == [coordinator.state] * 2
+    assert coordinator.saved == [coordinator.now] * 2

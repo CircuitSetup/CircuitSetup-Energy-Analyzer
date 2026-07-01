@@ -105,6 +105,72 @@ class SettingsController:
             settings,
         )
 
+    async def async_set_energy_goal_settings(
+        self,
+        circuit_id: str,
+        daily_goal_kwh: Any = None,
+        goal_alert_ratio: Any = None,
+    ) -> None:
+        """Persist daily energy goal settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._energy_goal_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "goal_alert_ratio": _positive_float_value(
+                goal_alert_ratio,
+                default=current.goal_alert_ratio,
+            ),
+        }
+        if daily_goal_kwh is None:
+            if current.daily_goal_kwh is not None:
+                settings["daily_goal_kwh"] = current.daily_goal_kwh
+        else:
+            goal_kwh = _optional_positive_float_value(
+                daily_goal_kwh,
+                default=None,
+            )
+            settings["daily_goal_kwh"] = goal_kwh if goal_kwh is not None else 0.0
+        coordinator.store_data.energy_goal_settings_by_circuit[circuit_id] = settings
+        coordinator._mark_store_dirty()
+        now = coordinator._now_fn()
+        goal_result = coordinator._energy_goal_processor.refresh_state(
+            circuit_id,
+            config,
+            coordinator._build_processing_context(now),
+        )
+        await coordinator._apply_feature_result(goal_result)
+        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator._async_save_store(now)
+
+    async def async_set_activity_alert_settings(
+        self,
+        circuit_id: str,
+        max_active_minutes: Any = None,
+        max_idle_minutes: Any = None,
+    ) -> None:
+        """Persist user-configured activity alert settings for one circuit."""
+        coordinator = self._coordinator
+        current = coordinator._activity_alert_settings_for_config(None, circuit_id)
+        max_minutes = _optional_positive_float_value(
+            max_active_minutes,
+            default=current.max_active_minutes,
+        )
+        max_idle = _optional_positive_float_value(
+            max_idle_minutes,
+            default=current.max_idle_minutes,
+        )
+        settings: dict[str, Any] = {}
+        if max_minutes is not None:
+            settings["max_active_minutes"] = max_minutes
+        if max_idle is not None:
+            settings["max_idle_minutes"] = max_idle
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.activity_alert_settings_by_circuit,
+            settings,
+        )
+
     async def async_set_demand_settings(
         self,
         circuit_id: str,
