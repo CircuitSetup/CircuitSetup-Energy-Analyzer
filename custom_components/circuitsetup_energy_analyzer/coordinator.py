@@ -72,12 +72,6 @@ from .context_sources import (
     flow_entities_for_settings as _flow_entities_for_settings,
 )
 from .context_sources import (
-    has_mains_source_configured as _has_mains_source_from_sources,
-)
-from .context_sources import (
-    has_rain_context_source_configured as _has_rain_context_source_from_sources,
-)
-from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
 from .cost import CostSettings
@@ -2266,7 +2260,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         advanced_settings: Mapping[str, Any],
         now: datetime,
     ) -> dict[str, Any]:
-        flow_entities = self._flow_entities_for_circuit(advanced_settings)
+        flow_entities = _flow_entities_for_settings(
+            self.entry_data,
+            self.options,
+            advanced_settings,
+        )
         threshold_minutes = int(
             advanced_settings.get(
                 CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
@@ -2364,16 +2362,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.entry_data,
             self.options,
             key,
-        )
-
-    def _flow_entities_for_circuit(
-        self: Self,
-        advanced_settings: Mapping[str, Any],
-    ) -> tuple[str, ...]:
-        return _flow_entities_for_settings(
-            self.entry_data,
-            self.options,
-            advanced_settings,
         )
 
     def _binary_entity_active(self: Self, entity_id: str | None) -> bool | None:
@@ -2932,18 +2920,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def _sync_setup_health_repairs(self: Self, circuit_id: str) -> None:
         await self.setup_health.async_sync_setup_health_repairs(circuit_id)
-
-    def _has_rain_context_source_configured(self: Self) -> bool:
-        return _has_rain_context_source_from_sources(
-            self.entry_data,
-            self.options,
-        )
-
-    def _has_mains_source_configured(self: Self) -> bool:
-        return _has_mains_source_from_sources(
-            self.entry_data,
-            self.options,
-        )
 
     def _nilm_signature_payloads(
         self: Self,
