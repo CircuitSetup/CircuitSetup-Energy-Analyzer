@@ -331,3 +331,49 @@ def test_settings_controller_reads_advanced_settings_for_circuit() -> None:
     assert settings["balance_negative_tolerance_w"] == 250.0
     assert settings["solar_export_tolerance_w"] == 120.0
     assert settings["solar_surplus_threshold_w"] == 500.0
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_sets_threshold_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_leg_imbalance_settings("hvac", 0.4, 800.0)
+    await controller.async_set_metric_consistency_settings("hvac", 12.0, 0.08, 120.0)
+    await controller.async_set_mains_balance_settings("mains", 250.0)
+    await controller.async_set_solar_flow_settings(
+        "mains",
+        100.0,
+        500.0,
+        1200.0,
+        350.0,
+    )
+
+    assert coordinator.store_data.leg_imbalance_settings_by_circuit["hvac"] == {
+        "warning_ratio": 0.4,
+        "minimum_total_power_w": 800.0,
+    }
+    assert coordinator.store_data.metric_consistency_settings_by_circuit["hvac"] == {
+        "apparent_power_tolerance_percent": 12.0,
+        "power_factor_tolerance": 0.08,
+        "minimum_apparent_power_va": 120.0,
+    }
+    assert coordinator.store_data.balance_settings_by_circuit["mains"] == {
+        "negative_tolerance_w": 250.0
+    }
+    assert coordinator.store_data.solar_flow_settings_by_circuit["mains"] == {
+        "export_tolerance_w": 100.0,
+        "solar_surplus_threshold_w": 500.0,
+        "high_solar_surplus_threshold_w": 1200.0,
+        "flexible_load_running_threshold_w": 350.0,
+    }
+    assert coordinator.dirty_count == 4
+    assert coordinator.refreshed_circuits == [
+        ("hvac", coordinator.now),
+        ("hvac", coordinator.now),
+        ("mains", coordinator.now),
+        ("mains", coordinator.now),
+    ]
+    assert coordinator.updated == [coordinator.state] * 4
+    assert coordinator.saved == [coordinator.now] * 4
