@@ -1495,6 +1495,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
 
     assert "timeline" in PANEL_MODULE_VERSION
     assert "nilm-lanes" in PANEL_MODULE_VERSION
+    assert "dashboard-nilm-lanes" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1768,6 +1769,46 @@ card._nilmWorkspace = {
   history: { start: "2026-06-29T12:00:00Z", end: "2026-06-29T12:10:00Z" },
   known_load_overlays: [],
   solar_overlays: [],
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: ["sig-new"],
+      assignment_ids: []
+    },
+    assigned: {
+      label: "Assigned",
+      signature_ids: [],
+      assignment_ids: ["assignment-1"]
+    },
+    needs_validation: {
+      label: "Needs Validation",
+      signature_ids: [],
+      assignment_ids: ["assignment-2"]
+    },
+    ready_to_publish: {
+      label: "Ready to Publish",
+      signature_ids: [],
+      assignment_ids: ["assignment-3", "assignment-4"]
+    },
+    published: {
+      label: "Published",
+      signature_ids: [],
+      assignment_ids: ["assignment-5"]
+    },
+    ignored_expected: {
+      label: "Ignored / Expected",
+      signature_ids: ["sig-ignored"],
+      assignment_ids: []
+    }
+  },
+  lane_counts: {
+    needs_review: 1,
+    assigned: 1,
+    needs_validation: 1,
+    ready_to_publish: 2,
+    published: 1,
+    ignored_expected: 1
+  },
   sessions: [{
     start: "2026-06-29T12:01:00Z",
     end: "2026-06-29T12:09:00Z",
@@ -1795,6 +1836,9 @@ for (const expected of [
   "data-dashboard-alert-detail",
   "View notification detail",
   "NILM mains power",
+  "Review lanes",
+  "Ready to Publish",
+  "2 items",
   "Pool Pump",
   "axis-label",
   ">W<",
