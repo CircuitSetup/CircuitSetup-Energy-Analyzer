@@ -675,6 +675,7 @@ def test_coordinator_exposes_store_persistence_manager() -> None:
     assert callable(coordinator.store_persistence.prune_alert_history)
     assert callable(coordinator.store_persistence.prune_nilm_history)
     assert callable(coordinator.store_persistence.prune_alert_feedback)
+    assert callable(coordinator.store_persistence.prune_recommendation_history)
     assert coordinator._store_dirty is False
 
 

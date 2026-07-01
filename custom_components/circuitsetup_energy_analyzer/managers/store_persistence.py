@@ -23,6 +23,16 @@ class StorePersistenceManager:
         nilm_unknown_loads_max_items: int,
         nilm_session_history_max_age: timedelta,
         nilm_session_history_max_items: int,
+        recommendation_pending_status: Any,
+        recommendation_sort_key: Callable[[Any], Any],
+        recommendation_history_max_age: timedelta,
+        recommendation_history_max_items: int,
+        recommendation_decisions_max_age: timedelta,
+        recommendation_decisions_max_items: int,
+        compact_settings_recommendation_episode_key: Callable[
+            [tuple[tuple[str, ...], ...]],
+            tuple[tuple[str, ...], ...],
+        ],
     ) -> None:
         self._coordinator = coordinator
         self._newest_mapping_items = newest_mapping_items
@@ -36,6 +46,15 @@ class StorePersistenceManager:
         self._nilm_unknown_loads_max_items = nilm_unknown_loads_max_items
         self._nilm_session_history_max_age = nilm_session_history_max_age
         self._nilm_session_history_max_items = nilm_session_history_max_items
+        self._recommendation_pending_status = recommendation_pending_status
+        self._recommendation_sort_key = recommendation_sort_key
+        self._recommendation_history_max_age = recommendation_history_max_age
+        self._recommendation_history_max_items = recommendation_history_max_items
+        self._recommendation_decisions_max_age = recommendation_decisions_max_age
+        self._recommendation_decisions_max_items = recommendation_decisions_max_items
+        self._compact_settings_recommendation_episode_key = (
+            compact_settings_recommendation_episode_key
+        )
         self.dirty = False
 
     def mark_dirty(self) -> None:
@@ -126,4 +145,45 @@ class StorePersistenceManager:
                 ),
                 reverse=True,
             )[: self._alert_feedback_max_items]
+        )
+
+    def prune_recommendation_history(self, now: datetime) -> None:
+        """Apply retention caps to settings recommendation histories."""
+        store_data = self._coordinator.store_data
+        cutoff = now - self._recommendation_history_max_age
+        recommendations = {
+            recommendation_id: recommendation
+            for recommendation_id, recommendation in (
+                store_data.settings_recommendations.items()
+            )
+            if recommendation.status is self._recommendation_pending_status
+            or recommendation.created_at >= cutoff
+        }
+        store_data.settings_recommendations = dict(
+            sorted(
+                recommendations.items(),
+                key=lambda item: self._recommendation_sort_key(item[1]),
+                reverse=True,
+            )[: self._recommendation_history_max_items]
+        )
+
+        decision_cutoff = now - self._recommendation_decisions_max_age
+        decisions = {
+            unique_key: decision
+            for unique_key, decision in (
+                store_data.settings_recommendation_decisions.items()
+            )
+            if decision.decided_at >= decision_cutoff
+        }
+        store_data.settings_recommendation_decisions = dict(
+            sorted(
+                decisions.items(),
+                key=lambda item: item[1].decided_at,
+                reverse=True,
+            )[: self._recommendation_decisions_max_items]
+        )
+        store_data.settings_recommendation_notification_episode_key = (
+            self._compact_settings_recommendation_episode_key(
+                store_data.settings_recommendation_notification_episode_key
+            )
         )

@@ -987,6 +987,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             nilm_unknown_loads_max_items=NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
             nilm_session_history_max_age=NILM_SESSION_HISTORY_MAX_AGE,
             nilm_session_history_max_items=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+            recommendation_pending_status=RecommendationStatus.PENDING,
+            recommendation_sort_key=_recommendation_sort_key,
+            recommendation_history_max_age=RECOMMENDATION_HISTORY_MAX_AGE,
+            recommendation_history_max_items=RECOMMENDATION_HISTORY_MAX_ITEMS,
+            recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
+            recommendation_decisions_max_items=RECOMMENDATION_DECISIONS_MAX_ITEMS,
+            compact_settings_recommendation_episode_key=(
+                _compact_settings_recommendation_episode_key
+            ),
         )
         self.notification_controller = NotificationController(
             self,
@@ -6074,43 +6083,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.prune_alert_feedback(now)
 
     def _prune_recommendation_history(self: Self, now: datetime) -> None:
-        cutoff = now - RECOMMENDATION_HISTORY_MAX_AGE
-        recommendations = {
-            recommendation_id: recommendation
-            for recommendation_id, recommendation in (
-                self.store_data.settings_recommendations.items()
-            )
-            if recommendation.status is RecommendationStatus.PENDING
-            or recommendation.created_at >= cutoff
-        }
-        self.store_data.settings_recommendations = dict(
-            sorted(
-                recommendations.items(),
-                key=lambda item: _recommendation_sort_key(item[1]),
-                reverse=True,
-            )[:RECOMMENDATION_HISTORY_MAX_ITEMS]
-        )
-
-        decision_cutoff = now - RECOMMENDATION_DECISIONS_MAX_AGE
-        decisions = {
-            unique_key: decision
-            for unique_key, decision in (
-                self.store_data.settings_recommendation_decisions.items()
-            )
-            if decision.decided_at >= decision_cutoff
-        }
-        self.store_data.settings_recommendation_decisions = dict(
-            sorted(
-                decisions.items(),
-                key=lambda item: item[1].decided_at,
-                reverse=True,
-            )[:RECOMMENDATION_DECISIONS_MAX_ITEMS]
-        )
-        self.store_data.settings_recommendation_notification_episode_key = (
-            _compact_settings_recommendation_episode_key(
-                self.store_data.settings_recommendation_notification_episode_key
-            )
-        )
+        self.store_persistence.prune_recommendation_history(now)
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
