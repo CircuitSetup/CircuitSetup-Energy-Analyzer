@@ -3511,10 +3511,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_persistence.dirty = bool(value)
 
     @property
-    def _notified_alert_ids(self: Self) -> set[str]:
-        return self.notification_controller.notified_alert_ids
-
-    @property
     def _active_repair_issues(self: Self) -> set[tuple[str, str]]:
         return self.setup_health.active_repair_issues
 
