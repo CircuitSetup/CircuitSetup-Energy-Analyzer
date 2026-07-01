@@ -63,9 +63,6 @@ from .const import (
     DOMAIN,
 )
 from .context_sources import (
-    configured_context_entities as _configured_context_entities_from_sources,
-)
-from .context_sources import (
     configured_context_entity as _configured_context_entity_from_sources,
 )
 from .context_sources import (
@@ -1128,9 +1125,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if isawaitable(result):
             await result
 
-    def _advanced_settings_for_circuit(self: Self, circuit_id: str) -> dict[str, Any]:
-        return self.settings_controller.advanced_settings_for_circuit(circuit_id)
-
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         self.settings_controller.refresh_settings_recommendation_state(now)
 
@@ -2124,7 +2118,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> None:
         circuit_id = config.circuit_id
-        advanced_settings = self._advanced_settings_for_circuit(circuit_id)
+        advanced_settings = self.settings_controller.advanced_settings_for_circuit(
+            circuit_id
+        )
         profile = config.appliance_profile
         changed = False
 
@@ -2352,13 +2348,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _configured_context_entity(self: Self, key: str) -> str:
         return _configured_context_entity_from_sources(
-            self.entry_data,
-            self.options,
-            key,
-        )
-
-    def _configured_context_entities(self: Self, key: str) -> tuple[str, ...]:
-        return _configured_context_entities_from_sources(
             self.entry_data,
             self.options,
             key,
