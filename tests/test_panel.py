@@ -2224,7 +2224,7 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
                 "appliance_id": "dishwasher",
                 "display_name": "Dishwasher",
                 "mains_circuit_id": "mains",
-                "confirmed_session_ids": ["session-confirmed"],
+                "confirmed_session_ids": ["session-confirmed", "session-merged"],
                 "rejected_session_ids": ["session-rejected"],
             }
         ]
@@ -2238,6 +2238,14 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
                 "start": "2026-06-06T08:00:00+00:00",
                 "end": "2026-06-06T08:45:00+00:00",
                 "assignment_id": "assignment-dishwasher",
+            },
+            {
+                "session_id": "session-merged",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T09:00:00+00:00",
+                "end": "2026-06-06T09:45:00+00:00",
+                "assignment_id": "assignment-before-merge",
             },
             {
                 "session_id": "session-pending",
@@ -2255,6 +2263,8 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
     sessions = {session["session_id"]: session for session in payload["sessions"]}
     assert "validate" not in sessions["session-confirmed"]["actions"]
     assert "reject" not in sessions["session-confirmed"]["actions"]
+    assert "validate" not in sessions["session-merged"]["actions"]
+    assert "reject" not in sessions["session-merged"]["actions"]
     assert "validate" in sessions["session-pending"]["actions"]
     assert "reject" in sessions["session-pending"]["actions"]
 
