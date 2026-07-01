@@ -111,6 +111,14 @@ class _SettingsCoordinator:
         self.saved: list[datetime] = []
         self.notified = 0
         self.episode_keys: list[tuple[tuple[str, ...], ...]] = []
+        self.notification_controller = SimpleNamespace(
+            async_notify_settings_recommendations_if_needed=(
+                self._record_settings_recommendation_notification
+            ),
+            set_settings_recommendation_notification_episode_key=(
+                self._record_settings_recommendation_episode_key
+            ),
+        )
         self.circuit_configs = [
             SimpleNamespace(
                 circuit_id="fridge",
@@ -145,7 +153,7 @@ class _SettingsCoordinator:
     def _refresh_settings_recommendation_state(self, now: datetime) -> None:
         self.refreshed_recommendations.append(now)
 
-    def _set_settings_recommendation_notification_episode_key(
+    def _record_settings_recommendation_episode_key(
         self,
         episode_key: tuple[tuple[str, ...], ...],
     ) -> None:
@@ -160,7 +168,7 @@ class _SettingsCoordinator:
     async def _async_save_store(self, now: datetime) -> None:
         self.saved.append(now)
 
-    async def _notify_settings_recommendations_if_needed(self) -> None:
+    async def _record_settings_recommendation_notification(self) -> None:
         self.notified += 1
 
     def _advanced_settings_for_circuit(self, circuit_id: str) -> dict[str, Any]:

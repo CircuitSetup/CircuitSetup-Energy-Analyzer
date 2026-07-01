@@ -128,7 +128,9 @@ class SettingsController:
             coordinator._mark_store_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator._async_save_store(now)
-        await coordinator._notify_settings_recommendations_if_needed()
+        await (
+            coordinator.notification_controller.async_notify_settings_recommendations_if_needed()
+        )
 
     def rebuild_setting_recommendations(
         self,
@@ -1076,7 +1078,9 @@ class SettingsController:
             if count > 0
         }
         if not pending_count_by_circuit:
-            coordinator._set_settings_recommendation_notification_episode_key(())
+            coordinator.notification_controller.set_settings_recommendation_notification_episode_key(
+                ()
+            )
 
     def visible_settings_recommendations(
         self,

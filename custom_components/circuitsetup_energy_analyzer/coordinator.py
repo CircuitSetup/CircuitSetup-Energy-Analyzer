@@ -922,7 +922,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._mark_store_dirty()
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
-        await self._notify_settings_recommendations_if_needed()
+        await (
+            self.notification_controller.async_notify_settings_recommendations_if_needed()
+        )
         return self.state
 
     def _refresh_config_metadata_state(self: Self, config: CircuitConfig) -> None:
@@ -1121,25 +1123,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _refresh_settings_recommendation_state(self: Self, now: datetime) -> None:
         self.settings_controller.refresh_settings_recommendation_state(now)
-
-    def _pending_settings_recommendations(
-        self: Self,
-        now: datetime,
-    ) -> list[SettingRecommendation]:
-        return self.settings_controller.pending_settings_recommendations(now)
-
-    async def _notify_settings_recommendations_if_needed(self: Self) -> None:
-        await (
-            self.notification_controller.async_notify_settings_recommendations_if_needed()
-        )
-
-    def _set_settings_recommendation_notification_episode_key(
-        self: Self,
-        episode_key: tuple[tuple[str, ...], ...],
-    ) -> None:
-        self.notification_controller.set_settings_recommendation_notification_episode_key(
-            episode_key
-        )
 
     async def async_set_energy_goal_settings(
         self: Self,

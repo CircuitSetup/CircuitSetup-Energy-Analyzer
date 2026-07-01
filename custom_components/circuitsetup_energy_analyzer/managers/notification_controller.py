@@ -99,9 +99,10 @@ class NotificationController:
     ) -> tuple[tuple[str, ...], ...]:
         """Return the duplicate-suppression key for pending recommendations."""
         parts: list[tuple[str, ...]] = []
-        for recommendation in self._coordinator._pending_settings_recommendations(
-            self._coordinator._now_fn()
-        ):
+        pending_recommendations = (
+            self._coordinator.settings_controller.pending_settings_recommendations
+        )
+        for recommendation in pending_recommendations(self._coordinator._now_fn()):
             evidence_key = repr(
                 self._material_evidence_key(
                     recommendation.feature,
