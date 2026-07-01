@@ -68,6 +68,7 @@ class _SettingsCoordinator:
             cost_settings_by_circuit={},
             demand_settings_by_circuit={},
             capacity_settings_by_circuit={},
+            utility_comparison_settings_by_circuit={},
             standby_settings_by_circuit={},
             leg_imbalance_settings_by_circuit={},
             metric_consistency_settings_by_circuit={},
@@ -150,6 +151,45 @@ class _SettingsCoordinator:
             window_hours=12,
             standby_threshold_w=5.0,
             always_on_alert_w=None,
+        )
+
+    def _billing_cycle_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            cycle_start_day=1,
+            budget_kwh=None,
+            budget_alert_ratio=1.0,
+        )
+
+    def _cost_settings_for_config(
+        self,
+        config: SimpleNamespace,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            cycle_start_day=1,
+            default_rate_per_kwh=None,
+            tou_rate_per_kwh=None,
+            tou_start="",
+            tou_end="",
+            tou_weekdays=(),
+            tou_name="Peak",
+        )
+
+    def _utility_comparison_settings_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            utility_energy_entity="",
+            utility_statistic_id="",
+            utility_source_type="auto",
+            utility_statistic_period="day",
+            measured_energy_entities=(),
+            tolerance_percent=5.0,
         )
 
 
@@ -442,3 +482,62 @@ async def test_settings_controller_sets_usage_and_load_settings() -> None:
     assert coordinator.refreshed_circuits == [("fridge", coordinator.now)] * 4
     assert coordinator.updated == [coordinator.state] * 4
     assert coordinator.saved == [coordinator.now] * 4
+
+
+@pytest.mark.asyncio
+async def test_settings_controller_sets_billing_cost_and_utility_settings() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_billing_cycle_settings("fridge", 15, 300.0, 0.9)
+    await controller.async_set_cost_settings(
+        "fridge",
+        1,
+        0.20,
+        0.30,
+        "17:00",
+        "21:00",
+        "0,1,2,3,4",
+        "Peak",
+    )
+    await controller.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="sensor.opower_current_bill_usage",
+        utility_statistic_id="opower:utility_elec_consumption",
+        utility_source_type="auto",
+        utility_statistic_period="day",
+        measured_energy_entities=["sensor.panel_import_energy"],
+        tolerance_percent=8.5,
+    )
+
+    assert coordinator.store_data.billing_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 15,
+        "budget_kwh": 300.0,
+        "budget_alert_ratio": 0.9,
+    }
+    assert coordinator.store_data.cost_settings_by_circuit["fridge"] == {
+        "cycle_start_day": 1,
+        "default_rate_per_kwh": 0.20,
+        "tou_rate_per_kwh": 0.30,
+        "tou_start": "17:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,1,2,3,4",
+        "tou_name": "Peak",
+    }
+    assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
+        "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_statistic_id": "opower:utility_elec_consumption",
+        "utility_source_type": "auto",
+        "utility_statistic_period": "day",
+        "measured_energy_entities": ["sensor.panel_import_energy"],
+        "tolerance_percent": 8.5,
+    }
+    assert coordinator.dirty_count == 3
+    assert coordinator.refreshed_circuits == [
+        ("fridge", coordinator.now),
+        ("fridge", coordinator.now),
+        ("mains", coordinator.now),
+    ]
+    assert coordinator.updated == [coordinator.state] * 3
+    assert coordinator.saved == [coordinator.now] * 3

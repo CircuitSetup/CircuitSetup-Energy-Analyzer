@@ -193,6 +193,146 @@ class SettingsController:
             settings,
         )
 
+    async def async_set_billing_cycle_settings(
+        self,
+        circuit_id: str,
+        cycle_start_day: Any = None,
+        budget_kwh: Any = None,
+        budget_alert_ratio: Any = None,
+    ) -> None:
+        """Persist billing-cycle usage forecast settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._billing_cycle_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "cycle_start_day": _positive_int_value(
+                cycle_start_day,
+                default=current.cycle_start_day,
+            ),
+            "budget_alert_ratio": _positive_float_value(
+                budget_alert_ratio,
+                default=current.budget_alert_ratio,
+            ),
+        }
+        budget = _optional_positive_float_value(
+            budget_kwh,
+            default=current.budget_kwh,
+        )
+        if budget is not None:
+            settings["budget_kwh"] = budget
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.billing_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_cost_settings(
+        self,
+        circuit_id: str,
+        cycle_start_day: Any = None,
+        default_rate_per_kwh: Any = None,
+        tou_rate_per_kwh: Any = None,
+        tou_start: Any = None,
+        tou_end: Any = None,
+        tou_weekdays: Any = None,
+        tou_name: Any = None,
+    ) -> None:
+        """Persist cost and Time-of-Use settings for one circuit."""
+        coordinator = self._coordinator
+        config = coordinator._config_for_circuit(circuit_id)
+        current = coordinator._cost_settings_for_config(config, circuit_id)
+        settings: dict[str, Any] = {
+            "cycle_start_day": _positive_int_value(
+                cycle_start_day,
+                default=current.cycle_start_day,
+            ),
+        }
+        default_rate = _optional_positive_float_value(
+            default_rate_per_kwh,
+            default=current.default_rate_per_kwh,
+        )
+        tou_rate = _optional_positive_float_value(
+            tou_rate_per_kwh,
+            default=current.tou_rate_per_kwh,
+        )
+        if default_rate is not None:
+            settings["default_rate_per_kwh"] = default_rate
+        if tou_rate is not None:
+            settings["tou_rate_per_kwh"] = tou_rate
+        settings["tou_start"] = str(tou_start or current.tou_start or "")
+        settings["tou_end"] = str(tou_end or current.tou_end or "")
+        weekdays = _weekday_csv_value(
+            tou_weekdays,
+            default=current.tou_weekdays,
+        )
+        if weekdays:
+            settings["tou_weekdays"] = weekdays
+        settings["tou_name"] = str(tou_name or current.tou_name or "Peak")
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.cost_settings_by_circuit,
+            settings,
+        )
+
+    async def async_set_utility_comparison_settings(
+        self,
+        circuit_id: str,
+        utility_energy_entity: Any = None,
+        measured_energy_entities: Any = None,
+        tolerance_percent: Any = None,
+        utility_statistic_id: Any = None,
+        utility_source_type: Any = None,
+        utility_statistic_period: Any = None,
+    ) -> None:
+        """Persist utility-vs-measured kWh comparison settings."""
+        coordinator = self._coordinator
+        current = coordinator._utility_comparison_settings_for_circuit(circuit_id)
+        utility_entity = (
+            current.utility_energy_entity
+            if utility_energy_entity is None
+            else str(utility_energy_entity).strip()
+        )
+        utility_statistic = (
+            current.utility_statistic_id
+            if utility_statistic_id is None
+            else str(utility_statistic_id).strip()
+        )
+        source_type = (
+            current.utility_source_type
+            if utility_source_type is None
+            else str(utility_source_type).strip()
+        )
+        statistic_period = (
+            current.utility_statistic_period
+            if utility_statistic_period is None
+            else str(utility_statistic_period).strip()
+        )
+        measured_entities = _entity_id_tuple_value(
+            measured_energy_entities,
+            default=current.measured_energy_entities,
+        )
+        settings: dict[str, Any] = {
+            "tolerance_percent": _nonnegative_float_value(
+                tolerance_percent,
+                default=current.tolerance_percent,
+            ),
+        }
+        if utility_entity:
+            settings["utility_energy_entity"] = utility_entity
+        if utility_statistic:
+            settings["utility_statistic_id"] = utility_statistic
+        if source_type:
+            settings["utility_source_type"] = source_type
+        if statistic_period:
+            settings["utility_statistic_period"] = statistic_period
+        if measured_entities:
+            settings["measured_energy_entities"] = list(measured_entities)
+        await self._async_save_circuit_settings(
+            circuit_id,
+            coordinator.store_data.utility_comparison_settings_by_circuit,
+            settings,
+        )
+
     async def async_set_leg_imbalance_settings(
         self,
         circuit_id: str,
@@ -922,6 +1062,50 @@ def _optional_positive_float_value(
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
+
+
+def _entity_id_tuple_value(
+    value: Any,
+    *,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        raw_items: Any = value.replace("\n", ",").split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        return default
+    return tuple(str(item).strip() for item in raw_items if str(item).strip())
+
+
+def _weekday_tuple_value(
+    value: Any,
+    *,
+    default: tuple[int, ...] = (),
+) -> tuple[int, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        raw_items: Any = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        return default
+    weekdays: list[int] = []
+    for item in raw_items:
+        try:
+            weekday = int(str(item).strip())
+        except (TypeError, ValueError):
+            continue
+        if 0 <= weekday <= 6 and weekday not in weekdays:
+            weekdays.append(weekday)
+    return tuple(weekdays) if weekdays else default
+
+
+def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
+    return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
 
 
 def _nonnegative_float_value(value: Any, *, default: float) -> float:
