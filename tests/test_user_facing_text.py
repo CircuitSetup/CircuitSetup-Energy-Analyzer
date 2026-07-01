@@ -1497,6 +1497,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "nilm-lanes" in PANEL_MODULE_VERSION
     assert "dashboard-nilm-lanes" in PANEL_MODULE_VERSION
     assert "nilm-review-card" in PANEL_MODULE_VERSION
+    assert "candidate-facts" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1601,6 +1602,14 @@ panel._nilmWorkspace = {
       signature_id: "sig-1",
       display_label: "Unknown load 1",
       confidence: 0.42,
+      typical_power_w: 720,
+      typical_duration_seconds: 1500,
+      seen_count: 4,
+      voltage_class: "120v",
+      dominant_leg: "a",
+      known_load_overlap: "No known-load overlap",
+      why_grouped: "Grouped by similar NILM on/off edges around 720 W.",
+      last_seen: "2026-06-06T08:00:00+00:00",
       actions: {
         label: {},
         assign: {},
@@ -1623,6 +1632,22 @@ for (const expected of [
   "1 signature needs labels or decisions.",
   "Next to review",
   "Unknown load 1",
+  "Typical power",
+  "720 W",
+  "Typical duration",
+  "25m",
+  "Seen count",
+  "4",
+  "Voltage class",
+  "120v",
+  "Dominant leg",
+  "a",
+  "Known-load overlap",
+  "No known-load overlap",
+  "Why grouped",
+  "Grouped by similar NILM on/off edges around 720 W.",
+  "Last seen",
+  "2026-06-06",
   "Save Label",
   "Assign Appliance",
   "Ignore",

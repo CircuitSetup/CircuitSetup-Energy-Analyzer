@@ -2284,6 +2284,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="metric">
             <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
             <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+            ${this._renderNilmSignatureFacts(item)}
             ${index === nextReviewIndex ? `<p class="muted">Use Needs review above for this signature's actions.</p>` : this._renderNilmSignatureReview(item, index)}
           </div>
         `, "Signatures group similar sessions that may be the same appliance.")}
@@ -2379,6 +2380,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <span>Next to review</span>
           <strong>${this._escape(title)}</strong>
           ${signature.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(Math.round(Number(signature.confidence || 0) * 100))}%</p>` : ""}
+          ${this._renderNilmSignatureFacts(signature)}
           ${this._renderNilmSignatureReview(signature, index)}
         </div>
       </div>
@@ -2424,6 +2426,37 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </div>
     `;
+  }
+
+  _renderNilmSignatureFacts(signature) {
+    const facts = [];
+    const addFact = (label, value) => {
+      if (value !== null && value !== undefined && value !== "") {
+        facts.push([label, value]);
+      }
+    };
+    addFact("Typical power", signature.typical_power_w !== undefined ? `${this._formatMetricValue(signature.typical_power_w)} W` : undefined);
+    addFact("Typical duration", signature.typical_duration_seconds !== undefined ? this._formatDuration(signature.typical_duration_seconds) : undefined);
+    addFact("Seen count", signature.seen_count);
+    addFact("Voltage class", signature.voltage_class);
+    addFact("Dominant leg", signature.dominant_leg);
+    addFact("Known-load overlap", this._formatNilmSignatureFact(signature.known_load_overlap));
+    addFact("Why grouped", signature.why_grouped);
+    addFact("Last seen", signature.last_seen ? this._formatDateTime(signature.last_seen) : undefined);
+    if (!facts.length) {
+      return "";
+    }
+    return facts.map(([label, value]) => `<p class="muted">${this._escape(label)}: ${this._escape(this._formatMetricValue(value))}</p>`).join("");
+  }
+
+  _formatNilmSignatureFact(value) {
+    if (Array.isArray(value)) {
+      return value.join(", ");
+    }
+    if (value && typeof value === "object") {
+      return JSON.stringify(value);
+    }
+    return value;
   }
 
   _renderNilmLabelIntervals(workspace) {
