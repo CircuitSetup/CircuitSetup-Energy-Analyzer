@@ -1870,7 +1870,7 @@ panel._nilmWorkspace = {
       end: "2026-06-24T19:03:00Z",
       display_label: "Dishwasher",
       assignment_id: "assignment-dishwasher",
-      confidence: 0.41,
+      confidence: 0.7,
       median_power_w: 720,
       estimated_energy_kwh: 0.61,
       actions: { validate: {}, reject: {} }
@@ -1883,8 +1883,8 @@ const html = panel._renderNilmWorkspaceBody();
 for (const expected of [
   "Estimated by NILM",
   "Low confidence",
-  "Confidence 41%",
-  'data-nilm-session-confidence="0.41"',
+  "Confidence 70%",
+  'data-nilm-session-confidence="0.70"',
   'data-nilm-low-confidence="true"'
 ]) {
   if (!html.includes(expected)) {

@@ -8,6 +8,7 @@ const SETUP_HEALTH_API_PATH = "/api/circuitsetup_energy_analyzer/setup_health";
 const SETUP_HEALTH_CALL_API_PATH = "circuitsetup_energy_analyzer/setup_health";
 const HISTORY_CALL_API_PREFIX = "history/period";
 const MAX_CHART_POINTS_PER_SERIES = 240;
+const NILM_LOW_CONFIDENCE_THRESHOLD = 0.8;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
@@ -3357,7 +3358,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return false;
     }
     const normalized = confidence <= 1 ? confidence : confidence / 100;
-    return normalized < 0.6;
+    return normalized < NILM_LOW_CONFIDENCE_THRESHOLD;
   }
 
   _formatComparisonValue(comparison, value) {
