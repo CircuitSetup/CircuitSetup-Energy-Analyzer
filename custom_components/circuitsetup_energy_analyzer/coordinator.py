@@ -978,6 +978,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self,
             newest_mapping_items=_newest_mapping_items,
             mapping_time=_mapping_time,
+            alert_history_max_age=ALERT_HISTORY_MAX_AGE,
+            alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
             alert_feedback_is_expired=_alert_feedback_is_expired,
             alert_feedback_max_age=ALERT_FEEDBACK_MAX_AGE,
             alert_feedback_max_items=ALERT_FEEDBACK_MAX_ITEMS,
@@ -6063,12 +6065,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.store_data.contextual_baselines_by_circuit = pruned_stats
 
     def _prune_alert_history(self: Self, now: datetime) -> None:
-        cutoff = now - ALERT_HISTORY_MAX_AGE
-        self.store_data.alerts = sorted(
-            (alert for alert in self.store_data.alerts if alert.timestamp >= cutoff),
-            key=lambda alert: alert.timestamp,
-            reverse=True,
-        )[:ALERT_HISTORY_MAX_ITEMS]
+        self.store_persistence.prune_alert_history(now)
 
     def _prune_nilm_history(self: Self, now: datetime) -> None:
         self.store_persistence.prune_nilm_history(now)
