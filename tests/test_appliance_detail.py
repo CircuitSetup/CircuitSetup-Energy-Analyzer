@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -283,10 +284,23 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["what_to_check_first"] == [
         "Validate this estimated appliance before relying on alerts."
     ]
-    assert "assignment-dishwasher" in detail["evidence_path"]
+    evidence_query = parse_qs(urlparse(detail["evidence_path"]).query)
+    assert evidence_query == {
+        "circuit_id": ["mains"],
+        "assignment_id": ["assignment-dishwasher"],
+        "nilm_workspace": ["1"],
+        "appliance_detail": ["1"],
+    }
+    review_path = payload["actions"]["review_nilm_assignment"]["path"]
+    review_query = parse_qs(urlparse(review_path).query)
+    assert review_query == {
+        "circuit_id": ["mains"],
+        "assignment_id": ["assignment-dishwasher"],
+        "nilm_workspace": ["1"],
+    }
     assert payload["actions"]["review_nilm_assignment"] == {
         "type": "navigate",
-        "path": detail["evidence_path"],
+        "path": review_path,
         "data": {
             "circuit_id": "mains",
             "assignment_id": "assignment-dishwasher",

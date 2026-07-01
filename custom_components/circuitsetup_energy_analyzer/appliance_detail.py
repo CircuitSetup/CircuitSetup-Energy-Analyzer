@@ -960,6 +960,7 @@ def _nilm_evidence_path(state: NilmVirtualApplianceState) -> str:
             "circuit_id": state.mains_circuit_id,
             "assignment_id": state.assignment_id,
             "nilm_workspace": "1",
+            "appliance_detail": "1",
         }
     )
     return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}"

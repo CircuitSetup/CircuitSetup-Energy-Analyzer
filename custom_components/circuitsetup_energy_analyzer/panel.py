@@ -106,7 +106,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260630-appliance-story-ui"
+PANEL_MODULE_VERSION = "20260701-appliance-detail-route"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
@@ -488,9 +488,16 @@ def _appliance_detail_actions(
         }
 
     if detail.source_type == "nilm_estimate" and detail.assignment_id:
+        review_query = urlencode(
+            {
+                ATTR_CIRCUIT_ID: detail.circuit_id,
+                ATTR_ASSIGNMENT_ID: detail.assignment_id,
+                "nilm_workspace": "1",
+            }
+        )
         actions["review_nilm_assignment"] = {
             "type": "navigate",
-            "path": detail.evidence_path,
+            "path": f"/{PANEL_URL_PATH}?{review_query}",
             "data": {
                 ATTR_CIRCUIT_ID: detail.circuit_id,
                 ATTR_ASSIGNMENT_ID: detail.assignment_id,
