@@ -46,7 +46,8 @@ class _SettingsCoordinator:
         self.store_data = SimpleNamespace(
             settings_recommendations={
                 recommendation.recommendation_id: recommendation
-            }
+            },
+            settings_recommendation_decisions={},
         )
         self.now = datetime(2026, 6, 30, 12, 5, tzinfo=UTC)
         self.set_values: list[tuple[str, str, object]] = []
@@ -100,18 +101,6 @@ class _SettingsCoordinator:
         self.rebuild_calls.append((now, circuit_id))
         return True
 
-    async def _async_record_setting_recommendation_decision(
-        self,
-        recommendation_id: str,
-        status: RecommendationStatus,
-    ) -> None:
-        stored = self.store_data.settings_recommendations[recommendation_id]
-        self.store_data.settings_recommendations[recommendation_id] = (
-            _recommendation(status=status)
-            if stored.recommendation_id == recommendation_id
-            else stored
-        )
-
 
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
@@ -161,8 +150,8 @@ async def test_settings_controller_recalculates_and_records_decisions() -> None:
     )
 
     assert coordinator.rebuild_calls == [(coordinator.now, "fridge")]
-    assert coordinator.dirty_count == 1
-    assert coordinator.saved == [coordinator.now]
+    assert coordinator.dirty_count == 2
+    assert coordinator.saved == [coordinator.now, coordinator.now]
     assert coordinator.notified == 1
     assert (
         coordinator.store_data.settings_recommendations[
@@ -170,3 +159,9 @@ async def test_settings_controller_recalculates_and_records_decisions() -> None:
         ].status
         is RecommendationStatus.DISMISSED
     )
+    decision = coordinator.store_data.settings_recommendation_decisions[
+        recommendation.unique_key
+    ]
+    assert decision.status is RecommendationStatus.DISMISSED
+    assert decision.denied_value == recommendation.suggested_value
+    assert coordinator.refreshed_recommendations[-1] == coordinator.now

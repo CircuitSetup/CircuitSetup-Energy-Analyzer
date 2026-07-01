@@ -195,7 +195,6 @@ from .settings_advisor import (
     DEFAULT_RECOMMENDATION_TTL,
     AdvisorCircuitContext,
     AdvisorInputs,
-    RecommendationDecision,
     RecommendationStatus,
     SettingRecommendation,
     build_settings_recommendations,
@@ -1688,35 +1687,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         recommendation_id: str,
         status: RecommendationStatus,
     ) -> None:
-        recommendation = self.store_data.settings_recommendations.get(
+        await self.settings_controller.async_record_setting_recommendation_decision(
             recommendation_id,
+            status,
         )
-        if (
-            recommendation is None
-            or recommendation.status is not RecommendationStatus.PENDING
-        ):
-            return
-
-        now = self._now_fn()
-        self.store_data.settings_recommendations[recommendation_id] = replace(
-            recommendation,
-            status=status,
-        )
-        self.store_data.settings_recommendation_decisions[
-            recommendation.unique_key
-        ] = RecommendationDecision(
-            unique_key=recommendation.unique_key,
-            status=status,
-            decided_at=now,
-            denied_value=recommendation.suggested_value,
-            evidence_fingerprint=recommendation_evidence_fingerprint(
-                recommendation,
-            ),
-        )
-        self._mark_store_dirty()
-        self._refresh_settings_recommendation_state(now)
-        self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
 
     def _advisor_inputs_for_config(
         self: Self,
