@@ -1794,6 +1794,19 @@ def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> N
     assert '${this._escape(recommendation.feature || "Suggested setting")}' not in asset
 
 
+def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    formatter_start = asset.index("_formatDuration(value) {")
+    formatter_end = asset.index("\n  _formatConfidence(value)", formatter_start)
+    formatter = asset[formatter_start:formatter_end]
+
+    null_guard = "value === null || value === undefined"
+    coercion = "Number(value)"
+
+    assert null_guard in formatter
+    assert formatter.index(null_guard) < formatter.index(coercion)
+
+
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
     asset_path = (
         INTEGRATION_DIR

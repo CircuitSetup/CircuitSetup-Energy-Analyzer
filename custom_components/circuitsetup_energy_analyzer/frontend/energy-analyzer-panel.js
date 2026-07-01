@@ -2940,6 +2940,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _formatDuration(value) {
+    if (value === null || value === undefined) {
+      return "Unknown";
+    }
     const seconds = Number(value);
     if (!Number.isFinite(seconds)) {
       return "Unknown";
