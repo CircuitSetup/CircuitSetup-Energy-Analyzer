@@ -2707,7 +2707,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "The workspace groups work into lanes",
         "Needs Review, Assigned, Needs Validation, Ready to Publish, "
         "Published, and Ignored / Expected",
-        "dashboard NILM card shows the same lane counts",
+        "dynamic dashboard NILM card can show the same lane counts "
+        "when it is available",
         "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
         "Disable Publishing",
