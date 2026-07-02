@@ -346,7 +346,10 @@ def test_coordinator_refreshes_rain_pump_context_from_rain_and_hvac() -> None:
     coordinator.state.run_cycle_runtime_seconds_by_circuit["hvac"] = 32 * 60
     coordinator.state.run_cycle_duty_cycle_by_circuit["hvac"] = 55.0
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["status"] == "weather_explained"
@@ -417,7 +420,10 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
     )
     coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 18 * 60
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["rain_intensity_per_hour"] == 0.02
@@ -481,7 +487,10 @@ def test_coordinator_marks_positive_rain_intensity_with_missing_unit_unknown() -
     )
     coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 7 * 60
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["rain_sensor_active"] is None
@@ -536,7 +545,10 @@ def test_coordinator_refreshes_water_flow_context_for_flow_without_load() -> Non
         now_fn=lambda: now,
     )
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["status"] == "possible_flow_without_load"
@@ -586,7 +598,10 @@ def test_coordinator_treats_positive_numeric_flow_sensor_as_active() -> None:
         now_fn=lambda: now,
     )
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["status"] == "possible_flow_without_load"
@@ -637,7 +652,10 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
         now_fn=lambda: now,
     )
 
-    coordinator._refresh_water_context_state(coordinator.circuit_configs[0], now)
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
 
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["flow_active_minutes"] == 0.0
@@ -4111,7 +4129,10 @@ def test_weather_context_history_excludes_same_ha_local_day_samples() -> None:
         now_fn=lambda: now,
     )
 
-    assert coordinator._weather_context_history_samples("hvac", now) == []
+    assert coordinator.environment_context.weather_context_history_samples(
+        "hvac",
+        now,
+    ) == []
 
 
 def test_dry_weather_pump_baseline_excludes_same_ha_local_day_samples() -> None:
@@ -4137,7 +4158,10 @@ def test_dry_weather_pump_baseline_excludes_same_ha_local_day_samples() -> None:
         now_fn=lambda: now,
     )
 
-    baseline = coordinator._dry_weather_pump_baseline("sump_pump", now)
+    baseline = coordinator.environment_context.dry_weather_pump_baseline(
+        "sump_pump",
+        now,
+    )
 
     assert baseline["dry_baseline_minutes"] is None
     assert baseline["comparable_window_count"] == 0
@@ -4199,7 +4223,10 @@ def test_dry_weather_pump_baseline_excludes_intensity_derived_rain_context() -> 
         now_fn=lambda: now,
     )
 
-    baseline = coordinator._dry_weather_pump_baseline("sump_pump", now)
+    baseline = coordinator.environment_context.dry_weather_pump_baseline(
+        "sump_pump",
+        now,
+    )
 
     assert baseline["dry_baseline_minutes"] == 7.0
     assert baseline["comparable_window_count"] == 2
@@ -4227,7 +4254,10 @@ def test_append_water_context_history_preserves_derived_rain_context() -> None:
         "hvac_compressor_runtime_minutes": 0.0,
     }
 
-    changed = coordinator._append_water_context_history("sump_pump", now)
+    changed = coordinator.environment_context.append_water_context_history(
+        "sump_pump",
+        now,
+    )
 
     assert changed is True
     assert coordinator.store_data.water_context_history_by_circuit["sump_pump"] == [
@@ -4281,7 +4311,10 @@ def test_append_water_context_history_replaces_same_ha_local_day() -> None:
         "hvac_compressor_runtime_minutes": 0.0,
     }
 
-    changed = coordinator._append_water_context_history("sump_pump", now)
+    changed = coordinator.environment_context.append_water_context_history(
+        "sump_pump",
+        now,
+    )
 
     assert changed is True
     assert coordinator.store_data.water_context_history_by_circuit["sump_pump"] == [
@@ -4323,7 +4356,7 @@ def test_append_weather_context_history_replaces_same_ha_local_day() -> None:
     )
     coordinator.state.run_cycle_count_by_circuit["hvac"] = 2
 
-    changed = coordinator._append_weather_context_history(
+    changed = coordinator.environment_context.append_weather_context_history(
         "hvac",
         now,
         temperature=91.0,

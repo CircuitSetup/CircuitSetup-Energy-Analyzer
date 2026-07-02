@@ -1,0 +1,667 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from datetime import datetime
+from statistics import median
+from typing import Any
+
+from ..const import (
+    CONF_EXPECTS_WATER_FLOW,
+    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+    CONF_RAIN_INTENSITY_ENTITY,
+    CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+    CONF_RAIN_SENSOR_ENTITY,
+    CONF_WATER_FLOW_CORRELATION_ENABLED,
+    DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+    DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
+    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
+    DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+)
+from ..context_sources import flow_entities_for_settings
+from ..local_time import local_date
+from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
+from ..water_correlations import (
+    FlowCorrelationInput,
+    RainPumpCorrelationInput,
+    evaluate_flow_correlation,
+    evaluate_rain_pump_correlation,
+)
+from ..weather_context import WeatherContextSample, evaluate_weather_context
+
+WEATHER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
+WATER_CONTEXT_HISTORY_MAX_SAMPLES = 1008
+HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
+    {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.ELECTRIC_HEAT,
+    }
+)
+PUMP_WATER_CONTEXT_PROFILES = frozenset(
+    {
+        ApplianceProfile.SUMP_PUMP,
+        ApplianceProfile.WATER_PUMP,
+        ApplianceProfile.WELL_PUMP,
+    }
+)
+FLOW_WATER_CONTEXT_PROFILES = frozenset(
+    {
+        ApplianceProfile.WATER_PUMP,
+        ApplianceProfile.WELL_PUMP,
+        ApplianceProfile.WATER_HEATER,
+        ApplianceProfile.WASHER,
+    }
+)
+
+
+class EnvironmentalContextManager:
+    """Refresh runtime weather, rain, and water-flow context state."""
+
+    def __init__(self, coordinator: Any) -> None:
+        self._coordinator = coordinator
+
+    def refresh_weather_context_state(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> None:
+        coordinator = self._coordinator
+        circuit_id = config.circuit_id
+        if config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES:
+            if coordinator.state_reducer.clear_weather_context_state(
+                coordinator.state,
+                coordinator.store_data,
+                circuit_id,
+            ):
+                self._mark_store_dirty()
+            return
+
+        outdoor_entity = coordinator.context_builder.outdoor_temperature_entity()
+        if not outdoor_entity:
+            if coordinator.state_reducer.clear_weather_context_state(
+                coordinator.state,
+                coordinator.store_data,
+                circuit_id,
+            ):
+                self._mark_store_dirty()
+            return
+
+        outdoor_temperature_reading = (
+            coordinator.context_builder.temperature_reading_for_entity(outdoor_entity)
+        )
+        outdoor_temperature = (
+            outdoor_temperature_reading["temperature_f"]
+            if outdoor_temperature_reading is not None
+            else None
+        )
+        runtime_minutes = (
+            coordinator.state.run_cycle_runtime_seconds_by_circuit.get(circuit_id, 0.0)
+            / 60.0
+        )
+        duty_cycle_percent = coordinator.state.run_cycle_duty_cycle_by_circuit.get(
+            circuit_id,
+            0.0,
+        )
+        coordinator.demo_data.seed_weather_context_history(
+            config,
+            now,
+            outdoor_temperature=outdoor_temperature,
+        )
+        history = self.weather_context_history_samples(circuit_id, now)
+        evidence = evaluate_weather_context(
+            outdoor_temperature=outdoor_temperature,
+            current_runtime_minutes=runtime_minutes,
+            current_duty_cycle_percent=duty_cycle_percent,
+            history=history,
+            mode=_weather_context_mode(config),
+            display_temperature=(
+                outdoor_temperature_reading["display_temperature"]
+                if outdoor_temperature_reading is not None
+                else None
+            ),
+            display_temperature_unit=(
+                outdoor_temperature_reading["display_unit"]
+                if outdoor_temperature_reading is not None
+                else "°F"
+            ),
+            observed_at=now,
+            time_zone=coordinator.context_builder.time_zone(),
+        )
+        if outdoor_temperature_reading is not None:
+            evidence["temperature_source_entity"] = outdoor_entity
+            evidence["temperature_source_unit"] = outdoor_temperature_reading[
+                "source_unit"
+            ]
+        if coordinator.store_data.weather_context_by_circuit.get(circuit_id) != (
+            evidence
+        ):
+            coordinator.store_data.weather_context_by_circuit[circuit_id] = evidence
+            self._mark_store_dirty()
+        coordinator.state.weather_context_by_circuit[circuit_id] = dict(evidence)
+        if outdoor_temperature is not None:
+            changed = self.append_weather_context_history(
+                circuit_id,
+                now,
+                temperature=outdoor_temperature,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
+            )
+            if changed:
+                self._mark_store_dirty()
+
+    def refresh_water_context_state(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> None:
+        coordinator = self._coordinator
+        circuit_id = config.circuit_id
+        settings_controller = coordinator.settings_controller
+        advanced_settings = settings_controller.advanced_settings_for_circuit(
+            circuit_id
+        )
+        profile = config.appliance_profile
+        changed = False
+
+        if profile in PUMP_WATER_CONTEXT_PROFILES and bool(
+            advanced_settings.get(
+                CONF_RAIN_PUMP_CORRELATION_ENABLED,
+                DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
+            )
+        ):
+            rain_evidence = self.rain_pump_context_evidence(
+                config,
+                advanced_settings,
+                now,
+            )
+            if coordinator.store_data.rain_pump_context_by_circuit.get(
+                circuit_id
+            ) != rain_evidence:
+                coordinator.store_data.rain_pump_context_by_circuit[circuit_id] = (
+                    rain_evidence
+                )
+                changed = True
+            coordinator.state.rain_pump_context_by_circuit[circuit_id] = dict(
+                rain_evidence
+            )
+        else:
+            changed = (
+                coordinator.state_reducer.clear_rain_pump_context_state(
+                    coordinator.state,
+                    coordinator.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
+
+        if profile in FLOW_WATER_CONTEXT_PROFILES and bool(
+            advanced_settings.get(
+                CONF_WATER_FLOW_CORRELATION_ENABLED,
+                DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+            )
+        ):
+            flow_evidence = self.water_flow_context_evidence(
+                config,
+                advanced_settings,
+                now,
+            )
+            if coordinator.store_data.water_flow_context_by_circuit.get(
+                circuit_id
+            ) != flow_evidence:
+                coordinator.store_data.water_flow_context_by_circuit[circuit_id] = (
+                    flow_evidence
+                )
+                changed = True
+            coordinator.state.water_flow_context_by_circuit[circuit_id] = dict(
+                flow_evidence
+            )
+        else:
+            changed = (
+                coordinator.state_reducer.clear_water_flow_context_state(
+                    coordinator.state,
+                    coordinator.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
+
+        if profile in PUMP_WATER_CONTEXT_PROFILES | FLOW_WATER_CONTEXT_PROFILES:
+            if self.append_water_context_history(circuit_id, now):
+                changed = True
+        else:
+            changed = (
+                coordinator.state_reducer.clear_water_context_history(
+                    coordinator.state,
+                    coordinator.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
+
+        if changed:
+            self._mark_store_dirty()
+
+    def observe_water_context(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> AlertEvidence | None:
+        coordinator = self._coordinator
+        result = coordinator._water_context_alert_processor.process(
+            config,
+            coordinator.context_builder.build(now),
+        )
+        return result.alerts[0] if result.alerts else None
+
+    def rain_pump_context_evidence(
+        self,
+        config: CircuitConfig,
+        advanced_settings: Mapping[str, Any],
+        now: datetime,
+    ) -> dict[str, Any]:
+        coordinator = self._coordinator
+        rain_entity = coordinator.context_builder.configured_context_entity(
+            CONF_RAIN_SENSOR_ENTITY
+        )
+        rain_intensity_entity = coordinator.context_builder.configured_context_entity(
+            CONF_RAIN_INTENSITY_ENTITY
+        )
+        rain_active = coordinator.context_builder.binary_entity_active(rain_entity)
+        rain_intensity = coordinator.context_builder.numeric_entity_value(
+            rain_intensity_entity
+        )
+        rain_intensity_unit = coordinator.context_builder.entity_unit_of_measurement(
+            rain_intensity_entity
+        )
+        compressor_context = self.hvac_compressor_context()
+        runtime_minutes = self.runtime_minutes_for_circuit(config.circuit_id)
+        baseline = self.dry_weather_pump_baseline(config.circuit_id, now)
+        evidence = evaluate_rain_pump_correlation(
+            RainPumpCorrelationInput(
+                circuit_id=config.circuit_id,
+                appliance_profile=config.appliance_profile.value,
+                pump_runtime_minutes=runtime_minutes,
+                dry_baseline_minutes=baseline["dry_baseline_minutes"],
+                comparable_window_count=baseline["comparable_window_count"],
+                rain_active=rain_active,
+                rain_intensity_per_hour=rain_intensity,
+                rain_intensity_unit=rain_intensity_unit,
+                compressor_runtime_minutes=compressor_context["runtime_minutes"],
+                compressor_duty_cycle_percent=compressor_context[
+                    "duty_cycle_percent"
+                ],
+                sensitivity_delta_threshold_pct=float(
+                    advanced_settings.get(
+                        CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+                        DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
+                    )
+                ),
+            )
+        )
+        evidence["rain_sensor_entity"] = rain_entity
+        evidence["rain_sensor_active"] = rain_active
+        evidence["rain_intensity_entity"] = rain_intensity_entity
+        evidence["rain_intensity_per_hour"] = rain_intensity
+        evidence["rain_intensity_unit"] = rain_intensity_unit
+        evidence["rain_response_window_minutes"] = int(
+            advanced_settings.get(
+                CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+                DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
+            )
+        )
+        evidence["hvac_compressor_runtime_minutes"] = compressor_context[
+            "runtime_minutes"
+        ]
+        evidence["hvac_compressor_duty_cycle_percent"] = compressor_context[
+            "duty_cycle_percent"
+        ]
+        evidence["hvac_compressor_circuits"] = compressor_context["circuit_ids"]
+        return evidence
+
+    def water_flow_context_evidence(
+        self,
+        config: CircuitConfig,
+        advanced_settings: Mapping[str, Any],
+        now: datetime,
+    ) -> dict[str, Any]:
+        coordinator = self._coordinator
+        flow_entities = flow_entities_for_settings(
+            coordinator.entry_data,
+            coordinator.options,
+            advanced_settings,
+        )
+        threshold_minutes = int(
+            advanced_settings.get(
+                CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+                DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
+            )
+        )
+        flow_active_minutes = coordinator.context_builder.max_flow_active_minutes(
+            flow_entities,
+            now,
+        )
+        appliance_runtime_minutes = self.runtime_minutes_for_circuit(
+            config.circuit_id
+        )
+        recent_related_runtime_minutes = (
+            coordinator.context_builder.recent_flow_context_minutes(
+                flow_entities,
+                now,
+                threshold_minutes,
+            )
+            if appliance_runtime_minutes > 0
+            else 0.0
+        )
+        history_count = len(
+            coordinator.store_data.water_context_history_by_circuit.get(
+                config.circuit_id,
+                [],
+            )
+        )
+        evidence = evaluate_flow_correlation(
+            FlowCorrelationInput(
+                circuit_id=config.circuit_id,
+                appliance_profile=config.appliance_profile.value,
+                flow_active_minutes=flow_active_minutes,
+                appliance_runtime_minutes=appliance_runtime_minutes,
+                recent_related_runtime_minutes=recent_related_runtime_minutes,
+                mapped_appliance_count=self.mapped_water_appliance_count(
+                    flow_entities
+                ),
+                threshold_minutes=threshold_minutes,
+                expects_water_flow=bool(
+                    advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)
+                ),
+                comparable_window_count=history_count,
+            )
+        )
+        evidence["flow_sensor_entities"] = list(flow_entities)
+        evidence["flow_sensor_active"] = any(
+            coordinator.context_builder.binary_entity_active(entity_id) is True
+            for entity_id in flow_entities
+        )
+        evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
+        return evidence
+
+    def runtime_minutes_for_circuit(self, circuit_id: str) -> float:
+        return round(
+            self._coordinator.state.run_cycle_runtime_seconds_by_circuit.get(
+                circuit_id,
+                0.0,
+            )
+            / 60.0,
+            3,
+        )
+
+    def hvac_compressor_context(self) -> dict[str, Any]:
+        coordinator = self._coordinator
+        circuit_ids: list[str] = []
+        runtime_minutes = 0.0
+        duty_cycle_percent = 0.0
+        for config in coordinator.circuit_configs:
+            if config.appliance_profile not in {
+                ApplianceProfile.HVAC,
+                ApplianceProfile.HVAC_COMPRESSOR,
+            }:
+                continue
+            circuit_ids.append(config.circuit_id)
+            runtime_minutes += self.runtime_minutes_for_circuit(config.circuit_id)
+            duty_cycle_percent = max(
+                duty_cycle_percent,
+                coordinator.state.run_cycle_duty_cycle_by_circuit.get(
+                    config.circuit_id,
+                    0.0,
+                ),
+            )
+        return {
+            "circuit_ids": circuit_ids,
+            "runtime_minutes": round(runtime_minutes, 3),
+            "duty_cycle_percent": round(duty_cycle_percent, 3),
+        }
+
+    def dry_weather_pump_baseline(
+        self,
+        circuit_id: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        dry_samples: list[float] = []
+        time_zone = self._coordinator.context_builder.time_zone()
+        for sample in self._coordinator.store_data.water_context_history_by_circuit.get(
+            circuit_id,
+            [],
+        ):
+            if not isinstance(sample, Mapping):
+                continue
+            sample_time = _datetime_or_none(sample.get("timestamp"))
+            if sample_time is not None and _ha_local_date(
+                sample_time,
+                time_zone,
+            ) >= _ha_local_date(now, time_zone):
+                continue
+            if not _water_context_history_sample_is_dry(sample):
+                continue
+            if _float_or_none(sample.get("compressor_runtime_minutes")) not in (
+                None,
+                0.0,
+            ):
+                continue
+            runtime = _float_or_none(sample.get("pump_runtime_minutes"))
+            if runtime is not None:
+                dry_samples.append(runtime)
+        return {
+            "dry_baseline_minutes": (
+                round(float(median(dry_samples)), 3) if dry_samples else None
+            ),
+            "comparable_window_count": len(dry_samples),
+        }
+
+    def mapped_water_appliance_count(self, flow_entities: Iterable[str]) -> int:
+        if not tuple(flow_entities):
+            return 0
+        count = 0
+        for config in self._coordinator.circuit_configs:
+            if config.appliance_profile in FLOW_WATER_CONTEXT_PROFILES:
+                count += 1
+        return count
+
+    def append_water_context_history(
+        self,
+        circuit_id: str,
+        now: datetime,
+    ) -> bool:
+        coordinator = self._coordinator
+        rain_evidence = coordinator.state.rain_pump_context_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        flow_evidence = coordinator.state.water_flow_context_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if not rain_evidence and not flow_evidence:
+            return False
+        sample = {
+            "timestamp": now.isoformat(),
+            "rain_status": rain_evidence.get("status"),
+            "flow_status": flow_evidence.get("status"),
+            "pump_runtime_minutes": rain_evidence.get("pump_runtime_minutes"),
+            "flow_active_minutes": flow_evidence.get("flow_active_minutes"),
+            "mismatch_minutes": flow_evidence.get("mismatch_minutes"),
+            "rain_active": rain_evidence.get("rain_sensor_active"),
+            "compressor_runtime_minutes": rain_evidence.get(
+                "hvac_compressor_runtime_minutes"
+            ),
+        }
+        for key in (
+            "rain_state",
+            "rain_intensity_mm_per_hour",
+            "rain_intensity_bin",
+            "rain_context_issues",
+        ):
+            if key in rain_evidence:
+                sample[key] = rain_evidence[key]
+        history = coordinator.store_data.water_context_history_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        time_zone = coordinator.context_builder.time_zone()
+        for index in range(len(history) - 1, -1, -1):
+            existing_time = _datetime_or_none(history[index].get("timestamp"))
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                time_zone,
+            ) == _ha_local_date(now, time_zone):
+                if history[index] == sample:
+                    return False
+                history[index] = sample
+                coordinator.state.water_context_history_by_circuit[circuit_id] = [
+                    dict(item) for item in history
+                ]
+                return True
+
+        history.append(sample)
+        del history[:-WATER_CONTEXT_HISTORY_MAX_SAMPLES]
+        coordinator.state.water_context_history_by_circuit[circuit_id] = [
+            dict(item) for item in history
+        ]
+        return True
+
+    def weather_context_history_samples(
+        self,
+        circuit_id: str,
+        now: datetime,
+    ) -> list[WeatherContextSample]:
+        samples: list[WeatherContextSample] = []
+        raw_samples = (
+            self._coordinator.store_data.weather_context_history_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        time_zone = self._coordinator.context_builder.time_zone()
+        for raw_sample in raw_samples:
+            if not isinstance(raw_sample, Mapping):
+                continue
+            sample_time = _datetime_or_none(raw_sample.get("timestamp"))
+            if sample_time is None or _ha_local_date(
+                sample_time,
+                time_zone,
+            ) >= _ha_local_date(now, time_zone):
+                continue
+            temperature = _float_or_none(raw_sample.get("temperature"))
+            runtime = _float_or_none(raw_sample.get("runtime_minutes"))
+            duty = _float_or_none(raw_sample.get("duty_cycle_percent"))
+            if temperature is None or runtime is None or duty is None:
+                continue
+            samples.append(
+                WeatherContextSample(
+                    temperature=temperature,
+                    runtime_minutes=runtime,
+                    duty_cycle_percent=duty,
+                    timestamp=sample_time,
+                    energy_kwh=_float_or_none(raw_sample.get("energy_kwh")),
+                    start_count=(
+                        int(start_count)
+                        if (start_count := _float_or_none(
+                            raw_sample.get("start_count"),
+                        ))
+                        is not None
+                        else None
+                    ),
+                )
+            )
+        return samples
+
+    def append_weather_context_history(
+        self,
+        circuit_id: str,
+        now: datetime,
+        *,
+        temperature: float,
+        runtime_minutes: float,
+        duty_cycle_percent: float,
+    ) -> bool:
+        coordinator = self._coordinator
+        sample = {
+            "timestamp": now.isoformat(),
+            "temperature": round(float(temperature), 3),
+            "runtime_minutes": round(float(runtime_minutes), 3),
+            "duty_cycle_percent": round(float(duty_cycle_percent), 3),
+            "start_count": coordinator.state.run_cycle_count_by_circuit.get(
+                circuit_id,
+                0,
+            ),
+        }
+        history = coordinator.store_data.weather_context_history_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        time_zone = coordinator.context_builder.time_zone()
+        for index in range(len(history) - 1, -1, -1):
+            existing_time = _datetime_or_none(history[index].get("timestamp"))
+            if existing_time is not None and _ha_local_date(
+                existing_time,
+                time_zone,
+            ) == _ha_local_date(now, time_zone):
+                if history[index] == sample:
+                    return False
+                history[index] = sample
+                return True
+
+        history.append(sample)
+        del history[:-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES]
+        return True
+
+    def _mark_store_dirty(self) -> None:
+        self._coordinator.store_persistence.mark_dirty()
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
+    if time_zone is None or value.tzinfo is None:
+        return value.date()
+    return local_date(value, time_zone)
+
+
+def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
+    raw_issues = sample.get("rain_context_issues")
+    if isinstance(raw_issues, str) and raw_issues.strip():
+        return False
+    if isinstance(raw_issues, (list, tuple, set)) and raw_issues:
+        return False
+    intensity = _float_or_none(sample.get("rain_intensity_mm_per_hour"))
+    if intensity is not None and intensity > 0.0:
+        return False
+    rain_state = str(sample.get("rain_state") or "").strip().lower()
+    if rain_state:
+        return rain_state == "dry"
+    return sample.get("rain_active") is False
+
+
+def _weather_context_mode(config: CircuitConfig) -> str:
+    if config.appliance_profile is ApplianceProfile.ELECTRIC_HEAT:
+        return "heating"
+    return "cooling"
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
