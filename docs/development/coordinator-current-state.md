@@ -11,10 +11,10 @@ the most connected modules, with 7 incoming and 47 outgoing internal edges.
 
 The initial audit was completed before extraction. This branch now keeps the
 public coordinator facade stable while delegating dashboard creation, evidence
-actions, settings recommendations, entity profile changes, and strict state
-update reduction to focused managers. Source updates, processing pipeline,
-persistence, NILM, notification, and setup-health extraction remain staged for
-later PRs.
+actions, settings recommendations, entity profile changes, strict state update
+reduction, and source sample construction to focused managers. Further
+coordinator thinning should keep lifecycle ownership in the coordinator while
+moving remaining feature-specific behavior behind those managers.
 
 ## Responsibility Clusters
 
