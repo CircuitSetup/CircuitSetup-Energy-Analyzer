@@ -56,6 +56,24 @@ class NilmController:
         self._assignment_appliance_id = assignment_appliance_id
         self._assignment_id = assignment_id
         self._assignment_max_items = assignment_max_items
+        self._sample_processor: Any | None = None
+        self._topology_processor: Any | None = None
+        self._total_events_by_circuit: Any | None = None
+        self._unmatched_edges_by_circuit: Any | None = None
+
+    def configure_processors(
+        self,
+        *,
+        sample_processor: Any,
+        topology_processor: Any,
+        total_events_by_circuit: Any,
+        unmatched_edges_by_circuit: Any,
+    ) -> None:
+        """Attach NILM processors and runtime buckets after construction."""
+        self._sample_processor = sample_processor
+        self._topology_processor = topology_processor
+        self._total_events_by_circuit = total_events_by_circuit
+        self._unmatched_edges_by_circuit = unmatched_edges_by_circuit
 
     def enabled_for_config(self, config: Any) -> bool:
         """Return whether NILM processing is enabled for one circuit config."""
@@ -86,7 +104,7 @@ class NilmController:
     ) -> list[AlertEvidence]:
         """Process one NILM mains sample and apply resulting state updates."""
         coordinator = self._coordinator
-        result = coordinator._nilm_sample_processor.process(
+        result = self._sample_processor.process(
             sample,
             config,
             coordinator.context_builder.build(sample.timestamp),
@@ -126,7 +144,7 @@ class NilmController:
     ) -> AlertEvidence | None:
         """Fold one known-load NILM topology match into analyzer state."""
         coordinator = self._coordinator
-        result = coordinator._nilm_topology_processor.process(
+        result = self._topology_processor.process(
             mains_config,
             match,
             coordinator.context_builder.build(match.edge.timestamp),
@@ -144,7 +162,7 @@ class NilmController:
     ) -> list[dict[str, Any]]:
         """Build NILM signature review payloads for one circuit."""
         coordinator = self._coordinator
-        return coordinator._nilm_sample_processor._nilm_signature_payloads(
+        return self._sample_processor._nilm_signature_payloads(
             circuit_id,
             signatures,
             coordinator.context_builder.build(coordinator.current_time()),
@@ -153,7 +171,7 @@ class NilmController:
     def refresh_state(self, circuit_id: str) -> None:
         """Refresh derived NILM state for one circuit."""
         coordinator = self._coordinator
-        result = coordinator._nilm_sample_processor.refresh_state(
+        result = self._sample_processor.refresh_state(
             circuit_id,
             coordinator.context_builder.build(coordinator.current_time()),
         )
@@ -205,17 +223,19 @@ class NilmController:
             )
             coordinator.store_persistence.mark_dirty()
 
-        coordinator._nilm_total_events_by_circuit[circuit_id] = max(
-            coordinator._nilm_total_events_by_circuit[circuit_id],
+        total_events_by_circuit = self._total_events_by_circuit
+        unmatched_edges_by_circuit = self._unmatched_edges_by_circuit
+        total_events_by_circuit[circuit_id] = max(
+            total_events_by_circuit[circuit_id],
             int(seed.get("total_events") or 0),
         )
-        if not coordinator._nilm_unmatched_edges[circuit_id]:
-            coordinator._nilm_unmatched_edges[circuit_id] = _demo_nilm_edges(
+        if not unmatched_edges_by_circuit[circuit_id]:
+            unmatched_edges_by_circuit[circuit_id] = _demo_nilm_edges(
                 seed.get("edges"),
                 self._datetime_or_none,
             )
-        unmatched_edges = coordinator._nilm_unmatched_edges[circuit_id]
-        coordinator._nilm_unmatched_edges[circuit_id] = unmatched_edges[:8]
+        unmatched_edges = unmatched_edges_by_circuit[circuit_id]
+        unmatched_edges_by_circuit[circuit_id] = unmatched_edges[:8]
 
     def hydrate_state_from_store(self) -> None:
         """Hydrate NILM runtime state from retained store data."""

@@ -71,7 +71,7 @@ class _ActionCoordinator:
         del circuit_id
         return None
 
-    def _apply_nilm_alert_feedback(
+    def apply_nilm_alert_feedback(
         self,
         alert: AlertEvidence,
         action: str,

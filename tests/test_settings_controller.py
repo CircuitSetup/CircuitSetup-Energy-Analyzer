@@ -150,9 +150,6 @@ class _SettingsCoordinator:
             build=self._record_processing_context,
             time_zone=self._context_time_zone,
         )
-        self._energy_goal_processor = SimpleNamespace(
-            refresh_state=self._refresh_energy_goal_state
-        )
 
     def current_time(self) -> datetime:
         return self.now
@@ -222,6 +219,14 @@ class _SettingsCoordinator:
     ) -> SimpleNamespace:
         self.energy_goal_refreshes.append((circuit_id, config, context))
         return self.goal_result
+
+    def refresh_energy_goal_state(
+        self,
+        circuit_id: str,
+        config: SimpleNamespace,
+        context: SimpleNamespace,
+    ) -> SimpleNamespace:
+        return self._refresh_energy_goal_state(circuit_id, config, context)
 
     async def async_apply_feature_result(self, result: SimpleNamespace) -> None:
         self.applied_feature_results.append(result)

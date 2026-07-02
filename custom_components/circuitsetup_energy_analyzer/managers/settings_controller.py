@@ -1176,7 +1176,7 @@ class SettingsController:
         coordinator.store_data.energy_goal_settings_by_circuit[circuit_id] = settings
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
-        goal_result = coordinator._energy_goal_processor.refresh_state(
+        goal_result = coordinator.refresh_energy_goal_state(
             circuit_id,
             config,
             coordinator.context_builder.build(now),
