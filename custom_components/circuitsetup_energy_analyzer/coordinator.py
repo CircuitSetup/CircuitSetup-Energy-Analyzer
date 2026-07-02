@@ -19,7 +19,6 @@ from .alert_feedback import (
     alert_feedback_is_expired as _alert_feedback_is_expired,
 )
 from .alerting import alert_anomaly_score
-from .appliance_detail import appliance_detail_for_circuit
 from .billing import (
     BillingCycleSettings,
 )
@@ -46,7 +45,6 @@ from .demand import (
     DemandSettings,
 )
 from .events import CircuitEventDetector
-from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
 from .local_time import local_date
 from .managers.alert_policies import AlertPolicyManager
@@ -62,6 +60,7 @@ from .managers.environmental_context import (
     EnvironmentalContextManager,
 )
 from .managers.evidence_actions import EvidenceActionController
+from .managers.export_manager import ExportManager
 from .managers.nilm_controller import NilmController
 from .managers.notification_controller import NotificationController
 from .managers.processing_pipeline import ProcessingPipeline
@@ -502,6 +501,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.settings_controller = SettingsController(self)
         self.alert_policies = AlertPolicyManager(self)
         self.processor_runtime = ProcessorRuntimeManager(self)
+        self.export_manager = ExportManager(self)
         self.context_builder = ProcessingContextBuilder(self)
         self.demo_data = DemoDataSeeder(self)
         self.pipeline = ProcessingPipeline(self)
@@ -1231,201 +1231,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
-        appliance_detail = appliance_detail_for_circuit(self, circuit_id)
-        self.last_exported_diagnostics = {
-            "circuit_id": circuit_id,
-            "appliance_detail": (
-                appliance_detail.as_dict() if appliance_detail is not None else None
-            ),
-            "anomaly_score": self.state.anomaly_score_by_circuit.get(circuit_id, 0.0),
-            "data_quality": self.state.data_quality_by_circuit.get(circuit_id),
-            "learning": self.state.learning_by_circuit.get(circuit_id, True),
-            "power_quality_score": self.state.power_quality_score_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "power_quality_evidence": self.state.power_quality_evidence_by_circuit.get(
-                circuit_id,
-                "",
-            ),
-            "reactive_power_drift": self.state.reactive_power_drift_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "apparent_power_drift": self.state.apparent_power_drift_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "power_factor_drift": self.state.power_factor_drift_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "health_status": self.state.health_status_by_circuit.get(circuit_id),
-            "health_summary": self.state.health_summary_by_circuit.get(circuit_id),
-            "readiness": self.state.readiness_by_circuit.get(circuit_id, {}),
-            "learning_progress": self.state.learning_progress_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "data_quality_checklist": self.state.data_quality_checklist_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "alert_evidence": self.state.alert_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "sensitivity": self.state.sensitivity_by_circuit.get(circuit_id),
-            "maintenance": self.state.maintenance_by_circuit.get(circuit_id, {}),
-            "nilm_review": self.state.nilm_review_by_circuit.get(circuit_id, []),
-            "daily_energy_usage_kwh": self.state.daily_energy_usage_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "energy_usage_share_percent": self.state.energy_usage_share_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "energy_usage_evidence": self.state.energy_usage_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "energy_goal_usage_percent": (
-                self.state.energy_goal_usage_by_circuit.get(circuit_id, 0.0)
-            ),
-            "energy_goal_status": self.state.energy_goal_status_by_circuit.get(
-                circuit_id,
-                "unconfigured",
-            ),
-            "energy_goal_evidence": self.state.energy_goal_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "run_cycle_count": self.state.run_cycle_count_by_circuit.get(
-                circuit_id,
-                0,
-            ),
-            "run_cycle_runtime_seconds": (
-                self.state.run_cycle_runtime_seconds_by_circuit.get(circuit_id, 0.0)
-            ),
-            "run_cycle_duty_cycle_percent": (
-                self.state.run_cycle_duty_cycle_by_circuit.get(circuit_id, 0.0)
-            ),
-            "run_cycle_status": self.state.run_cycle_status_by_circuit.get(
-                circuit_id,
-                "no_activity",
-            ),
-            "run_cycle_evidence": self.state.run_cycle_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "billing_cycle_usage_kwh": (
-                self.state.billing_cycle_usage_kwh_by_circuit.get(circuit_id, 0.0)
-            ),
-            "billing_cycle_forecast_kwh": (
-                self.state.billing_cycle_forecast_kwh_by_circuit.get(circuit_id, 0.0)
-            ),
-            "billing_cycle_budget_usage_percent": (
-                self.state.billing_cycle_budget_usage_by_circuit.get(circuit_id, 0.0)
-            ),
-            "billing_cycle_status": self.state.billing_cycle_status_by_circuit.get(
-                circuit_id,
-                "no_budget",
-            ),
-            "billing_cycle_evidence": (
-                self.state.billing_cycle_evidence_by_circuit.get(circuit_id, {})
-            ),
-            "cost_current_rate_per_kwh": self.state.cost_current_rate_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "cost_cycle": self.state.cost_cycle_by_circuit.get(circuit_id, 0.0),
-            "cost_cycle_forecast": self.state.cost_cycle_forecast_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "cost_status": self.state.cost_status_by_circuit.get(
-                circuit_id,
-                "unconfigured",
-            ),
-            "cost_evidence": self.state.cost_evidence_by_circuit.get(circuit_id, {}),
-            "current_demand_w": self.state.current_demand_w_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "peak_demand_w": self.state.peak_demand_w_by_circuit.get(circuit_id, 0.0),
-            "demand_limit_usage_percent": (
-                self.state.demand_limit_usage_by_circuit.get(circuit_id, 0.0)
-            ),
-            "demand_evidence": self.state.demand_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "capacity_usage_percent": self.state.capacity_usage_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "capacity_status": self.state.capacity_status_by_circuit.get(
-                circuit_id,
-                "unconfigured",
-            ),
-            "capacity_evidence": self.state.capacity_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-            "utility_comparison_difference_kwh": (
-                self.state.utility_comparison_difference_kwh_by_circuit.get(
-                    circuit_id,
-                    0.0,
-                )
-            ),
-            "utility_comparison_difference_percent": (
-                self.state.utility_comparison_difference_percent_by_circuit.get(
-                    circuit_id,
-                    0.0,
-                )
-            ),
-            "utility_comparison_status": (
-                self.state.utility_comparison_status_by_circuit.get(
-                    circuit_id,
-                    "unconfigured",
-                )
-            ),
-            "utility_comparison_evidence": (
-                self.state.utility_comparison_evidence_by_circuit.get(
-                    circuit_id,
-                    {},
-                )
-            ),
-            "always_on_power_w": self.state.always_on_power_w_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "standby_threshold_w": self.state.standby_threshold_w_by_circuit.get(
-                circuit_id,
-                0.0,
-            ),
-            "standby_status": self.state.standby_status_by_circuit.get(
-                circuit_id,
-                "learning",
-            ),
-            "always_on_limit_usage_percent": (
-                self.state.always_on_limit_usage_by_circuit.get(circuit_id, 0.0)
-            ),
-            "standby_evidence": self.state.standby_evidence_by_circuit.get(
-                circuit_id,
-                {},
-            ),
-        }
-        self.async_set_updated_data(self.state)
+        await self.export_manager.async_export_diagnostics(circuit_id)
 
     async def async_export_history_csv(self: Self, circuit_id: str) -> None:
         """Store retained analyzer history for one circuit as CSV text."""
-        self.last_exported_history_csv = build_circuit_history_csv(
-            self.store_data,
-            circuit_id,
-        )
-        self.async_set_updated_data(self.state)
+        await self.export_manager.async_export_history_csv(circuit_id)
 
     async def async_run_mapping_checks(self: Self) -> None:
         """Run lightweight source mapping checks."""
