@@ -1202,7 +1202,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             }
         ]
     }
-    coordinator._known_load_circuit_ids = frozenset({"pool_pump"})
+    coordinator.circuit_registry = SimpleNamespace(
+        known_load_circuit_ids=frozenset({"pool_pump"})
+    )
     coordinator.state.nilm_unknown_loads_by_circuit = {
         "mains": {
             "unknown_loads": [

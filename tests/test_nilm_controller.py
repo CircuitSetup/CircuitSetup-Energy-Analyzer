@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
+    NilmController,
+)
+
+
+def test_nilm_controller_filters_known_load_events_from_registry() -> None:
+    controller = _nilm_controller(
+        SimpleNamespace(
+            circuit_registry=SimpleNamespace(
+                known_load_circuit_ids=frozenset({"fridge"}),
+            ),
+        )
+    )
+    events = [
+        SimpleNamespace(circuit_id="mains"),
+        SimpleNamespace(circuit_id="fridge"),
+        SimpleNamespace(circuit_id="hvac"),
+    ]
+
+    assert [
+        event.circuit_id for event in controller.known_load_events("mains", events)
+    ] == ["fridge"]
+
+
+def _nilm_controller(coordinator: object) -> NilmController:
+    return NilmController(
+        coordinator,
+        clean_string_list=lambda value: [],
+        append_unique=lambda values, value: None,
+        nonnegative_float_value=lambda *args, **kwargs: 0.0,
+        label_interval_datetime=lambda value, field: None,
+        label_interval_id=lambda circuit_id, label, start, end: "interval",
+        signature_fingerprint_value=lambda value, circuit_id: "fingerprint",
+        signature_assignment_label=lambda value, circuit_id: "label",
+        label_interval_max_items=1,
+        round_optional_number=lambda value: None,
+        assignment_interval_matches=lambda assignment, interval: False,
+        overlap_seconds=lambda left, right: 0.0,
+        validation_coverage_overlap_seconds=lambda left, right: 0.0,
+        float_or_none=lambda value: None,
+        datetime_or_none=lambda value: None,
+        assignment_appliance_id=lambda label: label,
+        assignment_id=lambda circuit_id, appliance_id: "assignment",
+        assignment_max_items=1,
+    )
