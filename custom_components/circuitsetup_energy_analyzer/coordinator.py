@@ -65,6 +65,7 @@ from .managers.evidence_actions import EvidenceActionController
 from .managers.nilm_controller import NilmController
 from .managers.notification_controller import NotificationController
 from .managers.processing_pipeline import ProcessingPipeline
+from .managers.processor_runtime import ProcessorRuntimeManager
 from .managers.settings_controller import (
     SettingsController,
     material_recommendation_evidence_key,
@@ -94,7 +95,6 @@ from .models import (
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
-    EventType,
     PowerFlowMode,
     RetentionMode,
     SensorRef,
@@ -127,7 +127,6 @@ from .processors import (
     UtilityComparisonProcessor,
     WaterContextAlertProcessor,
 )
-from .profiles import get_profile_definition
 from .settings_advisor import (
     RecommendationStatus,
     SettingRecommendation,
@@ -502,6 +501,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self.settings_controller = SettingsController(self)
         self.alert_policies = AlertPolicyManager(self)
+        self.processor_runtime = ProcessorRuntimeManager(self)
         self.context_builder = ProcessingContextBuilder(self)
         self.demo_data = DemoDataSeeder(self)
         self.pipeline = ProcessingPipeline(self)
@@ -521,7 +521,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._event_processor = CircuitEventProcessor(self._detectors)
         self._power_quality_processor = PowerQualityProcessor(
             alert_policy_for_circuit=self.alert_policies.alert_policy_for_circuit,
-            learning_mature=self._learning_mature,
+            learning_mature=self.processor_runtime.learning_mature,
             seed_demo_event_history=self.demo_data.seed_event_history,
             seed_demo_power_quality_baselines=(
                 self.demo_data.seed_power_quality_baselines
@@ -529,7 +529,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             baseline_values=self._baseline_values,
         )
         self._energy_usage_processor = EnergyUsageProcessor(
-            settings_for_config=self._energy_usage_settings_for_config,
+            settings_for_config=(
+                self.processor_runtime.energy_usage_settings_for_config
+            ),
             retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
@@ -537,37 +539,41 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             seed_demo_history=self.demo_data.seed_energy_usage_history,
         )
         self._energy_goal_processor = EnergyGoalProcessor(
-            settings_for_config=self._energy_goal_settings_for_config,
+            settings_for_config=self.processor_runtime.energy_goal_settings_for_config,
             alert_policy_for_circuit=self.alert_policies.goal_alert_policy_for_circuit,
         )
         self._run_cycle_processor = RunCycleProcessor(
             alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
-            learning_mature=self._learning_mature,
+            learning_mature=self.processor_runtime.learning_mature,
         )
         self._activity_alert_processor = ActivityAlertProcessor(
-            settings_for_config=self._activity_alert_settings_for_config,
+            settings_for_config=(
+                self.processor_runtime.activity_alert_settings_for_config
+            ),
             alert_policy_for_circuit=(
                 self.alert_policies.activity_alert_policy_for_circuit
             ),
         )
         self._billing_cycle_processor = BillingCycleProcessor(
-            settings_for_config=self._billing_cycle_settings_for_config,
+            settings_for_config=(
+                self.processor_runtime.billing_cycle_settings_for_config
+            ),
             alert_policy_for_circuit=(
                 self.alert_policies.billing_alert_policy_for_circuit
             ),
         )
         self._cost_processor = CostProcessor(
-            settings_for_config=self._cost_settings_for_config,
+            settings_for_config=self.processor_runtime.cost_settings_for_config,
         )
         self._demand_processor = DemandProcessor(
-            settings_for_config=self._demand_settings_for_config,
+            settings_for_config=self.processor_runtime.demand_settings_for_config,
             alert_policy_for_circuit=self.alert_policies.demand_alert_policy_for_circuit,
             retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
         )
         self._capacity_processor = CapacityProcessor(
-            settings_for_config=self._capacity_settings_for_config,
+            settings_for_config=self.processor_runtime.capacity_settings_for_config,
             alert_policy_for_circuit=(
                 self.alert_policies.capacity_alert_policy_for_circuit
             ),
@@ -583,14 +589,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._metric_consistency_processor = MetricConsistencyProcessor()
         self._standby_processor = StandbyProcessor(
-            settings_for_config=self._standby_settings_for_config,
+            settings_for_config=self.processor_runtime.standby_settings_for_config,
             alert_policy_for_circuit=(
                 self.alert_policies.standby_alert_policy_for_circuit
             ),
             seed_demo_history=self.demo_data.seed_standby_history,
         )
         self._utility_comparison_processor = UtilityComparisonProcessor(
-            settings_for_circuit=self._utility_comparison_settings_for_circuit,
+            settings_for_circuit=(
+                self.processor_runtime.utility_comparison_settings_for_circuit
+            ),
             alert_policy_for_circuit=(
                 self.alert_policies.utility_comparison_alert_policy_for_circuit
             ),
@@ -1838,7 +1846,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> ActivityAlertSettings:
-        return self.settings_controller.activity_alert_settings_for_config(
+        return self.processor_runtime.activity_alert_settings_for_config(
             config,
             circuit_id,
         )
@@ -1848,7 +1856,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> EnergyUsageSettings:
-        return self.settings_controller.energy_usage_settings_for_config(
+        return self.processor_runtime.energy_usage_settings_for_config(
             config,
             circuit_id,
         )
@@ -1858,7 +1866,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> EnergyGoalSettings:
-        return self.settings_controller.energy_goal_settings_for_config(
+        return self.processor_runtime.energy_goal_settings_for_config(
             config,
             circuit_id,
         )
@@ -1868,7 +1876,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> BillingCycleSettings:
-        return self.settings_controller.billing_cycle_settings_for_config(
+        return self.processor_runtime.billing_cycle_settings_for_config(
             config,
             circuit_id,
         )
@@ -1878,7 +1886,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> CostSettings:
-        return self.settings_controller.cost_settings_for_config(
+        return self.processor_runtime.cost_settings_for_config(
             config,
             circuit_id,
         )
@@ -1888,20 +1896,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> DemandSettings:
-        return self.settings_controller.demand_settings_for_config(
+        return self.processor_runtime.demand_settings_for_config(
             config,
             circuit_id,
         )
 
     def _capacity_settings_for_config(self: Self, circuit_id: str) -> CapacitySettings:
-        return self.settings_controller.capacity_settings_for_config(circuit_id)
+        return self.processor_runtime.capacity_settings_for_config(circuit_id)
 
     def _standby_settings_for_config(
         self: Self,
         config: CircuitConfig | None,
         circuit_id: str,
     ) -> StandbySettings:
-        return self.settings_controller.standby_settings_for_config(
+        return self.processor_runtime.standby_settings_for_config(
             config,
             circuit_id,
         )
@@ -1910,31 +1918,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
     ) -> UtilityComparisonSettings:
-        return self.settings_controller.utility_comparison_settings_for_circuit(
+        return self.processor_runtime.utility_comparison_settings_for_circuit(
             circuit_id
         )
 
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
-        self.nilm_controller.clear_topology_state(circuit_id)
+        self.processor_runtime.clear_nilm_topology_state(circuit_id)
 
     def _learning_mature(self: Self, config: CircuitConfig, now: datetime) -> bool:
-        profile = get_profile_definition(config.appliance_profile)
-        circuit_events = [
-            event
-            for event in self.store_data.events
-            if event.circuit_id == config.circuit_id
-        ]
-        cycle_count = sum(
-            1 for event in circuit_events if event.event_type is EventType.START
-        )
-        if profile.minimum_cycles > 0 and cycle_count >= profile.minimum_cycles:
-            return True
-
-        if not circuit_events:
-            return False
-
-        first_seen = min(event.timestamp for event in circuit_events)
-        return now - first_seen >= timedelta(days=profile.minimum_learning_days)
+        return self.processor_runtime.learning_mature(config, now)
 
     async def _notify_alert(self: Self, alert: AlertEvidence) -> None:
         await self.notification_controller.async_notify_alert(alert)
