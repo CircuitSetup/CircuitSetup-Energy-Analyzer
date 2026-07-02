@@ -18,11 +18,7 @@ from .activity_timeline import (
 from .alert_feedback import (
     alert_feedback_is_expired as _alert_feedback_is_expired,
 )
-from .alerting import (
-    ConservativeAlertPolicy,
-    Observation,
-    alert_anomaly_score,
-)
+from .alerting import alert_anomaly_score
 from .appliance_detail import appliance_detail_for_circuit
 from .billing import (
     BillingCycleSettings,
@@ -61,6 +57,7 @@ from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
 from .goals import EnergyGoalSettings
 from .local_time import local_date
+from .managers.alert_policies import AlertPolicyManager
 from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
 from .managers.context import ProcessingContextBuilder
@@ -204,40 +201,6 @@ except ModuleNotFoundError:
 
         def async_set_updated_data(self, data: Any) -> None:
             self.data = data
-
-
-class _FeedbackAwareAlertPolicy:
-    """Apply persisted alert feedback before delegating to the scoring policy."""
-
-    def __init__(self: Self, coordinator: Any, policy: ConservativeAlertPolicy) -> None:
-        self._coordinator = coordinator
-        self._policy = policy
-
-    @property
-    def min_repeated(self: Self) -> int:
-        return self._policy.min_repeated
-
-    @property
-    def min_total_score(self: Self) -> float:
-        return self._policy.min_total_score
-
-    @property
-    def min_average_score(self: Self) -> float:
-        return self._policy.min_average_score
-
-    @property
-    def min_baseline_confidence(self: Self) -> float:
-        return self._policy.min_baseline_confidence
-
-    def observe(self: Self, observation: Observation) -> AlertEvidence | None:
-        min_repeated = self._coordinator._adjusted_min_repeated_for_observation(
-            observation,
-            self._policy.min_repeated,
-        )
-        alert = self._policy.observe(observation, min_repeated=min_repeated)
-        if alert is None or min_repeated == self._policy.min_repeated:
-            return alert
-        return replace(alert, adjusted_min_repeated=min_repeated)
 
 
 @dataclass(slots=True)
@@ -551,6 +514,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment_max_items=NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
         )
         self.settings_controller = SettingsController(self)
+        self.alert_policies = AlertPolicyManager(self)
         self.context_builder = ProcessingContextBuilder(self)
         self.demo_data = DemoDataSeeder(self)
         self.pipeline = ProcessingPipeline(self)
@@ -569,7 +533,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
         self._event_processor = CircuitEventProcessor(self._detectors)
         self._power_quality_processor = PowerQualityProcessor(
-            alert_policy_for_circuit=self._alert_policy_for_circuit,
+            alert_policy_for_circuit=self.alert_policies.alert_policy_for_circuit,
             learning_mature=self._learning_mature,
             seed_demo_event_history=self.demo_data.seed_event_history,
             seed_demo_power_quality_baselines=(
@@ -582,55 +546,67 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
-            alert_policy_for_circuit=self._usage_alert_policy_for_circuit,
+            alert_policy_for_circuit=self.alert_policies.usage_alert_policy_for_circuit,
             seed_demo_history=self.demo_data.seed_energy_usage_history,
         )
         self._energy_goal_processor = EnergyGoalProcessor(
             settings_for_config=self._energy_goal_settings_for_config,
-            alert_policy_for_circuit=self._goal_alert_policy_for_circuit,
+            alert_policy_for_circuit=self.alert_policies.goal_alert_policy_for_circuit,
         )
         self._run_cycle_processor = RunCycleProcessor(
-            alert_policy_for_circuit=self._cycle_alert_policy_for_circuit,
+            alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
             learning_mature=self._learning_mature,
         )
         self._activity_alert_processor = ActivityAlertProcessor(
             settings_for_config=self._activity_alert_settings_for_config,
-            alert_policy_for_circuit=self._activity_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.activity_alert_policy_for_circuit
+            ),
         )
         self._billing_cycle_processor = BillingCycleProcessor(
             settings_for_config=self._billing_cycle_settings_for_config,
-            alert_policy_for_circuit=self._billing_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.billing_alert_policy_for_circuit
+            ),
         )
         self._cost_processor = CostProcessor(
             settings_for_config=self._cost_settings_for_config,
         )
         self._demand_processor = DemandProcessor(
             settings_for_config=self._demand_settings_for_config,
-            alert_policy_for_circuit=self._demand_alert_policy_for_circuit,
+            alert_policy_for_circuit=self.alert_policies.demand_alert_policy_for_circuit,
             retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
         )
         self._capacity_processor = CapacityProcessor(
             settings_for_config=self._capacity_settings_for_config,
-            alert_policy_for_circuit=self._capacity_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.capacity_alert_policy_for_circuit
+            ),
             retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
                 self._retention_mode_for_circuit(circuit_id)
             ].days,
             source_states_for=self._source_states_for,
         )
         self._leg_imbalance_processor = LegImbalanceProcessor(
-            alert_policy_for_circuit=self._leg_imbalance_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.leg_imbalance_alert_policy_for_circuit
+            ),
         )
         self._metric_consistency_processor = MetricConsistencyProcessor()
         self._standby_processor = StandbyProcessor(
             settings_for_config=self._standby_settings_for_config,
-            alert_policy_for_circuit=self._standby_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.standby_alert_policy_for_circuit
+            ),
             seed_demo_history=self.demo_data.seed_standby_history,
         )
         self._utility_comparison_processor = UtilityComparisonProcessor(
             settings_for_circuit=self._utility_comparison_settings_for_circuit,
-            alert_policy_for_circuit=self._utility_comparison_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.utility_comparison_alert_policy_for_circuit
+            ),
             energy_kwh_for_entity=self.utility_energy_sources.energy_kwh_for_entity,
             energy_kwh_sum_for_entities=(
                 self.utility_energy_sources.energy_kwh_sum_for_entities
@@ -680,7 +656,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._nilm_topology_processor = NilmTopologyProcessor(
             known_config_for_circuit=self.circuit_registry.config_for_circuit,
-            alert_policy_for_circuit=self._nilm_topology_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.nilm_topology_alert_policy_for_circuit
+            ),
         )
         self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
         self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
@@ -712,7 +690,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             unmatched_edges_by_circuit=self._nilm_unmatched_edges,
         )
         self._water_context_alert_processor = WaterContextAlertProcessor(
-            alert_policy_for_circuit=self._water_context_alert_policy_for_circuit,
+            alert_policy_for_circuit=(
+                self.alert_policies.water_context_alert_policy_for_circuit
+            ),
         )
         self.store_persistence = StorePersistenceManager(
             self,
@@ -1940,139 +1920,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> list[dict[str, Any]]:
         return self.nilm_controller.signature_payloads(circuit_id, signatures)
 
-    def _feedback_aware_alert_policy(
-        self: Self,
-        policy: ConservativeAlertPolicy,
-    ) -> _FeedbackAwareAlertPolicy:
-        return _FeedbackAwareAlertPolicy(self, policy)
-
-    def _adjusted_min_repeated_for_observation(
-        self: Self,
-        observation: Observation,
-        base_min_repeated: int,
-    ) -> int:
-        return self.evidence_actions.adjusted_min_repeated_for_observation(
-            observation,
-            base_min_repeated,
-        )
-
-    def _alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.alert_policy_for_circuit(circuit_id)
-        )
-
-    def _usage_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.usage_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _goal_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.goal_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _billing_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.billing_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _demand_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.demand_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _capacity_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.capacity_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _leg_imbalance_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.leg_imbalance_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _standby_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.standby_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _utility_comparison_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.utility_comparison_alert_policy_for_circuit(
-                circuit_id
-            )
-        )
-
-    def _nilm_topology_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.nilm_topology_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _cycle_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.cycle_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _activity_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.activity_alert_policy_for_circuit(circuit_id)
-        )
-
-    def _water_context_alert_policy_for_circuit(
-        self: Self,
-        circuit_id: str,
-        feature: str,
-    ) -> _FeedbackAwareAlertPolicy:
-        return self._feedback_aware_alert_policy(
-            self.settings_controller.water_context_alert_policy_for_circuit(
-                circuit_id,
-                feature,
-            )
-        )
-
     def apply_nilm_alert_feedback(
         self: Self,
         alert: AlertEvidence,
         action: str,
         now: datetime,
     ) -> None:
-        self.nilm_controller.apply_alert_feedback(alert, action, now)
+        self.alert_policies.apply_nilm_alert_feedback(alert, action, now)
 
     def _mark_store_dirty(self: Self) -> None:
         self.store_persistence.mark_dirty()
