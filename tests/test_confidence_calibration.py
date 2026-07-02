@@ -449,9 +449,19 @@ def test_calibration_report_script_runs_directly() -> None:
     assert "# Confidence Calibration Report" in completed.stdout
 
 
-def test_repository_keeps_required_appliance_qa_docs() -> None:
-    qa_dir = Path(__file__).parents[1] / "docs" / "qa"
+def test_repository_keeps_appliance_qa_docs_local_only() -> None:
+    repo_root = Path(__file__).parents[1]
+    ignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
 
-    assert (qa_dir / "appliance-usability-test-matrix.md").exists()
-    assert (qa_dir / "dashboard-visual-results.md").exists()
-    assert (qa_dir / "home-assistant-appliance-workflow-results.md").exists()
+    assert "/docs/qa/" in ignore_text
+    assert "/docs/development/" in ignore_text
+
+    completed = subprocess.run(
+        ["git", "ls-files", "docs/qa", "docs/development"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == ""
