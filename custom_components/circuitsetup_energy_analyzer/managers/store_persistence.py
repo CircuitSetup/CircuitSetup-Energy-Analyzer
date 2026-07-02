@@ -81,6 +81,27 @@ class StorePersistenceManager:
     def mark_dirty(self) -> None:
         self.dirty = True
 
+    def reset_baseline_for_circuit(
+        self,
+        circuit_id: str,
+        baseline_values: dict[str, list[float]],
+    ) -> None:
+        """Clear learned baselines and stored alerts for one circuit."""
+        prefix = f"{circuit_id}:"
+        store_data = self._coordinator.store_data
+        store_data.baselines = {
+            key: value
+            for key, value in store_data.baselines.items()
+            if not key.startswith(prefix)
+        }
+        for key in list(baseline_values):
+            if key.startswith(prefix):
+                baseline_values.pop(key, None)
+        store_data.alerts = [
+            alert for alert in store_data.alerts if alert.circuit_id != circuit_id
+        ]
+        self.mark_dirty()
+
     async def async_save_if_dirty(self, now: datetime) -> None:
         store = getattr(self._coordinator, "_store", None)
         if store is None or not self.dirty:
