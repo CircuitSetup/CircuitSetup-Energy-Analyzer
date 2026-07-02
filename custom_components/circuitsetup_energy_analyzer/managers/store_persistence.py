@@ -8,6 +8,7 @@ from ..alert_feedback import alert_feedback_is_expired
 from ..local_time import local_date
 from ..settings_advisor import RecommendationStatus
 from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
+from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 
 class StorePersistenceManager:
@@ -33,10 +34,6 @@ class StorePersistenceManager:
         recommendation_history_max_items: int,
         recommendation_decisions_max_age: timedelta,
         recommendation_decisions_max_items: int,
-        compact_settings_recommendation_episode_key: Callable[
-            [tuple[tuple[str, ...], ...]],
-            tuple[tuple[str, ...], ...],
-        ],
     ) -> None:
         self._coordinator = coordinator
         self._newest_mapping_items = _newest_mapping_items
