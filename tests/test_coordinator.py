@@ -1336,6 +1336,45 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_coordinator_exposes_source_update_task_for_lifecycle_waits(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        5.0,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+
+    assert (
+        coordinator._source_update_task
+        is coordinator.source_updates.source_update_task
+    )
+    assert coordinator._source_update_task is not None
+
+    await coordinator.async_stop()
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
 async def test_coordinator_reschedules_source_update_added_during_processing(
     monkeypatch,
 ) -> None:
