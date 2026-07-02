@@ -851,6 +851,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.source_updates.async_stop()
 
     @property
+    def _source_update_task(self: Self) -> Any | None:
+        """Compatibility accessor for lifecycle wait helpers."""
+        return self.source_updates.source_update_task
+
+    @property
     def source_entities(self: Self) -> tuple[str, ...]:
         """Configured source entities currently watched by the coordinator."""
         return self.source_updates.source_entities
