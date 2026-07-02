@@ -106,7 +106,9 @@ class NilmController:
         events: Iterable[Any],
     ) -> Iterable[Any]:
         """Yield events that may mask a mains NILM edge."""
-        known_load_circuit_ids = self._coordinator._known_load_circuit_ids
+        known_load_circuit_ids = (
+            self._coordinator.circuit_registry.known_load_circuit_ids
+        )
         for event in events:
             if event.circuit_id == nilm_circuit_id:
                 continue

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..const import CONF_KNOWN_LOAD_CIRCUITS
+from ..context_sources import string_list_from_sources
+
 
 class CircuitRegistry:
     """Own read-only lookup of configured circuits by circuit ID."""
@@ -17,3 +20,14 @@ class CircuitRegistry:
             if config.circuit_id == circuit_id:
                 return config
         return None
+
+    @property
+    def known_load_circuit_ids(self) -> frozenset[str]:
+        """Return configured known-load circuit IDs for mains NILM masking."""
+        return frozenset(
+            string_list_from_sources(
+                self._coordinator.entry_data,
+                self._coordinator.options,
+                CONF_KNOWN_LOAD_CIRCUITS,
+            )
+        )

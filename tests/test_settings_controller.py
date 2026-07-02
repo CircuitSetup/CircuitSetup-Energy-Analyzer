@@ -8,6 +8,7 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_SENSITIVITY,
     CONF_UTILITY_COMPARISON_SETTINGS,
 )
 from custom_components.circuitsetup_energy_analyzer.cycles import (
@@ -101,7 +102,6 @@ class _SettingsCoordinator:
         self.options = {
             CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}
         }
-        self._sensitivity = "standard"
         self.now = datetime(2026, 6, 30, 12, 5, tzinfo=UTC)
         self.persist_count = 0
         self.dirty_count = 0
@@ -969,7 +969,7 @@ def test_settings_controller_reads_circuit_sensitivity() -> None:
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
     coordinator.store_data.sensitivity_by_circuit["fridge"] = "high"
-    coordinator._sensitivity = "quiet"
+    coordinator.options[CONF_SENSITIVITY] = "quiet"
 
     assert controller.sensitivity_for_circuit("fridge") == "sensitive"
     assert controller.sensitivity_for_circuit("hvac") == "quiet"

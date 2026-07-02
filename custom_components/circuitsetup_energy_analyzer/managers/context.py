@@ -29,7 +29,7 @@ class ProcessingContextBuilder:
             store_data=coordinator.store_data,
             options=coordinator.options,
             entry_data=coordinator.entry_data,
-            known_load_circuit_ids=coordinator._known_load_circuit_ids,
-            sensitivity=coordinator._sensitivity,
+            known_load_circuit_ids=coordinator.circuit_registry.known_load_circuit_ids,
+            sensitivity=coordinator.settings_controller.default_sensitivity,
             time_zone=self.time_zone(),
         )

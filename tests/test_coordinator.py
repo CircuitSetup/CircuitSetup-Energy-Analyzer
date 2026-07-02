@@ -672,6 +672,30 @@ def test_coordinator_exposes_processing_context_builder() -> None:
     assert coordinator.context_builder.time_zone() is None
 
 
+def test_processing_context_builder_uses_manager_boundaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        circuit_registry=SimpleNamespace(
+            known_load_circuit_ids=frozenset({"fridge"}),
+        ),
+        settings_controller=SimpleNamespace(default_sensitivity="quiet"),
+    )
+
+    context = ProcessingContextBuilder(coordinator).build(now)
+
+    assert context.known_load_circuit_ids == frozenset({"fridge"})
+    assert context.sensitivity == "quiet"
+
+
 def test_coordinator_exposes_processing_pipeline() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -9708,7 +9732,10 @@ def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
         ),
     )
 
-    assert coordinator._sensitivity_for_circuit("unknown") == "balanced"
+    assert (
+        coordinator.settings_controller.sensitivity_for_circuit("unknown")
+        == "balanced"
+    )
     assert coordinator._alert_policy_for_circuit("fridge").min_repeated == 3
     assert coordinator._alert_policy_for_circuit("hvac").min_repeated == 4
 

@@ -16,7 +16,12 @@ from ..alerting import ConservativeAlertPolicy
 from ..balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from ..billing import BillingCycleSettings
 from ..capacity import DEFAULT_CAPACITY_WARNING_RATIO, CapacitySettings
-from ..const import CONF_ADVANCED_SETTINGS, CONF_UTILITY_COMPARISON_SETTINGS
+from ..const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_SENSITIVITY,
+    CONF_UTILITY_COMPARISON_SETTINGS,
+    DEFAULT_SENSITIVITY,
+)
 from ..cost import CostSettings
 from ..cycles import (
     MIN_CYCLE_BASELINE_CONFIDENCE,
@@ -548,12 +553,23 @@ class SettingsController:
             normalize_sensitivity(preset),
         )
 
+    @property
+    def default_sensitivity(self) -> str:
+        """Return the normalized default alert sensitivity."""
+        coordinator = self._coordinator
+        return normalize_sensitivity(
+            coordinator.options.get(
+                CONF_SENSITIVITY,
+                coordinator.entry_data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
+            )
+        )
+
     def sensitivity_for_circuit(self, circuit_id: str) -> str:
         """Return normalized alert sensitivity for one circuit."""
         return normalize_sensitivity(
             self._coordinator.store_data.sensitivity_by_circuit.get(
                 circuit_id,
-                self._coordinator._sensitivity,
+                self.default_sensitivity,
             )
         )
 

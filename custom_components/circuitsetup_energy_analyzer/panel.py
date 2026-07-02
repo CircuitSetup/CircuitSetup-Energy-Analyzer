@@ -2216,9 +2216,12 @@ def _nilm_known_load_overlays(
     coordinator: Any,
     circuit_id: str,
 ) -> list[dict[str, Any]]:
+    circuit_registry = getattr(coordinator, "circuit_registry", None)
     known_load_ids = {
         str(value)
-        for value in _iter_items(getattr(coordinator, "_known_load_circuit_ids", ()))
+        for value in _iter_items(
+            getattr(circuit_registry, "known_load_circuit_ids", ())
+        )
     }
     overlays: list[dict[str, Any]] = []
     for config in getattr(coordinator, "circuit_configs", ()) or ():

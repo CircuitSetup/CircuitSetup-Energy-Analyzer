@@ -39,7 +39,6 @@ from .const import (
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
-    CONF_KNOWN_LOAD_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -48,7 +47,6 @@ from .const import (
     CONF_RAIN_RESPONSE_WINDOW_MINUTES,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
-    CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     DEFAULT_DASHBOARD_LAYOUT,
@@ -57,7 +55,6 @@ from .const import (
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DEFAULT_RETENTION_MODE,
-    DEFAULT_SENSITIVITY,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
 )
@@ -192,7 +189,6 @@ from .ux import (
     friendly_feature_name,
     health_summary,
     learning_progress,
-    normalize_sensitivity,
 )
 from .water_correlations import (
     FlowCorrelationInput,
@@ -584,19 +580,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._entry_retention_mode = _retention_mode_from_sources(
             self.entry_data,
             self.options,
-        )
-        self._known_load_circuit_ids = frozenset(
-            _string_list_from_sources(
-                self.entry_data,
-                self.options,
-                CONF_KNOWN_LOAD_CIRCUITS,
-            )
-        )
-        self._sensitivity = normalize_sensitivity(
-            self.options.get(
-                CONF_SENSITIVITY,
-                self.entry_data.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY),
-            )
         )
         self.dashboard_layout = normalize_dashboard_layout(
             self.options.get(
@@ -1925,8 +1908,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         maintenance = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
         maintenance.setdefault("active", circuit_id in self.paused_circuits)
         self.state.maintenance_by_circuit[circuit_id] = maintenance
-        self.state.sensitivity_by_circuit[circuit_id] = self._sensitivity_for_circuit(
-            circuit_id
+        self.state.sensitivity_by_circuit[circuit_id] = (
+            self.settings_controller.sensitivity_for_circuit(circuit_id)
         )
         self._refresh_alert_evidence_state(circuit_id)
         self._refresh_recent_activity_state(circuit_id, now)
@@ -3298,9 +3281,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 if sensor.role is SensorRole.ENERGY
             )
         return tuple(entity_ids)
-
-    def _sensitivity_for_circuit(self: Self, circuit_id: str) -> str:
-        return self.settings_controller.sensitivity_for_circuit(circuit_id)
 
     def _feedback_aware_alert_policy(
         self: Self,
