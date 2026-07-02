@@ -18,6 +18,7 @@ Public coordinator methods remain stable for services, entities, and the panel.
 | `SettingsController` | `managers/settings_controller.py` | Recalculate/apply/undo/reset/deny/dismiss advanced setting recommendations |
 | `EntityProfileController` | `managers/entity_profile_controller.py` | `async_set_entity_detail_level` |
 | `StateReducer` | `managers/state_reducer.py` | Strict dynamic `AnalyzerState` path updates used by processor results |
+| `SourceSampleBuilder` | `managers/source_samples.py` | Source-state lookup, demo source registry fallback, and normalized circuit sample assembly |
 
 Each extracted manager has focused unit tests plus existing coordinator/service
 tests to verify the facade remains compatible.
@@ -39,7 +40,8 @@ NILM state with higher regression risk:
 
 - Keep public coordinator method names and argument shapes.
 - Keep Home Assistant lifecycle methods on the coordinator.
-- Managers may call existing coordinator private helpers during this split.
+- Managers should use public coordinator facades or injected dependencies, not
+  coordinator private helpers.
 - Move high-risk internals only with characterization tests first.
 - Keep state path validation strict; unknown roots and intermediate key creation
   must continue to raise.
