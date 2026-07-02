@@ -191,7 +191,6 @@ from .ux import (
     alert_evidence_detail,
     canonicalize_sensitivity_config,
     data_quality_checklist,
-    friendly_feature_name,
     health_summary,
     learning_progress,
 )
@@ -897,7 +896,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
-        self._prune_recent_observations(now)
+        self.state_reducer.prune_recent_observations(
+            self.state,
+            now,
+            window_hours=DEFAULT_TIMELINE_WINDOW_HOURS,
+        )
 
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
@@ -3334,7 +3337,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data,
             result,
             alert_feedback=self.evidence_actions.alert_with_feedback,
-            record_observation=self._record_recent_observation,
         )
         for alert in applied.notifications:
             await self._notify_alert(alert)
@@ -3347,52 +3349,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _apply_retention(self: Self, now: datetime) -> None:
         self.store_persistence.apply_retention(now)
-
-    def _observation_payload(self: Self, observation: Any) -> dict[str, Any]:
-        payload = {
-            "timestamp": observation.observed_at.isoformat(),
-            "circuit_id": observation.circuit_id,
-            "feature": observation.feature,
-            "feature_name": friendly_feature_name(observation.feature),
-            "message": observation.message,
-            "score": observation.score,
-            "baseline_confidence": observation.baseline_confidence,
-            "observed_value": observation.observed_value,
-            "baseline_value": observation.baseline_value,
-        }
-        if getattr(observation, "observation_key", None) is not None:
-            payload["observation_key"] = observation.observation_key
-        return payload
-
-    def _record_recent_observation(self: Self, observation: Any) -> None:
-        payload = self._observation_payload(observation)
-        observations = self.state.recent_observations_by_circuit.setdefault(
-            observation.circuit_id,
-            [],
-        )
-        observation_key = payload.get("observation_key")
-        if observation_key is not None:
-            for index, existing in enumerate(observations):
-                if existing.get("observation_key") == observation_key:
-                    observations[index] = payload
-                    return
-        observations.append(payload)
-
-    def _prune_recent_observations(self: Self, now: datetime) -> None:
-        cutoff = now - timedelta(hours=DEFAULT_TIMELINE_WINDOW_HOURS)
-        retained: dict[str, list[dict[str, Any]]] = {}
-        for (
-            circuit_id,
-            observations,
-        ) in self.state.recent_observations_by_circuit.items():
-            kept = [
-                observation
-                for observation in observations
-                if _observation_within_cutoff(observation, cutoff)
-            ]
-            if kept:
-                retained[circuit_id] = kept
-        self.state.recent_observations_by_circuit = retained
 
     def _retention_mode_for_circuit(self: Self, circuit_id: str) -> RetentionMode:
         for config in self.circuit_configs:
@@ -3648,14 +3604,6 @@ def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
     if rain_state:
         return rain_state == "dry"
     return sample.get("rain_active") is False
-
-
-def _observation_within_cutoff(
-    observation: Mapping[str, Any],
-    cutoff: datetime,
-) -> bool:
-    observed_at = _datetime_or_none(observation.get("timestamp"))
-    return observed_at is not None and observed_at >= cutoff
 
 
 def _datetime_floor() -> datetime:
