@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
@@ -24,6 +25,36 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+def test_nilm_controller_builds_signature_payloads_with_public_current_time() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    context_calls: list[datetime] = []
+
+    def build_context(timestamp: datetime) -> SimpleNamespace:
+        context_calls.append(timestamp)
+        return SimpleNamespace(timestamp=timestamp)
+
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        context_builder=SimpleNamespace(build=build_context),
+        _nilm_sample_processor=SimpleNamespace(
+            _nilm_signature_payloads=(
+                lambda circuit_id, signatures, context: {
+                    "circuit_id": circuit_id,
+                    "context": context,
+                    "signatures": signatures,
+                }
+            )
+        ),
+    )
+    controller = _nilm_controller(coordinator)
+
+    payload = controller.signature_payloads("mains", [{"signature_id": "sig-1"}])
+
+    assert payload["context"].timestamp == now
+    assert payload["signatures"] == [{"signature_id": "sig-1"}]
+    assert context_calls == [now]
 
 
 def _nilm_controller(coordinator: object) -> NilmController:

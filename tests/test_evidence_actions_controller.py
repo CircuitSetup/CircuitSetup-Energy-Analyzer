@@ -45,7 +45,7 @@ class _ActionCoordinator:
             config_for_circuit=self._lookup_config_for_circuit,
         )
 
-    def _now_fn(self) -> datetime:
+    def current_time(self) -> datetime:
         return self.now
 
     def _refresh_ux_state_for_circuit(

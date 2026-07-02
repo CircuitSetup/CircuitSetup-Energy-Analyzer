@@ -95,7 +95,7 @@ class NotificationController:
         )
         self._coordinator.store_persistence.mark_dirty()
         await self._coordinator.store_persistence.async_save_if_dirty(
-            self._coordinator._now_fn()
+            self._coordinator.current_time()
         )
 
     def settings_recommendation_episode_key(
@@ -106,7 +106,7 @@ class NotificationController:
         pending_recommendations = (
             self._coordinator.settings_controller.pending_settings_recommendations
         )
-        for recommendation in pending_recommendations(self._coordinator._now_fn()):
+        for recommendation in pending_recommendations(self._coordinator.current_time()):
             evidence_key = repr(
                 self._material_evidence_key(
                     recommendation.feature,

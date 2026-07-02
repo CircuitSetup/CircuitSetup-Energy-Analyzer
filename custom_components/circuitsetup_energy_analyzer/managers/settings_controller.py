@@ -128,7 +128,7 @@ class SettingsController:
     ) -> None:
         """Rebuild pending advanced-setting recommendations from retained data."""
         coordinator = self._coordinator
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         if self.rebuild_setting_recommendations(now, circuit_id=circuit_id):
             coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
@@ -511,7 +511,7 @@ class SettingsController:
         advanced_by_circuit[circuit_id] = updated_settings
         self.replace_advanced_settings(circuit_id, updated_settings)
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -1175,7 +1175,7 @@ class SettingsController:
             settings["daily_goal_kwh"] = goal_kwh if goal_kwh is not None else 0.0
         coordinator.store_data.energy_goal_settings_by_circuit[circuit_id] = settings
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         goal_result = coordinator._energy_goal_processor.refresh_state(
             circuit_id,
             config,
@@ -1601,7 +1601,7 @@ class SettingsController:
         coordinator = self._coordinator
         settings_by_circuit[circuit_id] = settings
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         coordinator._refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -1643,7 +1643,7 @@ class SettingsController:
             status=RecommendationStatus.APPLIED,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -1675,7 +1675,7 @@ class SettingsController:
             status=RecommendationStatus.PENDING,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -1708,7 +1708,7 @@ class SettingsController:
             status=RecommendationStatus.STALE,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -2084,7 +2084,7 @@ class SettingsController:
         ):
             return
 
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=status,

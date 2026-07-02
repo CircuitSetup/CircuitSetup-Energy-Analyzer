@@ -154,7 +154,7 @@ class _SettingsCoordinator:
             refresh_state=self._refresh_energy_goal_state
         )
 
-    def _now_fn(self) -> datetime:
+    def current_time(self) -> datetime:
         return self.now
 
     async def _record_config_entry_persist(self) -> None:
