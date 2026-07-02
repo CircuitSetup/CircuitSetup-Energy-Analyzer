@@ -217,6 +217,31 @@ class StateReducer:
             timeline
         )
 
+    def hydrate_context_state_from_store(self, state: Any, store_data: Any) -> None:
+        """Hydrate volatile context state from persisted store snapshots."""
+        state.weather_context_by_circuit = {
+            circuit_id: dict(evidence)
+            for circuit_id, evidence in store_data.weather_context_by_circuit.items()
+        }
+        state.rain_pump_context_by_circuit = {
+            circuit_id: dict(evidence)
+            for circuit_id, evidence in (
+                store_data.rain_pump_context_by_circuit.items()
+            )
+        }
+        state.water_flow_context_by_circuit = {
+            circuit_id: dict(evidence)
+            for circuit_id, evidence in (
+                store_data.water_flow_context_by_circuit.items()
+            )
+        }
+        state.water_context_history_by_circuit = {
+            circuit_id: [dict(sample) for sample in samples]
+            for circuit_id, samples in (
+                store_data.water_context_history_by_circuit.items()
+            )
+        }
+
     def clear_power_quality_state(self, state: Any, circuit_id: str) -> bool:
         """Clear power-quality state owned by processor outputs."""
         return _pop_circuit_state(

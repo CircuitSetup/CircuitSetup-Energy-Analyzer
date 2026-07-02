@@ -362,3 +362,27 @@ def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:
     reducer.refresh_alert_evidence_state(state, "fridge", None, config=None)
 
     assert state.alert_evidence_by_circuit == {}
+
+
+def test_state_reducer_hydrates_context_state_from_store() -> None:
+    state = AnalyzerState()
+    store_data = FeatureStoreData()
+    store_data.weather_context_by_circuit["hvac"] = {"status": "normal"}
+    store_data.rain_pump_context_by_circuit["sump"] = {"status": "rain_explained"}
+    store_data.water_flow_context_by_circuit["pump"] = {"status": "normal"}
+    store_data.water_context_history_by_circuit["pump"] = [{"sample": 1}]
+
+    StateReducer().hydrate_context_state_from_store(state, store_data)
+
+    assert state.weather_context_by_circuit == {"hvac": {"status": "normal"}}
+    assert state.rain_pump_context_by_circuit == {
+        "sump": {"status": "rain_explained"}
+    }
+    assert state.water_flow_context_by_circuit == {"pump": {"status": "normal"}}
+    assert state.water_context_history_by_circuit == {"pump": [{"sample": 1}]}
+    assert state.weather_context_by_circuit["hvac"] is not (
+        store_data.weather_context_by_circuit["hvac"]
+    )
+    assert state.water_context_history_by_circuit["pump"][0] is not (
+        store_data.water_context_history_by_circuit["pump"][0]
+    )

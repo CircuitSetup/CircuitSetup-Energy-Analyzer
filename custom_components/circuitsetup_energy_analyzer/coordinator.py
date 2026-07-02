@@ -970,19 +970,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
-        prefix = f"{circuit_id}:"
-        self.store_data.baselines = {
-            key: value
-            for key, value in self.store_data.baselines.items()
-            if not key.startswith(prefix)
-        }
-        for key in list(self._baseline_values):
-            if key.startswith(prefix):
-                self._baseline_values.pop(key, None)
-        self.store_data.alerts = [
-            alert for alert in self.store_data.alerts if alert.circuit_id != circuit_id
-        ]
-        self._mark_store_dirty()
+        self.store_persistence.reset_baseline_for_circuit(
+            circuit_id,
+            self._baseline_values,
+        )
         self.state_reducer.reset_learning_state(self.state, circuit_id)
         self._clear_nilm_topology_state(circuit_id)
         now = self._now_fn()
@@ -1833,30 +1824,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if maintenance.get("active") is True:
                 self.paused_circuits.add(circuit_id)
         self.nilm_controller.hydrate_state_from_store()
-        self.state.weather_context_by_circuit = {
-            circuit_id: dict(evidence)
-            for circuit_id, evidence in (
-                self.store_data.weather_context_by_circuit.items()
-            )
-        }
-        self.state.rain_pump_context_by_circuit = {
-            circuit_id: dict(evidence)
-            for circuit_id, evidence in (
-                self.store_data.rain_pump_context_by_circuit.items()
-            )
-        }
-        self.state.water_flow_context_by_circuit = {
-            circuit_id: dict(evidence)
-            for circuit_id, evidence in (
-                self.store_data.water_flow_context_by_circuit.items()
-            )
-        }
-        self.state.water_context_history_by_circuit = {
-            circuit_id: [dict(sample) for sample in samples]
-            for circuit_id, samples in (
-                self.store_data.water_context_history_by_circuit.items()
-            )
-        }
+        self.state_reducer.hydrate_context_state_from_store(
+            self.state,
+            self.store_data,
+        )
         self.refresh_all_ux_state(self._now_fn())
         self._refresh_settings_recommendation_state(self._now_fn())
 

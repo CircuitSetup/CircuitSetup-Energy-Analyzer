@@ -13,7 +13,8 @@ The initial audit was completed before extraction. This branch now keeps the
 public coordinator facade stable while delegating dashboard creation, evidence
 actions, settings recommendations, entity profile changes, strict state update
 reduction, recent observation state, grouped processor/context cleanup, runtime
-metadata/latest-power/alert-evidence/recent-activity refresh, source
+metadata/latest-power/alert-evidence/recent-activity refresh, context-state
+hydration, relearn-baseline store cleanup, source
 update lifecycle, source sample construction, processor ordering, store
 persistence, setup-health aggregation, NILM workflows, and notification dedupe to focused managers. Further
 coordinator thinning should keep lifecycle ownership in the coordinator while
@@ -28,7 +29,7 @@ moving remaining feature-specific behavior behind those managers.
 | Sample normalization | Source-state lookup, parallel leg aggregation, demo source lookup, circuit sample creation | latest source states, source entity config, circuit configs | HA states | Medium risk; feeds every processor | sample/source builder helper |
 | Context construction | Local time, weather, rain, water-flow, source mapping, contextual baseline inputs | context dictionaries and history by circuit | HA states, timezone | Medium risk; context bugs change alert semantics | `ProcessingContextBuilder` |
 | Processor dispatch | Processor registry/order, per-circuit and cross-circuit processing, feature result collection | `AnalyzerState`, processor outputs | mostly none after sample/context are built | High risk because ordering is behavior | `ProcessingPipeline` |
-| State update application | Dynamic `StateUpdate` path application, feature result updates, recent observation upsert/prune handling, grouped cleanup for processor/context mappings, metadata/latest-power refresh, relearn volatile-state reset, alert evidence payload refresh, and recent-activity timeline refresh | all `AnalyzerState` mapping roots, `recent_observations_by_circuit`, context state/store mappings | none | High risk; covered by strict-path, recent-observation, cleanup, metadata, alert-evidence, and timeline characterization tests | `StateReducer` |
+| State update application | Dynamic `StateUpdate` path application, feature result updates, recent observation upsert/prune handling, grouped cleanup for processor/context mappings, metadata/latest-power refresh, relearn volatile-state reset, alert evidence payload refresh, recent-activity timeline refresh, and context-state hydration | all `AnalyzerState` mapping roots, `recent_observations_by_circuit`, context state/store mappings | none | High risk; covered by strict-path, recent-observation, cleanup, metadata, alert-evidence, timeline, and hydration characterization tests | `StateReducer` |
 | Alert feedback | Expected/unhelpful feedback, adjusted repeated counts, alert lookup/retirement, NILM appliance feedback | alert store, feedback store, active alerts | persistent notifications via notification helper | High user impact; stale IDs should stay friendly | `EvidenceActionController` |
 | Settings recommendations | Recalculate/apply/undo/reset/dismiss recommendations and notification refresh | settings recommendation store and state mappings | config entry updates/reload | Medium/high risk because options and UI meet here | `SettingsController` |
 | NILM actions | Label/assign/validate/reject/rename/profile/merge/publish/unpublish/retire/ignore/expected | NILM assignments, signatures, intervals, session history, virtual appliance state | services, entity refresh side effects | High risk; must preserve no automatic appliance creation | `NilmController` |
@@ -36,7 +37,7 @@ moving remaining feature-specific behavior behind those managers.
 | Dashboard creation | Preview/build/save/update, registry resolution, resource handling | circuit configs, entity registry state, dashboard status | entity registry, dashboard storage, resources | High UI risk, already heavily tested | `DashboardController` |
 | Setup health aggregation | Setup Health state, checklist-ish issue aggregation, repair payloads | readiness/data-quality/source health state | repairs, persistent notifications | Medium risk; should become guided checklist later | `SetupHealthAggregator` |
 | Repairs and notifications | Issue creation/dismissal, notification dedupe/copy | repair issue state, alert notification state | repairs, persistent notifications | Medium risk; wording/source labels matter | `NotificationController` plus existing helpers |
-| Storage save/prune/migration | Dirty tracking, retention, prune, save scheduling, migration coordination | `FeatureStoreData` and store manager internals | HA storage helpers/timers | Medium risk; migrations are primary-agent-only | `StorePersistenceManager` |
+| Storage save/prune/migration | Dirty tracking, retention, prune, save scheduling, migration coordination, and relearn-baseline cleanup | `FeatureStoreData` and store manager internals | HA storage helpers/timers | Medium risk; migrations are primary-agent-only | `StorePersistenceManager` |
 | Entity profile and registry behavior | Simple/Standard/Expert desired entities, registry cleanup, compatibility behavior | entity metadata and registry entries | entity/device registries | High risk for existing users; fake-HA compatibility recently repaired | `EntityProfileController` |
 
 ## Current Public Facade To Preserve
