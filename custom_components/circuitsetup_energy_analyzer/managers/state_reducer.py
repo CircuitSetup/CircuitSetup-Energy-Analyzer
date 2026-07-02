@@ -7,8 +7,21 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from ..activity_timeline import build_recent_activity_timeline, timeline_payload
 from ..processors.base import FeatureResult, StateUpdate
-from ..ux import friendly_feature_name
+from ..ux import alert_evidence_detail, friendly_feature_name
+
+_CIRCUIT_MODE_LABELS = {
+    "single_phase": "Single Phase",
+    "dual_phase": "Dual Phase",
+    "mixed": "Mixed",
+    "mains_nilm": "Mains NILM",
+}
+_POWER_FLOW_LABELS = {
+    "load": "Load",
+    "generation": "Generation / Solar Export",
+    "mains_net": "Mains Net / Import-Export",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +149,73 @@ class StateReducer:
             if kept:
                 retained[circuit_id] = kept
         state.recent_observations_by_circuit = retained
+
+    def refresh_config_metadata_state(self, state: Any, config: Any) -> None:
+        """Expose configured circuit classification metadata as state."""
+        state.circuit_mode_by_circuit[config.circuit_id] = _friendly_circuit_mode(
+            config.mode
+        )
+        state.power_flow_by_circuit[config.circuit_id] = _friendly_power_flow(
+            config.power_flow
+        )
+
+    def refresh_latest_real_power_state(
+        self,
+        state: Any,
+        config: Any,
+        sample: Any,
+    ) -> None:
+        """Store the latest normalized watts for lightweight state entities."""
+        power_w = getattr(sample, "real_power", None)
+        if power_w is None:
+            state.latest_real_power_w_by_circuit.pop(config.circuit_id, None)
+            return
+        state.latest_real_power_w_by_circuit[config.circuit_id] = float(power_w)
+
+    def reset_learning_state(self, state: Any, circuit_id: str) -> None:
+        """Reset volatile state when a circuit baseline is relearned."""
+        state.active_alerts_by_circuit.pop(circuit_id, None)
+        state.anomaly_score_by_circuit[circuit_id] = 0.0
+        state.learning_by_circuit[circuit_id] = True
+        self.clear_power_quality_state(state, circuit_id)
+
+    def refresh_alert_evidence_state(
+        self,
+        state: Any,
+        circuit_id: str,
+        alert: Any | None,
+        *,
+        config: Any | None,
+    ) -> None:
+        """Refresh the compact alert evidence payload for one circuit."""
+        if alert is None:
+            state.alert_evidence_by_circuit.pop(circuit_id, None)
+            return
+        state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(
+            alert,
+            config=config,
+        )
+
+    def refresh_recent_activity_state(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+        now: datetime,
+    ) -> None:
+        """Refresh the compact recent-activity state for one circuit."""
+        timeline = build_recent_activity_timeline(
+            circuit_id=circuit_id,
+            events=store_data.events,
+            alerts=store_data.alerts,
+            observations=state.recent_observations_by_circuit.get(circuit_id, []),
+            now=now,
+        )
+        state.recent_activity_by_circuit[circuit_id] = timeline.latest_title
+        state.recent_activity_count_by_circuit[circuit_id] = timeline.total_count
+        state.recent_activity_timeline_by_circuit[circuit_id] = timeline_payload(
+            timeline
+        )
 
     def clear_power_quality_state(self, state: Any, circuit_id: str) -> bool:
         """Clear power-quality state owned by processor outputs."""
@@ -291,3 +371,15 @@ def _pop_circuit_state(
         if mapping.pop(circuit_id, None) is not None:
             removed = True
     return removed
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _friendly_circuit_mode(mode: Any) -> str:
+    return _CIRCUIT_MODE_LABELS.get(_enum_value(mode), "Unknown")
+
+
+def _friendly_power_flow(power_flow: Any) -> str:
+    return _POWER_FLOW_LABELS.get(_enum_value(power_flow), "Unknown")

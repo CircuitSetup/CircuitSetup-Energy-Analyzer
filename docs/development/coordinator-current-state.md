@@ -12,7 +12,8 @@ the most connected modules, with 7 incoming and 47 outgoing internal edges.
 The initial audit was completed before extraction. This branch now keeps the
 public coordinator facade stable while delegating dashboard creation, evidence
 actions, settings recommendations, entity profile changes, strict state update
-reduction, recent observation state, grouped processor/context cleanup, source
+reduction, recent observation state, grouped processor/context cleanup, runtime
+metadata/latest-power/alert-evidence/recent-activity refresh, source
 update lifecycle, source sample construction, processor ordering, store
 persistence, setup-health aggregation, NILM workflows, and notification dedupe to focused managers. Further
 coordinator thinning should keep lifecycle ownership in the coordinator while
@@ -27,7 +28,7 @@ moving remaining feature-specific behavior behind those managers.
 | Sample normalization | Source-state lookup, parallel leg aggregation, demo source lookup, circuit sample creation | latest source states, source entity config, circuit configs | HA states | Medium risk; feeds every processor | sample/source builder helper |
 | Context construction | Local time, weather, rain, water-flow, source mapping, contextual baseline inputs | context dictionaries and history by circuit | HA states, timezone | Medium risk; context bugs change alert semantics | `ProcessingContextBuilder` |
 | Processor dispatch | Processor registry/order, per-circuit and cross-circuit processing, feature result collection | `AnalyzerState`, processor outputs | mostly none after sample/context are built | High risk because ordering is behavior | `ProcessingPipeline` |
-| State update application | Dynamic `StateUpdate` path application, feature result updates, recent observation upsert/prune handling, and grouped cleanup for processor/context mappings | all `AnalyzerState` mapping roots, `recent_observations_by_circuit`, context state/store mappings | none | High risk; covered by strict-path, recent-observation, and cleanup characterization tests | `StateReducer` |
+| State update application | Dynamic `StateUpdate` path application, feature result updates, recent observation upsert/prune handling, grouped cleanup for processor/context mappings, metadata/latest-power refresh, relearn volatile-state reset, alert evidence payload refresh, and recent-activity timeline refresh | all `AnalyzerState` mapping roots, `recent_observations_by_circuit`, context state/store mappings | none | High risk; covered by strict-path, recent-observation, cleanup, metadata, alert-evidence, and timeline characterization tests | `StateReducer` |
 | Alert feedback | Expected/unhelpful feedback, adjusted repeated counts, alert lookup/retirement, NILM appliance feedback | alert store, feedback store, active alerts | persistent notifications via notification helper | High user impact; stale IDs should stay friendly | `EvidenceActionController` |
 | Settings recommendations | Recalculate/apply/undo/reset/dismiss recommendations and notification refresh | settings recommendation store and state mappings | config entry updates/reload | Medium/high risk because options and UI meet here | `SettingsController` |
 | NILM actions | Label/assign/validate/reject/rename/profile/merge/publish/unpublish/retire/ignore/expected | NILM assignments, signatures, intervals, session history, virtual appliance state | services, entity refresh side effects | High risk; must preserve no automatic appliance creation | `NilmController` |

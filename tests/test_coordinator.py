@@ -2369,7 +2369,7 @@ async def test_runtime_retains_recent_observations_across_refreshes() -> None:
     }
 
 
-def test_refresh_alert_evidence_state_includes_graph_metadata_from_config() -> None:
+def test_refresh_ux_state_includes_alert_graph_metadata_from_config() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -2417,7 +2417,7 @@ def test_refresh_alert_evidence_state_includes_graph_metadata_from_config() -> N
         now_fn=lambda: now,
     )
 
-    coordinator._refresh_alert_evidence_state("fridge")
+    coordinator.refresh_ux_state_for_circuit("fridge", now)
 
     detail = coordinator.state.alert_evidence_by_circuit["fridge"]
     assert detail["graph_entities"] == [

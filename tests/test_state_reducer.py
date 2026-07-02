@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +13,9 @@ from custom_components.circuitsetup_energy_analyzer.managers.state_reducer impor
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     CircuitEvent,
+    CircuitMode,
     EventType,
+    PowerFlowMode,
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -273,3 +276,89 @@ def test_state_reducer_clears_context_state_and_store_groups() -> None:
     assert store_data.water_flow_context_by_circuit == {}
     assert state.water_context_history_by_circuit == {}
     assert store_data.water_context_history_by_circuit == {}
+
+
+def test_state_reducer_refreshes_metadata_and_latest_power() -> None:
+    state = AnalyzerState()
+    reducer = StateReducer()
+    config = SimpleNamespace(
+        circuit_id="fridge",
+        mode=CircuitMode.DUAL_PHASE,
+        power_flow=PowerFlowMode.LOAD,
+    )
+
+    reducer.refresh_config_metadata_state(state, config)
+    reducer.refresh_latest_real_power_state(
+        state,
+        config,
+        SimpleNamespace(real_power=823.4),
+    )
+
+    assert state.circuit_mode_by_circuit == {"fridge": "Dual Phase"}
+    assert state.power_flow_by_circuit == {"fridge": "Load"}
+    assert state.latest_real_power_w_by_circuit == {"fridge": 823.4}
+
+    reducer.refresh_latest_real_power_state(
+        state,
+        config,
+        SimpleNamespace(real_power=None),
+    )
+
+    assert state.latest_real_power_w_by_circuit == {}
+
+
+def test_state_reducer_resets_learning_state_for_relearn() -> None:
+    state = AnalyzerState()
+    reducer = StateReducer()
+    state.active_alerts_by_circuit["fridge"] = [object()]
+    state.anomaly_score_by_circuit["fridge"] = 4.2
+    state.learning_by_circuit["fridge"] = False
+    state.power_quality_score_by_circuit["fridge"] = 91.0
+    state.power_factor_drift_by_circuit["fridge"] = 0.2
+
+    reducer.reset_learning_state(state, "fridge")
+
+    assert state.active_alerts_by_circuit == {}
+    assert state.anomaly_score_by_circuit == {"fridge": 0.0}
+    assert state.learning_by_circuit == {"fridge": True}
+    assert state.power_quality_score_by_circuit == {}
+    assert state.power_factor_drift_by_circuit == {}
+
+
+def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+    state = AnalyzerState()
+    store_data = FeatureStoreData()
+    reducer = StateReducer()
+    event = CircuitEvent(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge energy is higher than normal.",
+        feature="energy_usage",
+        observed_value=2.8,
+        baseline_value=2.0,
+    )
+    store_data.events.append(event)
+    store_data.alerts.append(alert)
+
+    reducer.refresh_alert_evidence_state(state, "fridge", alert, config=None)
+    reducer.refresh_recent_activity_state(state, store_data, "fridge", now)
+
+    assert state.alert_evidence_by_circuit["fridge"]["message"] == (
+        "Fridge energy is higher than normal."
+    )
+    assert state.recent_activity_by_circuit["fridge"] == (
+        "Possible issue: Energy Usage"
+    )
+    assert state.recent_activity_count_by_circuit == {"fridge": 2}
+    assert state.recent_activity_timeline_by_circuit["fridge"]["total_count"] == 2
+
+    reducer.refresh_alert_evidence_state(state, "fridge", None, config=None)
+
+    assert state.alert_evidence_by_circuit == {}
