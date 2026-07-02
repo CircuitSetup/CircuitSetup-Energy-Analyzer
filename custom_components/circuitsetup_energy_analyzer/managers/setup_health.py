@@ -68,6 +68,23 @@ class SetupHealthAggregator:
         self._coordinator = coordinator
         self.active_repair_issues: set[tuple[str, str]] = set()
 
+    async def async_run_mapping_checks(self) -> None:
+        """Run lightweight source mapping checks and refresh setup UX state."""
+        coordinator = self._coordinator
+        coordinator.mapping_checks_run += 1
+        now = coordinator.current_time()
+        for config in coordinator.circuit_configs:
+            if not config.sensors:
+                coordinator.state.data_quality_by_circuit[config.circuit_id] = (
+                    "missing_required_sensor"
+                )
+                await self.async_sync_data_quality_repairs(
+                    config.circuit_id,
+                    "missing_required_sensor",
+                )
+            coordinator.ux_state.refresh_config(config, None, now)
+        coordinator.async_set_updated_data(coordinator.state)
+
     async def async_sync_data_quality_repairs(
         self,
         circuit_id: str,

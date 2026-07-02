@@ -1239,18 +1239,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_run_mapping_checks(self: Self) -> None:
         """Run lightweight source mapping checks."""
-        self.mapping_checks_run += 1
-        for config in self.circuit_configs:
-            if not config.sensors:
-                self.state.data_quality_by_circuit[config.circuit_id] = (
-                    "missing_required_sensor"
-                )
-                await self._sync_data_quality_repairs(
-                    config.circuit_id,
-                    "missing_required_sensor",
-                )
-            self._refresh_ux_state(config, None, self._now_fn())
-        self.async_set_updated_data(self.state)
+        await self.setup_health.async_run_mapping_checks()
 
     async def async_create_dashboard(self: Self) -> dict[str, Any]:
         """Create or update the recommended Home Assistant dashboard."""
