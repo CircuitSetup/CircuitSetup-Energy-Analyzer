@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from custom_components.circuitsetup_energy_analyzer.managers.store_persistence import (
@@ -80,3 +80,51 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     assert [alert.circuit_id for alert in store_data.alerts] == ["washer"]
     assert dict(baseline_values) == {"washer:real_power": [400.0]}
     assert manager.dirty is True
+
+
+def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        nilm_signatures={
+            "mains": [
+                {"signature_id": "old", "last_seen": "2026-06-01T12:00:00+00:00"},
+                {"signature_id": "new", "last_seen": "2026-06-30T12:00:00+00:00"},
+            ],
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {"session_id": "stale", "end": "2026-05-01T12:00:00+00:00"},
+                {"session_id": "fresh", "end": "2026-06-30T12:00:00+00:00"},
+            ],
+        },
+    )
+    coordinator = SimpleNamespace(store_data=store_data)
+    manager = StorePersistenceManager(
+        coordinator,
+        retention_mode_for_circuit=lambda circuit_id: object(),
+        ha_time_zone=lambda: "UTC",
+        weather_context_history_max_samples=10,
+        water_context_history_max_samples=10,
+        alert_history_max_age=timedelta(days=180),
+        alert_history_max_items=100,
+        alert_feedback_max_age=timedelta(days=365),
+        alert_feedback_max_items=100,
+        nilm_signatures_max_items=1,
+        nilm_unknown_loads_max_items=1,
+        nilm_session_history_max_age=timedelta(days=45),
+        nilm_session_history_max_items=10,
+        recommendation_history_max_age=timedelta(days=180),
+        recommendation_history_max_items=100,
+        recommendation_decisions_max_age=timedelta(days=180),
+        recommendation_decisions_max_items=100,
+        compact_settings_recommendation_episode_key=lambda episode_key: episode_key,
+    )
+
+    manager.prune_nilm_history(now)
+
+    assert store_data.nilm_signatures["mains"] == [
+        {"signature_id": "new", "last_seen": "2026-06-30T12:00:00+00:00"},
+    ]
+    assert store_data.nilm_session_history_by_circuit["mains"] == [
+        {"session_id": "fresh", "end": "2026-06-30T12:00:00+00:00"},
+    ]

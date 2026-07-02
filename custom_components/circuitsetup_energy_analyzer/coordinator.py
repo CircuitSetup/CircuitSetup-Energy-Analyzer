@@ -14,9 +14,6 @@ from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
-from .alert_feedback import (
-    alert_feedback_is_expired as _alert_feedback_is_expired,
-)
 from .alerting import alert_anomaly_score
 from .billing import (
     BillingCycleSettings,
@@ -42,7 +39,6 @@ from .demand import (
 )
 from .events import CircuitEventDetector
 from .goals import EnergyGoalSettings
-from .local_time import local_date
 from .managers.alert_policies import AlertPolicyManager
 from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
@@ -111,15 +107,10 @@ from .processors import (
     UtilityComparisonProcessor,
     WaterContextAlertProcessor,
 )
-from .settings_advisor import (
-    RecommendationStatus,
-    SettingRecommendation,
-)
 from .standby import StandbySettings
 from .storage import (
     RETENTION_WINDOWS,
     FeatureStoreData,
-    prune_contextual_baseline_state,
 )
 from .usage import EnergyUsageSettings
 from .utility_comparison import (
@@ -659,29 +650,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self.store_persistence = StorePersistenceManager(
             self,
-            newest_mapping_items=_newest_mapping_items,
-            mapping_time=_mapping_time,
             retention_mode_for_circuit=self._retention_mode_for_circuit,
-            retention_window_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(circuit_id)
-            ],
-            ha_local_date=_ha_local_date,
             ha_time_zone=self.context_builder.time_zone,
-            sample_timestamp_is_at_or_after=_sample_timestamp_is_at_or_after,
-            contextual_baseline_pruner=prune_contextual_baseline_state,
             weather_context_history_max_samples=WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
             water_context_history_max_samples=WATER_CONTEXT_HISTORY_MAX_SAMPLES,
             alert_history_max_age=ALERT_HISTORY_MAX_AGE,
             alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
-            alert_feedback_is_expired=_alert_feedback_is_expired,
             alert_feedback_max_age=ALERT_FEEDBACK_MAX_AGE,
             alert_feedback_max_items=ALERT_FEEDBACK_MAX_ITEMS,
             nilm_signatures_max_items=NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
             nilm_unknown_loads_max_items=NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
             nilm_session_history_max_age=NILM_SESSION_HISTORY_MAX_AGE,
             nilm_session_history_max_items=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
-            recommendation_pending_status=RecommendationStatus.PENDING,
-            recommendation_sort_key=_recommendation_sort_key,
             recommendation_history_max_age=RECOMMENDATION_HISTORY_MAX_AGE,
             recommendation_history_max_items=RECOMMENDATION_HISTORY_MAX_ITEMS,
             recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
@@ -1705,132 +1685,3 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return await self.notification_controller.async_notify_nilm_virtual_appliances(
             now
         )
-
-
-def _numeric_items(
-    raw_items: Any,
-    *,
-    keys: tuple[str, ...] = (),
-) -> list[float]:
-    if raw_items is None:
-        return []
-    try:
-        items = list(raw_items)
-    except TypeError:
-        items = [raw_items]
-
-    values: list[float] = []
-    for item in items:
-        if keys and isinstance(item, Mapping):
-            for key in keys:
-                if key in item:
-                    _append_float(values, item.get(key))
-                    break
-            continue
-        _append_float(values, item)
-    return values
-
-
-def _coerce_timestamped_dicts(raw_items: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_items, list):
-        return []
-    return [
-        dict(item)
-        for item in raw_items
-        if isinstance(item, Mapping)
-        and _datetime_or_none(item.get("timestamp")) is not None
-    ]
-
-
-def _append_float(values: list[float], raw_value: Any) -> None:
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError):
-        return
-    values.append(value)
-
-
-def _format_kwh(value: float) -> str:
-    return f"{value:.3f}".rstrip("0").rstrip(".")
-
-
-def _format_percent(value: float) -> str:
-    return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def _format_amps(value: float) -> str:
-    return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def _format_w(value: float) -> str:
-    return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def _datetime_or_none(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
-    if time_zone is None or value.tzinfo is None:
-        return value.date()
-    return local_date(value, time_zone)
-
-
-def _datetime_floor() -> datetime:
-    return datetime.min.replace(tzinfo=UTC)
-
-
-def _mapping_time(item: Any, *keys: str) -> datetime:
-    if not isinstance(item, Mapping):
-        return _datetime_floor()
-    for key in keys or ("last_seen", "timestamp", "created_at", "first_seen"):
-        parsed = _datetime_or_none(item.get(key))
-        if parsed is not None:
-            return parsed
-    return _datetime_floor()
-
-
-def _newest_mapping_items(items: Any, max_items: int) -> list[dict[str, Any]]:
-    if not isinstance(items, list):
-        return []
-    mapped_items = [dict(item) for item in items if isinstance(item, Mapping)]
-    return sorted(mapped_items, key=_mapping_time, reverse=True)[:max_items]
-
-
-def _recommendation_sort_key(
-    recommendation: SettingRecommendation,
-) -> tuple[bool, datetime]:
-    return (
-        recommendation.status is RecommendationStatus.PENDING,
-        max(recommendation.created_at, recommendation.expires_at),
-    )
-
-
-def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
-    if not isinstance(sample, dict):
-        return False
-    sample_time = _datetime_or_none(sample.get("timestamp"))
-    return sample_time is not None and sample_time >= cutoff
-
-
-def _float_or_none(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _round_number(value: Any) -> float:
-    parsed = _float_or_none(value)
-    if parsed is None:
-        return 0.0
-    return round(parsed, 3)
