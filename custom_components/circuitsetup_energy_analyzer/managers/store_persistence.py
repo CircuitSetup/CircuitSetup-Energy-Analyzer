@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-ContextualBaselinePruner = Callable[
-    [dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], Any, datetime],
-    tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]],
-]
+from ..alert_feedback import alert_feedback_is_expired
+from ..local_time import local_date
+from ..settings_advisor import RecommendationStatus
+from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
 
 
 class StorePersistenceManager:
@@ -17,27 +17,18 @@ class StorePersistenceManager:
         self,
         coordinator: Any,
         *,
-        newest_mapping_items: Callable[[Any, int], list[dict[str, Any]]],
-        mapping_time: Callable[..., datetime],
         retention_mode_for_circuit: Callable[[str], Any],
-        retention_window_for_circuit: Callable[[str], timedelta],
-        ha_local_date: Callable[[datetime, str | None], Any],
         ha_time_zone: Callable[[], str | None],
-        sample_timestamp_is_at_or_after: Callable[[Any, datetime], bool],
-        contextual_baseline_pruner: ContextualBaselinePruner,
         weather_context_history_max_samples: int,
         water_context_history_max_samples: int,
         alert_history_max_age: timedelta,
         alert_history_max_items: int,
-        alert_feedback_is_expired: Callable[[Any, datetime], bool],
         alert_feedback_max_age: timedelta,
         alert_feedback_max_items: int,
         nilm_signatures_max_items: int,
         nilm_unknown_loads_max_items: int,
         nilm_session_history_max_age: timedelta,
         nilm_session_history_max_items: int,
-        recommendation_pending_status: Any,
-        recommendation_sort_key: Callable[[Any], Any],
         recommendation_history_max_age: timedelta,
         recommendation_history_max_items: int,
         recommendation_decisions_max_age: timedelta,
@@ -48,14 +39,18 @@ class StorePersistenceManager:
         ],
     ) -> None:
         self._coordinator = coordinator
-        self._newest_mapping_items = newest_mapping_items
-        self._mapping_time = mapping_time
+        self._newest_mapping_items = _newest_mapping_items
+        self._mapping_time = _mapping_time
         self._retention_mode_for_circuit = retention_mode_for_circuit
-        self._retention_window_for_circuit = retention_window_for_circuit
-        self._ha_local_date = ha_local_date
+        self._retention_window_for_circuit = (
+            lambda circuit_id: RETENTION_WINDOWS[
+                self._retention_mode_for_circuit(circuit_id)
+            ]
+        )
+        self._ha_local_date = _ha_local_date
         self._ha_time_zone = ha_time_zone
-        self._sample_timestamp_is_at_or_after = sample_timestamp_is_at_or_after
-        self._contextual_baseline_pruner = contextual_baseline_pruner
+        self._sample_timestamp_is_at_or_after = _sample_timestamp_is_at_or_after
+        self._contextual_baseline_pruner = prune_contextual_baseline_state
         self._weather_context_history_max_samples = weather_context_history_max_samples
         self._water_context_history_max_samples = water_context_history_max_samples
         self._alert_history_max_age = alert_history_max_age
@@ -67,8 +62,8 @@ class StorePersistenceManager:
         self._nilm_unknown_loads_max_items = nilm_unknown_loads_max_items
         self._nilm_session_history_max_age = nilm_session_history_max_age
         self._nilm_session_history_max_items = nilm_session_history_max_items
-        self._recommendation_pending_status = recommendation_pending_status
-        self._recommendation_sort_key = recommendation_sort_key
+        self._recommendation_pending_status = RecommendationStatus.PENDING
+        self._recommendation_sort_key = _recommendation_sort_key
         self._recommendation_history_max_age = recommendation_history_max_age
         self._recommendation_history_max_items = recommendation_history_max_items
         self._recommendation_decisions_max_age = recommendation_decisions_max_age
@@ -366,3 +361,55 @@ class StorePersistenceManager:
                 store_data.settings_recommendation_notification_episode_key
             )
         )
+
+
+def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
+    if time_zone is None or value.tzinfo is None:
+        return value.date()
+    return local_date(value, time_zone)
+
+
+def _datetime_floor() -> datetime:
+    return datetime.min.replace(tzinfo=UTC)
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _mapping_time(item: Any, *keys: str) -> datetime:
+    if not isinstance(item, Mapping):
+        return _datetime_floor()
+    for key in keys or ("last_seen", "timestamp", "created_at", "first_seen"):
+        parsed = _datetime_or_none(item.get(key))
+        if parsed is not None:
+            return parsed
+    return _datetime_floor()
+
+
+def _newest_mapping_items(items: Any, max_items: int) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    mapped_items = [dict(item) for item in items if isinstance(item, Mapping)]
+    return sorted(mapped_items, key=_mapping_time, reverse=True)[:max_items]
+
+
+def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
+    if not isinstance(sample, dict):
+        return False
+    sample_time = _datetime_or_none(sample.get("timestamp"))
+    return sample_time is not None and sample_time >= cutoff
+
+
+def _recommendation_sort_key(recommendation: Any) -> tuple[bool, datetime]:
+    return (
+        recommendation.status is RecommendationStatus.PENDING,
+        max(recommendation.created_at, recommendation.expires_at),
+    )
