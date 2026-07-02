@@ -159,7 +159,7 @@ class EvidenceActionController:
             "baseline_value": alert.baseline_value,
             "evidence_count": evidence_count,
         }
-        coordinator._apply_nilm_alert_feedback(alert, action, now)
+        coordinator.apply_nilm_alert_feedback(alert, action, now)
         self.retire_alert_id(alert_id)
         coordinator.refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)

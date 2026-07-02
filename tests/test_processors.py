@@ -178,6 +178,93 @@ def test_processing_context_keeps_runtime_dependencies() -> None:
 
 
 @pytest.mark.asyncio
+async def test_processing_pipeline_uses_injected_processors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import power_quality
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    calls: list[str] = []
+    cleared_power_quality: list[str] = []
+    cleared_standby: list[str] = []
+
+    class _Processor:
+        def __init__(self, name: str, result: FeatureResult | None = None) -> None:
+            self.name = name
+            self.result = result or FeatureResult()
+
+        def process(self, *args: object, **kwargs: object) -> FeatureResult:
+            del args, kwargs
+            calls.append(self.name)
+            return self.result
+
+    class _Coordinator:
+        async def async_apply_feature_result(
+            self,
+            result: FeatureResult,
+        ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
+            return result.events, result.alerts
+
+    coordinator = _Coordinator()
+    pipeline = processing_pipeline.ProcessingPipeline(coordinator)
+    pipeline.configure_processors(
+        event_processor=_Processor("event"),
+        power_quality_processor=_Processor(
+            "power_quality",
+            power_quality.PowerQualityResult(clear_power_quality_state="fridge"),
+        ),
+        energy_usage_processor=_Processor("usage"),
+        energy_goal_processor=_Processor("goal"),
+        run_cycle_processor=_Processor("cycle"),
+        activity_alert_processor=_Processor("activity"),
+        billing_cycle_processor=_Processor("billing"),
+        cost_processor=_Processor("cost"),
+        demand_processor=_Processor("demand"),
+        capacity_processor=_Processor("capacity"),
+        leg_imbalance_processor=_Processor("leg_imbalance"),
+        metric_consistency_processor=_Processor("metric_consistency"),
+        standby_processor=_Processor("standby"),
+        mains_balance_processor=_Processor("mains_balance"),
+        solar_flow_processor=_Processor("solar_flow"),
+        utility_comparison_processor=_Processor("utility_comparison"),
+        clear_power_quality_state=cleared_power_quality.append,
+        clear_standby_state=cleared_standby.append,
+        sync_setup_health_repairs=lambda circuit_id: None,
+    )
+
+    await pipeline.async_process_circuit(
+        SimpleNamespace(
+            circuit_id="fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            power_flow=PowerFlowMode.LOAD,
+        ),
+        SimpleNamespace(),
+        SimpleNamespace(),
+    )
+
+    assert calls == [
+        "event",
+        "power_quality",
+        "usage",
+        "goal",
+        "cycle",
+        "activity",
+        "billing",
+        "cost",
+        "demand",
+        "capacity",
+        "leg_imbalance",
+        "metric_consistency",
+        "standby",
+    ]
+    assert cleared_power_quality == ["fridge"]
+    assert cleared_standby == []
+
+
+@pytest.mark.asyncio
 async def test_coordinator_applies_feature_result() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

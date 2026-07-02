@@ -947,7 +947,12 @@ def test_nilm_controller_refresh_state_applies_processor_updates() -> None:
                 ]
             )
 
-    coordinator._nilm_sample_processor = _Processor()
+    coordinator.nilm_controller.configure_processors(
+        sample_processor=_Processor(),
+        topology_processor=coordinator._nilm_topology_processor,
+        total_events_by_circuit=coordinator._nilm_total_events_by_circuit,
+        unmatched_edges_by_circuit=coordinator._nilm_unmatched_edges,
+    )
 
     coordinator.nilm_controller.refresh_state("mains")
 
@@ -979,7 +984,12 @@ def test_nilm_controller_builds_signature_payloads_with_processing_context() -> 
             calls.append((circuit_id, raw_signatures, context.now))
             return payloads
 
-    coordinator._nilm_sample_processor = _Processor()
+    coordinator.nilm_controller.configure_processors(
+        sample_processor=_Processor(),
+        topology_processor=coordinator._nilm_topology_processor,
+        total_events_by_circuit=coordinator._nilm_total_events_by_circuit,
+        unmatched_edges_by_circuit=coordinator._nilm_unmatched_edges,
+    )
 
     assert coordinator.nilm_controller.signature_payloads("mains", signatures) is (
         payloads
@@ -1040,7 +1050,12 @@ def test_nilm_controller_process_sample_applies_updates_and_dirty_flag() -> None
                 store_dirty=True,
             )
 
-    coordinator._nilm_sample_processor = _Processor()
+    coordinator.nilm_controller.configure_processors(
+        sample_processor=_Processor(),
+        topology_processor=coordinator._nilm_topology_processor,
+        total_events_by_circuit=coordinator._nilm_total_events_by_circuit,
+        unmatched_edges_by_circuit=coordinator._nilm_unmatched_edges,
+    )
 
     assert coordinator.nilm_controller.process_sample(config, sample, [event]) == [
         alert
@@ -1098,7 +1113,12 @@ def test_nilm_controller_observes_known_load_topology() -> None:
                 ],
             )
 
-    coordinator._nilm_topology_processor = _Processor()
+    coordinator.nilm_controller.configure_processors(
+        sample_processor=coordinator._nilm_sample_processor,
+        topology_processor=_Processor(),
+        total_events_by_circuit=coordinator._nilm_total_events_by_circuit,
+        unmatched_edges_by_circuit=coordinator._nilm_unmatched_edges,
+    )
 
     assert coordinator.nilm_controller.observe_known_load_topology(config, match) == (
         alert
@@ -1180,7 +1200,12 @@ def test_nilm_controller_hydrates_ignored_signatures_from_store() -> None:
                 ]
             )
 
-    coordinator._nilm_sample_processor = _Processor()
+    coordinator.nilm_controller.configure_processors(
+        sample_processor=_Processor(),
+        topology_processor=coordinator._nilm_topology_processor,
+        total_events_by_circuit=coordinator._nilm_total_events_by_circuit,
+        unmatched_edges_by_circuit=coordinator._nilm_unmatched_edges,
+    )
 
     coordinator.nilm_controller.hydrate_state_from_store()
 

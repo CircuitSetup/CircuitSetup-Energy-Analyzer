@@ -38,7 +38,10 @@ def test_nilm_controller_builds_signature_payloads_with_public_current_time() ->
     coordinator = SimpleNamespace(
         current_time=lambda: now,
         context_builder=SimpleNamespace(build=build_context),
-        _nilm_sample_processor=SimpleNamespace(
+    )
+    controller = _nilm_controller(coordinator)
+    controller.configure_processors(
+        sample_processor=SimpleNamespace(
             _nilm_signature_payloads=(
                 lambda circuit_id, signatures, context: {
                     "circuit_id": circuit_id,
@@ -47,8 +50,10 @@ def test_nilm_controller_builds_signature_payloads_with_public_current_time() ->
                 }
             )
         ),
+        topology_processor=SimpleNamespace(),
+        total_events_by_circuit={},
+        unmatched_edges_by_circuit={},
     )
-    controller = _nilm_controller(coordinator)
 
     payload = controller.signature_payloads("mains", [{"signature_id": "sig-1"}])
 

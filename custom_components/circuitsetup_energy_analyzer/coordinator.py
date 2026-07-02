@@ -726,6 +726,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
             ),
         )
+        self.pipeline.configure_processors(
+            event_processor=self._event_processor,
+            power_quality_processor=self._power_quality_processor,
+            energy_usage_processor=self._energy_usage_processor,
+            energy_goal_processor=self._energy_goal_processor,
+            run_cycle_processor=self._run_cycle_processor,
+            activity_alert_processor=self._activity_alert_processor,
+            billing_cycle_processor=self._billing_cycle_processor,
+            cost_processor=self._cost_processor,
+            demand_processor=self._demand_processor,
+            capacity_processor=self._capacity_processor,
+            leg_imbalance_processor=self._leg_imbalance_processor,
+            metric_consistency_processor=self._metric_consistency_processor,
+            standby_processor=self._standby_processor,
+            mains_balance_processor=self._mains_balance_processor,
+            solar_flow_processor=self._solar_flow_processor,
+            utility_comparison_processor=self._utility_comparison_processor,
+            clear_power_quality_state=self._clear_power_quality_state,
+            clear_standby_state=self._clear_standby_state,
+            sync_setup_health_repairs=self._sync_setup_health_repairs,
+        )
         self._nilm_topology_processor = NilmTopologyProcessor(
             known_config_for_circuit=self.circuit_registry.config_for_circuit,
             alert_policy_for_circuit=self._nilm_topology_alert_policy_for_circuit,
@@ -752,6 +773,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     if alert is not None
                 ]
             ),
+        )
+        self.nilm_controller.configure_processors(
+            sample_processor=self._nilm_sample_processor,
+            topology_processor=self._nilm_topology_processor,
+            total_events_by_circuit=self._nilm_total_events_by_circuit,
+            unmatched_edges_by_circuit=self._nilm_unmatched_edges,
         )
         self._water_context_alert_processor = WaterContextAlertProcessor(
             alert_policy_for_circuit=self._water_context_alert_policy_for_circuit,
@@ -849,6 +876,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def current_time(self: Self) -> datetime:
         """Return the coordinator's current runtime timestamp."""
         return self._now_fn()
+
+    def refresh_energy_goal_state(
+        self: Self,
+        circuit_id: str,
+        config: CircuitConfig,
+        context: Any,
+    ) -> FeatureResult:
+        """Refresh daily energy-goal state through the configured processor."""
+        return self._energy_goal_processor.refresh_state(circuit_id, config, context)
 
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
@@ -3412,7 +3448,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-    def _apply_nilm_alert_feedback(
+    def apply_nilm_alert_feedback(
         self: Self,
         alert: AlertEvidence,
         action: str,
