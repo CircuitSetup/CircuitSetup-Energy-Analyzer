@@ -18,13 +18,20 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     DOMAIN,
     ENTITY_MODEL_COMPACT,
 )
+from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    ApplianceProfile,
     BaselineStats,
+    CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     EventType,
+    SensorRef,
+    SensorRole,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
@@ -139,12 +146,110 @@ async def test_diagnostics_includes_redacted_runtime_summaries_without_ha() -> N
         "baselines": {"count": 1, "features": {"fridge": ["real_power"]}},
         "alerts": {"count": 1, "by_circuit": {"fridge": 1}},
         "nilm_signatures": {"mains": 1},
+        "appliance_details": [],
         "last_exported_diagnostics": {
             "circuit_id": "fridge",
             "anomaly_score": 0.42,
         },
     }
     assert "sensor.secret_panel_power" not in repr(diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_includes_appliance_detail_runtime_summaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    state = AnalyzerState(
+        latest_real_power_w_by_circuit={"fridge": 84.0},
+        daily_energy_usage_by_circuit={"fridge": 2.4},
+        run_cycle_status_by_circuit={"fridge": "running"},
+    )
+    coordinator = SimpleNamespace(
+        state=state,
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(
+                    SensorRef("sensor.secret_fridge_power", SensorRole.REAL_POWER),
+                    SensorRef("sensor.secret_fridge_energy", SensorRole.ENERGY),
+                ),
+            ),
+            CircuitConfig(
+                circuit_id="mains",
+                name="Mains NILM",
+                appliance_profile=ApplianceProfile.MAINS_NILM,
+                mode=CircuitMode.MAINS_NILM,
+                sensors=(
+                    SensorRef("sensor.secret_mains_power", SensorRole.REAL_POWER),
+                ),
+            ),
+        ),
+        store_data=FeatureStoreData(
+            baselines={
+                "fridge:daily_energy_kwh": BaselineStats(
+                    "daily_energy_kwh",
+                    12,
+                    1.8,
+                    0.1,
+                    1.5,
+                    2.1,
+                    0.86,
+                )
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "lifecycle_state": "published",
+                        "confidence": 0.91,
+                        "publish_entities": True,
+                        "created_device": True,
+                    }
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    timestamp=datetime(2026, 6, 2, 18, 0, tzinfo=UTC),
+                    delta_w=820.0,
+                    delta_var=0.0,
+                    delta_va=820.0,
+                    delta_pf=0.0,
+                    direction="on",
+                )
+            ]
+        },
+        last_exported_diagnostics={},
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="Panel Analyzer",
+        data={"source_entities": ["sensor.secret_panel_power"]},
+        options={},
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    details = {
+        detail["display_name"]: detail
+        for detail in diagnostics["runtime"]["appliance_details"]
+    }
+    assert details["Kitchen Fridge"]["source_type"] == "direct_meter"
+    assert details["Kitchen Fridge"]["daily_energy_kwh"] == 2.4
+    assert details["Kitchen Fridge"]["today_vs_normal"][0]["status"] == "higher"
+    assert details["Dishwasher"]["source_type"] == "nilm_estimate"
+    assert details["Dishwasher"]["confidence"] == 0.91
+    assert "sensor.secret" not in repr(diagnostics["runtime"]["appliance_details"])
 
 
 @pytest.mark.asyncio

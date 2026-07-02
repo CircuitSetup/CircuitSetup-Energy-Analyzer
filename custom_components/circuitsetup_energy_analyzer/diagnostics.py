@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
+from .appliance_detail import (
+    appliance_detail_for_assignment,
+    appliance_detail_for_circuit,
+)
 from .const import (
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_ENTITY_MODEL_VERSION,
@@ -91,10 +95,55 @@ def _runtime_summary(hass: Any, entry_id: str) -> dict[str, Any] | None:
                 {},
             ).items()
         },
+        "appliance_details": _appliance_details(coordinator),
         "last_exported_diagnostics": dict(
             getattr(coordinator, "last_exported_diagnostics", {}) or {}
         ),
     }
+
+
+def _appliance_details(coordinator: Any) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
+        if not circuit_id:
+            continue
+        detail = appliance_detail_for_circuit(coordinator, circuit_id)
+        if detail is None:
+            continue
+        details.append(_diagnostic_appliance_detail(detail))
+        seen.add(("circuit", circuit_id))
+
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, dict):
+        return details
+    for assignments in assignments_by_circuit.values():
+        if not isinstance(assignments, list):
+            continue
+        for assignment in assignments:
+            if not isinstance(assignment, dict):
+                continue
+            assignment_id = str(assignment.get("assignment_id") or "").strip()
+            if not assignment_id or ("assignment", assignment_id) in seen:
+                continue
+            detail = appliance_detail_for_assignment(coordinator, assignment_id)
+            if detail is None:
+                continue
+            details.append(_diagnostic_appliance_detail(detail))
+            seen.add(("assignment", assignment_id))
+    return details
+
+
+def _diagnostic_appliance_detail(detail: Any) -> dict[str, Any]:
+    payload = detail.as_dict()
+    payload.pop("mains_source", None)
+    return payload
 
 
 def _entity_model_summary(hass: Any, entry: Any) -> dict[str, Any]:
