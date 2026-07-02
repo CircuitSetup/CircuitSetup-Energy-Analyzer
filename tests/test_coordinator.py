@@ -3183,7 +3183,7 @@ def test_unhelpful_feedback_raises_future_alert_requirement() -> None:
         ),
         now_fn=lambda: now + timedelta(days=1),
     )
-    policy = coordinator._usage_alert_policy_for_circuit("fridge")
+    policy = coordinator.alert_policies.usage_alert_policy_for_circuit("fridge")
 
     for index in range(4):
         assert (
@@ -9833,8 +9833,12 @@ def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
         coordinator.settings_controller.sensitivity_for_circuit("unknown")
         == "balanced"
     )
-    assert coordinator._alert_policy_for_circuit("fridge").min_repeated == 3
-    assert coordinator._alert_policy_for_circuit("hvac").min_repeated == 4
+    assert coordinator.alert_policies.alert_policy_for_circuit(
+        "fridge"
+    ).min_repeated == 3
+    assert coordinator.alert_policies.alert_policy_for_circuit(
+        "hvac"
+    ).min_repeated == 4
 
 
 def test_coordinator_canonicalizes_legacy_sensitivity_config_copies() -> None:
