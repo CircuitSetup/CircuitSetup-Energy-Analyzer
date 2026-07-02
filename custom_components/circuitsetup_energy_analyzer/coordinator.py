@@ -41,17 +41,9 @@ from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
 from .cost import CostSettings
-from .cycles import (
-    cycle_summary_payload,
-    summarize_circuit_cycles,
-)
 from .dashboard import normalize_dashboard_layout
 from .demand import (
     DemandSettings,
-)
-from .energy_dashboard import (
-    evaluate_energy_dashboard_readiness,
-    readiness_payload,
 )
 from .events import CircuitEventDetector
 from .exporting import build_circuit_history_csv
@@ -95,6 +87,7 @@ from .managers.utility_energy_sources import (
     _ha_recorder_get_instance,
     _ha_statistics_during_period,
 )
+from .managers.ux_state import UxStateManager
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -112,9 +105,6 @@ from .nilm import (
     NilmEdgeDetector,
 )
 from .normalize import NormalizedCircuitSample, SourceState
-from .operating_detection import (
-    resolve_operating_detection_from_settings,
-)
 from .processors import (
     ActivityAlertProcessor,
     BillingCycleProcessor,
@@ -154,9 +144,6 @@ from .utility_comparison import (
 )
 from .ux import (
     canonicalize_sensitivity_config,
-    data_quality_checklist,
-    health_summary,
-    learning_progress,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -746,6 +733,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             track_state_change_event=async_track_state_change_event,
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
         )
+        self.ux_state = UxStateManager(self)
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
@@ -1729,29 +1717,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return any(config.circuit_id == circuit_id for config in self.circuit_configs)
 
     def _hydrate_state_from_store(self: Self) -> None:
-        for circuit_id, maintenance in self.store_data.maintenance_by_circuit.items():
-            if maintenance.get("active") is True:
-                self.paused_circuits.add(circuit_id)
-        self.nilm_controller.hydrate_state_from_store()
-        self.state_reducer.hydrate_context_state_from_store(
-            self.state,
-            self.store_data,
-        )
-        self.refresh_all_ux_state(self._now_fn())
-        self._refresh_settings_recommendation_state(self._now_fn())
+        self.ux_state.hydrate_state_from_store()
 
     def refresh_all_ux_state(self: Self, now: datetime) -> None:
-        for config in self.circuit_configs:
-            self._refresh_ux_state(config, None, now)
+        self.ux_state.refresh_all(now)
 
     def refresh_ux_state_for_circuit(
         self: Self,
         circuit_id: str,
         now: datetime,
     ) -> None:
-        config = self.circuit_registry.config_for_circuit(circuit_id)
-        if config is not None:
-            self._refresh_ux_state(config, None, now)
+        self.ux_state.refresh_for_circuit(circuit_id, now)
 
     def _refresh_ux_state(
         self: Self,
@@ -1759,139 +1735,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         sample: NormalizedCircuitSample | None,
         now: datetime,
     ) -> None:
-        circuit_id = config.circuit_id
-        checklist = data_quality_checklist(config, sample)
-        if (
-            sample is None
-            and circuit_id in self.state.data_quality_checklist_by_circuit
-        ):
-            checklist = dict(self.state.data_quality_checklist_by_circuit[circuit_id])
-        self.state.data_quality_checklist_by_circuit[circuit_id] = checklist
-        dashboard_readiness = evaluate_energy_dashboard_readiness(
-            config,
-            self._source_states_for(config, now),
-        )
-        self.state.energy_dashboard_status_by_circuit[circuit_id] = (
-            dashboard_readiness.status
-        )
-        self.state.energy_dashboard_evidence_by_circuit[circuit_id] = (
-            readiness_payload(dashboard_readiness)
-        )
-
-        learning = self.state.learning_by_circuit.get(circuit_id, True)
-        suppression_reason = self._suppression_reason(circuit_id, learning)
-        progress = learning_progress(
-            config,
-            events=self.store_data.events,
-            baselines=self.store_data.baselines,
-            baseline_buffer_counts={
-                key: len(values) for key, values in self._baseline_values.items()
-            },
-            now=now,
-            learning=learning,
-            suppression_reason=suppression_reason,
-        )
-        self.state.learning_progress_by_circuit[circuit_id] = progress
-        merge_gap_seconds = resolve_operating_detection_from_settings(
-            config,
-            getattr(
-                self.store_data,
-                "operating_detection_settings_by_circuit",
-                {},
-            ).get(circuit_id, {}),
-        ).profile.merge_gap_seconds
-        cycle_summary = summarize_circuit_cycles(
-            self.store_data.events,
-            circuit_id=circuit_id,
-            now=now,
-            merge_gap_seconds=merge_gap_seconds,
-            time_zone=self.context_builder.time_zone(),
-        )
-        self.state.run_cycle_count_by_circuit[circuit_id] = (
-            cycle_summary.start_count
-        )
-        self.state.run_cycle_runtime_seconds_by_circuit[circuit_id] = (
-            cycle_summary.runtime_seconds
-        )
-        self.state.run_cycle_duty_cycle_by_circuit[circuit_id] = (
-            cycle_summary.duty_cycle_percent
-        )
-        self.state.run_cycle_status_by_circuit[circuit_id] = cycle_summary.status
-        self.state.run_cycle_evidence_by_circuit[circuit_id] = cycle_summary_payload(
-            cycle_summary
-        )
-        self.environment_context.refresh_weather_context_state(config, now)
-        self.environment_context.refresh_water_context_state(config, now)
-
-        maintenance = dict(self.store_data.maintenance_by_circuit.get(circuit_id, {}))
-        maintenance.setdefault("active", circuit_id in self.paused_circuits)
-        self.state.maintenance_by_circuit[circuit_id] = maintenance
-        self.state.sensitivity_by_circuit[circuit_id] = (
-            self.settings_controller.sensitivity_for_circuit(circuit_id)
-        )
-        self.state_reducer.refresh_alert_evidence_state(
-            self.state,
-            circuit_id,
-            self._latest_alert_for_circuit(circuit_id),
-            config=self.circuit_registry.config_for_circuit(circuit_id),
-        )
-        self.state_reducer.refresh_recent_activity_state(
-            self.state,
-            self.store_data,
-            circuit_id,
-            now,
-        )
-        self.nilm_controller.refresh_state(circuit_id)
-
-        status, summary = health_summary(
-            data_quality_problem=bool(
-                self.state.data_quality_by_circuit.get(circuit_id)
-            ),
-            paused=bool(maintenance.get("active"))
-            or circuit_id in self.paused_circuits,
-            active_alerts=bool(self.state.active_alerts_by_circuit.get(circuit_id)),
-            observations=bool(
-                self.state.recent_observations_by_circuit.get(circuit_id)
-            ),
-            nilm_review_count=len(
-                self.state.nilm_review_by_circuit.get(circuit_id, [])
-            ),
-            mixed=(
-                config.mode is CircuitMode.MIXED
-                or config.appliance_profile is ApplianceProfile.MIXED
-            ),
-            learning=learning,
-        )
-        self.state.health_status_by_circuit[circuit_id] = status
-        self.state.health_summary_by_circuit[circuit_id] = summary
-        self.state.readiness_by_circuit[circuit_id] = {
-            **progress,
-            "required_metric_coverage": checklist["required_metric_coverage"],
-            "optional_metric_coverage": checklist["optional_metric_coverage"],
-            "health_status": status,
-            "health_summary": summary,
-        }
+        self.ux_state.refresh_config(config, sample, now)
 
     def _suppression_reason(self: Self, circuit_id: str, learning: bool) -> str | None:
-        if self.state.data_quality_by_circuit.get(circuit_id):
-            return "data_quality"
-        if circuit_id in self.paused_circuits:
-            return "paused"
-        if learning:
-            return "learning"
-        return None
+        return self.ux_state.suppression_reason(circuit_id, learning)
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
-        alerts = list(self.state.active_alerts_by_circuit.get(circuit_id, []))
-        if not alerts:
-            alerts = [
-                alert
-                for alert in self.store_data.alerts
-                if alert.circuit_id == circuit_id
-            ]
-        if not alerts:
-            return None
-        return max(alerts, key=lambda alert: alert.timestamp)
+        return self.ux_state.latest_alert_for_circuit(circuit_id)
 
     def _sample_for_config(
         self: Self,
