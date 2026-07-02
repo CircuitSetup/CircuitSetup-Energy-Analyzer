@@ -6,6 +6,7 @@ from typing import Any
 from .. import notifications
 from ..models import AlertEvidence
 from ..nilm_virtual import nilm_virtual_appliance_alerts
+from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 
 class NotificationController:
@@ -15,10 +16,6 @@ class NotificationController:
         self,
         coordinator: Any,
         *,
-        compact_settings_recommendation_episode_key: Callable[
-            [tuple[tuple[str, ...], ...]],
-            tuple[tuple[str, ...], ...],
-        ],
         material_evidence_key: Callable[
             [str, dict[str, Any]],
             tuple[tuple[str, Any], ...],

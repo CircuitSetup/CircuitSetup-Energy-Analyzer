@@ -3229,9 +3229,10 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
         RECOMMENDATION_DECISIONS_MAX_ITEMS,
         RECOMMENDATION_HISTORY_MAX_ITEMS,
-        RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION,
-        RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS,
         EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        recommendation_episodes,
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
@@ -3287,7 +3288,10 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     }
     episodes = tuple(
         (f"rec-{index}", "hvac")
-        for index in range(RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS + 10)
+        for index in range(
+            recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+            + 10
+        )
     )
     coordinator = EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
@@ -3340,10 +3344,13 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     episode_key = (
         coordinator.store_data.settings_recommendation_notification_episode_key
     )
-    assert len(episode_key) <= RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+    assert (
+        len(episode_key)
+        <= recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+    )
     assert episode_key[0] == (
         "version",
-        RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION,
+        recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION,
     )
     assert episode_key[1] == ("pending_count", "110")
     assert episode_key[2][0] == "fingerprint"
@@ -11580,6 +11587,9 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
     from custom_components.circuitsetup_energy_analyzer import (
         settings_advisor as advisor,
     )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        recommendation_episodes,
+    )
 
     notifications: list[dict[str, Any]] = []
 
@@ -11616,7 +11626,8 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
                 expires_at=now + timedelta(days=30),
             )
             for index in range(
-                coordinator_module.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS + 10
+                recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
+                + 10
             )
         },
     )

@@ -117,7 +117,6 @@ def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
         recommendation_history_max_items=100,
         recommendation_decisions_max_age=timedelta(days=180),
         recommendation_decisions_max_items=100,
-        compact_settings_recommendation_episode_key=lambda episode_key: episode_key,
     )
 
     manager.prune_nilm_history(now)

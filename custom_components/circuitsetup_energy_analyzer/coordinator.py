@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -136,8 +135,6 @@ RECOMMENDATION_HISTORY_MAX_ITEMS = 200
 RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
 RECOMMENDATION_DECISIONS_MAX_AGE = timedelta(days=365)
-RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS = 100
-RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION = "sha256:v1"
 try:
     from homeassistant.helpers.event import async_track_state_change_event
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -381,20 +378,6 @@ def process_events_into_state(
         state.anomaly_score_by_circuit.setdefault(circuit_id, 0.0)
 
     return state
-
-
-def _compact_settings_recommendation_episode_key(
-    episode_key: tuple[tuple[str, ...], ...],
-) -> tuple[tuple[str, ...], ...]:
-    """Return a bounded duplicate-suppression key for pending recommendations."""
-    if len(episode_key) <= RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS:
-        return episode_key
-    fingerprint = hashlib.sha256(repr(episode_key).encode("utf-8")).hexdigest()
-    return (
-        ("version", RECOMMENDATION_NOTIFICATION_EPISODE_FINGERPRINT_VERSION),
-        ("pending_count", str(len(episode_key))),
-        ("fingerprint", fingerprint),
-    )
 
 
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
@@ -666,15 +649,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             recommendation_history_max_items=RECOMMENDATION_HISTORY_MAX_ITEMS,
             recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
             recommendation_decisions_max_items=RECOMMENDATION_DECISIONS_MAX_ITEMS,
-            compact_settings_recommendation_episode_key=(
-                _compact_settings_recommendation_episode_key
-            ),
         )
         self.notification_controller = NotificationController(
             self,
-            compact_settings_recommendation_episode_key=(
-                _compact_settings_recommendation_episode_key
-            ),
             material_evidence_key=material_recommendation_evidence_key,
         )
         self.setup_health = SetupHealthAggregator(self)
