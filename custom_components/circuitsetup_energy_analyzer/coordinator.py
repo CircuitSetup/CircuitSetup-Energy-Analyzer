@@ -956,7 +956,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._clear_power_quality_state(circuit_id)
         self._clear_nilm_topology_state(circuit_id)
         now = self._now_fn()
-        self._refresh_ux_state_for_circuit(circuit_id, now)
+        self.refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
 
@@ -1823,14 +1823,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.water_context_history_by_circuit.items()
             )
         }
-        self._refresh_all_ux_state(self._now_fn())
+        self.refresh_all_ux_state(self._now_fn())
         self._refresh_settings_recommendation_state(self._now_fn())
 
-    def _refresh_all_ux_state(self: Self, now: datetime) -> None:
+    def refresh_all_ux_state(self: Self, now: datetime) -> None:
         for config in self.circuit_configs:
             self._refresh_ux_state(config, None, now)
 
-    def _refresh_ux_state_for_circuit(
+    def refresh_ux_state_for_circuit(
         self: Self,
         circuit_id: str,
         now: datetime,
@@ -3435,7 +3435,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _active_repair_issues(self: Self) -> set[tuple[str, str]]:
         return self.setup_health.active_repair_issues
 
-    async def _apply_feature_result(
+    async def async_apply_feature_result(
         self: Self,
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:

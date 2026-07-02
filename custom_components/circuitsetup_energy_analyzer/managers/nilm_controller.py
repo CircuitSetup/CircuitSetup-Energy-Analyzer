@@ -1134,7 +1134,7 @@ class NilmController:
         coordinator = self._coordinator
         coordinator.store_persistence.mark_dirty()
         self.refresh_state(circuit_id)
-        coordinator._refresh_ux_state_for_circuit(
+        coordinator.refresh_ux_state_for_circuit(
             circuit_id,
             coordinator.current_time(),
         )

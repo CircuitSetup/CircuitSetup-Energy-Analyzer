@@ -41,7 +41,7 @@ class EvidenceActionController:
         del duration
         coordinator = self._coordinator
         coordinator.paused_circuits.add(circuit_id)
-        coordinator._refresh_ux_state_for_circuit(
+        coordinator.refresh_ux_state_for_circuit(
             circuit_id,
             coordinator.current_time(),
         )
@@ -54,7 +54,7 @@ class EvidenceActionController:
             return False
         self.retire_alert_id(alert_id)
         now = coordinator.current_time()
-        coordinator._refresh_all_ux_state(now)
+        coordinator.refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True
@@ -80,7 +80,7 @@ class EvidenceActionController:
         coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
         coordinator.paused_circuits.add(circuit_id)
         coordinator.store_persistence.mark_dirty()
-        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -103,7 +103,7 @@ class EvidenceActionController:
         if should_relearn:
             await coordinator.async_relearn_baseline(circuit_id)
             return
-        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -161,7 +161,7 @@ class EvidenceActionController:
         }
         coordinator._apply_nilm_alert_feedback(alert, action, now)
         self.retire_alert_id(alert_id)
-        coordinator._refresh_all_ux_state(now)
+        coordinator.refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True

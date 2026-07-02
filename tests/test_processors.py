@@ -213,7 +213,7 @@ async def test_coordinator_applies_feature_result() -> None:
 
     coordinator._notify_alert = fake_notify
 
-    applied_events, applied_alerts = await coordinator._apply_feature_result(
+    applied_events, applied_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(
             events=[event],
             alerts=[alert],
@@ -253,7 +253,7 @@ async def test_coordinator_state_update_without_store_data_change_stays_clean() 
         store_data=FeatureStoreData(),
     )
 
-    await coordinator._apply_feature_result(
+    await coordinator.async_apply_feature_result(
         FeatureResult(
             state_updates=[
                 StateUpdate(
@@ -296,7 +296,7 @@ async def test_coordinator_applies_observation_lane_without_creating_alert_histo
         now_fn=lambda: now,
     )
 
-    applied_events, applied_alerts = await coordinator._apply_feature_result(
+    applied_events, applied_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(observations=[observation]),
     )
 

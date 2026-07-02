@@ -22,7 +22,7 @@ class ProcessingPipeline:
         alerts: list[Any] = []
 
         event_result = coordinator._event_processor.process(sample, config, context)
-        new_events, _ = await coordinator._apply_feature_result(event_result)
+        new_events, _ = await coordinator.async_apply_feature_result(event_result)
         events.extend(new_events)
 
         power_quality_result = coordinator._power_quality_processor.process(
@@ -34,7 +34,7 @@ class ProcessingPipeline:
             coordinator._clear_power_quality_state(
                 power_quality_result.clear_power_quality_state
             )
-        _, power_quality_alerts = await coordinator._apply_feature_result(
+        _, power_quality_alerts = await coordinator.async_apply_feature_result(
             power_quality_result
         )
         alerts.extend(power_quality_alerts)
@@ -44,7 +44,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, usage_alerts = await coordinator._apply_feature_result(usage_result)
+        _, usage_alerts = await coordinator.async_apply_feature_result(usage_result)
         alerts.extend(usage_alerts)
 
         goal_result = coordinator._energy_goal_processor.process(
@@ -52,11 +52,11 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, goal_alerts = await coordinator._apply_feature_result(goal_result)
+        _, goal_alerts = await coordinator.async_apply_feature_result(goal_result)
         alerts.extend(goal_alerts)
 
         cycle_result = coordinator._run_cycle_processor.process(sample, config, context)
-        _, cycle_alerts = await coordinator._apply_feature_result(cycle_result)
+        _, cycle_alerts = await coordinator.async_apply_feature_result(cycle_result)
         alerts.extend(cycle_alerts)
 
         activity_result = coordinator._activity_alert_processor.process(
@@ -64,7 +64,9 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, activity_alerts = await coordinator._apply_feature_result(activity_result)
+        _, activity_alerts = await coordinator.async_apply_feature_result(
+            activity_result
+        )
         alerts.extend(activity_alerts)
 
         billing_result = coordinator._billing_cycle_processor.process(
@@ -72,14 +74,14 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, billing_alerts = await coordinator._apply_feature_result(billing_result)
+        _, billing_alerts = await coordinator.async_apply_feature_result(billing_result)
         alerts.extend(billing_alerts)
 
         cost_result = coordinator._cost_processor.process(sample, config, context)
-        await coordinator._apply_feature_result(cost_result)
+        await coordinator.async_apply_feature_result(cost_result)
 
         demand_result = coordinator._demand_processor.process(sample, config, context)
-        _, demand_alerts = await coordinator._apply_feature_result(demand_result)
+        _, demand_alerts = await coordinator.async_apply_feature_result(demand_result)
         alerts.extend(demand_alerts)
 
         capacity_result = coordinator._capacity_processor.process(
@@ -87,7 +89,9 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, capacity_alerts = await coordinator._apply_feature_result(capacity_result)
+        _, capacity_alerts = await coordinator.async_apply_feature_result(
+            capacity_result
+        )
         alerts.extend(capacity_alerts)
 
         leg_imbalance_result = coordinator._leg_imbalance_processor.process(
@@ -95,7 +99,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, leg_imbalance_alerts = await coordinator._apply_feature_result(
+        _, leg_imbalance_alerts = await coordinator.async_apply_feature_result(
             leg_imbalance_result
         )
         alerts.extend(leg_imbalance_alerts)
@@ -105,7 +109,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        await coordinator._apply_feature_result(metric_consistency_result)
+        await coordinator.async_apply_feature_result(metric_consistency_result)
 
         if (
             config.power_flow is PowerFlowMode.GENERATION
@@ -118,7 +122,9 @@ class ProcessingPipeline:
                 config,
                 context,
             )
-            _, standby_alerts = await coordinator._apply_feature_result(standby_result)
+            _, standby_alerts = await coordinator.async_apply_feature_result(
+                standby_result
+            )
             alerts.extend(standby_alerts)
 
         return events, alerts
@@ -158,7 +164,7 @@ class ProcessingPipeline:
                 config,
                 utility_context,
             )
-            _, new_alerts = await coordinator._apply_feature_result(result)
+            _, new_alerts = await coordinator.async_apply_feature_result(result)
             await coordinator._sync_setup_health_repairs(circuit_id)
             alerts.extend(new_alerts)
         return alerts
