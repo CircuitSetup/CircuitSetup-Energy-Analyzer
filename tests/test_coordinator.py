@@ -4370,7 +4370,7 @@ def test_demo_energy_usage_history_uses_ha_local_seed_dates() -> None:
         ),
     )
 
-    coordinator._seed_demo_energy_usage_history(
+    coordinator.demo_data.seed_energy_usage_history(
         config,
         SimpleNamespace(energy=52.6),
         now,
@@ -4414,7 +4414,7 @@ def test_demo_weather_context_history_uses_ha_local_prior_days() -> None:
         ),
     )
 
-    coordinator._seed_demo_weather_context_history(
+    coordinator.demo_data.seed_weather_context_history(
         config,
         now,
         outdoor_temperature=86.0,
