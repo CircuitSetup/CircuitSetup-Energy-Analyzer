@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime
+import hashlib
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
@@ -18,43 +19,28 @@ class NilmController:
         self,
         coordinator: Any,
         *,
-        clean_string_list: Callable[[Any], list[str]],
-        append_unique: Callable[[list[str], Any], None],
-        nonnegative_float_value: Callable[..., float],
-        label_interval_datetime: Callable[[Any, str], Any],
-        label_interval_id: Callable[[str, str, str, str], str],
-        signature_fingerprint_value: Callable[[Any, str], str],
-        signature_assignment_label: Callable[[Any, str], str],
         label_interval_max_items: int,
-        round_optional_number: Callable[[Any], float | None],
-        assignment_interval_matches: Callable[[Any, Any], bool],
-        overlap_seconds: Callable[[Any, Any], float],
-        validation_coverage_overlap_seconds: Callable[[Any, Any], float],
-        float_or_none: Callable[[Any], float | None],
-        datetime_or_none: Callable[[Any], datetime | None],
-        assignment_appliance_id: Callable[[str], str],
-        assignment_id: Callable[[str, str], str],
         assignment_max_items: int,
     ) -> None:
         self._coordinator = coordinator
-        self._clean_string_list = clean_string_list
-        self._append_unique = append_unique
-        self._nonnegative_float_value = nonnegative_float_value
-        self._label_interval_datetime = label_interval_datetime
-        self._label_interval_id = label_interval_id
-        self._signature_fingerprint_value = signature_fingerprint_value
-        self._signature_assignment_label = signature_assignment_label
+        self._clean_string_list = _clean_string_list
+        self._append_unique = _append_unique
+        self._nonnegative_float_value = _nonnegative_float_value
+        self._label_interval_datetime = _nilm_label_interval_datetime
+        self._label_interval_id = _nilm_label_interval_id
+        self._signature_fingerprint_value = _nilm_signature_fingerprint_value
+        self._signature_assignment_label = _nilm_signature_assignment_label
         self._label_interval_max_items = label_interval_max_items
-        self._round_optional_number = round_optional_number
-        self._assignment_interval_matches = assignment_interval_matches
-        self._overlap_seconds = overlap_seconds
+        self._round_optional_number = _round_optional_number
+        self._assignment_interval_matches = _nilm_assignment_interval_matches
+        self._overlap_seconds = _nilm_overlap_seconds
         self._validation_coverage_overlap_seconds = (
-            validation_coverage_overlap_seconds
+            _nilm_validation_coverage_overlap_seconds
         )
-        self._float_or_none = float_or_none
-        self._datetime_or_none = datetime_or_none
-        self._assignment_appliance_id = assignment_appliance_id
-        self._assignment_id = assignment_id
+        self._float_or_none = _float_or_none
+        self._datetime_or_none = _datetime_or_none
+        self._assignment_appliance_id = _nilm_assignment_appliance_id
+        self._assignment_id = _nilm_assignment_id
         self._assignment_max_items = assignment_max_items
         self._sample_processor: Any | None = None
         self._topology_processor: Any | None = None
@@ -230,10 +216,7 @@ class NilmController:
             int(seed.get("total_events") or 0),
         )
         if not unmatched_edges_by_circuit[circuit_id]:
-            unmatched_edges_by_circuit[circuit_id] = _demo_nilm_edges(
-                seed.get("edges"),
-                self._datetime_or_none,
-            )
+            unmatched_edges_by_circuit[circuit_id] = _demo_nilm_edges(seed.get("edges"))
         unmatched_edges = unmatched_edges_by_circuit[circuit_id]
         unmatched_edges_by_circuit[circuit_id] = unmatched_edges[:8]
 
@@ -1391,13 +1374,10 @@ def _demo_seed_list(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
-def _demo_nilm_edges(
-    value: Any,
-    datetime_or_none: Callable[[Any], datetime | None],
-) -> list[NilmEdge]:
+def _demo_nilm_edges(value: Any) -> list[NilmEdge]:
     edges: list[NilmEdge] = []
     for raw_edge in _demo_seed_list(value):
-        timestamp = datetime_or_none(raw_edge.pop("timestamp", None))
+        timestamp = _datetime_or_none(raw_edge.pop("timestamp", None))
         if timestamp is None:
             continue
         try:
@@ -1405,3 +1385,173 @@ def _demo_nilm_edges(
         except TypeError:
             continue
     return edges
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _round_optional_number(value: Any) -> float | None:
+    parsed = _float_or_none(value)
+    if parsed is None:
+        return None
+    return round(parsed, 3)
+
+
+def _nilm_label_interval_datetime(value: Any, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"Invalid NILM label interval {field_name}.") from err
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _nilm_label_interval_id(
+    circuit_id: str,
+    start: str,
+    end: str,
+    label: str,
+) -> str:
+    seed = f"{circuit_id}|{start}|{end}|{label}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"label-{digest}"
+
+
+def _nilm_signature_fingerprint_value(
+    signature: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    return str(
+        signature.get("feedback_fingerprint")
+        or signature.get("signature_fingerprint")
+        or signature.get("signature_id")
+        or fallback
+    ).strip()
+
+
+def _nilm_signature_assignment_label(
+    signature: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    return (
+        str(signature.get("user_label") or "").strip()
+        or str(signature.get("display_name") or "").strip()
+        or str(signature.get("likely_type") or "").strip()
+        or fallback
+    )
+
+
+def _nilm_assignment_interval_matches(
+    interval: Mapping[str, Any],
+    assignment: Mapping[str, Any],
+) -> bool:
+    interval_id = str(interval.get("interval_id") or "").strip()
+    if interval_id and interval_id in _clean_string_list(
+        assignment.get("label_interval_ids")
+    ):
+        return True
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if (
+        assignment_id
+        and str(interval.get("assignment_id") or "").strip() == assignment_id
+    ):
+        return True
+    interval_appliance = str(
+        interval.get("appliance_id") or interval.get("label") or ""
+    ).strip().casefold()
+    if not interval_appliance:
+        return False
+    return interval_appliance in {
+        str(assignment.get("appliance_id") or "").strip().casefold(),
+        str(assignment.get("display_name") or "").strip().casefold(),
+    }
+
+
+def _nilm_overlap_seconds(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+) -> float:
+    first_start = _datetime_or_none(first.get("start"))
+    first_end = _datetime_or_none(first.get("end"))
+    second_start = _datetime_or_none(second.get("start"))
+    second_end = _datetime_or_none(second.get("end"))
+    if not all((first_start, first_end, second_start, second_end)):
+        return 0.0
+    overlap_start = max(first_start, second_start)
+    overlap_end = min(first_end, second_end)
+    if overlap_end <= overlap_start:
+        return 0.0
+    return (overlap_end - overlap_start).total_seconds()
+
+
+def _nilm_validation_coverage_overlap_seconds(
+    interval: Mapping[str, Any],
+    session: Mapping[str, Any],
+) -> float:
+    validation_start = interval.get("validation_start")
+    validation_end = interval.get("validation_end")
+    if not validation_start or not validation_end:
+        return 0.0
+    return _nilm_overlap_seconds(
+        {"start": validation_start, "end": validation_end},
+        session,
+    )
+
+
+def _nilm_assignment_appliance_id(label: str) -> str:
+    slug = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in str(label or "").strip()
+    ).strip("_")
+    return "_".join(part for part in slug.split("_") if part)[:64] or "nilm"
+
+
+def _nilm_assignment_id(circuit_id: str, appliance_id: str) -> str:
+    seed = f"{circuit_id}|{appliance_id}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"assignment-{digest}"
+
+
+def _append_unique(values: Any, value: Any) -> None:
+    text = str(value or "").strip()
+    if not text or text in values:
+        return
+    values.append(text)
+
+
+def _clean_string_list(values: Any) -> list[str]:
+    if isinstance(values, (str, bytes)):
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    cleaned: list[str] = []
+    for value in iterator:
+        text = str(value or "").strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def _nonnegative_float_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0.0 else default

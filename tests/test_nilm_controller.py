@@ -62,24 +62,49 @@ def test_nilm_controller_builds_signature_payloads_with_public_current_time() ->
     assert context_calls == [now]
 
 
+def test_nilm_controller_owns_assignment_helper_behavior() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=SimpleNamespace(
+            nilm_appliance_assignments_by_circuit={},
+        ),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=10,
+        assignment_max_items=10,
+    )
+
+    assignment = controller.upsert_assignment(
+        "mains",
+        label="Kitchen Dishwasher",
+        signature_fingerprint=" fingerprint-1 ",
+        session_id=" session-1 ",
+        label_interval_id=" interval-1 ",
+        confidence="0.82",
+    )
+    updated = controller.upsert_assignment(
+        "mains",
+        label="Kitchen Dishwasher",
+        signature_fingerprint="fingerprint-1",
+        session_id="session-1",
+        label_interval_id="interval-1",
+        confidence="0.5",
+    )
+
+    assert updated["assignment_id"] == assignment["assignment_id"]
+    assert updated["assignment_id"].startswith("assignment-")
+    assert updated["appliance_id"] == "kitchen_dishwasher"
+    assert updated["signature_fingerprints"] == ["fingerprint-1"]
+    assert updated["session_ids"] == ["session-1"]
+    assert updated["label_interval_ids"] == ["interval-1"]
+    assert updated["confidence"] == 0.82
+
+
 def _nilm_controller(coordinator: object) -> NilmController:
     return NilmController(
         coordinator,
-        clean_string_list=lambda value: [],
-        append_unique=lambda values, value: None,
-        nonnegative_float_value=lambda *args, **kwargs: 0.0,
-        label_interval_datetime=lambda value, field: None,
-        label_interval_id=lambda circuit_id, label, start, end: "interval",
-        signature_fingerprint_value=lambda value, circuit_id: "fingerprint",
-        signature_assignment_label=lambda value, circuit_id: "label",
         label_interval_max_items=1,
-        round_optional_number=lambda value: None,
-        assignment_interval_matches=lambda assignment, interval: False,
-        overlap_seconds=lambda left, right: 0.0,
-        validation_coverage_overlap_seconds=lambda left, right: 0.0,
-        float_or_none=lambda value: None,
-        datetime_or_none=lambda value: None,
-        assignment_appliance_id=lambda label: label,
-        assignment_id=lambda circuit_id, appliance_id: "assignment",
         assignment_max_items=1,
     )
