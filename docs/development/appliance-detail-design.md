@@ -23,6 +23,10 @@ Supported selectors:
 The payload is read-only and returns service/navigation action descriptors with
 internal IDs already filled in.
 
+`async_export_diagnostics()` also includes the serialized Appliance Detail read
+model for the requested direct/mixed/mains circuit so diagnostics exports match
+the appliance story shown in the panel.
+
 ## Source Types
 
 The detail payload always includes `source_type`:

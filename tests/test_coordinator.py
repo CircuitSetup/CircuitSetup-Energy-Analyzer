@@ -10157,6 +10157,77 @@ async def test_export_diagnostics_includes_ux_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_export_diagnostics_includes_appliance_detail_story() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "appliance_profile": "refrigerator",
+                    "mode": "single_phase",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.fridge_energy",
+                            "role": "energy",
+                        },
+                    ],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            baselines={
+                "fridge:daily_energy_kwh": BaselineStats(
+                    feature="daily_energy_kwh",
+                    sample_count=12,
+                    median=1.8,
+                    mad=0.1,
+                    p10=1.5,
+                    p90=2.1,
+                    confidence=0.86,
+                )
+            }
+        ),
+    )
+    coordinator.state.latest_real_power_w_by_circuit["fridge"] = 128.4
+    coordinator.state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    coordinator.state.run_cycle_status_by_circuit["fridge"] = "running"
+    coordinator.state.run_cycle_count_by_circuit["fridge"] = 14
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["fridge"] = 7200.0
+    coordinator.state.health_summary_by_circuit["fridge"] = "Watch"
+    coordinator.state.energy_usage_evidence_by_circuit["fridge"] = {
+        "status": "higher"
+    }
+
+    await coordinator.async_export_diagnostics("fridge")
+
+    detail = coordinator.last_exported_diagnostics["appliance_detail"]
+    assert detail["display_name"] == "Kitchen Fridge"
+    assert detail["source_type"] == "direct_meter"
+    assert detail["current_power_w"] == 128.4
+    assert detail["daily_energy_kwh"] == 2.4
+    assert detail["runtime_today_seconds"] == 7200.0
+    assert detail["run_count_today"] == 14
+    assert detail["evidence_path"].endswith("circuit_id=fridge")
+    comparisons = {
+        item["metric_id"]: item for item in detail["today_vs_normal"]
+    }
+    assert comparisons["daily_energy_kwh"]["status"] == "higher"
+    assert comparisons["daily_energy_kwh"]["normal_low"] == 1.5
+    assert comparisons["daily_energy_kwh"]["normal_high"] == 2.1
+    assert detail["expectations"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_learns_power_quality_baselines_for_optional_metrics() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
