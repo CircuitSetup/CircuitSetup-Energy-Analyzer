@@ -26,6 +26,7 @@ from .alerting import (
     Observation,
     alert_anomaly_score,
 )
+from .appliance_detail import appliance_detail_for_circuit
 from .billing import (
     BillingCycleSettings,
 )
@@ -1348,8 +1349,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_export_diagnostics(self: Self, circuit_id: str) -> None:
         """Store a lightweight diagnostics export snapshot for a circuit."""
+        appliance_detail = appliance_detail_for_circuit(self, circuit_id)
         self.last_exported_diagnostics = {
             "circuit_id": circuit_id,
+            "appliance_detail": (
+                appliance_detail.as_dict() if appliance_detail is not None else None
+            ),
             "anomaly_score": self.state.anomaly_score_by_circuit.get(circuit_id, 0.0),
             "data_quality": self.state.data_quality_by_circuit.get(circuit_id),
             "learning": self.state.learning_by_circuit.get(circuit_id, True),
