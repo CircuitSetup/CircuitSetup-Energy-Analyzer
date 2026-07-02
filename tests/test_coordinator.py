@@ -14004,7 +14004,8 @@ async def test_recorder_statistics_use_recorder_executor(
         now_fn=lambda: now,
     )
 
-    statistics = await coordinator._recorder_statistics_during_period(
+    utility_sources = coordinator.utility_energy_sources
+    statistics = await utility_sources.recorder_statistics_during_period(
         statistic_ids={"sensor.energy"},
         start_time=now - timedelta(days=1),
         end_time=now,
@@ -14067,7 +14068,8 @@ async def test_recorder_statistics_skip_generic_executor_fallback(
         now_fn=lambda: now,
     )
 
-    statistics = await coordinator._recorder_statistics_during_period(
+    utility_sources = coordinator.utility_energy_sources
+    statistics = await utility_sources.recorder_statistics_during_period(
         statistic_ids={"sensor.energy"},
         start_time=now - timedelta(days=1),
         end_time=now,
