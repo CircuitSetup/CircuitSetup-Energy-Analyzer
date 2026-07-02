@@ -747,8 +747,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             mains_balance_processor=self._mains_balance_processor,
             solar_flow_processor=self._solar_flow_processor,
             utility_comparison_processor=self._utility_comparison_processor,
-            clear_power_quality_state=self._clear_power_quality_state,
-            clear_standby_state=self._clear_standby_state,
+            clear_power_quality_state=lambda circuit_id: (
+                self.state_reducer.clear_power_quality_state(self.state, circuit_id)
+            ),
+            clear_standby_state=lambda circuit_id: (
+                self.state_reducer.clear_standby_state(self.state, circuit_id)
+            ),
             sync_setup_health_repairs=self._sync_setup_health_repairs,
         )
         self._nilm_topology_processor = NilmTopologyProcessor(
@@ -1002,7 +1006,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.active_alerts_by_circuit.pop(circuit_id, None)
         self.state.anomaly_score_by_circuit[circuit_id] = 0.0
         self.state.learning_by_circuit[circuit_id] = True
-        self._clear_power_quality_state(circuit_id)
+        self.state_reducer.clear_power_quality_state(self.state, circuit_id)
         self._clear_nilm_topology_state(circuit_id)
         now = self._now_fn()
         self.refresh_ux_state_for_circuit(circuit_id, now)
@@ -2050,12 +2054,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         circuit_id = config.circuit_id
         if config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES:
-            self._clear_weather_context_state(circuit_id)
+            if self.state_reducer.clear_weather_context_state(
+                self.state,
+                self.store_data,
+                circuit_id,
+            ):
+                self._mark_store_dirty()
             return
 
         outdoor_entity = self._outdoor_temperature_entity()
         if not outdoor_entity:
-            self._clear_weather_context_state(circuit_id)
+            if self.state_reducer.clear_weather_context_state(
+                self.state,
+                self.store_data,
+                circuit_id,
+            ):
+                self._mark_store_dirty()
             return
 
         outdoor_temperature_reading = self._temperature_reading_for_entity(
@@ -2153,7 +2167,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 rain_evidence
             )
         else:
-            changed = self._clear_rain_pump_context_state(circuit_id) or changed
+            changed = (
+                self.state_reducer.clear_rain_pump_context_state(
+                    self.state,
+                    self.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
 
         if profile in FLOW_WATER_CONTEXT_PROFILES and bool(
             advanced_settings.get(
@@ -2177,13 +2198,27 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 flow_evidence
             )
         else:
-            changed = self._clear_water_flow_context_state(circuit_id) or changed
+            changed = (
+                self.state_reducer.clear_water_flow_context_state(
+                    self.state,
+                    self.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
 
         if profile in PUMP_WATER_CONTEXT_PROFILES | FLOW_WATER_CONTEXT_PROFILES:
             if self._append_water_context_history(circuit_id, now):
                 changed = True
         else:
-            changed = self._clear_water_context_history(circuit_id) or changed
+            changed = (
+                self.state_reducer.clear_water_context_history(
+                    self.state,
+                    self.store_data,
+                    circuit_id,
+                )
+                or changed
+            )
 
         if changed:
             self._mark_store_dirty()
@@ -2316,42 +2351,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
         return evidence
-
-    def _clear_rain_pump_context_state(self: Self, circuit_id: str) -> bool:
-        removed = False
-        if self.state.rain_pump_context_by_circuit.pop(circuit_id, None) is not None:
-            removed = True
-        if (
-            self.store_data.rain_pump_context_by_circuit.pop(circuit_id, None)
-            is not None
-        ):
-            removed = True
-        return removed
-
-    def _clear_water_flow_context_state(self: Self, circuit_id: str) -> bool:
-        removed = False
-        if self.state.water_flow_context_by_circuit.pop(circuit_id, None) is not None:
-            removed = True
-        if (
-            self.store_data.water_flow_context_by_circuit.pop(circuit_id, None)
-            is not None
-        ):
-            removed = True
-        return removed
-
-    def _clear_water_context_history(self: Self, circuit_id: str) -> bool:
-        removed = False
-        if (
-            self.state.water_context_history_by_circuit.pop(circuit_id, None)
-            is not None
-        ):
-            removed = True
-        if (
-            self.store_data.water_context_history_by_circuit.pop(circuit_id, None)
-            is not None
-        ):
-            removed = True
-        return removed
 
     def _configured_context_entity(self: Self, key: str) -> str:
         return _configured_context_entity_from_sources(
@@ -2573,20 +2572,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             dict(item) for item in history
         ]
         return True
-
-    def _clear_weather_context_state(self: Self, circuit_id: str) -> None:
-        removed = False
-        if self.state.weather_context_by_circuit.pop(circuit_id, None) is not None:
-            removed = True
-        if self.store_data.weather_context_by_circuit.pop(circuit_id, None) is not None:
-            removed = True
-        if (
-            self.store_data.weather_context_history_by_circuit.pop(circuit_id, None)
-            is not None
-        ):
-            removed = True
-        if removed:
-            self._mark_store_dirty()
 
     def _outdoor_temperature_entity(self: Self) -> str:
         for source in (self.options, self.entry_data):
@@ -3458,22 +3443,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id
         )
 
-    def _clear_power_quality_state(self: Self, circuit_id: str) -> None:
-        self.state.power_quality_score_by_circuit.pop(circuit_id, None)
-        self.state.power_quality_evidence_by_circuit.pop(circuit_id, None)
-        self.state.reactive_power_drift_by_circuit.pop(circuit_id, None)
-        self.state.apparent_power_drift_by_circuit.pop(circuit_id, None)
-        self.state.power_factor_drift_by_circuit.pop(circuit_id, None)
-
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
         self.nilm_controller.clear_topology_state(circuit_id)
-
-    def _clear_standby_state(self: Self, circuit_id: str) -> None:
-        self.state.always_on_power_w_by_circuit.pop(circuit_id, None)
-        self.state.standby_threshold_w_by_circuit.pop(circuit_id, None)
-        self.state.standby_status_by_circuit.pop(circuit_id, None)
-        self.state.always_on_limit_usage_by_circuit.pop(circuit_id, None)
-        self.state.standby_evidence_by_circuit.pop(circuit_id, None)
 
     def _learning_mature(self: Self, config: CircuitConfig, now: datetime) -> bool:
         profile = get_profile_definition(config.appliance_profile)

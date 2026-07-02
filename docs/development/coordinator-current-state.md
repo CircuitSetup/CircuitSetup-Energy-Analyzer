@@ -12,7 +12,9 @@ the most connected modules, with 7 incoming and 47 outgoing internal edges.
 The initial audit was completed before extraction. This branch now keeps the
 public coordinator facade stable while delegating dashboard creation, evidence
 actions, settings recommendations, entity profile changes, strict state update
-reduction, recent observation state, and source sample construction to focused managers. Further
+reduction, recent observation state, grouped processor/context cleanup, source
+update lifecycle, source sample construction, processor ordering, store
+persistence, setup-health aggregation, NILM workflows, and notification dedupe to focused managers. Further
 coordinator thinning should keep lifecycle ownership in the coordinator while
 moving remaining feature-specific behavior behind those managers.
 
@@ -25,7 +27,7 @@ moving remaining feature-specific behavior behind those managers.
 | Sample normalization | Source-state lookup, parallel leg aggregation, demo source lookup, circuit sample creation | latest source states, source entity config, circuit configs | HA states | Medium risk; feeds every processor | sample/source builder helper |
 | Context construction | Local time, weather, rain, water-flow, source mapping, contextual baseline inputs | context dictionaries and history by circuit | HA states, timezone | Medium risk; context bugs change alert semantics | `ProcessingContextBuilder` |
 | Processor dispatch | Processor registry/order, per-circuit and cross-circuit processing, feature result collection | `AnalyzerState`, processor outputs | mostly none after sample/context are built | High risk because ordering is behavior | `ProcessingPipeline` |
-| State update application | Dynamic `StateUpdate` path application, feature result updates, and recent observation upsert/prune handling | all `AnalyzerState` mapping roots, `recent_observations_by_circuit` | none | High risk; covered by strict-path and recent-observation characterization tests | `StateReducer` |
+| State update application | Dynamic `StateUpdate` path application, feature result updates, recent observation upsert/prune handling, and grouped cleanup for processor/context mappings | all `AnalyzerState` mapping roots, `recent_observations_by_circuit`, context state/store mappings | none | High risk; covered by strict-path, recent-observation, and cleanup characterization tests | `StateReducer` |
 | Alert feedback | Expected/unhelpful feedback, adjusted repeated counts, alert lookup/retirement, NILM appliance feedback | alert store, feedback store, active alerts | persistent notifications via notification helper | High user impact; stale IDs should stay friendly | `EvidenceActionController` |
 | Settings recommendations | Recalculate/apply/undo/reset/dismiss recommendations and notification refresh | settings recommendation store and state mappings | config entry updates/reload | Medium/high risk because options and UI meet here | `SettingsController` |
 | NILM actions | Label/assign/validate/reject/rename/profile/merge/publish/unpublish/retire/ignore/expected | NILM assignments, signatures, intervals, session history, virtual appliance state | services, entity refresh side effects | High risk; must preserve no automatic appliance creation | `NilmController` |
@@ -46,23 +48,14 @@ or panel contracts.
 
 ## Extraction Order Notes
 
-Recommended later sequence remains:
-
-1. Source update lifecycle.
-2. Processing pipeline.
-3. State reducer.
-4. Persistence.
-5. Evidence and notifications.
-6. Dashboard, settings, and NILM controllers.
-7. Setup health and entity profile.
-
-The highest-risk boundary is dynamic state reduction. It should be extracted
-with strict path validation and focused tests before large user-facing features
-depend on it.
+Recommended later work should continue as grouped slices around related
+behavior: context-source construction, UX-state refresh, demo-history seeding,
+and Home Assistant lifecycle verification. The highest-risk boundary remains
+state mutation, so new reducer moves should keep strict path validation and
+focused tests.
 
 ## Branch Implementation Boundary
 
 This branch adds appliance-centered read models and API payloads, plus the first
 low-risk manager delegates. It does not move coordinator lifecycle methods,
-storage migrations, source listeners, processor dispatch, NILM mutation methods,
-notification orchestration, or Home Assistant unload/reload ownership.
+storage migrations, or Home Assistant unload/reload ownership.

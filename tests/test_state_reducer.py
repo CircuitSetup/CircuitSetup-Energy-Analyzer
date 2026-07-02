@@ -210,3 +210,66 @@ def test_state_reducer_records_and_prunes_recent_observations() -> None:
     reducer.prune_recent_observations(state, now, window_hours=12)
 
     assert state.recent_observations_by_circuit == {"fridge": [fridge_payload]}
+
+
+def test_state_reducer_clears_processor_owned_state_groups() -> None:
+    state = AnalyzerState()
+    reducer = StateReducer()
+    state.power_quality_score_by_circuit["fridge"] = 98.0
+    state.power_quality_evidence_by_circuit["fridge"] = {"status": "ok"}
+    state.reactive_power_drift_by_circuit["fridge"] = 0.1
+    state.apparent_power_drift_by_circuit["fridge"] = 0.2
+    state.power_factor_drift_by_circuit["fridge"] = 0.3
+    state.standby_threshold_w_by_circuit["fridge"] = 12.0
+    state.always_on_power_w_by_circuit["fridge"] = 8.0
+    state.standby_status_by_circuit["fridge"] = "normal"
+    state.always_on_limit_usage_by_circuit["fridge"] = 0.42
+    state.standby_evidence_by_circuit["fridge"] = {"status": "normal"}
+
+    assert reducer.clear_power_quality_state(state, "fridge") is True
+    assert reducer.clear_standby_state(state, "fridge") is True
+    assert reducer.clear_power_quality_state(state, "fridge") is False
+    assert reducer.clear_standby_state(state, "fridge") is False
+    assert state.power_quality_score_by_circuit == {}
+    assert state.power_quality_evidence_by_circuit == {}
+    assert state.reactive_power_drift_by_circuit == {}
+    assert state.apparent_power_drift_by_circuit == {}
+    assert state.power_factor_drift_by_circuit == {}
+    assert state.standby_threshold_w_by_circuit == {}
+    assert state.always_on_power_w_by_circuit == {}
+    assert state.standby_status_by_circuit == {}
+    assert state.always_on_limit_usage_by_circuit == {}
+    assert state.standby_evidence_by_circuit == {}
+
+
+def test_state_reducer_clears_context_state_and_store_groups() -> None:
+    state = AnalyzerState()
+    store_data = FeatureStoreData()
+    reducer = StateReducer()
+    state.weather_context_by_circuit["hvac"] = {"status": "normal"}
+    store_data.weather_context_by_circuit["hvac"] = {"status": "normal"}
+    store_data.weather_context_history_by_circuit["hvac"] = [{"sample": 1}]
+    state.rain_pump_context_by_circuit["pump"] = {"status": "expected"}
+    store_data.rain_pump_context_by_circuit["pump"] = {"status": "expected"}
+    state.water_flow_context_by_circuit["pump"] = {"status": "normal"}
+    store_data.water_flow_context_by_circuit["pump"] = {"status": "normal"}
+    state.water_context_history_by_circuit["pump"] = [{"sample": 2}]
+    store_data.water_context_history_by_circuit["pump"] = [{"sample": 2}]
+
+    assert reducer.clear_weather_context_state(state, store_data, "hvac") is True
+    assert reducer.clear_rain_pump_context_state(state, store_data, "pump") is True
+    assert reducer.clear_water_flow_context_state(state, store_data, "pump") is True
+    assert reducer.clear_water_context_history(state, store_data, "pump") is True
+    assert reducer.clear_weather_context_state(state, store_data, "hvac") is False
+    assert reducer.clear_rain_pump_context_state(state, store_data, "pump") is False
+    assert reducer.clear_water_flow_context_state(state, store_data, "pump") is False
+    assert reducer.clear_water_context_history(state, store_data, "pump") is False
+    assert state.weather_context_by_circuit == {}
+    assert store_data.weather_context_by_circuit == {}
+    assert store_data.weather_context_history_by_circuit == {}
+    assert state.rain_pump_context_by_circuit == {}
+    assert store_data.rain_pump_context_by_circuit == {}
+    assert state.water_flow_context_by_circuit == {}
+    assert store_data.water_flow_context_by_circuit == {}
+    assert state.water_context_history_by_circuit == {}
+    assert store_data.water_context_history_by_circuit == {}
