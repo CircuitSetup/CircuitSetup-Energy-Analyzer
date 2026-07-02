@@ -27,6 +27,10 @@ internal IDs already filled in.
 model for the requested direct/mixed/mains circuit so diagnostics exports match
 the appliance story shown in the panel.
 
+Home Assistant config-entry diagnostics include redacted Appliance Detail
+summaries for configured circuits and NILM assignments; raw source entity IDs
+are omitted from that diagnostics surface.
+
 ## Source Types
 
 The detail payload always includes `source_type`:
