@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..processors.base import FeatureResult, StateUpdate
+from ..ux import friendly_feature_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +77,6 @@ class StateReducer:
         result: FeatureResult,
         *,
         alert_feedback: Callable[[Any], Any],
-        record_observation: Callable[[Any], None],
     ) -> AppliedFeatureResult:
         """Apply processor output to analyzer state and persistent store."""
         stored_alerts = [alert_feedback(alert) for alert in result.alerts]
@@ -87,7 +88,7 @@ class StateReducer:
         if stored_alerts:
             store_data.alerts.extend(stored_alerts)
         for observation in result.observations:
-            record_observation(observation)
+            self.record_recent_observation(state, observation)
         self.apply_updates(state, result.state_updates)
         notifications = [alert_feedback(alert) for alert in result.notifications]
         store_dirty = bool(result.store_dirty or result.events or stored_alerts)
@@ -97,3 +98,77 @@ class StateReducer:
             notifications=notifications,
             store_dirty=store_dirty,
         )
+
+    def record_recent_observation(self, state: Any, observation: Any) -> None:
+        """Record one recent observation in state, replacing matching keyed entries."""
+        payload = _observation_payload(observation)
+        observations = state.recent_observations_by_circuit.setdefault(
+            observation.circuit_id,
+            [],
+        )
+        observation_key = payload.get("observation_key")
+        if observation_key is not None:
+            for index, existing in enumerate(observations):
+                if existing.get("observation_key") == observation_key:
+                    observations[index] = payload
+                    return
+        observations.append(payload)
+
+    def prune_recent_observations(
+        self,
+        state: Any,
+        now: datetime,
+        *,
+        window_hours: float,
+    ) -> None:
+        """Drop recent observation payloads outside the dashboard timeline window."""
+        cutoff = now - timedelta(hours=window_hours)
+        retained: dict[str, list[dict[str, Any]]] = {}
+        for (
+            circuit_id,
+            observations,
+        ) in state.recent_observations_by_circuit.items():
+            kept = [
+                observation
+                for observation in observations
+                if _observation_within_cutoff(observation, cutoff)
+            ]
+            if kept:
+                retained[circuit_id] = kept
+        state.recent_observations_by_circuit = retained
+
+
+def _observation_payload(observation: Any) -> dict[str, Any]:
+    payload = {
+        "timestamp": observation.observed_at.isoformat(),
+        "circuit_id": observation.circuit_id,
+        "feature": observation.feature,
+        "feature_name": friendly_feature_name(observation.feature),
+        "message": observation.message,
+        "score": observation.score,
+        "baseline_confidence": observation.baseline_confidence,
+        "observed_value": observation.observed_value,
+        "baseline_value": observation.baseline_value,
+    }
+    if getattr(observation, "observation_key", None) is not None:
+        payload["observation_key"] = observation.observation_key
+    return payload
+
+
+def _observation_within_cutoff(
+    observation: Mapping[str, Any],
+    cutoff: datetime,
+) -> bool:
+    observed_at = _datetime_or_none(observation.get("timestamp"))
+    return observed_at is not None and observed_at >= cutoff
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
