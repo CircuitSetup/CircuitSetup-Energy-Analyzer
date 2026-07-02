@@ -38,7 +38,6 @@ from .const import (
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_MAINS_SOURCE_ENTITIES,
-    CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -55,9 +54,6 @@ from .const import (
     DEFAULT_RETENTION_MODE,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
     DOMAIN,
-)
-from .context_sources import (
-    configured_context_entity as _configured_context_entity_from_sources,
 )
 from .context_sources import (
     flow_entities_for_settings as _flow_entities_for_settings,
@@ -1987,7 +1983,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
             return
 
-        outdoor_entity = self._outdoor_temperature_entity()
+        outdoor_entity = self.context_builder.outdoor_temperature_entity()
         if not outdoor_entity:
             if self.state_reducer.clear_weather_context_state(
                 self.state,
@@ -1997,8 +1993,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
             return
 
-        outdoor_temperature_reading = self._temperature_reading_for_entity(
-            outdoor_entity,
+        outdoor_temperature_reading = (
+            self.context_builder.temperature_reading_for_entity(outdoor_entity)
         )
         outdoor_temperature = (
             outdoor_temperature_reading["temperature_f"]
@@ -2165,13 +2161,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         advanced_settings: Mapping[str, Any],
         now: datetime,
     ) -> dict[str, Any]:
-        rain_entity = self._configured_context_entity(CONF_RAIN_SENSOR_ENTITY)
-        rain_intensity_entity = self._configured_context_entity(
+        rain_entity = self.context_builder.configured_context_entity(
+            CONF_RAIN_SENSOR_ENTITY
+        )
+        rain_intensity_entity = self.context_builder.configured_context_entity(
             CONF_RAIN_INTENSITY_ENTITY
         )
-        rain_active = self._binary_entity_active(rain_entity)
-        rain_intensity = self._numeric_entity_value(rain_intensity_entity)
-        rain_intensity_unit = self._entity_unit_of_measurement(rain_intensity_entity)
+        rain_active = self.context_builder.binary_entity_active(rain_entity)
+        rain_intensity = self.context_builder.numeric_entity_value(
+            rain_intensity_entity
+        )
+        rain_intensity_unit = self.context_builder.entity_unit_of_measurement(
+            rain_intensity_entity
+        )
         compressor_context = self._hvac_compressor_context()
         runtime_minutes = self._runtime_minutes_for_circuit(config.circuit_id)
         baseline = self._dry_weather_pump_baseline(config.circuit_id, now)
@@ -2234,12 +2236,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
             )
         )
-        flow_active_minutes = self._max_flow_active_minutes(flow_entities, now)
+        flow_active_minutes = self.context_builder.max_flow_active_minutes(
+            flow_entities,
+            now,
+        )
         appliance_runtime_minutes = self._runtime_minutes_for_circuit(
             config.circuit_id
         )
         recent_related_runtime_minutes = (
-            self._recent_flow_context_minutes(
+            self.context_builder.recent_flow_context_minutes(
                 flow_entities,
                 now,
                 threshold_minutes,
@@ -2272,101 +2277,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         evidence["flow_sensor_entities"] = list(flow_entities)
         evidence["flow_sensor_active"] = any(
-            self._binary_entity_active(entity_id) is True for entity_id in flow_entities
+            self.context_builder.binary_entity_active(entity_id) is True
+            for entity_id in flow_entities
         )
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
         return evidence
-
-    def _configured_context_entity(self: Self, key: str) -> str:
-        return _configured_context_entity_from_sources(
-            self.entry_data,
-            self.options,
-            key,
-        )
-
-    def _binary_entity_active(self: Self, entity_id: str | None) -> bool | None:
-        if not entity_id:
-            return None
-        raw_state = self._raw_state_for_entity(entity_id)
-        if raw_state is None:
-            return None
-        state = str(getattr(raw_state, "state", "")).strip().lower()
-        if state in {"on", "true", "1", "wet", "rain", "raining", "detected"}:
-            return True
-        if state in {"off", "false", "0", "dry", "clear", "none"}:
-            return False
-        return None
-
-    def _numeric_entity_value(self: Self, entity_id: str | None) -> float | None:
-        if not entity_id:
-            return None
-        raw_state = self._raw_state_for_entity(entity_id)
-        if raw_state is None:
-            return None
-        state = str(getattr(raw_state, "state", "")).strip()
-        return _float_or_none(state)
-
-    def _entity_unit_of_measurement(self: Self, entity_id: str | None) -> str | None:
-        if not entity_id:
-            return None
-        raw_state = self._raw_state_for_entity(entity_id)
-        if raw_state is None:
-            return None
-        attributes = getattr(raw_state, "attributes", {})
-        if not isinstance(attributes, Mapping):
-            return None
-        unit = str(attributes.get("unit_of_measurement") or "").strip()
-        return unit or None
-
-    def _max_flow_active_minutes(
-        self: Self,
-        entity_ids: Iterable[str],
-        now: datetime,
-    ) -> float:
-        durations = [
-            self._flow_entity_active_minutes(entity_id, now)
-            for entity_id in entity_ids
-        ]
-        return round(max(durations, default=0.0), 3)
-
-    def _flow_entity_active(self: Self, entity_id: str | None) -> bool | None:
-        active = self._binary_entity_active(entity_id)
-        if active is not None:
-            return active
-        value = self._numeric_entity_value(entity_id)
-        if value is None:
-            return None
-        return value > 0.0
-
-    def _flow_entity_active_minutes(
-        self: Self,
-        entity_id: str,
-        now: datetime,
-    ) -> float:
-        if self._flow_entity_active(entity_id) is not True:
-            return 0.0
-        raw_state = self._raw_state_for_entity(entity_id)
-        changed_at = _datetime_or_none(getattr(raw_state, "last_changed", None))
-        if changed_at is None:
-            return 0.0
-        return max(0.0, (now - changed_at).total_seconds() / 60.0)
-
-    def _recent_flow_context_minutes(
-        self: Self,
-        entity_ids: Iterable[str],
-        now: datetime,
-        threshold_minutes: int,
-    ) -> float:
-        recent_minutes = 0.0
-        lookback = timedelta(minutes=max(threshold_minutes, 1) * 3)
-        for entity_id in entity_ids:
-            raw_state = self._raw_state_for_entity(entity_id)
-            if raw_state is None:
-                continue
-            changed_at = _datetime_or_none(getattr(raw_state, "last_changed", None))
-            if changed_at is not None and now - changed_at <= lookback:
-                recent_minutes = max(recent_minutes, threshold_minutes)
-        return recent_minutes
 
     def _runtime_minutes_for_circuit(self: Self, circuit_id: str) -> float:
         return round(
@@ -2497,68 +2412,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             dict(item) for item in history
         ]
         return True
-
-    def _outdoor_temperature_entity(self: Self) -> str:
-        for source in (self.options, self.entry_data):
-            entity_id = str(source.get(CONF_OUTDOOR_TEMPERATURE_ENTITY, "")).strip()
-            if entity_id:
-                return entity_id
-        return ""
-
-    def _temperature_reading_for_entity(
-        self: Self,
-        entity_id: str,
-    ) -> dict[str, float | str] | None:
-        raw_state = self._raw_state_for_entity(entity_id)
-        if raw_state is None:
-            return None
-        state = str(getattr(raw_state, "state", "")).strip()
-        if state.lower() in {"unknown", "unavailable", ""}:
-            return None
-        value = _float_or_none(state)
-        if value is None:
-            return None
-        attributes = getattr(raw_state, "attributes", {}) or {}
-        source_unit = self._temperature_source_unit(
-            str(attributes.get("unit_of_measurement") or "").strip(),
-        )
-        temperature_f = _temperature_to_fahrenheit(value, source_unit)
-        display_unit = self._temperature_display_unit(source_unit)
-        display_temperature = _temperature_from_fahrenheit(
-            temperature_f,
-            display_unit,
-        )
-        return {
-            "temperature_f": round(temperature_f, 3),
-            "display_temperature": round(display_temperature, 3),
-            "display_unit": display_unit,
-            "source_unit": source_unit,
-        }
-
-    def _temperature_source_unit(self: Self, raw_unit: str) -> str:
-        unit = _normalized_temperature_unit(raw_unit)
-        if unit:
-            return unit
-        return self._ha_temperature_unit()
-
-    def _temperature_display_unit(self: Self, source_unit: str) -> str:
-        if source_unit in {"°F", "°C"}:
-            return source_unit
-        return self._ha_temperature_unit()
-
-    def _ha_temperature_unit(self: Self) -> str:
-        config = getattr(self.hass, "config", None)
-        units = getattr(config, "units", None)
-        raw_unit = getattr(units, "temperature_unit", None)
-        unit = _normalized_temperature_unit(str(raw_unit or ""))
-        return unit or "°F"
-
-    def _raw_state_for_entity(self: Self, entity_id: str) -> Any | None:
-        hass_states = getattr(self.hass, "states", None)
-        get_state = getattr(hass_states, "get", None)
-        if get_state is None:
-            return None
-        return get_state(entity_id)
 
     def _weather_context_history_samples(
         self: Self,
@@ -3547,31 +3400,6 @@ def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
         return False
     sample_time = _datetime_or_none(sample.get("timestamp"))
     return sample_time is not None and sample_time >= cutoff
-
-
-def _normalized_temperature_unit(unit: str) -> str:
-    normalized = str(unit or "").strip().lower()
-    if normalized in {"°f", "f", "fahrenheit"}:
-        return "°F"
-    if normalized in {"°c", "c", "celsius"}:
-        return "°C"
-    if normalized in {"k", "kelvin"}:
-        return "K"
-    return ""
-
-
-def _temperature_to_fahrenheit(value: float, unit: str) -> float:
-    if unit == "°C":
-        return (value * 9.0 / 5.0) + 32.0
-    if unit == "K":
-        return ((value - 273.15) * 9.0 / 5.0) + 32.0
-    return value
-
-
-def _temperature_from_fahrenheit(value: float, unit: str) -> float:
-    if unit == "°C":
-        return (value - 32.0) * 5.0 / 9.0
-    return value
 
 
 def _weather_context_mode(config: CircuitConfig) -> str:
