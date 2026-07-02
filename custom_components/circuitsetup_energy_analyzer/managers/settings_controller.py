@@ -512,7 +512,7 @@ class SettingsController:
         self.replace_advanced_settings(circuit_id, updated_settings)
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
-        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -1181,8 +1181,8 @@ class SettingsController:
             config,
             coordinator.context_builder.build(now),
         )
-        await coordinator._apply_feature_result(goal_result)
-        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        await coordinator.async_apply_feature_result(goal_result)
+        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -1602,7 +1602,7 @@ class SettingsController:
         settings_by_circuit[circuit_id] = settings
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
-        coordinator._refresh_ux_state_for_circuit(circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -1645,7 +1645,7 @@ class SettingsController:
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
-        coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
 
@@ -1677,7 +1677,7 @@ class SettingsController:
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
-        coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True
@@ -1710,7 +1710,7 @@ class SettingsController:
         coordinator.store_persistence.mark_dirty()
         now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
-        coordinator._refresh_ux_state_for_circuit(recommendation.circuit_id, now)
+        coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True

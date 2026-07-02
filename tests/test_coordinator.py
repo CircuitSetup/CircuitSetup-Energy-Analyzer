@@ -2267,7 +2267,7 @@ async def test_runtime_retains_recent_observations_across_refreshes() -> None:
         message="Fridge ran longer than usual.",
     )
 
-    await coordinator._apply_feature_result(
+    await coordinator.async_apply_feature_result(
         FeatureResult(observations=[observation]),
     )
     now_holder["value"] = now_holder["value"] + timedelta(minutes=1)
@@ -2971,7 +2971,7 @@ async def test_expected_alert_feedback_suppresses_matching_future_notification(
         now_fn=lambda: now + timedelta(days=1),
     )
 
-    _, active_alerts = await coordinator._apply_feature_result(
+    _, active_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(alerts=[repeated_alert], notifications=[repeated_alert])
     )
 
@@ -3053,7 +3053,7 @@ async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
         now_fn=lambda: now + timedelta(days=1),
     )
 
-    _, active_alerts = await coordinator._apply_feature_result(
+    _, active_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(alerts=[unrelated_alert], notifications=[unrelated_alert])
     )
 

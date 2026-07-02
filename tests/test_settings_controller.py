@@ -172,7 +172,7 @@ class _SettingsCoordinator:
     ) -> None:
         self.episode_keys.append(episode_key)
 
-    def _refresh_ux_state_for_circuit(self, circuit_id: str, now: datetime) -> None:
+    def refresh_ux_state_for_circuit(self, circuit_id: str, now: datetime) -> None:
         self.refreshed_circuits.append((circuit_id, now))
 
     def async_set_updated_data(self, state: object) -> None:
@@ -223,7 +223,7 @@ class _SettingsCoordinator:
         self.energy_goal_refreshes.append((circuit_id, config, context))
         return self.goal_result
 
-    async def _apply_feature_result(self, result: SimpleNamespace) -> None:
+    async def async_apply_feature_result(self, result: SimpleNamespace) -> None:
         self.applied_feature_results.append(result)
 
     def _context_time_zone(self) -> str:

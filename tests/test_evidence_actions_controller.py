@@ -48,14 +48,14 @@ class _ActionCoordinator:
     def current_time(self) -> datetime:
         return self.now
 
-    def _refresh_ux_state_for_circuit(
+    def refresh_ux_state_for_circuit(
         self,
         circuit_id: str,
         now: datetime,
     ) -> None:
         self.refreshed.append((circuit_id, now))
 
-    def _refresh_all_ux_state(self, now: datetime) -> None:
+    def refresh_all_ux_state(self, now: datetime) -> None:
         self.refreshed.append(now)
 
     def async_set_updated_data(self, state: object) -> None:
