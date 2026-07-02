@@ -15,8 +15,6 @@ from . import repairs as repairs  # noqa: F401 - compatibility for test monkeypa
 from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
-    build_recent_activity_timeline,
-    timeline_payload,
 )
 from .alert_feedback import (
     alert_feedback_is_expired as _alert_feedback_is_expired,
@@ -189,7 +187,6 @@ from .utility_comparison import (
     select_statistics_energy_for_period,
 )
 from .ux import (
-    alert_evidence_detail,
     canonicalize_sensitivity_config,
     data_quality_checklist,
     health_summary,
@@ -915,8 +912,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config in self.circuit_configs:
             sample = self._sample_for_config(config, now)
             samples.append((config, sample))
-            self._refresh_config_metadata_state(config)
-            self._refresh_latest_real_power_state(config, sample)
+            self.state_reducer.refresh_config_metadata_state(self.state, config)
+            self.state_reducer.refresh_latest_real_power_state(
+                self.state,
+                config,
+                sample,
+            )
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
             new_events, new_alerts = await self.pipeline.async_process_circuit(
@@ -967,27 +968,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         return self.state
 
-    def _refresh_config_metadata_state(self: Self, config: CircuitConfig) -> None:
-        """Expose configured circuit classification metadata as diagnostic state."""
-        self.state.circuit_mode_by_circuit[config.circuit_id] = (
-            _friendly_circuit_mode(config.mode)
-        )
-        self.state.power_flow_by_circuit[config.circuit_id] = (
-            _friendly_power_flow(config.power_flow)
-        )
-
-    def _refresh_latest_real_power_state(
-        self: Self,
-        config: CircuitConfig,
-        sample: NormalizedCircuitSample,
-    ) -> None:
-        """Store the latest normalized watts for lightweight state entities."""
-        power_w = getattr(sample, "real_power", None)
-        if power_w is None:
-            self.state.latest_real_power_w_by_circuit.pop(config.circuit_id, None)
-            return
-        self.state.latest_real_power_w_by_circuit[config.circuit_id] = float(power_w)
-
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
         prefix = f"{circuit_id}:"
@@ -1003,10 +983,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alert for alert in self.store_data.alerts if alert.circuit_id != circuit_id
         ]
         self._mark_store_dirty()
-        self.state.active_alerts_by_circuit.pop(circuit_id, None)
-        self.state.anomaly_score_by_circuit[circuit_id] = 0.0
-        self.state.learning_by_circuit[circuit_id] = True
-        self.state_reducer.clear_power_quality_state(self.state, circuit_id)
+        self.state_reducer.reset_learning_state(self.state, circuit_id)
         self._clear_nilm_topology_state(circuit_id)
         now = self._now_fn()
         self.refresh_ux_state_for_circuit(circuit_id, now)
@@ -1972,8 +1949,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.state.sensitivity_by_circuit[circuit_id] = (
             self.settings_controller.sensitivity_for_circuit(circuit_id)
         )
-        self._refresh_alert_evidence_state(circuit_id)
-        self._refresh_recent_activity_state(circuit_id, now)
+        self.state_reducer.refresh_alert_evidence_state(
+            self.state,
+            circuit_id,
+            self._latest_alert_for_circuit(circuit_id),
+            config=self.circuit_registry.config_for_circuit(circuit_id),
+        )
+        self.state_reducer.refresh_recent_activity_state(
+            self.state,
+            self.store_data,
+            circuit_id,
+            now,
+        )
         self.nilm_controller.refresh_state(circuit_id)
 
         status, summary = health_summary(
@@ -2013,39 +2000,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if learning:
             return "learning"
         return None
-
-    def _refresh_alert_evidence_state(self: Self, circuit_id: str) -> None:
-        alert = self._latest_alert_for_circuit(circuit_id)
-        if alert is None:
-            self.state.alert_evidence_by_circuit.pop(circuit_id, None)
-            return
-        self.state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(
-            alert,
-            config=self.circuit_registry.config_for_circuit(circuit_id),
-        )
-
-    def _refresh_recent_activity_state(
-        self: Self,
-        circuit_id: str,
-        now: datetime,
-    ) -> None:
-        timeline = build_recent_activity_timeline(
-            circuit_id=circuit_id,
-            events=self.store_data.events,
-            alerts=self.store_data.alerts,
-            observations=self.state.recent_observations_by_circuit.get(
-                circuit_id,
-                [],
-            ),
-            now=now,
-        )
-        self.state.recent_activity_by_circuit[circuit_id] = timeline.latest_title
-        self.state.recent_activity_count_by_circuit[circuit_id] = (
-            timeline.total_count
-        )
-        self.state.recent_activity_timeline_by_circuit[circuit_id] = (
-            timeline_payload(timeline)
-        )
 
     def _refresh_weather_context_state(
         self: Self,
@@ -4096,23 +4050,6 @@ def _power_flow_mode_from_raw(
     if appliance_profile is ApplianceProfile.SOLAR_INVERTER:
         return PowerFlowMode.GENERATION
     return PowerFlowMode.LOAD
-
-
-def _friendly_circuit_mode(mode: CircuitMode) -> str:
-    return {
-        CircuitMode.SINGLE_PHASE: "Single Phase",
-        CircuitMode.DUAL_PHASE: "Dual Phase",
-        CircuitMode.MIXED: "Mixed",
-        CircuitMode.MAINS_NILM: "Mains NILM",
-    }.get(mode, "Unknown")
-
-
-def _friendly_power_flow(power_flow: PowerFlowMode) -> str:
-    return {
-        PowerFlowMode.LOAD: "Load",
-        PowerFlowMode.GENERATION: "Generation / Solar Export",
-        PowerFlowMode.MAINS_NET: "Mains Net / Import-Export",
-    }.get(power_flow, "Unknown")
 
 
 def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:

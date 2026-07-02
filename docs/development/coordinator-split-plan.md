@@ -17,7 +17,7 @@ Public coordinator methods remain stable for services, entities, and the panel.
 | `EvidenceActionController` | `managers/evidence_actions.py` | `async_pause_alerts`, `async_acknowledge_alert`, maintenance start/end, alert feedback, NILM alert feedback |
 | `SettingsController` | `managers/settings_controller.py` | Recalculate/apply/undo/reset/deny/dismiss advanced setting recommendations |
 | `EntityProfileController` | `managers/entity_profile_controller.py` | `async_set_entity_detail_level` |
-| `StateReducer` | `managers/state_reducer.py` | Strict dynamic `AnalyzerState` path updates, feature-result observation recording, recent observation pruning, and grouped cleanup for processor/context state |
+| `StateReducer` | `managers/state_reducer.py` | Strict dynamic `AnalyzerState` path updates, feature-result observation recording, recent observation pruning, grouped cleanup for processor/context state, and runtime state refresh for metadata, latest power, alert evidence, and recent activity |
 | `SourceSampleBuilder` | `managers/source_samples.py` | Source-state lookup, demo source registry fallback, and normalized circuit sample assembly |
 | `SourceUpdateManager` | `managers/source_updates.py` | Source subscriptions, pending updates, listener cleanup, and compatibility accessors |
 | `ProcessingContextBuilder` | `managers/context.py` | Runtime processor context assembly and Home Assistant timezone lookup |
