@@ -137,6 +137,112 @@ class StateReducer:
                 retained[circuit_id] = kept
         state.recent_observations_by_circuit = retained
 
+    def clear_power_quality_state(self, state: Any, circuit_id: str) -> bool:
+        """Clear power-quality state owned by processor outputs."""
+        return _pop_circuit_state(
+            state,
+            circuit_id,
+            (
+                "power_quality_score_by_circuit",
+                "power_quality_evidence_by_circuit",
+                "reactive_power_drift_by_circuit",
+                "apparent_power_drift_by_circuit",
+                "power_factor_drift_by_circuit",
+            ),
+        )
+
+    def clear_standby_state(self, state: Any, circuit_id: str) -> bool:
+        """Clear standby state owned by processor outputs."""
+        return _pop_circuit_state(
+            state,
+            circuit_id,
+            (
+                "always_on_power_w_by_circuit",
+                "standby_threshold_w_by_circuit",
+                "standby_status_by_circuit",
+                "always_on_limit_usage_by_circuit",
+                "standby_evidence_by_circuit",
+            ),
+        )
+
+    def clear_weather_context_state(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+    ) -> bool:
+        """Clear volatile and persisted weather context for one circuit."""
+        removed = _pop_circuit_state(
+            state,
+            circuit_id,
+            ("weather_context_by_circuit",),
+        )
+        removed = (
+            _pop_circuit_state(
+                store_data,
+                circuit_id,
+                (
+                    "weather_context_by_circuit",
+                    "weather_context_history_by_circuit",
+                ),
+            )
+            or removed
+        )
+        return removed
+
+    def clear_rain_pump_context_state(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+    ) -> bool:
+        """Clear volatile and persisted rain/pump context for one circuit."""
+        return self._clear_state_and_store_group(
+            state,
+            store_data,
+            circuit_id,
+            "rain_pump_context_by_circuit",
+        )
+
+    def clear_water_flow_context_state(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+    ) -> bool:
+        """Clear volatile and persisted water-flow context for one circuit."""
+        return self._clear_state_and_store_group(
+            state,
+            store_data,
+            circuit_id,
+            "water_flow_context_by_circuit",
+        )
+
+    def clear_water_context_history(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+    ) -> bool:
+        """Clear volatile and persisted water-context history for one circuit."""
+        return self._clear_state_and_store_group(
+            state,
+            store_data,
+            circuit_id,
+            "water_context_history_by_circuit",
+        )
+
+    def _clear_state_and_store_group(
+        self,
+        state: Any,
+        store_data: Any,
+        circuit_id: str,
+        root: str,
+    ) -> bool:
+        removed = _pop_circuit_state(state, circuit_id, (root,))
+        removed = _pop_circuit_state(store_data, circuit_id, (root,)) or removed
+        return removed
+
 
 def _observation_payload(observation: Any) -> dict[str, Any]:
     payload = {
@@ -172,3 +278,16 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _pop_circuit_state(
+    owner: Any,
+    circuit_id: str,
+    roots: tuple[str, ...],
+) -> bool:
+    removed = False
+    for root in roots:
+        mapping = getattr(owner, root)
+        if mapping.pop(circuit_id, None) is not None:
+            removed = True
+    return removed
