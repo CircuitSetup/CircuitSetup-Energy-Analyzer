@@ -147,7 +147,7 @@ class NilmController:
         return coordinator._nilm_sample_processor._nilm_signature_payloads(
             circuit_id,
             signatures,
-            coordinator.context_builder.build(coordinator._now_fn()),
+            coordinator.context_builder.build(coordinator.current_time()),
         )
 
     def refresh_state(self, circuit_id: str) -> None:
@@ -155,7 +155,7 @@ class NilmController:
         coordinator = self._coordinator
         result = coordinator._nilm_sample_processor.refresh_state(
             circuit_id,
-            coordinator.context_builder.build(coordinator._now_fn()),
+            coordinator.context_builder.build(coordinator.current_time()),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -274,7 +274,7 @@ class NilmController:
             ),
             None,
         )
-        now = self._coordinator._now_fn().isoformat()
+        now = self._coordinator.current_time().isoformat()
         if assignment is None:
             assignment = {
                 "assignment_id": assignment_id_text
@@ -366,7 +366,7 @@ class NilmController:
             raise ValueError("NILM label interval end must be after start.")
 
         coordinator = self._coordinator
-        now_dt = coordinator._now_fn()
+        now_dt = coordinator.current_time()
         now = now_dt.isoformat()
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
@@ -456,7 +456,7 @@ class NilmController:
         if len(remaining) == len(intervals):
             return False
         coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
-        now_dt = coordinator._now_fn()
+        now_dt = coordinator.current_time()
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
@@ -528,7 +528,7 @@ class NilmController:
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(
-            coordinator._now_fn()
+            coordinator.current_time()
         )
         return dict(assignment)
 
@@ -573,7 +573,7 @@ class NilmController:
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(
-            coordinator._now_fn()
+            coordinator.current_time()
         )
         return dict(assignment)
 
@@ -718,7 +718,7 @@ class NilmController:
             session_id for session_id in confirmed if session_id not in newly_rejected
         ]
 
-        now_dt = coordinator._now_fn()
+        now_dt = coordinator.current_time()
         now = now_dt.isoformat()
         current_confidence = self._nonnegative_float_value(
             assignment.get("confidence"),
@@ -820,7 +820,7 @@ class NilmController:
             default=0.0,
         )
         coordinator = self._coordinator
-        now_dt = coordinator._now_fn()
+        now_dt = coordinator.current_time()
         now = now_dt.isoformat()
         if correct:
             already_confirmed = session_id_text in confirmed
@@ -1056,7 +1056,7 @@ class NilmController:
                 assignment.setdefault("signature_fingerprints", []),
                 source_fingerprint,
             )
-            assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+            assignment["updated_at"] = self._coordinator.current_time().isoformat()
             source["assignment_id"] = assignment["assignment_id"]
             target["assignment_id"] = assignment["assignment_id"]
             self.remove_signature_from_other_assignments(
@@ -1134,9 +1134,14 @@ class NilmController:
         coordinator = self._coordinator
         coordinator.store_persistence.mark_dirty()
         self.refresh_state(circuit_id)
-        coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
+        coordinator._refresh_ux_state_for_circuit(
+            circuit_id,
+            coordinator.current_time(),
+        )
         coordinator.async_set_updated_data(coordinator.state)
-        await coordinator.store_persistence.async_save_if_dirty(coordinator._now_fn())
+        await coordinator.store_persistence.async_save_if_dirty(
+            coordinator.current_time()
+        )
 
     async def async_rename_nilm_appliance(
         self,
@@ -1151,7 +1156,7 @@ class NilmController:
             raise ValueError("Missing label.")
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["display_name"] = label_text
-        assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
@@ -1168,7 +1173,7 @@ class NilmController:
             raise ValueError("Missing appliance_profile.")
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["appliance_profile"] = profile_text
-        assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
@@ -1246,7 +1251,7 @@ class NilmController:
         )
         if source.get("lifecycle_state") == "published":
             target["lifecycle_state"] = "published"
-        target["updated_at"] = self._coordinator._now_fn().isoformat()
+        target["updated_at"] = self._coordinator.current_time().isoformat()
 
         assignments = (
             self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
@@ -1288,7 +1293,7 @@ class NilmController:
         assignment["publish_entities"] = True
         assignment["created_device"] = True
         assignment["lifecycle_state"] = "published"
-        assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
@@ -1302,7 +1307,7 @@ class NilmController:
         assignment["publish_entities"] = False
         if assignment.get("lifecycle_state") == "published":
             assignment["lifecycle_state"] = "validated"
-        assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
@@ -1315,7 +1320,7 @@ class NilmController:
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["publish_entities"] = False
         assignment["lifecycle_state"] = "retired"
-        assignment["updated_at"] = self._coordinator._now_fn().isoformat()
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
@@ -1347,7 +1352,7 @@ class NilmController:
         self._coordinator.store_persistence.mark_dirty()
         self._coordinator.async_set_updated_data(self._coordinator.state)
         await self._coordinator.store_persistence.async_save_if_dirty(
-            self._coordinator._now_fn()
+            self._coordinator.current_time()
         )
         await self._coordinator.config_entry_controller.async_reload()
 

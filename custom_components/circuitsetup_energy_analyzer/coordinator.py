@@ -846,6 +846,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def last_source_update_entities(self: Self, value: Iterable[str]) -> None:
         self.source_updates.last_source_update_entities = tuple(value)
 
+    def current_time(self: Self) -> datetime:
+        """Return the coordinator's current runtime timestamp."""
+        return self._now_fn()
+
     async def async_process_update(self: Self) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()

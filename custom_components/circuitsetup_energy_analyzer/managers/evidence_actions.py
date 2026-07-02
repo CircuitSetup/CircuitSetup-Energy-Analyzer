@@ -41,7 +41,10 @@ class EvidenceActionController:
         del duration
         coordinator = self._coordinator
         coordinator.paused_circuits.add(circuit_id)
-        coordinator._refresh_ux_state_for_circuit(circuit_id, coordinator._now_fn())
+        coordinator._refresh_ux_state_for_circuit(
+            circuit_id,
+            coordinator.current_time(),
+        )
         coordinator.async_set_updated_data(coordinator.state)
 
     async def async_acknowledge_alert(self, alert_id: str) -> bool:
@@ -50,7 +53,7 @@ class EvidenceActionController:
         if self.alert_for_id(alert_id) is None:
             return False
         self.retire_alert_id(alert_id)
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         coordinator._refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -65,7 +68,7 @@ class EvidenceActionController:
     ) -> None:
         """Mark one circuit in maintenance and pause appliance notifications."""
         coordinator = self._coordinator
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         payload: dict[str, Any] = {
             "active": True,
             "note": str(note),
@@ -88,7 +91,7 @@ class EvidenceActionController:
     ) -> None:
         """Clear maintenance state and optionally relearn the circuit baseline."""
         coordinator = self._coordinator
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         current = dict(
             coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
         )
@@ -129,7 +132,7 @@ class EvidenceActionController:
         alert = self.alert_for_id(alert_id)
         if alert is None:
             return False
-        now = coordinator._now_fn()
+        now = coordinator.current_time()
         fingerprint = alert_feedback_fingerprint(
             alert,
             config=coordinator.circuit_registry.config_for_circuit(alert.circuit_id),
@@ -233,7 +236,7 @@ class EvidenceActionController:
         self,
         candidates: tuple[str, ...],
     ) -> tuple[str | None, Mapping[str, Any]]:
-        now = self._coordinator._now_fn()
+        now = self._coordinator.current_time()
         for fingerprint in candidates:
             feedback = self._coordinator.store_data.alert_feedback.get(fingerprint)
             if not isinstance(feedback, Mapping):
