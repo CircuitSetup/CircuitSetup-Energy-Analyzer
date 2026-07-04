@@ -124,7 +124,7 @@ def _settings_recommendation(advisor: Any, **overrides: Any) -> Any:
         "apply_payload": {"daily_spike_ratio": 0.3},
         "status": advisor.RecommendationStatus.PENDING,
         "created_at": datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
-        "expires_at": datetime(2026, 7, 2, 12, 0, tzinfo=UTC),
+        "expires_at": datetime(2099, 7, 2, 12, 0, tzinfo=UTC),
     }
     values.update(overrides)
     return advisor.SettingRecommendation(**values)
