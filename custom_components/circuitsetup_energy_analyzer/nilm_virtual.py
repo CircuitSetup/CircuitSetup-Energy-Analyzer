@@ -6,6 +6,7 @@ from datetime import datetime
 from math import isfinite
 from typing import Any
 
+from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import DOMAIN
 from .models import AlertEvidence, SensorRole, Severity
 from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
@@ -95,15 +96,23 @@ def nilm_virtual_unique_id(
 def nilm_virtual_device_info(
     entry_id: str,
     state: NilmVirtualApplianceState,
+    hass: Any | None = None,
 ) -> dict[str, Any]:
     """Return device registry metadata for an estimated NILM appliance."""
-    return {
+    device_info = {
         "identifiers": {(DOMAIN, f"{entry_id}_nilm_{state.assignment_id}")},
         "name": state.display_name,
         "manufacturer": "CircuitSetup",
         "model": "NILM Estimated Appliance",
         "via_device": (DOMAIN, f"{entry_id}_{state.mains_circuit_id}"),
     }
+    suggested_area = suggested_area_for_profile(
+        state.appliance_profile,
+        existing_area_names_for_hass(hass),
+    )
+    if suggested_area:
+        device_info["suggested_area"] = suggested_area
+    return device_info
 
 
 def nilm_virtual_appliance_alerts(
@@ -323,7 +332,9 @@ def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
     return {
         "estimated": True,
         "source": "nilm",
+        "source_type": "nilm_estimate",
         "assignment_id": state.assignment_id,
+        "appliance_profile": state.appliance_profile,
         "mains_source": state.mains_source,
         "confidence": state.confidence,
         "model_status": state.model_status,

@@ -391,7 +391,11 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
     @property
     def device_info(self) -> dict[str, Any]:
         """Group estimated NILM entities by assignment device."""
-        return nilm_virtual_device_info(self._entry_id, self._current_nilm_state())
+        return nilm_virtual_device_info(
+            self._entry_id,
+            self._current_nilm_state(),
+            getattr(self.coordinator, "hass", None),
+        )
 
     def _current_nilm_state(self) -> NilmVirtualApplianceState:
         for state in published_nilm_virtual_appliance_states(self.coordinator):

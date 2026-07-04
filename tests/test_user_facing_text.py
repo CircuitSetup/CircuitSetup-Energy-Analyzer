@@ -1285,7 +1285,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Estimated Appliances",
         "Estimated appliances are NILM's current best grouped load guesses.",
         "Appliance Assignments",
-        "Assignments save a signature as a named appliance for future review.",
+        "Assignments save a signature as a named appliance. Validate it, "
+        "then create an estimated HA device when it is trustworthy.",
         "Open Appliance Detail",
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
@@ -1351,8 +1352,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
         "_renderNilmExistingAssignmentField",
         "Assign Appliance",
-        "Publish Entities",
-        "Disable Publishing",
+        "Create HA Device",
+        "Remove HA Device",
+        "Created an estimated HA appliance device.",
+        "Removed the estimated HA appliance device.",
         "Remove Assignment",
         "Save Assignment",
         "_saveNilmAssignmentChanges",
@@ -1501,6 +1504,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "session-validation-card" in PANEL_MODULE_VERSION
     assert "interval-running-prompt" in PANEL_MODULE_VERSION
     assert "low-confidence-nilm" in PANEL_MODULE_VERSION
+    assert "nilm-ha-device-workflow" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1658,6 +1662,35 @@ for (const expected of [
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_assignment_actions_use_ha_device_workflow_labels() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const publishHtml = panel._renderNilmAssignmentActions({
+  assignment_id: "assignment-washer",
+  display_name: "Washer",
+  actions: { publish: {} }
+}, 0);
+const unpublishHtml = panel._renderNilmAssignmentActions({
+  assignment_id: "assignment-washer",
+  display_name: "Washer",
+  actions: { unpublish: {} }
+}, 0);
+for (const expected of ["Create HA Device", "Remove HA Device"]) {
+  const html = expected === "Create HA Device" ? publishHtml : unpublishHtml;
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+for (const stale of ["Publish Entities", "Disable Publishing"]) {
+  if (publishHtml.includes(stale) || unpublishHtml.includes(stale)) {
+    throw new Error(`stale label ${stale}`);
   }
 }
 """
@@ -3030,7 +3063,7 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "when it is available",
         "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
-        "Disable Publishing",
+        "Remove HA Device",
         "NILM estimates are inferred from aggregate power and are not safety evidence",
         "`assign_session_to_appliance`",
         "`publish_nilm_appliance_assignment`",
