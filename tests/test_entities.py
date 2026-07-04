@@ -4293,7 +4293,9 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
     assert estimated_power.extra_state_attributes == {
         "estimated": True,
         "source": "nilm",
+        "source_type": "nilm_estimate",
         "assignment_id": "assignment-dishwasher",
+        "appliance_profile": "dishwasher",
         "mains_source": "sensor.mains_power",
         "confidence": 0.92,
         "model_status": "published",
@@ -4307,6 +4309,9 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "model": "NILM Estimated Appliance",
         "via_device": (DOMAIN, "entry-1_mains"),
     }
+    assert "icon" not in estimated_power.device_info
+    assert "entry-1_dishwasher_active_power" not in sensor_by_id
+    assert "entry-1_dishwasher_running" not in binary_by_id
 
     coordinator._nilm_unmatched_edges["mains"].append(
         NilmEdge(
@@ -4321,6 +4326,43 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
 
     assert estimated_power.native_value == 900.0
     assert running.is_on is True
+
+
+def test_nilm_virtual_device_info_inherits_real_appliance_area_metadata() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        NilmVirtualApplianceState,
+        nilm_virtual_device_info,
+    )
+
+    state = NilmVirtualApplianceState(
+        appliance_id="washer",
+        assignment_id="assignment-washer",
+        display_name="Washer",
+        is_running=False,
+        estimated_power_w=0.0,
+        estimated_energy_kwh_today=0.0,
+        confidence=0.91,
+        last_seen=None,
+        active_signature_id=None,
+        active_session_id=None,
+        latest_session_id=None,
+        model_status="published",
+        mains_circuit_id="mains",
+        mains_source="sensor.mains_power",
+        appliance_profile="washer",
+        last_validation="2026-06-06T08:00:00+00:00",
+    )
+
+    device_info = nilm_virtual_device_info("entry-1", state)
+
+    assert device_info == {
+        "identifiers": {(DOMAIN, "entry-1_nilm_assignment-washer")},
+        "name": "Washer",
+        "manufacturer": "CircuitSetup",
+        "model": "NILM Estimated Appliance",
+        "via_device": (DOMAIN, "entry-1_mains"),
+        "suggested_area": "Laundry",
+    }
 
 
 def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
@@ -4433,6 +4475,65 @@ async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() 
         entity.unique_id.startswith("entry-1_nilm_")
         for entity in added_entities
     )
+
+
+@pytest.mark.asyncio
+async def test_nilm_virtual_publish_flags_control_entity_setup() -> None:
+    from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    assignment = {
+        "assignment_id": "assignment-washer",
+        "display_name": "Washer",
+        "mains_circuit_id": "mains",
+        "publish_entities": False,
+        "lifecycle_state": "validated",
+    }
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(mains,),
+        entry_data={},
+        options={},
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", data={})
+
+    async def nilm_unique_ids() -> set[str]:
+        added_entities = []
+        await sensor.async_setup_entry(hass, entry, added_entities.extend)
+        await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
+        return {
+            entity.unique_id
+            for entity in added_entities
+            if entity.unique_id.startswith("entry-1_nilm_")
+        }
+
+    assert await nilm_unique_ids() == set()
+
+    assignment["publish_entities"] = True
+    assignment["lifecycle_state"] = "published"
+    assert {
+        "entry-1_nilm_assignment-washer_health_summary",
+        "entry-1_nilm_assignment-washer_estimated_power",
+        "entry-1_nilm_assignment-washer_estimated_running",
+    } <= await nilm_unique_ids()
+
+    assignment["publish_entities"] = False
+    assignment["lifecycle_state"] = "validated"
+    assert await nilm_unique_ids() == set()
+
+    assignment["publish_entities"] = True
+    assignment["lifecycle_state"] = "retired"
+    assert await nilm_unique_ids() == set()
 
 
 @pytest.mark.asyncio

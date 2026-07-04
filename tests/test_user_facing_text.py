@@ -1668,6 +1668,35 @@ for (const expected of [
     )
 
 
+def test_nilm_assignment_actions_use_ha_device_workflow_labels() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const publishHtml = panel._renderNilmAssignmentActions({
+  assignment_id: "assignment-washer",
+  display_name: "Washer",
+  actions: { publish: {} }
+}, 0);
+const unpublishHtml = panel._renderNilmAssignmentActions({
+  assignment_id: "assignment-washer",
+  display_name: "Washer",
+  actions: { unpublish: {} }
+}, 0);
+for (const expected of ["Create HA Device", "Remove HA Device"]) {
+  const html = expected === "Create HA Device" ? publishHtml : unpublishHtml;
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+for (const stale of ["Publish Entities", "Disable Publishing"]) {
+  if (publishHtml.includes(stale) || unpublishHtml.includes(stale)) {
+    throw new Error(`stale label ${stale}`);
+  }
+}
+"""
+    )
+
+
 def test_nilm_workspace_does_not_duplicate_review_item_control_ids() -> None:
     _run_panel_node_script(
         """
