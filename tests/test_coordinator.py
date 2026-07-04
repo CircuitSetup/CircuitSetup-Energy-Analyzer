@@ -11061,6 +11061,7 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer import settings_advisor
 
     recommendation = _settings_recommendation(settings_advisor)
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
         entry_data={
@@ -11084,6 +11085,7 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
                 recommendation.recommendation_id: recommendation,
             },
         ),
+        now_fn=lambda: now,
     )
 
     await coordinator.async_apply_setting_recommendation(
