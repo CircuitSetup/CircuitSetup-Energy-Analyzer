@@ -975,10 +975,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return `Assigned to ${name}.`;
     }
     if (actionKey === "publish") {
-      return "Published estimated appliance entities.";
+      return "Created an estimated HA appliance device.";
     }
     if (actionKey === "unpublish") {
-      return "Disabled estimated appliance publishing.";
+      return "Removed the estimated HA appliance device.";
     }
     if (actionKey === "retire") {
       return "Removed appliance assignment.";
@@ -2334,7 +2334,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             ${this._renderNilmAssignmentEditFields(item, index)}
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
-        `, "Assignments save a signature as a named appliance for future review.")}
+        `, "Assignments save a signature as a named appliance. Validate it, then create an estimated HA device when it is trustworthy.")}
         ${this._renderNilmOverlayToggles(workspace)}
         ${this._renderNilmGraphControls(graphWindow)}
         ${graph}
@@ -2793,8 +2793,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${detailButton}
         ${hasSave ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" ${this._busyAction === `nilm_assignments_${index}_save` ? "disabled" : ""}>Save Assignment</button>` : ""}
         ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>Validate History</button>` : ""}
-        ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Publish Entities</button>` : ""}
-        ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Disable Publishing</button>` : ""}
+        ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Create HA Device</button>` : ""}
+        ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Remove HA Device</button>` : ""}
         ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Remove Assignment</button>` : ""}
       </div>
     `;

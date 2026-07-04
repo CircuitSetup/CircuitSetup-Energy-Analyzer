@@ -1285,7 +1285,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Estimated Appliances",
         "Estimated appliances are NILM's current best grouped load guesses.",
         "Appliance Assignments",
-        "Assignments save a signature as a named appliance for future review.",
+        "Assignments save a signature as a named appliance. Validate it, "
+        "then create an estimated HA device when it is trustworthy.",
         "Open Appliance Detail",
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
@@ -1351,8 +1352,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
         "_renderNilmExistingAssignmentField",
         "Assign Appliance",
-        "Publish Entities",
-        "Disable Publishing",
+        "Create HA Device",
+        "Remove HA Device",
+        "Created an estimated HA appliance device.",
+        "Removed the estimated HA appliance device.",
         "Remove Assignment",
         "Save Assignment",
         "_saveNilmAssignmentChanges",
@@ -1501,6 +1504,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "session-validation-card" in PANEL_MODULE_VERSION
     assert "interval-running-prompt" in PANEL_MODULE_VERSION
     assert "low-confidence-nilm" in PANEL_MODULE_VERSION
+    assert "nilm-ha-device-workflow" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -3030,7 +3034,7 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "when it is available",
         "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
-        "Disable Publishing",
+        "Remove HA Device",
         "NILM estimates are inferred from aggregate power and are not safety evidence",
         "`assign_session_to_appliance`",
         "`publish_nilm_appliance_assignment`",
