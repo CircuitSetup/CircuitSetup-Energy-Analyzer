@@ -14822,7 +14822,7 @@ def test_standby_settings_default_to_two_day_low_watermark_window() -> None:
         },
     )
 
-    settings = coordinator._standby_settings_for_config(
+    settings = coordinator.processor_runtime.standby_settings_for_config(
         coordinator.circuit_configs[0],
         "office",
     )

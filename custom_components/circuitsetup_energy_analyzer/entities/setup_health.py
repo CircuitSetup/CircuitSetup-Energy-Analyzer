@@ -1077,16 +1077,6 @@ def _setup_health_needs_water_flow_source(coordinator: Any, circuit: Any) -> boo
     )
 
 
-def _setup_health_has_utility_comparison_setup_status(
-    coordinator: Any,
-    circuit_id: str,
-) -> bool:
-    return (
-        _setup_health_utility_comparison_setup_status(coordinator, circuit_id)
-        is not None
-    )
-
-
 def _setup_health_utility_comparison_setup_status(
     coordinator: Any,
     circuit_id: str,

@@ -3051,32 +3051,6 @@ def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def default_assignment_text(source_entities: Iterable[str]) -> str:
-    """Build editable non-JSON circuit assignment lines from source entities."""
-    groups: dict[str, list[str]] = {}
-    for entity_id in source_entities:
-        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
-        groups.setdefault(circuit_id, []).append(entity_id)
-
-    lines = [
-        "# Format: Circuit name | appliance_type | mode | entity_id, entity_id",
-        "# Use appliance_type 'exclude' to leave a detected group out.",
-    ]
-    for circuit_id, entity_ids in groups.items():
-        profile, mode = _suggest_assignment_profile_mode(circuit_id, entity_ids)
-        lines.append(
-            " | ".join(
-                (
-                    _friendly_name_from_id(circuit_id),
-                    profile,
-                    mode,
-                    ", ".join(entity_ids),
-                )
-            )
-        )
-    return "\n".join(lines)
-
-
 def build_config_from_assignment_input(
     pending_config: Mapping[str, Any],
     assignment_input: Mapping[str, Any],

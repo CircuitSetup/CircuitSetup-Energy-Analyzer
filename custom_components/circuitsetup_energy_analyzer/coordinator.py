@@ -9,17 +9,10 @@ from typing import Any, Self
 
 from . import notifications as notifications  # noqa: F401 - compatibility for tests
 from . import repairs as repairs  # noqa: F401 - compatibility for test monkeypatching
-from .activity_alerts import ActivityAlertSettings
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
 from .alerting import alert_anomaly_score
-from .billing import (
-    BillingCycleSettings,
-)
-from .capacity import (
-    CapacitySettings,
-)
 from .config_parsing import (
     circuit_configs_from_entry_data as _circuit_configs_from_entry_data,
 )
@@ -31,13 +24,8 @@ from .const import (
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
-from .cost import CostSettings
 from .dashboard import normalize_dashboard_layout
-from .demand import (
-    DemandSettings,
-)
 from .events import CircuitEventDetector
-from .goals import EnergyGoalSettings
 from .managers.alert_policies import AlertPolicyManager
 from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
@@ -106,14 +94,9 @@ from .processors import (
     UtilityComparisonProcessor,
     WaterContextAlertProcessor,
 )
-from .standby import StandbySettings
 from .storage import (
     RETENTION_WINDOWS,
     FeatureStoreData,
-)
-from .usage import EnergyUsageSettings
-from .utility_comparison import (
-    UtilityComparisonSettings,
 )
 from .ux import (
     canonicalize_sensitivity_config,
@@ -1574,9 +1557,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         self.ux_state.refresh_config(config, sample, now)
 
-    def _suppression_reason(self: Self, circuit_id: str, learning: bool) -> str | None:
-        return self.ux_state.suppression_reason(circuit_id, learning)
-
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         return self.ux_state.latest_alert_for_circuit(circuit_id)
 
@@ -1669,87 +1649,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     def _registered_demo_source_entity_ids(self: Self) -> dict[str, str]:
         return self.source_samples.registered_demo_source_entity_ids()
 
-
-    def _activity_alert_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> ActivityAlertSettings:
-        return self.processor_runtime.activity_alert_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _energy_usage_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> EnergyUsageSettings:
-        return self.processor_runtime.energy_usage_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _energy_goal_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> EnergyGoalSettings:
-        return self.processor_runtime.energy_goal_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _billing_cycle_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> BillingCycleSettings:
-        return self.processor_runtime.billing_cycle_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _cost_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> CostSettings:
-        return self.processor_runtime.cost_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _demand_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> DemandSettings:
-        return self.processor_runtime.demand_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _capacity_settings_for_config(self: Self, circuit_id: str) -> CapacitySettings:
-        return self.processor_runtime.capacity_settings_for_config(circuit_id)
-
-    def _standby_settings_for_config(
-        self: Self,
-        config: CircuitConfig | None,
-        circuit_id: str,
-    ) -> StandbySettings:
-        return self.processor_runtime.standby_settings_for_config(
-            config,
-            circuit_id,
-        )
-
-    def _utility_comparison_settings_for_circuit(
-        self: Self,
-        circuit_id: str,
-    ) -> UtilityComparisonSettings:
-        return self.processor_runtime.utility_comparison_settings_for_circuit(
-            circuit_id
-        )
 
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
         self.processor_runtime.clear_nilm_topology_state(circuit_id)

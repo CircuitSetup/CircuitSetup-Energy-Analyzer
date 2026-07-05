@@ -469,9 +469,6 @@ class SetupHealthAggregator:
             advanced_settings,
         )
 
-    def has_utility_comparison_setup_status(self, circuit_id: str) -> bool:
-        return self.utility_comparison_repair_problem(circuit_id) is not None
-
     def utility_comparison_repair_problem(self, circuit_id: str) -> str | None:
         status = self._coordinator.state.utility_comparison_status_by_circuit.get(
             circuit_id
