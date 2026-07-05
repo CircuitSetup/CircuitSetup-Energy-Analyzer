@@ -474,26 +474,7 @@ def compact_descriptions_for_setup(
             applicability_already_checked=True,
         ):
             compact_descriptions.append(description)
-    return _dedupe_duplicate_control_descriptions(domain, compact_descriptions)
-
-
-def _dedupe_duplicate_control_descriptions(
-    domain: str,
-    descriptions: Collection[Any],
-) -> tuple[Any, ...]:
-    """Remove compact-control duplicates that would present the same action."""
-    if domain != "button":
-        return tuple(descriptions)
-
-    keys = {str(getattr(description, "key", "")) for description in descriptions}
-    if "start_maintenance" not in keys or "pause_alerts" not in keys:
-        return tuple(descriptions)
-
-    return tuple(
-        description
-        for description in descriptions
-        if str(getattr(description, "key", "")) != "pause_alerts"
-    )
+    return tuple(compact_descriptions)
 
 
 def desired_compact_entity_rules(
@@ -923,13 +904,6 @@ _RULES: tuple[EntityCreationRule, ...] = (
         simple=True,
         standard=True,
         expert=True,
-    ),
-    _rule(
-        "button",
-        "pause_alerts",
-        EntityExposure.DIAGNOSTIC,
-        EntityGroup.DEVELOPER_DIAGNOSTICS,
-        ENTITY_DETAIL_EXPERT,
     ),
     _rule(
         "number",

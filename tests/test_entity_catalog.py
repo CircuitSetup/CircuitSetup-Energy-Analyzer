@@ -338,42 +338,8 @@ def test_compact_creation_rule_documents_requested_replacements() -> None:
     assert maintenance_start.replacement == "switch.<circuit>_maintenance"
 
 
-def test_pause_alerts_button_is_expert_developer_diagnostic_opt_in() -> None:
-    rule = compact_creation_rule_for_entity("button", "pause_alerts")
-
-    assert rule.group is EntityGroup.DEVELOPER_DIAGNOSTICS
-    assert not should_create_entity(
-        rule=rule,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_SIMPLE,
-        selected_groups=(),
-        legacy_compatibility_keys=(),
-    )
-    assert not should_create_entity(
-        rule=rule,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_STANDARD,
-        selected_groups=(),
-        legacy_compatibility_keys=(),
-    )
-    assert not should_create_entity(
-        rule=rule,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_EXPERT,
-        selected_groups=(),
-        legacy_compatibility_keys=(),
-    )
-    assert should_create_entity(
-        rule=rule,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_EXPERT,
-        selected_groups={EntityGroup.DEVELOPER_DIAGNOSTICS},
-        legacy_compatibility_keys=(),
-    )
+def test_pause_alerts_button_is_not_a_current_compact_entity() -> None:
+    assert ("button", "pause_alerts") not in compact_creation_rules_by_key()
 
 
 def test_should_create_entity_checks_feature_source_applicability() -> None:
