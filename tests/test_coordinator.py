@@ -1328,6 +1328,11 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         0.01,
     )
     monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
         fake_process_update,
@@ -1339,10 +1344,8 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
-    for _ in range(20):
-        if process_calls:
-            break
-        await asyncio.sleep(0.01)
+    assert coordinator._source_update_task is not None
+    await asyncio.wait_for(coordinator._source_update_task, timeout=1)
 
     assert process_calls == 1
     assert coordinator.pending_source_update_entities == ()
@@ -1351,6 +1354,125 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         "sensor.fridge_power",
         "sensor.fridge_var",
     )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_waits_for_quiet_source_state_changes(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+    changed_entity_batches: list[tuple[str, ...] | None] = []
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    async def fake_process_update(self, *, changed_entities=None):
+        changed_entity_batches.append(changed_entities)
+        return self.state
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        0.05,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
+        0.2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module.EnergyAnalyzerCoordinator,
+        "async_process_update",
+        fake_process_update,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+    await asyncio.sleep(0.03)
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
+    await asyncio.sleep(0.04)
+
+    assert changed_entity_batches == []
+
+    for _ in range(20):
+        if changed_entity_batches:
+            break
+        await asyncio.sleep(0.01)
+
+    assert changed_entity_batches == [
+        ("sensor.fridge_current", "sensor.fridge_power")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_coordinator_max_source_update_batch_window(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+    changed_entity_batches: list[tuple[str, ...] | None] = []
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    async def fake_process_update(self, *, changed_entities=None):
+        changed_entity_batches.append(changed_entities)
+        return self.state
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        0.05,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
+        0.08,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module.EnergyAnalyzerCoordinator,
+        "async_process_update",
+        fake_process_update,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+    await asyncio.sleep(0.03)
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
+    await asyncio.sleep(0.03)
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
+
+    for _ in range(20):
+        if changed_entity_batches:
+            break
+        await asyncio.sleep(0.01)
+
+    assert changed_entity_batches == [
+        ("sensor.fridge_current", "sensor.fridge_power", "sensor.fridge_var")
+    ]
 
 
 @pytest.mark.asyncio
@@ -1383,6 +1505,11 @@ async def test_coordinator_passes_changed_source_entities_to_process_update(
         0.01,
     )
     monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
         fake_process_update,
@@ -1393,10 +1520,8 @@ async def test_coordinator_passes_changed_source_entities_to_process_update(
 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
-    for _ in range(20):
-        if changed_entity_batches:
-            break
-        await asyncio.sleep(0.01)
+    assert coordinator._source_update_task is not None
+    await asyncio.wait_for(coordinator._source_update_task, timeout=1)
 
     assert changed_entity_batches == [
         ("sensor.fridge_current", "sensor.fridge_power")
@@ -1475,6 +1600,11 @@ async def test_coordinator_reschedules_source_update_added_during_processing(
     monkeypatch.setattr(
         coordinator_module,
         "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
         0.01,
     )
     monkeypatch.setattr(
@@ -1634,13 +1764,13 @@ def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
         calls["pipeline"].append(config.circuit_id)
         return [], []
 
-    async def fake_cross_circuit(samples, now):
+    async def fake_cross_circuit(samples, now_or_context):
         calls["cross_samples"].append(
             [config.circuit_id for config, _sample in samples]
         )
         return []
 
-    def fake_process_sample(config, sample, events):
+    def fake_process_sample(config, sample, events, context=None):
         calls["nilm"].append(config.circuit_id)
         return []
 
@@ -1733,6 +1863,58 @@ async def test_source_update_includes_mains_nilm_when_known_load_changes() -> No
 
 
 @pytest.mark.asyncio
+async def test_source_update_reuses_processing_context_for_runtime_processors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(
+        coordinator_module,
+        now_holder,
+        include_mains_nilm=True,
+    )
+    original_build = coordinator.context_builder.build
+    build_calls: list[datetime] = []
+
+    def counting_build(now: datetime):
+        build_calls.append(now)
+        return original_build(now)
+
+    async def fake_process_circuit(config, sample, context):
+        return [], []
+
+    async def fake_notify_settings():
+        return None
+
+    async def fake_sync_repairs(*args):
+        return None
+
+    coordinator.context_builder.build = counting_build
+    coordinator.pipeline.async_process_circuit = fake_process_circuit
+    coordinator._rebuild_setting_recommendations = (
+        lambda _now, *, circuit_id=None: False
+    )
+    notify_settings = "async_notify_settings_recommendations_if_needed"
+    monkeypatch.setattr(
+        coordinator.notification_controller,
+        notify_settings,
+        fake_notify_settings,
+    )
+    coordinator._sync_data_quality_repairs = fake_sync_repairs
+    coordinator._sync_setup_health_repairs = fake_sync_repairs
+    coordinator.environment_context.observe_water_context = lambda _config, _now: None
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert build_calls == [now_holder["value"]]
+
+
+@pytest.mark.asyncio
 async def test_frequent_source_updates_throttle_recommendation_work() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -1805,6 +1987,55 @@ async def test_dirty_store_save_throttles_retention_but_direct_apply_still_runs(
         now + timedelta(seconds=10),
         now + timedelta(seconds=75),
     ]
+
+
+@pytest.mark.asyncio
+async def test_source_dirty_store_save_is_throttled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    saved = 0
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            nonlocal saved
+            saved += 1
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store=FakeStore(),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    retention_calls: list[datetime] = []
+
+    monkeypatch.setattr(
+        coordinator.store_persistence,
+        "apply_retention",
+        lambda timestamp: retention_calls.append(timestamp),
+    )
+
+    coordinator.store_persistence.mark_dirty()
+    await coordinator.store_persistence.async_save_if_dirty(now, force=False)
+    coordinator.store_persistence.mark_dirty()
+    await coordinator.store_persistence.async_save_if_dirty(
+        now + timedelta(seconds=5),
+        force=False,
+    )
+    await coordinator.store_persistence.async_save_if_dirty(
+        now + timedelta(seconds=35),
+        force=False,
+    )
+
+    assert saved == 2
+    assert retention_calls == [now]
+    assert coordinator.store_persistence.dirty is False
 
 
 @pytest.mark.asyncio

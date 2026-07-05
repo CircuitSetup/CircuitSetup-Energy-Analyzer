@@ -3633,6 +3633,71 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
+def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+        unmatched_edges_max_items=3,
+    )
+
+    def sample(index: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=index * 30),
+            circuit_id="mains",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    for index, watts in enumerate((100, 260, 100, 260, 100, 260), start=1):
+        processor.process(sample(index, watts), config, context, events=())
+
+    retained_edges = processor.unmatched_edges_by_circuit["mains"]
+    assert len(retained_edges) == 3
+    assert [edge.timestamp for edge in retained_edges] == [
+        now + timedelta(seconds=index * 30) for index in (4, 5, 6)
+    ]
+
+
 def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         _merge_nilm_session_history,

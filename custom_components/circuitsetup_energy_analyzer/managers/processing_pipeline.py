@@ -173,13 +173,13 @@ class ProcessingPipeline:
     async def async_process_cross_circuit(
         self,
         samples: list[tuple[Any, Any]],
-        now: Any,
+        context: Any,
     ) -> list[Any]:
         coordinator = self._coordinator
 
         balance_result = self._mains_balance_processor.process(
             samples,
-            coordinator.context_builder.build(now),
+            context,
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -188,7 +188,7 @@ class ProcessingPipeline:
 
         solar_result = self._solar_flow_processor.process(
             samples,
-            coordinator.context_builder.build(now),
+            context,
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -196,14 +196,13 @@ class ProcessingPipeline:
         )
 
         alerts: list[Any] = []
-        utility_context = coordinator.context_builder.build(now)
         for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
             config = coordinator.circuit_registry.config_for_circuit(circuit_id)
             if config is None:
                 continue
             result = await self._utility_comparison_processor.process(
                 config,
-                utility_context,
+                context,
             )
             _, new_alerts = await coordinator.async_apply_feature_result(result)
             await self._sync_setup_health_repairs(circuit_id)

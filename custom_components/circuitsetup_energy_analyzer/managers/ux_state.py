@@ -45,6 +45,7 @@ class UxStateManager:
         config: CircuitConfig,
         sample: NormalizedCircuitSample | None,
         now: datetime,
+        context: Any | None = None,
     ) -> None:
         coordinator = self._coordinator
         circuit_id = config.circuit_id
@@ -136,7 +137,7 @@ class UxStateManager:
             circuit_id,
             now,
         )
-        coordinator.nilm_controller.refresh_state(circuit_id)
+        coordinator.nilm_controller.refresh_state(circuit_id, context)
 
         status, summary = health_summary(
             data_quality_problem=bool(
