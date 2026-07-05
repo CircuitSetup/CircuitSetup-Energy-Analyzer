@@ -87,13 +87,14 @@ class NilmController:
         config: Any,
         sample: Any,
         events: Iterable[Any],
+        context: Any | None = None,
     ) -> list[AlertEvidence]:
         """Process one NILM mains sample and apply resulting state updates."""
         coordinator = self._coordinator
         result = self._sample_processor.process(
             sample,
             config,
-            coordinator.context_builder.build(sample.timestamp),
+            context or coordinator.context_builder.build(sample.timestamp),
             events=events,
         )
         coordinator.state_reducer.apply_updates(
@@ -127,13 +128,14 @@ class NilmController:
         self,
         mains_config: Any,
         match: Any,
+        context: Any | None = None,
     ) -> AlertEvidence | None:
         """Fold one known-load NILM topology match into analyzer state."""
         coordinator = self._coordinator
         result = self._topology_processor.process(
             mains_config,
             match,
-            coordinator.context_builder.build(match.edge.timestamp),
+            context or coordinator.context_builder.build(match.edge.timestamp),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,
@@ -154,12 +156,12 @@ class NilmController:
             coordinator.context_builder.build(coordinator.current_time()),
         )
 
-    def refresh_state(self, circuit_id: str) -> None:
+    def refresh_state(self, circuit_id: str, context: Any | None = None) -> None:
         """Refresh derived NILM state for one circuit."""
         coordinator = self._coordinator
         result = self._sample_processor.refresh_state(
             circuit_id,
-            coordinator.context_builder.build(coordinator.current_time()),
+            context or coordinator.context_builder.build(coordinator.current_time()),
         )
         coordinator.state_reducer.apply_updates(
             coordinator.state,

@@ -71,3 +71,38 @@ def test_source_sample_builder_uses_registered_demo_sources_for_dual_phase() -> 
     assert sample.leg_a_real_power == 1200
     assert sample.leg_b_real_power == 900
     assert not sample.quality_issues
+
+
+def test_source_sample_builder_skips_demo_registry_for_regular_sources() -> None:
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            if entity_id != "sensor.fridge_power":
+                return None
+            return SimpleNamespace(
+                state="125",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now,
+            )
+
+    builder = SourceSampleBuilder(
+        SimpleNamespace(states=FakeStates(), entity_registry=object()),
+        entry_id="entry-1",
+    )
+
+    def fail_if_called() -> dict[str, str]:
+        raise AssertionError("demo registry lookup should not run")
+
+    builder.registered_demo_source_entity_ids = fail_if_called
+
+    states = builder.source_states_for(config, now)
+
+    assert states["sensor.fridge_power"].state == "125"

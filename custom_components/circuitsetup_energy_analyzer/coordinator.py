@@ -104,6 +104,7 @@ from .ux import (
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
+SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
 ALERT_HISTORY_MAX_ITEMS = 500
 ALERT_HISTORY_MAX_AGE = timedelta(days=180)
@@ -115,6 +116,7 @@ NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
 NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT = 500
 NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
 NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
+NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT = 512
 RECOMMENDATION_HISTORY_MAX_ITEMS = 200
 RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
@@ -379,6 +381,21 @@ def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
     }
 
 
+def _source_circuit_ids_by_entity(
+    circuit_configs: Iterable[CircuitConfig],
+) -> dict[str, tuple[str, ...]]:
+    circuit_ids_by_entity: defaultdict[str, list[str]] = defaultdict(list)
+    for config in circuit_configs:
+        for sensor in config.sensors:
+            entity_id = str(sensor.entity_id).strip()
+            if entity_id:
+                circuit_ids_by_entity[entity_id].append(config.circuit_id)
+    return {
+        entity_id: tuple(circuit_ids)
+        for entity_id, circuit_ids in circuit_ids_by_entity.items()
+    }
+
+
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     """Runtime coordinator for source sensor updates and analyzer state."""
 
@@ -405,6 +422,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.entry_data,
             self.options,
         )
+        self._source_circuit_ids_by_entity = _source_circuit_ids_by_entity(
+            self.circuit_configs
+        )
+        self._known_source_entity_ids = frozenset(self._source_circuit_ids_by_entity)
         self.circuit_registry = CircuitRegistry(self)
         self._now_fn = now_fn or (lambda: datetime.now(UTC))
         self._entry_retention_mode = _retention_mode_from_sources(
@@ -605,14 +626,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             ignored_signatures=self.ignored_nilm_signatures,
             known_load_events=self.nilm_controller.known_load_events,
             observe_topology=(
-                lambda config, match, _context: [
+                lambda config, match, context: [
                     alert
                     for alert in [
-                        self.nilm_controller.observe_known_load_topology(config, match)
+                        self.nilm_controller.observe_known_load_topology(
+                            config,
+                            match,
+                            context,
+                        )
                     ]
                     if alert is not None
                 ]
             ),
+            unmatched_edges_max_items=NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
         )
         self.nilm_controller.configure_processors(
             sample_processor=self._nilm_sample_processor,
@@ -660,6 +686,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self,
             track_state_change_event=async_track_state_change_event,
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
+            max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
         self.ux_state = UxStateManager(self)
         self._hydrate_state_from_store()
@@ -718,22 +745,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not changed:
             return tuple(self.circuit_configs)
 
-        entity_ids_by_circuit = {
-            config.circuit_id: {sensor.entity_id for sensor in config.sensors}
-            for config in self.circuit_configs
-        }
-        known_entity_ids = {
-            entity_id
-            for entity_ids in entity_ids_by_circuit.values()
-            for entity_id in entity_ids
-        }
-        if not changed.issubset(known_entity_ids):
+        if not changed.issubset(self._known_source_entity_ids):
             return tuple(self.circuit_configs)
 
         selected_circuit_ids = {
             circuit_id
-            for circuit_id, entity_ids in entity_ids_by_circuit.items()
-            if entity_ids & changed
+            for entity_id in changed
+            for circuit_id in self._source_circuit_ids_by_entity.get(entity_id, ())
         }
         if not selected_circuit_ids:
             return tuple(self.circuit_configs)
@@ -839,6 +857,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 config,
                 sample,
                 events,
+                context,
             ):
                 nilm_alert = self.evidence_actions.alert_with_feedback(nilm_alert)
                 if nilm_alert.feedback_status != "expected":
@@ -847,11 +866,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
         alerts.extend(await self._notify_nilm_virtual_appliances(now))
-        alerts.extend(await self.pipeline.async_process_cross_circuit(samples, now))
+        alerts.extend(await self.pipeline.async_process_cross_circuit(samples, context))
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
-            self._refresh_ux_state(config, sample, now)
+            self._refresh_ux_state(config, sample, now, context)
             if config.circuit_id not in processing_circuit_ids:
                 continue
             await self._sync_setup_health_repairs(config.circuit_id)
@@ -879,7 +898,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if self._rebuild_setting_recommendations(now):
                 self._mark_store_dirty()
         self.async_set_updated_data(self.state)
-        await self._async_save_store(now)
+        await self._async_save_store(now, force=False)
         if recommendation_refresh_due:
             await (
                 self.notification_controller.async_notify_settings_recommendations_if_needed()
@@ -1554,8 +1573,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config: CircuitConfig,
         sample: NormalizedCircuitSample | None,
         now: datetime,
+        context: Any | None = None,
     ) -> None:
-        self.ux_state.refresh_config(config, sample, now)
+        self.ux_state.refresh_config(config, sample, now, context)
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         return self.ux_state.latest_alert_for_circuit(circuit_id)
@@ -1627,8 +1647,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._mark_store_dirty()
         return applied.events, applied.active_alerts
 
-    async def _async_save_store(self: Self, now: datetime) -> None:
-        await self.store_persistence.async_save_if_dirty(now)
+    async def _async_save_store(
+        self: Self,
+        now: datetime,
+        *,
+        force: bool = True,
+    ) -> None:
+        await self.store_persistence.async_save_if_dirty(now, force=force)
 
     def _apply_retention(self: Self, now: datetime) -> None:
         self.store_persistence.apply_retention(now)
