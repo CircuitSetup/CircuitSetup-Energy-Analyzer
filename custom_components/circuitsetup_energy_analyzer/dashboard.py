@@ -16,6 +16,7 @@ from .const import (
 DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
 DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
+DASHBOARD_COLUMNS = 4
 NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-graphs"
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
 
@@ -120,15 +121,8 @@ def build_recommended_dashboard(
             hass=hass,
             entry_id=entry_id,
         ),
-        _behavior_watchlist_section(
-            appliance_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        ),
         _appliance_status_section(
             appliance_circuits,
-            include_evidence_links=include_feature_cards,
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -148,7 +142,6 @@ def build_recommended_dashboard(
     sections.append(
         _energy_tracking_section(
             appliance_circuits,
-            mains_circuits=mains_circuits,
             include_feature_cards=include_feature_cards,
             registry_lookup=registry_lookup,
             hass=hass,
@@ -193,7 +186,7 @@ def build_recommended_dashboard(
                 "path": "overview",
                 "icon": DASHBOARD_ICON,
                 "type": "sections",
-                "max_columns": 4,
+                "max_columns": DASHBOARD_COLUMNS,
                 "dense_section_placement": True,
                 "sections": sections,
             }
@@ -236,7 +229,6 @@ def dashboard_preflight_summary(
     all_sections = [
         "Household Overview",
         "Today's Energy",
-        "Behavior Watchlist",
         "Appliance Status",
         "Mains, Solar, and NILM",
         "Energy Tracking",
@@ -346,7 +338,6 @@ def _dashboard_section_titles(
     titles = [
         "Household Overview",
         "Today's Energy",
-        "Behavior Watchlist",
         "Appliance Status",
     ]
     if mains_circuits:
@@ -430,7 +421,7 @@ def _household_overview_section(
             {
                 "type": "glance",
                 "title": "Top appliances right now",
-                "columns": min(len(activity_rows), 5),
+                "columns": DASHBOARD_COLUMNS,
                 "entities": activity_rows,
             }
         )
@@ -461,7 +452,7 @@ def _todays_energy_section(
             {
                 "type": "glance",
                 "title": "Top energy users today",
-                "columns": min(len(daily_rows), 5),
+                "columns": DASHBOARD_COLUMNS,
                 "entities": daily_rows[:5],
             }
         )
@@ -501,7 +492,7 @@ def _todays_energy_section(
                 {
                     "type": "glance",
                     "title": "Solar-covered share",
-                    "columns": min(len(solar_rows), 5),
+                    "columns": DASHBOARD_COLUMNS,
                     "entities": solar_rows[:5],
                 }
             )
@@ -510,57 +501,9 @@ def _todays_energy_section(
     return {"type": "grid", "title": "Today's Energy", "cards": cards}
 
 
-def _behavior_watchlist_section(
-    appliance_circuits: Iterable[Any],
-    *,
-    registry_lookup: dict[str, Any] | None,
-    hass: Any | None,
-    entry_id: str | None,
-) -> dict[str, Any]:
-    circuits = list(appliance_circuits)
-    energy_rows = _resolved_rows_for_circuits(
-        circuits,
-        ("sensor", "energy_summary", "Energy Summary"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    electrical_rows = _resolved_rows_for_circuits(
-        circuits,
-        ("sensor", "electrical_health", "Electrical Health"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    cards: list[dict[str, Any]] = []
-    if energy_rows:
-        cards.append(_entities_card("Usage watchlist", energy_rows))
-    if electrical_rows:
-        cards.append(_entities_card("Electrical watchlist", electrical_rows))
-    for circuit in circuits[:3]:
-        circuit_id = _circuit_id(circuit)
-        if not circuit_id:
-            continue
-        cards.append(
-            {
-                "type": "button",
-                "name": f"Open {_circuit_name(circuit)} Detail",
-                "icon": "mdi:clipboard-text-search-outline",
-                "tap_action": {
-                    "action": "navigate",
-                    "navigation_path": _appliance_detail_path(circuit_id),
-                },
-            }
-        )
-    if not cards:
-        cards.append(_markdown_card("Behavior watchlist appears after entities load."))
-    return {"type": "grid", "title": "Behavior Watchlist", "cards": cards}
-
-
 def _appliance_status_section(
     circuits: Iterable[Any],
     *,
-    include_evidence_links: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
@@ -588,18 +531,6 @@ def _appliance_status_section(
             cards.append(_markdown_card(_circuit_note(name, notes)))
         if rows:
             cards.append(_entities_card(name, rows))
-            if include_evidence_links:
-                cards.append(
-                    {
-                        "type": "button",
-                        "name": f"Open {name} Detail",
-                        "icon": "mdi:clipboard-text-search-outline",
-                        "tap_action": {
-                            "action": "navigate",
-                            "navigation_path": _appliance_detail_path(circuit_id),
-                        },
-                    }
-                )
 
     return {
         "type": "grid",
@@ -632,7 +563,7 @@ def _mains_section(
             {
                 "type": "glance",
                 "title": "Mains rollups",
-                "columns": 3,
+                "columns": DASHBOARD_COLUMNS,
                 "entities": rollup_rows,
             }
         )
@@ -703,7 +634,7 @@ def _mains_section(
                 {
                     "type": "glance",
                     "title": "Unknown load signals",
-                    "columns": 3,
+                    "columns": DASHBOARD_COLUMNS,
                     "entities": unknown_rows,
                 }
             )
@@ -779,14 +710,12 @@ def _mains_section(
 def _energy_tracking_section(
     circuits: Iterable[Any],
     *,
-    mains_circuits: Iterable[Any],
     include_feature_cards: bool,
     registry_lookup: dict[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any]:
     appliance_circuits = list(circuits)
-    mains_list = list(mains_circuits)
     daily_entities = _resolved_entities_for_circuits(
         appliance_circuits,
         ("sensor", "daily_energy_usage", "Daily Energy Usage"),
@@ -794,44 +723,9 @@ def _energy_tracking_section(
         hass=hass,
         entry_id=entry_id,
     )
-    activity_entities = _resolved_entities_for_circuits(
-        appliance_circuits,
-        ("sensor", "activity_summary", "Activity Summary"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-    electrical_rows = _resolved_rows_for_circuits(
-        [*appliance_circuits, *mains_list],
-        ("sensor", "electrical_health", "Electrical Health"),
-        registry_lookup=registry_lookup,
-        hass=hass,
-        entry_id=entry_id,
-    )
-
     cards: list[dict[str, Any]] = []
     if daily_entities:
         cards.append(_statistics_graph_card("Daily energy trend", daily_entities))
-    if activity_entities:
-        cards.append(
-            {
-                "type": "history-graph",
-                "title": "Appliance activity",
-                "hours_to_show": 48,
-                "entities": [
-                    {"entity": entity_id} for entity_id in activity_entities
-                ],
-            }
-        )
-    if electrical_rows:
-        cards.append(
-            {
-                "type": "glance",
-                "title": "Electrical health rollups",
-                "columns": 4,
-                "entities": electrical_rows,
-            }
-        )
     if include_feature_cards and (
         water_flow_card := _water_flow_context_card(
             appliance_circuits,
@@ -907,7 +801,7 @@ def _nilm_review_section(
             {
                 "type": "glance",
                 "title": "NILM review",
-                "columns": min(len(rows), 3),
+                "columns": DASHBOARD_COLUMNS,
                 "entities": rows,
             }
         )
@@ -1067,7 +961,7 @@ def _water_flow_context_card(
         {
             "type": "glance",
             "title": "Water flow context",
-            "columns": 2,
+            "columns": DASHBOARD_COLUMNS,
             "entities": rows,
         },
     )
@@ -1606,10 +1500,6 @@ def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> 
 
 def _markdown_card(content: str) -> dict[str, str]:
     return {"type": "markdown", "content": content}
-
-
-def _appliance_detail_path(circuit_id: str) -> str:
-    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id}&appliance_detail=1"
 
 
 def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:

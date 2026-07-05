@@ -24,12 +24,6 @@ views:
                 name: Energy Summary
               - entity: sensor.refrigerator_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Refrigerator Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=refrigerator
           - type: entities
             title: HVAC
             entities:
@@ -41,12 +35,6 @@ views:
                 name: Energy Summary
               - entity: sensor.hvac_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open HVAC Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=hvac
           - type: entities
             title: Water heater
             entities:
@@ -58,12 +46,6 @@ views:
                 name: Energy Summary
               - entity: sensor.water_heater_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Water heater Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=water_heater
           - type: entities
             title: Pool pump
             entities:
@@ -75,12 +57,6 @@ views:
                 name: Energy Summary
               - entity: sensor.pool_pump_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Pool pump Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=pool_pump
           - type: entities
             title: Washer
             entities:
@@ -92,12 +68,6 @@ views:
                 name: Energy Summary
               - entity: sensor.washer_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Washer Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=washer
           - type: entities
             title: Dryer
             entities:
@@ -109,12 +79,6 @@ views:
                 name: Energy Summary
               - entity: sensor.dryer_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Dryer Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=dryer
           - type: entities
             title: Car charger
             entities:
@@ -126,19 +90,12 @@ views:
                 name: Energy Summary
               - entity: sensor.car_charger_daily_energy_usage
                 name: Daily Energy Usage
-          - type: button
-            name: Open Car charger Evidence
-            icon: mdi:chart-line
-            tap_action:
-              action: navigate
-              navigation_path: /circuitsetup-energy-analyzer-evidence?circuit_id=car_charger
-
       - type: grid
         title: Mains, Solar, and NILM
         cards:
           - type: glance
             title: Mains rollups
-            columns: 3
+            columns: 4
             entities:
               - entity: sensor.mains_nilm_activity_summary
                 name: Activity
@@ -176,7 +133,7 @@ views:
             vertical: false
           - type: glance
             title: Unknown load signals
-            columns: 3
+            columns: 4
             entities:
               - entity: sensor.mains_nilm_nilm_unknown_loads
                 name: Inventory
@@ -244,37 +201,6 @@ views:
               - entity: sensor.washer_daily_energy_usage
               - entity: sensor.dryer_daily_energy_usage
               - entity: sensor.car_charger_daily_energy_usage
-          - type: history-graph
-            title: Appliance activity
-            hours_to_show: 48
-            entities:
-              - entity: sensor.refrigerator_activity_summary
-              - entity: sensor.hvac_activity_summary
-              - entity: sensor.water_heater_activity_summary
-              - entity: sensor.pool_pump_activity_summary
-              - entity: sensor.washer_activity_summary
-              - entity: sensor.dryer_activity_summary
-              - entity: sensor.car_charger_activity_summary
-          - type: glance
-            title: Electrical health rollups
-            columns: 4
-            entities:
-              - entity: sensor.refrigerator_electrical_health
-                name: Refrigerator
-              - entity: sensor.hvac_electrical_health
-                name: HVAC
-              - entity: sensor.water_heater_electrical_health
-                name: Water heater
-              - entity: sensor.pool_pump_electrical_health
-                name: Pool pump
-              - entity: sensor.washer_electrical_health
-                name: Washer
-              - entity: sensor.dryer_electrical_health
-                name: Dryer
-              - entity: sensor.car_charger_electrical_health
-                name: Car charger
-              - entity: sensor.mains_nilm_electrical_health
-                name: Mains
           - type: conditional
             conditions:
               - entity: sensor.water_heater_water_flow_correlation
@@ -288,7 +214,7 @@ views:
             card:
               type: glance
               title: Water flow context
-              columns: 2
+              columns: 4
               entities:
                 - entity: sensor.water_heater_water_flow_correlation
                   name: Water heater
@@ -355,3 +281,23 @@ views:
                 data-quality problems. Demand and capacity findings are
                 operational evidence from energy measurements, not electrical
                 safety verification, code compliance, or breaker sizing advice.
+
+      - type: grid
+        title: Diagnostics and Evidence
+        cards:
+          - type: markdown
+            title: Analyzer evidence links
+            content: >
+              **Analyzer evidence links**
+
+              Open these views when you want alert evidence, analyzer actions,
+              and troubleshooting context without adding more diagnostic rows
+              to every appliance card.
+
+              - [Refrigerator evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=refrigerator)
+              - [HVAC evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=hvac)
+              - [Water heater evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=water_heater)
+              - [Pool pump evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=pool_pump)
+              - [Washer evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=washer)
+              - [Dryer evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=dryer)
+              - [Car charger evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=car_charger)
