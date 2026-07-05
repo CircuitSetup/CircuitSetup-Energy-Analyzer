@@ -84,13 +84,6 @@ CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (
         args_fn=lambda circuit_id: (circuit_id, False),
         icon="mdi:bell-ring-outline",
     ),
-    CircuitButtonDescription(
-        key="pause_alerts",
-        name_suffix="Pause Alerts",
-        method_name="async_pause_alerts",
-        args_fn=lambda circuit_id: (circuit_id, None),
-        icon="mdi:bell-pause-outline",
-    ),
 )
 
 GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
@@ -348,7 +341,6 @@ def button_description_applies(
         "relearn_baseline",
         "start_maintenance",
         "end_maintenance",
-        "pause_alerts",
     }:
         return True
     return supports_daily_circuit_controls(circuit)
@@ -377,11 +369,6 @@ def _button_availability_reason(
         return "maintenance_active"
     if button_key == "end_maintenance" and not _maintenance_active(state, circuit_id):
         return "maintenance_inactive"
-    if button_key == "pause_alerts":
-        if _alerts_paused(state, coordinator, circuit_id):
-            return "alerts_paused"
-        if not _has_active_alert(state, circuit_id):
-            return "no_active_alert"
     return None
 
 
@@ -390,8 +377,6 @@ def _availability_reason_label(reason: str) -> str:
         "action_unavailable": "The analyzer action is unavailable.",
         "maintenance_active": "Alerts are already paused for this circuit.",
         "maintenance_inactive": "Alerts are not paused for this circuit.",
-        "alerts_paused": "Alerts are already paused for this circuit.",
-        "no_active_alert": "No active alert is available to pause.",
     }.get(reason, reason.replace("_", " "))
 
 
@@ -408,33 +393,9 @@ def _availability_next_step(reason: str) -> str:
         "action_unavailable": "Reload the integration or check the system log.",
         "maintenance_active": "Use Resume Alerts when work is complete.",
         "maintenance_inactive": "Use Pause Alerts before resuming alerts.",
-        "alerts_paused": "Resume alerts or wait for the alert pause to expire.",
-        "no_active_alert": (
-            "Review the circuit summary or evidence panel for current alerts."
-        ),
     }.get(reason, "Review the circuit controls and try again.")
 
 
 def _maintenance_active(state: Any, circuit_id: str) -> bool:
     maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
     return isinstance(maintenance, Mapping) and maintenance.get("active") is True
-
-
-def _alerts_paused(state: Any, coordinator: Any, circuit_id: str) -> bool:
-    paused_circuits = getattr(coordinator, "paused_circuits", ())
-    return circuit_id in paused_circuits or _maintenance_active(state, circuit_id)
-
-
-def _has_active_alert(state: Any, circuit_id: str) -> bool:
-    alerts_by_circuit = getattr(state, "active_alerts_by_circuit", {})
-    if not isinstance(alerts_by_circuit, Mapping):
-        return False
-    alerts = alerts_by_circuit.get(circuit_id)
-    if isinstance(alerts, int | float):
-        return alerts > 0
-    if isinstance(alerts, Mapping):
-        return bool(alerts)
-    try:
-        return len(alerts) > 0
-    except TypeError:
-        return bool(alerts)

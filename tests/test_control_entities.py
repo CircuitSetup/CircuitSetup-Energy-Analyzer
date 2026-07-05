@@ -154,13 +154,6 @@ class _FakeCoordinator:
     ) -> None:
         self.calls.append(("async_end_maintenance", (circuit_id, relearn)))
 
-    async def async_pause_alerts(
-        self,
-        circuit_id: str,
-        duration: str | None = None,
-    ) -> None:
-        self.calls.append(("async_pause_alerts", (circuit_id, duration)))
-
     async def async_run_mapping_checks(self) -> None:
         self.calls.append(("async_run_mapping_checks", ()))
 
@@ -397,7 +390,7 @@ async def test_existing_legacy_maintenance_button_registry_row_preserves_button(
 
 
 @pytest.mark.asyncio
-async def test_pause_alerts_button_requires_active_unpaused_alert(
+async def test_button_setup_uses_switch_instead_of_pause_alerts_button(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import button
@@ -414,31 +407,8 @@ async def test_pause_alerts_button_requires_active_unpaused_alert(
         added_entities.extend,
     )
 
-    by_unique_id = {entity.unique_id: entity for entity in added_entities}
-    pause_alerts = by_unique_id["entry-1_fridge_pause_alerts"]
-
-    assert pause_alerts.available is False
-    assert pause_alerts.extra_state_attributes == {
-        "availability_reason": "no_active_alert",
-        "availability_label": "No active alert is available to pause.",
-        "next_step": "Review the circuit summary or evidence panel for current alerts.",
-    }
-
-    with pytest.raises(button.HomeAssistantError, match="no active alert"):
-        await pause_alerts.async_press()
-
-    coordinator.data.active_alerts_by_circuit["fridge"] = [object()]
-
-    assert pause_alerts.available is True
-    assert pause_alerts.extra_state_attributes is None
-
-    coordinator.data.maintenance_by_circuit["fridge"] = {"active": True}
-
-    assert pause_alerts.available is False
-    assert pause_alerts.extra_state_attributes == {
-        "availability_reason": "alerts_paused",
-        "availability_label": "Alerts are already paused for this circuit.",
-        "next_step": "Resume alerts or wait for the alert pause to expire.",
+    assert "entry-1_fridge_pause_alerts" not in {
+        entity.unique_id for entity in added_entities
     }
 
 
