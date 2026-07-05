@@ -111,7 +111,7 @@ PANEL_MODULE_VERSION = (
     "20260701-appliance-timeline-nilm-lanes-dashboard-nilm-lanes-"
     "nilm-review-card-candidate-facts-session-validation-card-"
     "interval-running-prompt-low-confidence-nilm-expanded-comparisons-"
-    "nilm-ha-device-workflow-alert-action-copy-cost-currency"
+    "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-refresh-route-stop-save-nilm-reload"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
@@ -918,7 +918,7 @@ def _advanced_circuit_settings_path(
     coordinator: Any,
     config: CircuitConfig | None,
 ) -> str:
-    path = "/config/integrations/integration/circuitsetup_energy_analyzer"
+    path = "/config/integrations/dashboard"
     params: dict[str, str] = {}
     entry_id = _coordinator_entry_id(coordinator)
     if entry_id:
