@@ -1312,7 +1312,7 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         callbacks.append(callback)
         return lambda: None
 
-    async def fake_process_update(self):
+    async def fake_process_update(self, *, changed_entities=None):
         nonlocal process_calls
         process_calls += 1
         return self.state
@@ -1351,6 +1351,56 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         "sensor.fridge_power",
         "sensor.fridge_var",
     )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_passes_changed_source_entities_to_process_update(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    callbacks = []
+    changed_entity_batches: list[tuple[str, ...] | None] = []
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        callbacks.append(callback)
+        return lambda: None
+
+    async def fake_process_update(self, *, changed_entities=None):
+        changed_entity_batches.append(changed_entities)
+        return self.state
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        coordinator_module.EnergyAnalyzerCoordinator,
+        "async_process_update",
+        fake_process_update,
+    )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+    await coordinator.async_start(["sensor.fridge_power"])
+
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
+    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
+    for _ in range(20):
+        if changed_entity_batches:
+            break
+        await asyncio.sleep(0.01)
+
+    assert changed_entity_batches == [
+        ("sensor.fridge_current", "sensor.fridge_power")
+    ]
 
 
 @pytest.mark.asyncio
@@ -1409,7 +1459,7 @@ async def test_coordinator_reschedules_source_update_added_during_processing(
         callbacks.append(callback)
         return lambda: None
 
-    async def fake_process_update(self):
+    async def fake_process_update(self, *, changed_entities=None):
         nonlocal process_calls
         process_calls += 1
         if process_calls == 1:
@@ -1465,7 +1515,7 @@ async def test_coordinator_stop_cancels_pending_source_state_update(
         callbacks.append(callback)
         return lambda: None
 
-    async def fake_process_update(self):
+    async def fake_process_update(self, *, changed_entities=None):
         nonlocal process_calls
         process_calls += 1
         return self.state
@@ -1496,6 +1546,265 @@ async def test_coordinator_stop_cancels_pending_source_state_update(
     assert process_calls == 0
     assert coordinator.pending_source_update_entities == ()
     assert coordinator.last_source_update_entities == ()
+
+
+def _source_scoped_coordinator(
+    coordinator_module: Any,
+    now_holder: dict[str, datetime],
+    *,
+    include_mains_nilm: bool = False,
+) -> Any:
+    circuit_values = {
+        "sensor.fridge_power": 125,
+        "sensor.hvac_power": 1800,
+        "sensor.well_pump_power": 700,
+        "sensor.mains_power": 2625,
+    }
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            value = circuit_values.get(entity_id)
+            if value is None:
+                return None
+            return SimpleNamespace(
+                state=str(value),
+                attributes={"unit_of_measurement": "W"},
+                last_updated=now_holder["value"],
+            )
+
+    circuits = [
+        {
+            "circuit_id": "fridge",
+            "name": "Fridge",
+            "mode": "single_phase",
+            "appliance_profile": "refrigerator",
+            "sensors": [{"entity_id": "sensor.fridge_power", "role": "real_power"}],
+        },
+        {
+            "circuit_id": "hvac",
+            "name": "HVAC",
+            "mode": "single_phase",
+            "appliance_profile": "hvac",
+            "sensors": [{"entity_id": "sensor.hvac_power", "role": "real_power"}],
+        },
+        {
+            "circuit_id": "well_pump",
+            "name": "Well Pump",
+            "mode": "single_phase",
+            "appliance_profile": "well_pump",
+            "sensors": [
+                {"entity_id": "sensor.well_pump_power", "role": "real_power"}
+            ],
+        },
+    ]
+    if include_mains_nilm:
+        circuits.insert(
+            0,
+            {
+                "circuit_id": "mains",
+                "name": "Mains NILM",
+                "mode": "mains_nilm",
+                "appliance_profile": "mains_nilm",
+                "sensors": [
+                    {"entity_id": "sensor.mains_power", "role": "real_power"}
+                ],
+            },
+        )
+
+    options = {CONF_ENABLE_EXPERIMENTAL_NILM: True} if include_mains_nilm else {}
+    return coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={CONF_CIRCUITS: circuits},
+        options=options,
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now_holder["value"],
+    )
+
+
+def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
+    calls: dict[str, list[Any]] = {
+        "pipeline": [],
+        "nilm": [],
+        "cross_samples": [],
+        "recommendation_rebuilds": [],
+        "recommendation_notifications": [],
+    }
+
+    async def fake_process_circuit(config, sample, context):
+        calls["pipeline"].append(config.circuit_id)
+        return [], []
+
+    async def fake_cross_circuit(samples, now):
+        calls["cross_samples"].append(
+            [config.circuit_id for config, _sample in samples]
+        )
+        return []
+
+    def fake_process_sample(config, sample, events):
+        calls["nilm"].append(config.circuit_id)
+        return []
+
+    def fake_rebuild_settings(now, *, circuit_id=None):
+        calls["recommendation_rebuilds"].append((now, circuit_id))
+        return False
+
+    async def fake_notify_settings():
+        calls["recommendation_notifications"].append(coordinator.current_time())
+
+    async def fake_sync_repairs(*args):
+        return None
+
+    coordinator.pipeline.async_process_circuit = fake_process_circuit
+    coordinator.pipeline.async_process_cross_circuit = fake_cross_circuit
+    coordinator.nilm_controller.process_sample = fake_process_sample
+    coordinator._rebuild_setting_recommendations = fake_rebuild_settings
+    notify_settings = "async_notify_settings_recommendations_if_needed"
+    setattr(coordinator.notification_controller, notify_settings, fake_notify_settings)
+    coordinator._sync_data_quality_repairs = fake_sync_repairs
+    coordinator._sync_setup_health_repairs = fake_sync_repairs
+    coordinator.environment_context.observe_water_context = lambda _config, _now: None
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    calls = _record_source_scoped_update_work(coordinator)
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert calls["pipeline"] == ["fridge"]
+    assert calls["nilm"] == ["fridge"]
+    assert calls["cross_samples"] == [["fridge", "hvac", "well_pump"]]
+    assert coordinator.state.latest_real_power_w_by_circuit == {
+        "fridge": 125.0,
+        "hvac": 1800.0,
+        "well_pump": 700.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_source_update_unknown_entity_falls_back_to_full_processing() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    calls = _record_source_scoped_update_work(coordinator)
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.outdoor_temperature",),
+    )
+
+    assert calls["pipeline"] == ["fridge", "hvac", "well_pump"]
+    assert calls["nilm"] == ["fridge", "hvac", "well_pump"]
+    assert calls["cross_samples"] == [["fridge", "hvac", "well_pump"]]
+
+
+@pytest.mark.asyncio
+async def test_source_update_includes_mains_nilm_when_known_load_changes() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(
+        coordinator_module,
+        now_holder,
+        include_mains_nilm=True,
+    )
+    calls = _record_source_scoped_update_work(coordinator)
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert calls["pipeline"] == ["mains", "fridge"]
+    assert calls["nilm"] == ["mains", "fridge"]
+    assert calls["cross_samples"] == [["mains", "fridge", "hvac", "well_pump"]]
+
+
+@pytest.mark.asyncio
+async def test_frequent_source_updates_throttle_recommendation_work() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    now_holder = {"value": now}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    calls = _record_source_scoped_update_work(coordinator)
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+    now_holder["value"] = now + timedelta(seconds=5)
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert calls["recommendation_rebuilds"] == [(now, None)]
+    assert calls["recommendation_notifications"] == [now]
+
+
+@pytest.mark.asyncio
+async def test_dirty_store_save_throttles_retention_but_direct_apply_still_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    saved = 0
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            nonlocal saved
+            saved += 1
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store=FakeStore(),
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+    retention_calls: list[datetime] = []
+
+    def fake_apply_retention(timestamp: datetime) -> None:
+        retention_calls.append(timestamp)
+
+    monkeypatch.setattr(
+        coordinator.store_persistence,
+        "apply_retention",
+        fake_apply_retention,
+    )
+
+    coordinator.store_persistence.mark_dirty()
+    await coordinator.store_persistence.async_save_if_dirty(now)
+    coordinator.store_persistence.mark_dirty()
+    await coordinator.store_persistence.async_save_if_dirty(now + timedelta(seconds=5))
+    coordinator._apply_retention(now + timedelta(seconds=10))
+    coordinator.store_persistence.mark_dirty()
+    await coordinator.store_persistence.async_save_if_dirty(now + timedelta(seconds=75))
+
+    assert saved == 3
+    assert retention_calls == [
+        now,
+        now + timedelta(seconds=10),
+        now + timedelta(seconds=75),
+    ]
 
 
 @pytest.mark.asyncio

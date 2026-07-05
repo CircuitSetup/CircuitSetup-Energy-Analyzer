@@ -121,6 +121,7 @@ from .ux import (
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
+SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
 ALERT_HISTORY_MAX_ITEMS = 500
 ALERT_HISTORY_MAX_AGE = timedelta(days=180)
 ALERT_FEEDBACK_MAX_ITEMS = 500
@@ -383,6 +384,16 @@ def process_events_into_state(
 def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     """Apply a processor-requested update to AnalyzerState."""
     apply_state_update(state, path, value)
+
+
+def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
+    if entity_ids is None:
+        return set()
+    return {
+        entity_id
+        for entity_id in (str(entity_id).strip() for entity_id in entity_ids)
+        if entity_id
+    }
 
 
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
@@ -659,6 +670,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.last_exported_diagnostics: dict[str, Any] = {}
         self.last_exported_history_csv: str = ""
         self.mapping_checks_run = 0
+        self._last_settings_recommendation_source_refresh_at: datetime | None = None
         self.state = AnalyzerState()
         self.started = False
         self.source_updates = SourceUpdateManager(
@@ -714,6 +726,76 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Return the coordinator's current runtime timestamp."""
         return self._now_fn()
 
+    def _processing_configs_for_changed_entities(
+        self: Self,
+        changed_entities: Iterable[str] | None,
+    ) -> tuple[CircuitConfig, ...]:
+        """Return circuit configs that need expensive per-circuit processing."""
+        changed = _normalized_entity_ids(changed_entities)
+        if not changed:
+            return tuple(self.circuit_configs)
+
+        entity_ids_by_circuit = {
+            config.circuit_id: {sensor.entity_id for sensor in config.sensors}
+            for config in self.circuit_configs
+        }
+        known_entity_ids = {
+            entity_id
+            for entity_ids in entity_ids_by_circuit.values()
+            for entity_id in entity_ids
+        }
+        if not changed.issubset(known_entity_ids):
+            return tuple(self.circuit_configs)
+
+        selected_circuit_ids = {
+            circuit_id
+            for circuit_id, entity_ids in entity_ids_by_circuit.items()
+            if entity_ids & changed
+        }
+        if not selected_circuit_ids:
+            return tuple(self.circuit_configs)
+
+        selected_configs = [
+            config
+            for config in self.circuit_configs
+            if config.circuit_id in selected_circuit_ids
+        ]
+        if any(
+            not self.nilm_controller.enabled_for_config(config)
+            for config in selected_configs
+        ):
+            selected_circuit_ids.update(
+                config.circuit_id
+                for config in self.circuit_configs
+                if self.nilm_controller.enabled_for_config(config)
+            )
+
+        return tuple(
+            config
+            for config in self.circuit_configs
+            if config.circuit_id in selected_circuit_ids
+        )
+
+    def _settings_recommendation_refresh_due(
+        self: Self,
+        now: datetime,
+        *,
+        changed_entities: Iterable[str] | None,
+        force: bool,
+    ) -> bool:
+        if changed_entities is None:
+            return True
+        if force or self._last_settings_recommendation_source_refresh_at is None:
+            self._last_settings_recommendation_source_refresh_at = now
+            return True
+        if (
+            now - self._last_settings_recommendation_source_refresh_at
+            >= SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL
+        ):
+            self._last_settings_recommendation_source_refresh_at = now
+            return True
+        return False
+
     def refresh_energy_goal_state(
         self: Self,
         circuit_id: str,
@@ -723,13 +805,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Refresh daily energy-goal state through the configured processor."""
         return self._energy_goal_processor.refresh_state(circuit_id, config, context)
 
-    async def async_process_update(self: Self) -> AnalyzerState:
+    async def async_process_update(
+        self: Self,
+        *,
+        changed_entities: Iterable[str] | None = None,
+    ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
         context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
+        processing_configs = self._processing_configs_for_changed_entities(
+            changed_entities
+        )
+        processing_circuit_ids = {
+            config.circuit_id for config in processing_configs
+        }
         self.state_reducer.prune_recent_observations(
             self.state,
             now,
@@ -745,6 +837,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 config,
                 sample,
             )
+            if config.circuit_id not in processing_circuit_ids:
+                continue
             await self._sync_data_quality_repairs(config.circuit_id, sample)
 
             new_events, new_alerts = await self.pipeline.async_process_circuit(
@@ -756,6 +850,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alerts.extend(new_alerts)
 
         for config, sample in samples:
+            if config.circuit_id not in processing_circuit_ids:
+                continue
             for nilm_alert in self.nilm_controller.process_sample(
                 config,
                 sample,
@@ -773,6 +869,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
             self._refresh_ux_state(config, sample, now)
+            if config.circuit_id not in processing_circuit_ids:
+                continue
             await self._sync_setup_health_repairs(config.circuit_id)
             water_context_alert = self.environment_context.observe_water_context(
                 config,
@@ -789,13 +887,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(water_context_alert)
         if alerts:
             process_events_into_state(self.state, events, alerts)
-        if self._rebuild_setting_recommendations(now):
-            self._mark_store_dirty()
+        recommendation_refresh_due = self._settings_recommendation_refresh_due(
+            now,
+            changed_entities=changed_entities,
+            force=bool(alerts),
+        )
+        if recommendation_refresh_due:
+            if self._rebuild_setting_recommendations(now):
+                self._mark_store_dirty()
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)
-        await (
-            self.notification_controller.async_notify_settings_recommendations_if_needed()
-        )
+        if recommendation_refresh_due:
+            await (
+                self.notification_controller.async_notify_settings_recommendations_if_needed()
+            )
         return self.state
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
