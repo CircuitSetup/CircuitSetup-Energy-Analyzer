@@ -132,8 +132,8 @@ questions instead of raw diagnostic entity lists:
 - **Appliance Detail** combines current activity, health, electrical state,
   energy state, Today vs Normal comparisons, behavior expectations, active
   alerts, first checks, and actions for one appliance or circuit.
-- **Behavior Watchlist** highlights appliances that are higher than normal,
-  still learning, expected because of context, or worth validating.
+- **Appliance Status** keeps activity, electrical health, energy state, and
+  daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** compares current daily energy, runtime, run count,
   estimated cost, power, demand peak, configured capacity usage, and
   solar-covered share against learned normal ranges when enough baseline data
@@ -264,8 +264,8 @@ The fastest path is to let the integration create a starter dashboard:
 Choose one layout:
 
 1. **Simple**: compact appliance status, mains rollup, and energy tracking sections built from summary entities.
-2. **Standard**: Simple plus feature-level mains, HVAC, solar, utility, weather, water, billing, cost, and appliance evidence navigation cards when matching Standard entities exist.
-3. **Expert**: Standard plus the diagnostics/evidence section for each circuit. It does not add diagnostic/detail entity cards automatically.
+2. **Standard**: Simple plus feature-level mains, HVAC, solar, utility, weather, water, billing, and cost cards when matching Standard entities exist.
+3. **Expert**: Standard plus the diagnostics/evidence section for appliance evidence navigation. It does not add diagnostic/detail entity cards automatically.
 
 The dashboard form has three setup paths:
 
@@ -275,7 +275,7 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Behavior Watchlist, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or expert sections when data exists. It uses registry-resolved summary and graph entities plus navigation-only evidence buttons and NILM buttons instead of service-control cards. NILM review lanes summarize Needs Review, Assigned, Needs Validation, Ready to Publish, Published, and Ignored / Expected work in the workspace; the dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes summarize Needs Review, Assigned, Needs Validation, Ready to Publish, Published, and Ignored / Expected work in the workspace; the dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
 
 For manual dashboards, start with one simple card per important appliance:
 

@@ -675,7 +675,6 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert "button" in card_types
     assert "gauge" in card_types
     assert "glance" in card_types
-    assert "history-graph" in card_types
     assert "statistics-graph" in card_types
     assert "tile" in card_types
     assert any(card.get("title") == "Appliance Status" for card in cards)
@@ -771,6 +770,7 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         "Mains, Solar, and NILM",
         "Energy Tracking",
         "HVAC Weather Context",
+        "Diagnostics and Evidence",
     } <= section_titles
     assert section_titles.isdisjoint(
         {
@@ -828,23 +828,16 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         assert f"sensor.{circuit}_health_summary" not in appliance_overview
         assert (
             f"/circuitsetup-energy-analyzer-evidence?circuit_id={circuit}"
-            in appliance_overview
+            not in appliance_overview
         )
-    for name in (
-        "Open Refrigerator Evidence",
-        "Open HVAC Evidence",
-        "Open Water heater Evidence",
-        "Open Pool pump Evidence",
-        "Open Washer Evidence",
-        "Open Dryer Evidence",
-        "Open Car charger Evidence",
-    ):
-        assert name in appliance_overview
+    assert "Open Refrigerator Evidence" not in appliance_overview
+    assert "Analyzer evidence links" in yaml.safe_dump(
+        _dashboard_section(dashboard, "Diagnostics and Evidence")
+    )
 
     energy_tracking = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
-    assert "Electrical health rollups" in energy_tracking
-    assert "sensor.hvac_electrical_health" in energy_tracking
-    assert "sensor.mains_nilm_electrical_health" in energy_tracking
+    assert "Appliance activity" not in energy_tracking
+    assert "Electrical health rollups" not in energy_tracking
 
 
 def test_dashboard_example_removes_static_alert_evidence_view() -> None:
@@ -948,6 +941,7 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
         "Mains, Solar, and NILM",
         "Energy Tracking",
         "HVAC Weather Context",
+        "Diagnostics and Evidence",
     ]
 
     mains_section = yaml.safe_dump(
@@ -961,7 +955,7 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
     assert "Unknown Load Inventory" in mains_section
     assert "Unknown load signals" in mains_section
     assert "Settings and exports" in energy_section
-    assert "Electrical health rollups" in energy_section
+    assert "Electrical health rollups" not in energy_section
     assert "Notifications and repairs" in weather_section
     assert "title: NILM Unknown Loads" not in dashboard_text
     assert "title: Settings And Exports" not in dashboard_text
@@ -3049,16 +3043,16 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "visual appliance story" in readme_text
     assert "Household Overview" in readme_text
     assert "Today's Energy" in readme_text
-    assert "Behavior Watchlist" in readme_text
     assert "Appliance Run Timeline" in readme_text
     assert "NILM Review" in readme_text
+    assert "Diagnostics and Evidence" in readme_text
     assert "NILM review lanes" in readme_text
     assert (
         "Needs Review, Assigned, Needs Validation, Ready to Publish, "
         "Published, and Ignored / Expected"
     ) in readme_text
     assert "instead of service-control cards" in readme_text
-    assert "navigation-only evidence buttons" in readme_text
+    assert "expert evidence links and NILM buttons" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
     assert "Create Or Update Dashboard" in readme_text
     assert "Match Entity Detail Level To Layout" in readme_text
