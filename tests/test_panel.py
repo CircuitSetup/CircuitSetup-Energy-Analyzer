@@ -255,6 +255,35 @@ def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
     assert _panel_custom_component(hass) is panel_custom_module
 
 
+def test_frontend_component_prefers_import_without_hass_components_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _frontend_component,
+    )
+
+    frontend_module = ModuleType("homeassistant.components.frontend")
+    frontend_module.async_remove_panel = lambda *args, **kwargs: None
+    components_module = ModuleType("homeassistant.components")
+    components_module.frontend = frontend_module
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.frontend",
+        frontend_module,
+    )
+
+    class Components:
+        @property
+        def frontend(self) -> None:
+            raise AssertionError("deprecated hass.components.frontend access")
+
+    assert (
+        _frontend_component(SimpleNamespace(components=Components()))
+        is frontend_module
+    )
+
+
 @pytest.mark.asyncio
 async def test_panel_registers_via_frontend_when_panel_custom_helper_missing(
     monkeypatch: pytest.MonkeyPatch,
