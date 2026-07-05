@@ -1080,10 +1080,37 @@ def _validate_retention_mode(user_input: Mapping[str, Any]) -> str:
     return retention_mode
 
 
-def _selector(config: dict[str, Any], fallback: Any) -> Any:
-    if ha_selector is None:
-        return fallback
-    return ha_selector(config)
+def _selector(
+    config: dict[str, Any],
+    fallback: Any,
+    *,
+    allow_blank: bool = False,
+) -> Any:
+    validator = fallback if ha_selector is None else ha_selector(config)
+    if allow_blank:
+        return _OptionalBlankSelector(config, validator)
+    return validator
+
+
+class _OptionalBlankSelector:
+    """Selector wrapper for optional HA fields whose native selector rejects blanks."""
+
+    def __init__(self, config: dict[str, Any], validator: Any) -> None:
+        self._config = config
+        self._validator = validator
+
+    def __call__(self, value: Any) -> Any:
+        if value in (None, ""):
+            return ""
+        if callable(self._validator):
+            return self._validator(value)
+        return value
+
+    def __eq__(self, other: object) -> bool:
+        return other == self._config
+
+    def serialize(self) -> dict[str, Any]:
+        return self._config
 
 
 class _SerializableSelectorFallback:
@@ -1204,7 +1231,7 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
 
 
 def _time_selector() -> Any:
-    return _selector({"time": {}}, str)
+    return _selector({"time": {}}, str, allow_blank=True)
 
 
 def _weekday_select_selector() -> Any:
