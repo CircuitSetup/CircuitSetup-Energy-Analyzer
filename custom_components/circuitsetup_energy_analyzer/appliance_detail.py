@@ -549,95 +549,95 @@ def appliance_expectations_for_circuit(
             ),
         )
 
-    if profile in {ApplianceProfile.HVAC, ApplianceProfile.HVAC_SYSTEM}:
-        if _is_higher(runtime):
-            weather_status = _mapping_status(
-                state,
-                "weather_context_by_circuit",
-                circuit_id,
-            )
-            if weather_status in {
-                "weather_correlated",
-                "hot_weather",
-                "expected",
-                "context_explained",
-            }:
-                return (
-                    _expectation(
-                        config,
-                        title="Runtime fits weather context",
-                        status="expected",
-                        source_type=expectation_source,
-                        observed="Longer runtime is explained by weather context.",
-                        expected=_normal_range_text(runtime),
-                        why_it_matters=(
-                            "HVAC runtime should change with outdoor temperature."
-                        ),
-                        what_to_check_first=(
-                            "No action needed unless comfort is poor.",
-                        ),
-                        evidence_path=evidence_path,
-                    ),
-                )
+    if profile in {ApplianceProfile.HVAC, ApplianceProfile.HVAC_SYSTEM} and _is_higher(
+        runtime
+    ):
+        weather_status = _mapping_status(
+            state,
+            "weather_context_by_circuit",
+            circuit_id,
+        )
+        if weather_status in {
+            "weather_correlated",
+            "hot_weather",
+            "expected",
+            "context_explained",
+        }:
             return (
                 _expectation(
                     config,
-                    title="Runtime is above normal",
-                    status="watch",
+                    title="Runtime fits weather context",
+                    status="expected",
                     source_type=expectation_source,
-                    observed="HVAC runtime is above the learned range.",
+                    observed="Longer runtime is explained by weather context.",
                     expected=_normal_range_text(runtime),
                     why_it_matters=(
-                        "Long runtime on mild days may indicate efficiency issues."
+                        "HVAC runtime should change with outdoor temperature."
                     ),
-                    what_to_check_first=("Check filters, vents, and setpoints.",),
+                    what_to_check_first=(
+                        "No action needed unless comfort is poor.",
+                    ),
                     evidence_path=evidence_path,
                 ),
             )
+        return (
+            _expectation(
+                config,
+                title="Runtime is above normal",
+                status="watch",
+                source_type=expectation_source,
+                observed="HVAC runtime is above the learned range.",
+                expected=_normal_range_text(runtime),
+                why_it_matters=(
+                    "Long runtime on mild days may indicate efficiency issues."
+                ),
+                what_to_check_first=("Check filters, vents, and setpoints.",),
+                evidence_path=evidence_path,
+            ),
+        )
 
     if profile in {
         ApplianceProfile.SUMP_PUMP,
         ApplianceProfile.WATER_PUMP,
         ApplianceProfile.WELL_PUMP,
-    }:
-        if _is_higher(runtime):
-            rain_status = _mapping_status(
-                state,
-                "rain_pump_context_by_circuit",
-                circuit_id,
-            )
-            if rain_status in {"rain_explained", "weather_explained", "expected"}:
-                return (
-                    _expectation(
-                        config,
-                        title="Pump activity fits rain context",
-                        status="expected",
-                        source_type=expectation_source,
-                        observed="Recent rain explains the pump runtime.",
-                        expected=_normal_range_text(runtime),
-                        why_it_matters="Pump activity often follows rain or water use.",
-                        what_to_check_first=("No action needed right now.",),
-                        evidence_path=evidence_path,
-                    ),
-                )
+    } and _is_higher(runtime):
+        rain_status = _mapping_status(
+            state,
+            "rain_pump_context_by_circuit",
+            circuit_id,
+        )
+        if rain_status in {"rain_explained", "weather_explained", "expected"}:
             return (
                 _expectation(
                     config,
-                    title="Pump runtime is above normal",
-                    status="watch",
+                    title="Pump activity fits rain context",
+                    status="expected",
                     source_type=expectation_source,
-                    observed="Pump runtime is above the learned range without context.",
+                    observed="Recent rain explains the pump runtime.",
                     expected=_normal_range_text(runtime),
-                    why_it_matters=(
-                        "Unexpected pump activity can point to water intrusion "
-                        "or leaks."
-                    ),
-                    what_to_check_first=(
-                        "Check for water flow, rain, or a stuck pump.",
-                    ),
+                    why_it_matters="Pump activity often follows rain or water use.",
+                    what_to_check_first=("No action needed right now.",),
                     evidence_path=evidence_path,
                 ),
             )
+        return (
+            _expectation(
+                config,
+                title="Pump runtime is above normal",
+                status="watch",
+                source_type=expectation_source,
+                observed="Pump runtime is above the learned range without context.",
+                expected=_normal_range_text(runtime),
+                why_it_matters=(
+                    "Unexpected pump activity can point to water intrusion "
+                    "or leaks."
+                ),
+                what_to_check_first=(
+                    "Check for water flow, rain, or a stuck pump.",
+                ),
+                evidence_path=evidence_path,
+            ),
+        )
 
     recipe = _PROFILE_EXPECTATION_RECIPES.get(profile)
 

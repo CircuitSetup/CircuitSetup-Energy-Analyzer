@@ -124,14 +124,16 @@ def nilm_virtual_appliance_alerts(
     alerts: list[AlertEvidence] = []
     for state in published_nilm_virtual_appliance_states(coordinator):
         assignment = _assignment_for_state(coordinator, state)
-        for alert in (
-            nilm_virtual_low_confidence_alert(state, now=now),
-            nilm_virtual_finished_alert(state, now=now),
-            nilm_virtual_unusual_runtime_alert(state, assignment, now=now),
-            nilm_virtual_unusual_energy_alert(state, assignment, now=now),
-        ):
-            if alert is not None:
-                alerts.append(alert)
+        alerts.extend(
+            alert
+            for alert in (
+                nilm_virtual_low_confidence_alert(state, now=now),
+                nilm_virtual_finished_alert(state, now=now),
+                nilm_virtual_unusual_runtime_alert(state, assignment, now=now),
+                nilm_virtual_unusual_energy_alert(state, assignment, now=now),
+            )
+            if alert is not None
+        )
     return tuple(alerts)
 
 

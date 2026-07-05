@@ -1905,9 +1905,9 @@ def _nilm_workspace_lanes(
         confidence = _clamped_float(assignment.get("confidence"), default=0.0)
         if state in {"ignored", "expected", "retired"}:
             lane = "ignored_expected"
-        elif state in {"needs_validation", "conflict", "low_confidence"}:
-            lane = "needs_validation"
-        elif confidence < 0.8:
+        elif state in {"needs_validation", "conflict", "low_confidence"} or (
+            confidence < 0.8
+        ):
             lane = "needs_validation"
         elif assignment.get("publish_entities") is True or state == "published":
             lane = "published"

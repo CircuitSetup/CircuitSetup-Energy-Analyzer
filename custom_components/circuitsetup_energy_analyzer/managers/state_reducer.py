@@ -277,23 +277,20 @@ class StateReducer:
         circuit_id: str,
     ) -> bool:
         """Clear volatile and persisted weather context for one circuit."""
-        removed = _pop_circuit_state(
+        removed_state = _pop_circuit_state(
             state,
             circuit_id,
             ("weather_context_by_circuit",),
         )
-        removed = (
-            _pop_circuit_state(
-                store_data,
-                circuit_id,
-                (
-                    "weather_context_by_circuit",
-                    "weather_context_history_by_circuit",
-                ),
-            )
-            or removed
+        removed_store = _pop_circuit_state(
+            store_data,
+            circuit_id,
+            (
+                "weather_context_by_circuit",
+                "weather_context_history_by_circuit",
+            ),
         )
-        return removed
+        return removed_state or removed_store
 
     def clear_rain_pump_context_state(
         self,
@@ -344,9 +341,9 @@ class StateReducer:
         circuit_id: str,
         root: str,
     ) -> bool:
-        removed = _pop_circuit_state(state, circuit_id, (root,))
-        removed = _pop_circuit_state(store_data, circuit_id, (root,)) or removed
-        return removed
+        removed_state = _pop_circuit_state(state, circuit_id, (root,))
+        removed_store = _pop_circuit_state(store_data, circuit_id, (root,))
+        return removed_state or removed_store
 
 
 def _observation_payload(observation: Any) -> dict[str, Any]:

@@ -178,7 +178,7 @@ def build_recommended_dashboard(
     if include_expert_links:
         sections.append(_expert_evidence_section(circuit_list))
 
-    dashboard = {
+    return {
         "title": DASHBOARD_TITLE,
         "views": [
             {
@@ -192,7 +192,6 @@ def build_recommended_dashboard(
             }
         ],
     }
-    return dashboard
 
 
 def dashboard_preflight_summary(
@@ -471,13 +470,13 @@ def _todays_energy_section(
                 hass=hass,
                 entry_id=entry_id,
             )
-            for row in rows:
-                cost_rows.append(
-                    {
-                        **row,
-                        "name": f"{_circuit_name(circuit)} {row.get('name', '')}",
-                    }
-                )
+            cost_rows.extend(
+                {
+                    **row,
+                    "name": f"{_circuit_name(circuit)} {row.get('name', '')}",
+                }
+                for row in rows
+            )
         if cost_rows:
             cards.append(_entities_card("Cost estimate", cost_rows))
         solar_rows = _resolved_rows_for_circuits(

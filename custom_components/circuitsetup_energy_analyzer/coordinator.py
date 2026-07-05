@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
-from . import notifications as notifications  # noqa: F401 - compatibility for tests
-from . import repairs as repairs  # noqa: F401 - compatibility for test monkeypatching
+from . import notifications as notifications  # compatibility for tests
+from . import repairs as repairs  # compatibility for test monkeypatching
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
@@ -894,9 +894,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             changed_entities=changed_entities,
             force=bool(alerts),
         )
-        if recommendation_refresh_due:
-            if self._rebuild_setting_recommendations(now):
-                self._mark_store_dirty()
+        if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
+            self._mark_store_dirty()
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:
