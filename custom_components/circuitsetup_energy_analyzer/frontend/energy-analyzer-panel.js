@@ -1723,9 +1723,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <section class="panel">
         <h2>Actions</h2>
         ${this._renderActionGroup("Respond to this alert", "Review the graph, then choose how the analyzer should treat this alert.", [
-          this._actionButton("acknowledge", "Acknowledge"),
-          this._actionButton("mark_expected", "Mark Expected", true),
-          this._actionButton("mark_unhelpful", "Not Helpful", true),
+          this._actionButton("acknowledge", "Dismiss", false, "Clear this alert for now without teaching the analyzer."),
+          this._actionButton("mark_expected", "Mark Expected", true, "Teach the analyzer this behavior is expected so similar alerts are less likely."),
+          this._actionButton("mark_unhelpful", "Not Helpful", true, "Tell the analyzer this alert was inaccurate or not useful. This does not mark the behavior as normal."),
         ])}
         ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
           this._actionButton("pause_alerts", "Pause Alerts", true),
@@ -3252,15 +3252,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
-  _actionButton(actionKey, label, secondary = false) {
+  _actionButton(actionKey, label, secondary = false, helperText = "") {
     const actions = this._payload && this._payload.actions;
     const action = actions && actions[actionKey];
     if (!action) {
       return "";
     }
     const reason = action.unavailable_label || action.unavailable_reason || "";
+    const hintText = reason || helperText;
     const title = reason ? ` title="${this._escape(reason)}"` : "";
-    const hint = reason ? `<span class="action-reason">${this._escape(reason)}</span>` : "";
+    const hint = hintText ? `<span class="action-reason">${this._escape(hintText)}</span>` : "";
     return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${this._escape(action.label || label)}</button>${hint}</span>`;
   }
 

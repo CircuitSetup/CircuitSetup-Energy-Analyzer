@@ -2456,6 +2456,46 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
     assert "Evidence Window" not in asset
 
 
+def test_dynamic_alert_evidence_panel_feedback_actions_explain_choices() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._payload = {
+  actions: {
+    acknowledge: {},
+    mark_expected: {},
+    mark_unhelpful: {},
+  },
+};
+const html = panel._renderAlertContent({
+  circuit_id: "fridge",
+  feature: "daily_energy",
+  percent_change: 34,
+  repeated_count: 2,
+  first_seen: "2026-07-04T10:00:00Z",
+  last_seen: "2026-07-04T11:00:00Z",
+}, { name: "Kitchen Refrigerator" });
+
+for (const expected of [
+  ">Dismiss<",
+  "Clear this alert for now without teaching the analyzer.",
+  ">Mark Expected<",
+  "Teach the analyzer this behavior is expected",
+  ">Not Helpful<",
+  "does not mark the behavior as normal",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+
+if (html.includes(">Acknowledge<")) {
+  throw new Error(`old acknowledge label still present: ${html}`);
+}
+"""
+    )
+
+
 def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> None:
     asset_path = (
         INTEGRATION_DIR
