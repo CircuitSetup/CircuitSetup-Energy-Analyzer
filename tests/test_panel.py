@@ -213,9 +213,7 @@ def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit()
     action = payload["actions"]["open_advanced_circuit_settings"]
     parsed = urlparse(action["path"])
     params = parse_qs(parsed.fragment)
-    assert parsed.path == (
-        "/config/integrations/integration/circuitsetup_energy_analyzer"
-    )
+    assert parsed.path == "/config/integrations/dashboard"
     assert params["config_entry"] == ["entry-car-charger"]
     assert params["circuit_id"] == ["car_charger"]
     assert params["options_step"] == ["advanced_settings"]
@@ -231,6 +229,58 @@ def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
 
     assert 'new CustomEvent("location-changed"' in panel_script
     assert "detail: { replace: false }" in panel_script
+    assert 'startsWith("/config/")' in panel_script
+    assert "window.location.assign(path)" in panel_script
+
+
+def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
+    panel_script = Path(
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+    ).read_text(encoding="utf-8")
+
+    body = panel_script.split("  _actionRefreshRouteKey(actionKey) {", 1)[1].split(
+        "\n  _nilmActionMessage",
+        1,
+    )[0]
+    assert "history.replaceState" not in body
+    assert "routeUrl.searchParams.set(EXPAND_NILM_QUERY_PARAM" not in body
+    assert "protectedEvidencePanelTarget" not in panel_script
+
+
+def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
+    panel_script = Path(
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+    ).read_text(encoding="utf-8")
+
+    body = panel_script.split(
+        "  async _saveNilmAssignmentChanges(index) {",
+        1,
+    )[1].split("\n  async _callRecommendationAction", 1)[0]
+    route_key_line = 'this._actionRefreshRouteKey("nilm_save_assignment")'
+    assert body.index(route_key_line) < body.index(
+        "await this._hass.callService"
+    )
+    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
+    assert "window.location.assign(routeKey);" in body
+    assert "await this._loadEvidence" not in body
+
+
+def test_panel_nilm_item_actions_reload_evidence_route() -> None:
+    panel_script = Path(
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+    ).read_text(encoding="utf-8")
+
+    body = panel_script.split(
+        "  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {",
+        1,
+    )[1].split("\n  async _saveNilmAssignmentChanges", 1)[0]
+    route_key_line = "const routeKey = this._actionRefreshRouteKey(`nilm_${actionKey}`)"
+    assert body.index(route_key_line) < body.index(
+        "await this._hass.callService"
+    )
+    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
+    assert "window.location.assign(routeKey);" in body
+    assert "await this._loadEvidence({ routeKey });" not in body
 
 
 def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(

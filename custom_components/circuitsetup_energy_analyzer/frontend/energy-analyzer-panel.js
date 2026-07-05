@@ -13,6 +13,7 @@ const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
 const SETUP_HEALTH_QUERY_PARAM = "setup_health";
+const LAST_ACTION_MESSAGE_STORAGE_KEY = "circuitsetupEnergyAnalyzerLastActionMessage";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
@@ -148,6 +149,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   connectedCallback() {
     installRouteChangeDispatcher();
+    this._restoreStoredActionMessage();
     this._addRouteListeners();
     this._loadEvidenceIfRouteChanged({ force: true });
   }
@@ -710,6 +712,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.target_assignment_id = target;
     }
+    const routeKey = this._actionRefreshRouteKey(`nilm_${actionKey}`);
     const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -721,8 +724,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       this._lastActionMessage = this._nilmWorkspaceActionMessage(actionKey, data, item);
       this._busyAction = "";
-      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
-      this._scrollToTop();
+      this._storeActionMessageForReload(this._lastActionMessage);
+      window.location.assign(routeKey);
     } catch (error) {
       this._error = `Could not run ${action.service}: ${error.message}`;
       this._busyAction = "";
@@ -767,6 +770,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._renderAndScrollToTop();
       return;
     }
+    const routeKey = this._actionRefreshRouteKey("nilm_save_assignment");
     this._busyAction = `nilm_assignments_${index}_save`;
     this._render();
     try {
@@ -782,8 +786,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._nilmAssignmentDrafts.delete(`${draftKey}:appliance_profile`);
       this._lastActionMessage = this._nilmWorkspaceActionMessage("save", {}, item);
       this._busyAction = "";
-      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_save_assignment") });
-      this._scrollToTop();
+      this._storeActionMessageForReload(this._lastActionMessage);
+      window.location.assign(routeKey);
     } catch (error) {
       this._error = `Could not save assignment changes: ${error.message}`;
       this._busyAction = "";
@@ -824,6 +828,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _navigate(path) {
     if (!path) {
+      return;
+    }
+    if (String(path).startsWith("/config/")) {
+      window.location.assign(path);
       return;
     }
     history.pushState(null, "", path);
@@ -867,6 +875,26 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderAndScrollToTop() {
     this._render();
     this._scrollToTop();
+  }
+
+  _storeActionMessageForReload(message) {
+    try {
+      sessionStorage.setItem(LAST_ACTION_MESSAGE_STORAGE_KEY, message);
+    } catch (_error) {
+      // Storage can be unavailable in hardened browser sessions.
+    }
+  }
+
+  _restoreStoredActionMessage() {
+    try {
+      const message = sessionStorage.getItem(LAST_ACTION_MESSAGE_STORAGE_KEY);
+      if (message) {
+        this._lastActionMessage = message;
+        sessionStorage.removeItem(LAST_ACTION_MESSAGE_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Storage can be unavailable in hardened browser sessions.
+    }
   }
 
   _scrollToTop() {
@@ -918,14 +946,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (feature) {
       routeUrl.searchParams.set("feature", feature);
     }
-    if (actionKey.startsWith("nilm_")) {
-      routeUrl.searchParams.set(EXPAND_NILM_QUERY_PARAM, routeUrl.searchParams.get(EXPAND_NILM_QUERY_PARAM) || "1");
-    }
-    const refreshRouteKey = `${routeUrl.pathname}${routeUrl.search}`;
-    if (refreshRouteKey !== this._routeKey()) {
-      history.replaceState(null, "", refreshRouteKey);
-    }
-    return refreshRouteKey;
+    return `${routeUrl.pathname}${routeUrl.search}`;
   }
 
   _nilmActionMessage(actionKey, data) {
@@ -1400,7 +1421,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-assignment-action]")) {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         const index = Number.parseInt(button.dataset.nilmAssignmentIndex || "-1", 10);
         this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
       });
@@ -2209,7 +2232,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _loadExpandedNilm() {
     const routeUrl = new URL(this._routeKey(), window.location.origin);
     routeUrl.searchParams.set(EXPAND_NILM_QUERY_PARAM, "1");
-    history.replaceState(null, "", `${routeUrl.pathname}${routeUrl.search}${routeUrl.hash}`);
+    this._navigate(`${routeUrl.pathname}${routeUrl.search}${routeUrl.hash}`);
   }
 
   _nilmMergeTargetChip(index, option) {
