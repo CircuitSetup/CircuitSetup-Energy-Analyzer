@@ -338,11 +338,38 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     assert _dashboard_section(dashboard, "Appliance Run Timeline")
     assert _dashboard_section(dashboard, "NILM Review")
     assert "sensor.fridge_daily_energy_usage" in refs
+    assert "sensor.fridge_cost_cycle" in refs
+    assert "sensor.fridge_cost_cycle_forecast" in refs
+    assert "sensor.fridge_solar_flexible_load_coverage" in refs
     assert "sensor.fridge_energy_summary" in refs
     assert "sensor.fridge_activity_summary" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
     assert "select.fridge_alert_sensitivity" not in refs
     assert "button.fridge_relearn_baseline" not in refs
+
+    todays_energy = _dashboard_section(dashboard, "Today's Energy")
+    assert _card_with_title(todays_energy, "Cost estimate")["entities"] == [
+        {"entity": "sensor.fridge_cost_cycle", "name": "Refrigerator Cost so far"},
+        {
+            "entity": "sensor.fridge_cost_cycle_forecast",
+            "name": "Refrigerator Projected cost",
+        },
+        {"entity": "sensor.hvac_cost_cycle", "name": "HVAC Cost so far"},
+        {"entity": "sensor.hvac_cost_cycle_forecast", "name": "HVAC Projected cost"},
+        {"entity": "sensor.mains_cost_cycle", "name": "Mains NILM Cost so far"},
+        {
+            "entity": "sensor.mains_cost_cycle_forecast",
+            "name": "Mains NILM Projected cost",
+        },
+    ]
+    assert _card_with_title(todays_energy, "Solar-covered share")["entities"] == [
+        {
+            "entity": "sensor.fridge_solar_flexible_load_coverage",
+            "name": "Refrigerator",
+        },
+        {"entity": "sensor.hvac_solar_flexible_load_coverage", "name": "HVAC"},
+        {"entity": "sensor.mains_solar_flexible_load_coverage", "name": "Mains NILM"},
+    ]
 
 
 def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:

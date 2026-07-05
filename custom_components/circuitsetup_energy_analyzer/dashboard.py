@@ -51,6 +51,10 @@ UTILITY_COMPARISON_ENTITY_SPECS = (
 HVAC_WEATHER_ENTITY_SPECS = (
     ("sensor", "daily_energy_usage", "Daily Energy Usage"),
 )
+TODAYS_COST_ENTITY_SPECS = (
+    ("sensor", "cost_cycle", "Cost so far"),
+    ("sensor", "cost_cycle_forecast", "Projected cost"),
+)
 WATER_FLOW_PROFILES = {
     "sump_pump",
     "washer",
@@ -467,6 +471,40 @@ def _todays_energy_section(
                 [row["entity"] for row in daily_rows],
             )
         )
+        cost_rows: list[dict[str, str]] = []
+        for circuit in circuits:
+            rows, _notes = _resolved_entity_rows(
+                _circuit_id(circuit),
+                TODAYS_COST_ENTITY_SPECS,
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+            for row in rows:
+                cost_rows.append(
+                    {
+                        **row,
+                        "name": f"{_circuit_name(circuit)} {row.get('name', '')}",
+                    }
+                )
+        if cost_rows:
+            cards.append(_entities_card("Cost estimate", cost_rows))
+        solar_rows = _resolved_rows_for_circuits(
+            circuits,
+            ("sensor", "solar_flexible_load_coverage", "Solar-covered share"),
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if solar_rows:
+            cards.append(
+                {
+                    "type": "glance",
+                    "title": "Solar-covered share",
+                    "columns": min(len(solar_rows), 5),
+                    "entities": solar_rows[:5],
+                }
+            )
     else:
         cards.append(_markdown_card("Today's energy appears after kWh sources report."))
     return {"type": "grid", "title": "Today's Energy", "cards": cards}

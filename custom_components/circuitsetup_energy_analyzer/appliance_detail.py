@@ -250,7 +250,7 @@ def appliance_detail_for_circuit(
             "run_cycle_count_by_circuit",
             config.circuit_id,
         ),
-        cost_today=None,
+        cost_today=_estimated_cost_today(state, config.circuit_id),
         today_vs_normal=comparisons,
         expectations=expectations,
         recent_timeline=_recent_timeline(state, config.circuit_id),
@@ -301,7 +301,14 @@ def _nilm_detail(
         daily_energy_kwh=state.estimated_energy_kwh_today,
         runtime_today_seconds=None,
         run_count_today=None,
-        cost_today=None,
+        cost_today=_estimated_cost(
+            state.estimated_energy_kwh_today,
+            _positive_state_number(
+                analyzer_state,
+                "cost_current_rate_by_circuit",
+                state.mains_circuit_id,
+            ),
+        ),
         today_vs_normal=(),
         expectations=_nilm_expectations(
             state,
@@ -363,6 +370,13 @@ def metric_comparisons_for_circuit(
             ("real_power", "current_power_w"),
         ),
         (
+            "cost_today",
+            "Cost today",
+            "$",
+            "",
+            ("daily_energy_kwh", "daily_energy_usage_kwh"),
+        ),
+        (
             "demand_peak_w",
             "Demand peak",
             "W",
@@ -399,7 +413,11 @@ def metric_comparisons_for_circuit(
             == "unconfigured"
         ):
             continue
-        current = _state_number(state, field, config.circuit_id)
+        current = (
+            _estimated_cost_today(state, config.circuit_id)
+            if metric_id == "cost_today"
+            else _state_number(state, field, config.circuit_id)
+        )
         baseline = _comparison_baseline(
             coordinator,
             state,
@@ -809,6 +827,26 @@ def _comparison_baseline(
                     "contextual_baseline",
                 )
 
+    if metric_id == "cost_today":
+        rate = _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id)
+        energy_baseline = _comparison_baseline(
+            coordinator,
+            state,
+            circuit_id,
+            metric_id="daily_energy_kwh",
+            baseline_features=baseline_features,
+        )
+        if rate is None or energy_baseline is None:
+            return None
+        low, high, median, confidence, source = energy_baseline
+        return (
+            _round_money(low * rate) if low is not None else None,
+            _round_money(high * rate) if high is not None else None,
+            _round_money(median * rate) if median is not None else None,
+            confidence,
+            f"{source}_cost_estimate",
+        )
+
     store_data = getattr(coordinator, "store_data", None)
     baselines = getattr(store_data, "baselines", {})
     if not isinstance(baselines, Mapping):
@@ -1045,6 +1083,25 @@ def _state_number(state: Any, field: str, key: str) -> float | None:
     return _number_or_none(mapping.get(key))
 
 
+def _positive_state_number(state: Any, field: str, key: str) -> float | None:
+    value = _state_number(state, field, key)
+    if value is None or value <= 0.0:
+        return None
+    return value
+
+
+def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
+    daily_kwh = _state_number(state, "daily_energy_usage_by_circuit", circuit_id)
+    rate = _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id)
+    return _estimated_cost(daily_kwh, rate)
+
+
+def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:
+    if energy_kwh is None or rate is None:
+        return None
+    return _round_money(energy_kwh * rate)
+
+
 def _state_int(state: Any, field: str, key: str) -> int | None:
     mapping = getattr(state, field, {})
     if not isinstance(mapping, Mapping) or key not in mapping:
@@ -1060,6 +1117,10 @@ def _number_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _round_money(value: float) -> float:
+    return round(float(value), 2)
 
 
 def _iso(value: Any) -> str | None:

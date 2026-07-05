@@ -341,6 +341,7 @@ async def test_config_entry_setup_supports_multi_workflow_sources(
         _registered_platform_domains(hass, entry.entry_id)
         == EXPECTED_PLATFORM_DOMAINS
     )
+    _assert_appliance_workflow_payloads(hass, coordinator, entry.entry_id)
 
     assert await hass.config_entries.async_unload(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -348,6 +349,69 @@ async def test_config_entry_setup_supports_multi_workflow_sources(
     assert entry.entry_id not in hass.data[DOMAIN]
     assert _unexpected_lifecycle_log_messages(caplog.records) == []
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+def _assert_appliance_workflow_payloads(
+    hass: Any,
+    coordinator: Any,
+    entry_id: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.dashboard import (
+        build_recommended_dashboard,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+        nilm_workspace_payload,
+        setup_health_payload,
+    )
+
+    appliance = appliance_detail_payload([coordinator], circuit_id="fridge")
+    assert appliance["status"] == "ok"
+    assert appliance["detail"]["source_type"] == "direct_meter"
+    assert appliance["detail"]["evidence_path"].endswith("circuit_id=fridge")
+    assert appliance["actions"]["open_evidence"]["type"] == "navigate"
+    assert appliance["actions"]["relearn_baseline"]["data"] == {
+        "circuit_id": "fridge"
+    }
+
+    setup_health = setup_health_payload([coordinator], entry_id=entry_id)
+    assert setup_health["status"] == "ok"
+    assert setup_health["checklist_total_count"] == len(setup_health["checklist"])
+    assert setup_health["checklist_total_count"] > 0
+
+    nilm_workspace = nilm_workspace_payload([coordinator], circuit_id="mains")
+    assert nilm_workspace["status"] == "ok"
+    assert nilm_workspace["circuit"]["circuit_id"] == "mains"
+    assert set(nilm_workspace["lanes"]) == {
+        "needs_review",
+        "assigned",
+        "needs_validation",
+        "ready_to_publish",
+        "published",
+        "ignored_expected",
+    }
+    label_action_data = nilm_workspace["actions"]["label_interval"]["data"]
+    assert label_action_data["circuit_id"] == "mains"
+    assert label_action_data["mains_entity_id"].startswith("sensor.")
+
+    dashboard = build_recommended_dashboard(
+        coordinator.circuit_configs,
+        "standard",
+        hass=hass,
+        entry_id=entry_id,
+    )
+    sections = {
+        section.get("title")
+        for view in dashboard.get("views", [])
+        for section in view.get("sections", [])
+    }
+    assert {
+        "Household Overview",
+        "Today's Energy",
+        "Behavior Watchlist",
+        "Appliance Run Timeline",
+        "NILM Review",
+    } <= sections
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")

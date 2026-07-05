@@ -143,6 +143,38 @@ def test_contextual_energy_comparison_uses_existing_evidence_range() -> None:
     assert comparison["normal_high"] == 10.0
 
 
+def test_today_vs_normal_estimates_cost_from_daily_energy_and_rate() -> None:
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.cost_current_rate_by_circuit["fridge"] = 0.25
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:daily_energy_kwh": _baseline("daily_energy_kwh", 2.0, 1.8, 2.2)
+        }
+    )
+
+    detail = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+        store_data,
+    )
+    comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
+
+    assert detail["cost_today"] == 0.6
+    assert comparisons["cost_today"] == {
+        "metric_id": "cost_today",
+        "label": "Cost today",
+        "unit": "$",
+        "current_value": 0.6,
+        "normal_low": 0.45,
+        "normal_high": 0.55,
+        "normal_median": 0.5,
+        "status": "higher",
+        "confidence": 0.9,
+        "source": "baseline_cost_estimate",
+    }
+
+
 def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     state = AnalyzerState()
     state.peak_demand_w_by_circuit["ev"] = 5200.0
