@@ -1408,10 +1408,6 @@ def _nilm_workspace_target(
     return sensor_fallback
 
 
-def _is_nilm_config(config: Any) -> bool:
-    return _is_explicit_nilm_config(config) or _is_sensor_backed_mains_config(config)
-
-
 def _is_explicit_nilm_config(config: Any) -> bool:
     mode = getattr(config, "mode", None)
     appliance_profile = getattr(config, "appliance_profile", None)

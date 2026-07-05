@@ -989,17 +989,6 @@ class FeatureStore:
         """Persist the current in-memory payload."""
         await self._store.async_save(feature_store_data_to_dict(self.data))
 
-    async def async_prune_and_save(
-        self: Self,
-        retention_mode: RetentionMode,
-        now: datetime,
-    ) -> FeatureStoreData:
-        """Prune retained events and persist the updated payload."""
-        self.data = prune_events(self.data, retention_mode, now)
-        await self.async_save()
-        return self.data
-
-
 def _features_to_dict(features: Any) -> dict[str, Any]:
     return {
         str(key): _json_safe_feature_value(value)
