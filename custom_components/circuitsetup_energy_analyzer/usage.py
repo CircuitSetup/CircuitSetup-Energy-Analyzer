@@ -75,10 +75,7 @@ def record_energy_usage(
     last_energy = _float_or_none(history.get("last_energy_kwh"))
     last_sample_at = _datetime_or_none(history.get("last_sample_at"))
     initial_sample = last_energy is None or last_sample_at is None
-    if initial_sample:
-        delta_kwh = 0.0
-    else:
-        delta_kwh = max(float(energy_kwh) - last_energy, 0.0)
+    delta_kwh = 0.0 if initial_sample else max(float(energy_kwh) - last_energy, 0.0)
 
     if delta_kwh > 0.0:
         _add_daily_usage(days, today, delta_kwh)

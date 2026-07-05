@@ -218,16 +218,22 @@ def _features(result: MetricConsistencyResult) -> dict[str, float]:
     features: dict[str, float] = {
         "mismatch_score_percent": result.mismatch_score_percent
     }
-    for key, value in {
-        "expected_apparent_power_va": result.expected_apparent_power_va,
-        "reported_apparent_power_va": result.reported_apparent_power_va,
-        "apparent_power_difference_percent": result.apparent_power_difference_percent,
-        "expected_power_factor": result.expected_power_factor,
-        "reported_power_factor": result.reported_power_factor,
-        "power_factor_difference": result.power_factor_difference,
-    }.items():
-        if value is not None:
-            features[key] = value
+    features.update(
+        {
+            key: value
+            for key, value in {
+                "expected_apparent_power_va": result.expected_apparent_power_va,
+                "reported_apparent_power_va": result.reported_apparent_power_va,
+                "apparent_power_difference_percent": (
+                    result.apparent_power_difference_percent
+                ),
+                "expected_power_factor": result.expected_power_factor,
+                "reported_power_factor": result.reported_power_factor,
+                "power_factor_difference": result.power_factor_difference,
+            }.items()
+            if value is not None
+        }
+    )
     return features
 
 

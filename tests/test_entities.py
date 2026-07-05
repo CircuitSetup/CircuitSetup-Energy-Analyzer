@@ -4261,11 +4261,11 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "entry-1_nilm_assignment-dishwasher_estimated_power",
         "entry-1_nilm_assignment-dishwasher_estimated_daily_energy",
     } <= set(sensor_by_id)
-    assert set(
+    assert {
         unique_id
         for unique_id in sensor_by_id
         if unique_id.startswith("entry-1_nilm_assignment-dishwasher_")
-    ) == {
+    } == {
         "entry-1_nilm_assignment-dishwasher_health_summary",
         "entry-1_nilm_assignment-dishwasher_activity_summary",
         "entry-1_nilm_assignment-dishwasher_energy_summary",
