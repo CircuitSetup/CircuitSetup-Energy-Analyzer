@@ -3096,15 +3096,21 @@ def _panel_custom_component(hass: Any) -> Any:
 
 
 def _frontend_component(hass: Any) -> Any:
-    components = getattr(hass, "components", None)
-    component = getattr(components, "frontend", None)
-    if component is not None:
-        return component
-    if components is None:
-        return None
     try:
         from homeassistant.components import frontend
-
-        return frontend
     except ModuleNotFoundError:
-        return getattr(getattr(hass, "components", None), "frontend", None)
+        frontend = None
+
+    components = getattr(hass, "components", None)
+    if components is None:
+        return frontend
+    if type(components).__module__.startswith("homeassistant."):
+        return frontend
+    if (
+        type(components).__module__ == "types"
+        and type(components).__name__ == "SimpleNamespace"
+    ):
+        return getattr(components, "frontend", frontend)
+    if frontend is None:
+        return getattr(components, "frontend", None)
+    return frontend
