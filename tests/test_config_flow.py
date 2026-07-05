@@ -4384,6 +4384,44 @@ def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None
     }
 
 
+def test_advanced_settings_schema_accepts_blank_optional_tou_times(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    class StrictTimeSelector:
+        def __init__(self, config: dict[str, object]) -> None:
+            self._config = config
+
+        def __call__(self, value):
+            if "time" in self._config and value == "":
+                raise vol.Invalid("Invalid time specified")
+            return value
+
+        def serialize(self) -> dict[str, object]:
+            return self._config
+
+    monkeypatch.setattr(config_flow, "ha_selector", StrictTimeSelector)
+
+    schema = config_flow._advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "mains",
+            "name": "Mains",
+            "appliance_profile": config_flow.ApplianceProfile.MAINS_NILM.value,
+            "mode": config_flow.CircuitMode.MAINS_NILM.value,
+            "power_flow": "mains_net",
+        },
+    )
+
+    validated = schema({"billing_cost_settings": {"tou_start": "", "tou_end": ""}})
+
+    settings = config_flow._advanced_settings_from_input(validated)
+
+    assert "tou_start" not in settings
+    assert "tou_end" not in settings
+
+
 def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,
