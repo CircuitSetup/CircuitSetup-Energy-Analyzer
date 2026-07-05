@@ -1491,6 +1491,62 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
 
 
+def test_appliance_detail_renders_cost_values_as_currency() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  detail: {
+    activity_state: "Running",
+    current_power_w: 820,
+    source_type: "direct_meter",
+    confidence: null,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: null,
+    daily_energy_kwh: 2.4,
+    runtime_today_seconds: 7200,
+    run_count_today: 3,
+    cost_today: 0.6,
+    recent_timeline: { items: [] },
+    today_vs_normal: [{
+      metric_id: "cost_today",
+      label: "Cost today",
+      unit: "$",
+      current_value: 0.6,
+      normal_low: 0.45,
+      normal_high: 0.55,
+      normal_median: 0.5,
+      status: "higher",
+      confidence: 0.9,
+      source: "baseline_cost_estimate"
+    }],
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: []
+  },
+  actions: {}
+};
+const html = panel._renderApplianceDetailBody();
+for (const expected of [
+  "Cost Today",
+  "$0.60",
+  "Cost today",
+  "Normal $0.45 - $0.55",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+if (html.includes("0.6 $")) {
+  throw new Error(`cost comparison used suffix currency: ${html}`);
+}
+"""
+    )
+
+
 def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         PANEL_MODULE_VERSION,
@@ -1505,6 +1561,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "interval-running-prompt" in PANEL_MODULE_VERSION
     assert "low-confidence-nilm" in PANEL_MODULE_VERSION
     assert "nilm-ha-device-workflow" in PANEL_MODULE_VERSION
+    assert "cost-currency" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:

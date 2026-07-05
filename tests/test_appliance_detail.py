@@ -59,6 +59,7 @@ def _direct_state() -> AnalyzerState:
     state.run_cycle_count_by_circuit["fridge"] = 14
     state.run_cycle_runtime_seconds_by_circuit["fridge"] = 7200.0
     state.daily_energy_usage_by_circuit["fridge"] = 1.82
+    state.cost_current_rate_by_circuit["fridge"] = 0.25
     state.energy_usage_evidence_by_circuit["fridge"] = {"status": "normal"}
     state.metric_consistency_status_by_circuit["fridge"] = "consistent"
     state.leg_imbalance_status_by_circuit["fridge"] = "balanced"
@@ -109,9 +110,11 @@ def _nilm_coordinator() -> SimpleNamespace:
         "created_device": True,
         "publish_entities": True,
     }
+    state = AnalyzerState()
+    state.cost_current_rate_by_circuit["mains"] = 0.2
     return SimpleNamespace(
         circuit_configs=(mains,),
-        state=AnalyzerState(),
+        state=state,
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={"mains": [assignment]},
         ),
@@ -185,7 +188,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["daily_energy_kwh"] == 1.82
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
-    assert detail["cost_today"] is None
+    assert detail["cost_today"] == 0.46
     assert detail["next_step"] == "Review alert evidence"
     assert detail["what_to_check_first"] == [
         "No electrical check is needed right now."
@@ -314,6 +317,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["energy_state"] == "Estimated"
     assert detail["current_power_w"] == 0.0
     assert detail["daily_energy_kwh"] == 0.818
+    assert detail["cost_today"] == 0.16
     assert detail["next_step"] == "Review NILM assignment"
     assert detail["what_to_check_first"] == [
         "Validate this estimated appliance before relying on alerts."

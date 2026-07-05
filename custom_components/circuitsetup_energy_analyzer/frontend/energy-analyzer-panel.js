@@ -3322,7 +3322,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _formatCost(value) {
-    return value === null || value === undefined ? "Unknown" : `$${this._formatNumber(value)}`;
+    if (value === null || value === undefined) {
+      return "Unknown";
+    }
+    const cost = Number(value);
+    if (!Number.isFinite(cost)) {
+      return "Unknown";
+    }
+    return `$${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   _formatDuration(value) {
@@ -3367,6 +3374,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "Unknown";
     }
     const unit = comparison && comparison.unit ? String(comparison.unit) : "";
+    if (unit === "$") {
+      return this._formatCost(value);
+    }
     if (unit === "%") {
       return `${this._formatNumber(value)}%`;
     }
