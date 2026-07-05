@@ -410,10 +410,10 @@ def _assert_appliance_workflow_payloads(
     assert {
         "Household Overview",
         "Today's Energy",
-        "Behavior Watchlist",
         "Appliance Run Timeline",
         "NILM Review",
     } <= sections
+    assert "Behavior Watchlist" not in sections
 
 
 async def _assert_appliance_workflow_panel_views(
