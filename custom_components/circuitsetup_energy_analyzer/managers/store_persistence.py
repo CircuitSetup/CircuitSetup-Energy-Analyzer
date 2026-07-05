@@ -10,6 +10,8 @@ from ..settings_advisor import RecommendationStatus
 from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
+STORE_RETENTION_SAVE_INTERVAL = timedelta(minutes=1)
+
 
 class StorePersistenceManager:
     """Manage store dirty tracking and save gating for the coordinator."""
@@ -68,6 +70,7 @@ class StorePersistenceManager:
         self._compact_settings_recommendation_episode_key = (
             compact_settings_recommendation_episode_key
         )
+        self._last_dirty_save_retention_at: datetime | None = None
         self.dirty = False
 
     def mark_dirty(self) -> None:
@@ -98,10 +101,17 @@ class StorePersistenceManager:
         store = getattr(self._coordinator, "_store", None)
         if store is None or not self.dirty:
             return
-        self.apply_retention(now)
+        if self._dirty_save_retention_due(now):
+            self.apply_retention(now)
+            self._last_dirty_save_retention_at = now
         store.data = self._coordinator.store_data
         await store.async_save()
         self.dirty = False
+
+    def _dirty_save_retention_due(self, now: datetime) -> bool:
+        if self._last_dirty_save_retention_at is None:
+            return True
+        return now - self._last_dirty_save_retention_at >= STORE_RETENTION_SAVE_INTERVAL
 
     def apply_retention(self, now: datetime) -> None:
         """Apply all persisted store retention rules."""
