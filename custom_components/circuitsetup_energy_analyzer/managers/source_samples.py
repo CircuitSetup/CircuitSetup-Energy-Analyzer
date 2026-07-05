@@ -112,7 +112,12 @@ class SourceSampleBuilder:
         if get_state is None:
             return states
 
-        registered_demo_entity_ids = self.registered_demo_source_entity_ids()
+        has_demo_source = any(
+            is_demo_source_entity_id(sensor.entity_id) for sensor in config.sensors
+        )
+        registered_demo_entity_ids = (
+            self.registered_demo_source_entity_ids() if has_demo_source else {}
+        )
         for sensor in config.sensors:
             raw_state = get_state(sensor.entity_id)
             if raw_state is None and is_demo_source_entity_id(sensor.entity_id):

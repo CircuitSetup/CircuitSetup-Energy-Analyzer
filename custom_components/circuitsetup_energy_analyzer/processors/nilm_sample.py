@@ -55,6 +55,7 @@ class NilmSampleProcessor:
         ignored_signatures: MutableSet[tuple[str, str]],
         known_load_events: KnownLoadEventsProvider,
         observe_topology: TopologyObserver,
+        unmatched_edges_max_items: int = 512,
     ) -> None:
         self._nilm_enabled = nilm_enabled
         self._seed_demo_nilm_state = seed_demo_nilm_state
@@ -65,6 +66,7 @@ class NilmSampleProcessor:
         self.ignored_signatures = ignored_signatures
         self._known_load_events = known_load_events
         self._observe_topology = observe_topology
+        self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
 
     def process(
         self,
@@ -101,6 +103,10 @@ class NilmSampleProcessor:
         else:
             next_unmatched = candidate_edges
 
+        next_unmatched = _newest_nilm_edges(
+            next_unmatched,
+            self._unmatched_edges_max_items,
+        )
         if edges:
             self.total_events_by_circuit[circuit_id] += len(edges)
         self.unmatched_edges_by_circuit[circuit_id] = next_unmatched
@@ -325,6 +331,12 @@ def nilm_review_payload(signature: dict[str, Any]) -> dict[str, Any]:
     else:
         payload["review_state"] = "new"
     return payload
+
+
+def _newest_nilm_edges(edges: Iterable[NilmEdge], max_items: int) -> list[NilmEdge]:
+    if max_items <= 0:
+        return []
+    return sorted(edges, key=lambda edge: edge.timestamp)[-max_items:]
 
 
 def _nilm_session_history_payloads(

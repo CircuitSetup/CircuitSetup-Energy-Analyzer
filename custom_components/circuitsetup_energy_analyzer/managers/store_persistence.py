@@ -11,6 +11,7 @@ from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 STORE_RETENTION_SAVE_INTERVAL = timedelta(minutes=1)
+STORE_DIRTY_SAVE_INTERVAL = timedelta(seconds=30)
 
 
 class StorePersistenceManager:
@@ -71,6 +72,7 @@ class StorePersistenceManager:
             compact_settings_recommendation_episode_key
         )
         self._last_dirty_save_retention_at: datetime | None = None
+        self._last_dirty_save_at: datetime | None = None
         self.dirty = False
 
     def mark_dirty(self) -> None:
@@ -97,16 +99,24 @@ class StorePersistenceManager:
         ]
         self.mark_dirty()
 
-    async def async_save_if_dirty(self, now: datetime) -> None:
+    async def async_save_if_dirty(self, now: datetime, *, force: bool = True) -> None:
         store = getattr(self._coordinator, "_store", None)
         if store is None or not self.dirty:
+            return
+        if not force and not self._dirty_save_due(now):
             return
         if self._dirty_save_retention_due(now):
             self.apply_retention(now)
             self._last_dirty_save_retention_at = now
         store.data = self._coordinator.store_data
         await store.async_save()
+        self._last_dirty_save_at = now
         self.dirty = False
+
+    def _dirty_save_due(self, now: datetime) -> bool:
+        if self._last_dirty_save_at is None:
+            return True
+        return now - self._last_dirty_save_at >= STORE_DIRTY_SAVE_INTERVAL
 
     def _dirty_save_retention_due(self, now: datetime) -> bool:
         if self._last_dirty_save_retention_at is None:
