@@ -846,5 +846,193 @@
       "title": "Compact entity model available",
       "description": "This integration entry has {legacy_count} legacy analyzer entities that can be migrated to the compact entity model. Next step: {recommended_action}"
     }
+  },
+  "config_panel": {
+    "safety": {
+      "electrical_notice": "This is operational evidence from energy measurements, not electrical safety verification, code compliance, or breaker sizing advice. Consult a qualified electrician for safety or code concerns."
+    },
+    "notifications": {
+      "alert": {
+        "title": "Energy Analyzer Alert",
+        "open_evidence_graph": "Open evidence graph",
+        "observed_value": "Observed value",
+        "repeated_observations": "Repeated observations",
+        "safety_notice": "Safety notice",
+        "nilm_estimated": "Estimated from mains power by NILM.",
+        "confidence": "Confidence",
+        "comparison_value": "Comparison value",
+        "baseline_value": "Baseline value"
+      },
+      "settings_recommendations": {
+        "title": "CircuitSetup Energy Analyzer suggested settings",
+        "singular_message": "There is 1 suggested Advanced Circuit Setting to review via CircuitSetup Energy Analyzer > Configure > Review Suggested Settings.",
+        "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review via CircuitSetup Energy Analyzer > Configure > Review Suggested Settings."
+      }
+    },
+    "dashboard": {
+      "title": "CircuitSetup Energy Analyzer",
+      "views": {
+        "overview": "Overview"
+      },
+      "sections": {
+        "household_overview": "Household Overview",
+        "todays_energy": "Today's Energy",
+        "appliance_status": "Appliance Status",
+        "mains_solar_nilm": "Mains, Solar, and NILM",
+        "energy_tracking": "Energy Tracking",
+        "appliance_run_timeline": "Appliance Run Timeline",
+        "nilm_review": "NILM Review",
+        "hvac_weather_context": "HVAC Weather Context",
+        "diagnostics_and_evidence": "Diagnostics and Evidence"
+      },
+      "entity_labels": {
+        "activity": "Activity",
+        "electrical_health": "Electrical Health",
+        "energy_summary": "Energy Summary",
+        "daily_energy_usage": "Daily Energy Usage",
+        "electrical": "Electrical",
+        "energy": "Energy",
+        "known_appliance_load": "Known Appliance Load",
+        "unassigned_mains_load": "Unassigned Mains Load",
+        "known_load_share": "Known Load Share",
+        "inventory": "Inventory",
+        "signatures": "Signatures",
+        "solar_flow": "Solar Flow",
+        "solar_surplus": "Solar Surplus",
+        "utility_difference": "Utility Difference",
+        "utility_status": "Utility Status",
+        "cost_so_far": "Cost so far",
+        "projected_cost": "Projected cost",
+        "known_load_coverage": "Known Load Coverage",
+        "total_monitored_power": "Total Monitored Power",
+        "nilm_review_count": "NILM Review Count",
+        "unknown_load_inventory": "Unknown Load Inventory",
+        "solar_covered_share": "Solar-covered share",
+        "activity_summary": "Activity Summary",
+        "outdoor_weather_context": "Outdoor Weather Context",
+        "outdoor_temperature": "Outdoor Temperature",
+        "water_flow_correlation": "Water Flow Correlation"
+      },
+      "cards": {
+        "setup_health": "Setup Health",
+        "household_energy_overview": "Household energy overview",
+        "top_appliances_right_now": "Top appliances right now",
+        "top_energy_users_today": "Top energy users today",
+        "todays_appliance_energy": "Today's appliance energy",
+        "cost_estimate": "Cost estimate",
+        "mains_rollups": "Mains rollups",
+        "mains_load_match": "Mains Load Match",
+        "unknown_load_signals": "Unknown load signals",
+        "open_nilm_graph_review": "Open NILM Graph & Review",
+        "solar_flow": "Solar flow",
+        "utility_comparison": "Utility comparison",
+        "mains_daily_energy": "Mains daily energy",
+        "daily_energy_trend": "Daily energy trend",
+        "appliance_run_timeline": "Appliance run timeline",
+        "nilm_review": "NILM review",
+        "review_nilm_assignments": "Review NILM Assignments",
+        "hvac_energy_temperature": "HVAC daily energy and outdoor temperature",
+        "water_flow_context": "Water flow context",
+        "defined_nilm_appliance_power": "Defined NILM appliance power",
+        "nilm_mains_power": "NILM mains power"
+      },
+      "notes": {
+        "household_overview_after_setup": "Household overview appears after setup.",
+        "todays_energy_after_sources": "Today's energy appears after kWh sources report.",
+        "appliance_status_summary": "These cards keep each appliance to Activity, Electrical Health, Energy Summary, and Daily Energy Usage. Daily Energy Usage may show Waiting For Energy Change until a cumulative kWh source increases.",
+        "known_load_share": "Known Load Share is how much of current mains power is explained by the circuits you selected. Low values usually mean normal unmonitored loads, not necessarily a problem.",
+        "energy_tracking_after_entities": "Energy tracking cards appear after analyzer summary entities are created and available.",
+        "run_timeline_after_activity": "Run timeline appears after activity summaries.",
+        "hvac_weather_note": "HVAC weather note",
+        "notifications_and_repairs": "Notifications and repairs: appliance alerts use persistent notifications with observed evidence. Repairs are reserved for setup, configuration, missing sensors, stale data, or other data-quality problems. Demand and capacity findings are operational evidence from energy measurements, not electrical safety verification, code compliance, or breaker sizing advice.",
+        "circuit_dashboard_note": "{name} dashboard note"
+      },
+      "gap_notes": {
+        "ambiguous": "Ambiguous entities: {labels}\nNext step: remove duplicate stale analyzer entities or reload the integration.",
+        "disabled": "Disabled entities: {labels}\nNext step: enable these entities from Home Assistant entity settings.",
+        "unavailable": "Unavailable entities: {labels}\nNext step: open the entity details and follow its availability reason.",
+        "missing": "Missing entities: {labels}\nNext step: reload the integration or review Entity Detail Level."
+      },
+      "expert": {
+        "heading": "Analyzer evidence links",
+        "description": "Open these views when you want alert evidence, analyzer actions, and troubleshooting context without adding more diagnostic rows to every appliance card.",
+        "link_label": "{name} evidence"
+      }
+    },
+    "panel": {
+      "setup_health": {
+        "heading": "Setup Health",
+        "header_message": "Guided setup checklist for appliance energy analysis.",
+        "loading": "Loading Setup Health...",
+        "checklist_heading": "Setup Checklist",
+        "empty_checklist": "No setup checklist items are available yet.",
+        "open_setting": "Open setting",
+        "labels": {
+          "affected": "Affected",
+          "circuit": "Circuit"
+        },
+        "fallbacks": {
+          "review_setup": "Review setup",
+          "review_item_reason": "Review this setup item before relying on appliance guidance."
+        },
+        "unavailable": {
+          "state": "Unavailable",
+          "message": "Setup Health is not available because the integration is not loaded.",
+          "next_step": "Reload the integration, then open Setup Health again."
+        },
+        "checklist": {
+          "source_data_found": {
+            "title": "Source data found",
+            "why_it_matters": "Confirms Home Assistant is receiving live readings for each circuit.",
+            "fix": "Review source sensors"
+          },
+          "circuit_assignments_reviewed": {
+            "title": "Circuit assignments reviewed",
+            "why_it_matters": "Names, profiles, and sensor roles identify each circuit.",
+            "fix": "Review circuit assignments"
+          },
+          "ct_direction_valid": {
+            "title": "CT direction looks valid",
+            "why_it_matters": "Checks that power flow matches the selected circuit role.",
+            "fix": "Check CT direction"
+          },
+          "cumulative_kwh_sources_found": {
+            "title": "Cumulative kWh sources found",
+            "why_it_matters": "Energy totals power today-vs-normal and utility comparisons.",
+            "fix": "Add cumulative kWh source"
+          },
+          "appliance_profiles_selected": {
+            "title": "Appliance profiles selected",
+            "why_it_matters": "Profiles choose the right runtime, standby, demand, and context checks.",
+            "fix": "Review appliance profiles"
+          },
+          "entity_detail_level_selected": {
+            "title": "Entity detail level selected",
+            "why_it_matters": "Controls which helper sensors and dashboard diagnostics HA creates.",
+            "fix": "Choose entity detail level"
+          },
+          "dashboard_created": {
+            "title": "Dashboard created",
+            "why_it_matters": "Provides setup health, appliance status, and evidence links in one view.",
+            "fix": "Create recommended dashboard"
+          },
+          "notifications_enabled": {
+            "title": "Notifications enabled",
+            "why_it_matters": "Keeps alert notifications linked to the evidence that caused them.",
+            "fix": "Review notification preferences"
+          },
+          "nilm_enabled": {
+            "title": "NILM enabled",
+            "why_it_matters": "Optional mains NILM can discover unknown loads from aggregate sensors.",
+            "fix": "Enable NILM if desired"
+          },
+          "learning_progress": {
+            "title": "Learning progress",
+            "why_it_matters": "Recent history is needed before comparisons and alerts become reliable.",
+            "fix": "Let analyzer learn"
+          }
+        }
+      }
+    }
   }
 }

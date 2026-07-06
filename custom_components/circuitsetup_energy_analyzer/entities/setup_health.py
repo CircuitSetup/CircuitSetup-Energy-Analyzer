@@ -21,6 +21,7 @@ from ..const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
 )
 from ..entity import circuit_info_from_config
+from ..localized_text import translation_section
 from ..models import ApplianceProfile, CircuitMode, SensorRole
 from ..profiles import get_profile_definition
 
@@ -104,6 +105,24 @@ _SETUP_HEALTH_ISSUE_OPTION_STEPS = {
     "utility_comparison_missing_measured_source": "utility",
     "utility_comparison_source_mismatch": "utility",
 }
+
+
+def setup_health_panel_text() -> dict[str, Any]:
+    """Return English setup-health panel text from Home Assistant translations."""
+    return dict(translation_section("panel", "setup_health"))
+
+
+def _setup_health_checklist_text(item_id: str) -> Mapping[str, Any]:
+    checklist = setup_health_panel_text().get("checklist", {})
+    if not isinstance(checklist, Mapping):
+        return {}
+    item = checklist.get(item_id, {})
+    return item if isinstance(item, Mapping) else {}
+
+
+def _setup_health_checklist_value(item_id: str, key: str) -> str:
+    value = _setup_health_checklist_text(item_id).get(key, "")
+    return str(value) if value is not None else ""
 
 
 def setup_health_value(coordinator: Any) -> str:
@@ -317,94 +336,109 @@ def _setup_health_checklist(
     items = [
         _setup_health_checklist_item(
             "source_data_found",
-            "Source data found",
+            _setup_health_checklist_value("source_data_found", "title"),
             "ok" if has_circuits and not source_circuits else "needs_attention",
-            "Confirms Home Assistant is receiving live readings for each circuit.",
+            _setup_health_checklist_value("source_data_found", "why_it_matters"),
             affected_circuits=source_circuits,
             fix=(
-                "Review source sensors"
+                _setup_health_checklist_value("source_data_found", "fix")
                 if has_circuits
-                else "Review circuit assignments"
+                else _setup_health_checklist_value(
+                    "circuit_assignments_reviewed",
+                    "fix",
+                )
             ),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "circuit_assignments_reviewed",
-            "Circuit assignments reviewed",
+            _setup_health_checklist_value("circuit_assignments_reviewed", "title"),
             "ok" if has_circuits else "needs_attention",
-            "Names, profiles, and sensor roles identify each circuit.",
-            fix="Review circuit assignments",
+            _setup_health_checklist_value(
+                "circuit_assignments_reviewed",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("circuit_assignments_reviewed", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "ct_direction_valid",
-            "CT direction looks valid",
+            _setup_health_checklist_value("ct_direction_valid", "title"),
             "ok" if not ct_circuits else "needs_attention",
-            "Checks that power flow matches the selected circuit role.",
+            _setup_health_checklist_value("ct_direction_valid", "why_it_matters"),
             affected_circuits=ct_circuits,
-            fix="Check CT direction",
+            fix=_setup_health_checklist_value("ct_direction_valid", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "cumulative_kwh_sources_found",
-            "Cumulative kWh sources found",
+            _setup_health_checklist_value("cumulative_kwh_sources_found", "title"),
             "ok" if has_circuits and not energy_circuits else "needs_attention",
-            "Energy totals power today-vs-normal and utility comparisons.",
+            _setup_health_checklist_value(
+                "cumulative_kwh_sources_found",
+                "why_it_matters",
+            ),
             affected_circuits=energy_circuits,
-            fix="Add cumulative kWh source",
+            fix=_setup_health_checklist_value("cumulative_kwh_sources_found", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "appliance_profiles_selected",
-            "Appliance profiles selected",
+            _setup_health_checklist_value("appliance_profiles_selected", "title"),
             "ok" if has_circuits else "needs_attention",
-            "Profiles choose the right runtime, standby, demand, and context checks.",
-            fix="Review appliance profiles",
+            _setup_health_checklist_value(
+                "appliance_profiles_selected",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("appliance_profiles_selected", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "entity_detail_level_selected",
-            "Entity detail level selected",
+            _setup_health_checklist_value("entity_detail_level_selected", "title"),
             "ok" if entity_detail_level else "needs_attention",
-            "Controls which helper sensors and dashboard diagnostics HA creates.",
-            fix="Choose entity detail level",
+            _setup_health_checklist_value(
+                "entity_detail_level_selected",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("entity_detail_level_selected", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "dashboard_created",
-            "Dashboard created",
+            _setup_health_checklist_value("dashboard_created", "title"),
             "ok" if dashboard_action in {"created", "updated"} else "needs_attention",
-            "Provides setup health, appliance status, and evidence links in one view.",
-            fix="Create recommended dashboard",
+            _setup_health_checklist_value("dashboard_created", "why_it_matters"),
+            fix=_setup_health_checklist_value("dashboard_created", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "notifications_enabled",
-            "Notifications enabled",
+            _setup_health_checklist_value("notifications_enabled", "title"),
             "ok",
-            "Keeps alert notifications linked to the evidence that caused them.",
-            fix="Review notification preferences",
+            _setup_health_checklist_value("notifications_enabled", "why_it_matters"),
+            fix=_setup_health_checklist_value("notifications_enabled", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "nilm_enabled",
-            "NILM enabled",
+            _setup_health_checklist_value("nilm_enabled", "title"),
             "ok" if nilm_enabled else "optional",
-            "Optional mains NILM can discover unknown loads from aggregate sensors.",
-            fix="Enable NILM if desired",
+            _setup_health_checklist_value("nilm_enabled", "why_it_matters"),
+            fix=_setup_health_checklist_value("nilm_enabled", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "learning_progress",
-            "Learning progress",
+            _setup_health_checklist_value("learning_progress", "title"),
             (
                 "learning"
                 if learning_circuits
                 else ("ok" if has_circuits else "needs_attention")
             ),
-            "Recent history is needed before comparisons and alerts become reliable.",
+            _setup_health_checklist_value("learning_progress", "why_it_matters"),
             affected_circuits=learning_circuits,
-            fix="Let analyzer learn",
+            fix=_setup_health_checklist_value("learning_progress", "fix"),
             compact=compact,
         ),
     ]

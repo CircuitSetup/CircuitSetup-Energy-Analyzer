@@ -399,7 +399,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._setupHealthError = `Could not load Setup Health from ${fetchPath}: ${error.message}`;
+      this._setupHealthError = `${fetchPath}: ${error.message}`;
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._setupHealthLoading = false;
@@ -1051,27 +1051,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const setupHealthRoute = this._routeRequestsSetupHealth();
     const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
     const statusText = setupHealthRoute
-      ? "Setup Health"
+      ? this._setupHealthText("heading")
       : applianceDetailRoute
       ? "Appliance Detail"
       : nilmWorkspaceRoute
       ? "NILM Workspace"
       : this._statusText(payload && payload.status);
     const headerTitle = setupHealthRoute
-      ? "Setup Health"
+      ? this._setupHealthText("heading")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.display_name) || "Appliance Detail"
       : nilmWorkspaceRoute
       ? "NILM Workspace"
       : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
     const headerMessage = setupHealthRoute
-      ? "Guided setup checklist for appliance energy analysis."
+      ? this._setupHealthText("header_message")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
       : nilmWorkspaceRoute
       ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
       : (alert && alert.message) || "Historical alert not found";
-    const loadingText = setupHealthRoute ? "Loading Setup Health..." : "Loading alert evidence...";
+    const loadingText = setupHealthRoute ? this._setupHealthText("loading") : "Loading alert evidence...";
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1462,24 +1462,24 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderSetupHealthContent() {
     if (this._setupHealthLoading) {
-      return `<section class="panel"><h2>Setup Health</h2><p class="muted">Loading Setup Health...</p></section>`;
+      return `<section class="panel"><h2>${this._escape(this._setupHealthText("heading"))}</h2><p class="muted">${this._escape(this._setupHealthText("loading"))}</p></section>`;
     }
     if (this._setupHealthError) {
-      return `<section class="panel error"><h2>Setup Health</h2><p>${this._escape(this._setupHealthError)}</p></section>`;
+      return `<section class="panel error"><h2>${this._escape(this._setupHealthText("heading"))}</h2><p>${this._escape(this._setupHealthError)}</p></section>`;
     }
     const payload = this._setupHealth || {};
     if (payload.status && payload.status !== "ok") {
       return `
         <section class="panel">
-          <h2>Setup Health</h2>
-          <p>${this._escape(payload.message || "Setup Health is not available right now.")}</p>
-          <p class="muted">${this._escape(payload.next_step || "Reload the integration, then try again.")}</p>
+          <h2>${this._escape(this._setupHealthText("heading"))}</h2>
+          <p>${this._escape(payload.message || this._setupHealthText("unavailable.message"))}</p>
+          <p class="muted">${this._escape(payload.next_step || this._setupHealthText("unavailable.next_step"))}</p>
         </section>
       `;
     }
     return `
       <section class="panel">
-        <h2>Setup Checklist</h2>
+        <h2>${this._escape(this._setupHealthText("checklist_heading"))}</h2>
         ${this._renderSetupHealthChecklist(payload.checklist, payload.issues)}
       </section>
     `;
@@ -1492,7 +1492,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ...safeItems.map((item) => this._renderSetupHealthChecklistItem(item)),
     ];
     if (!rows.length) {
-      return `<p class="muted">No setup checklist items are available yet.</p>`;
+      return `<p class="muted">${this._escape(this._setupHealthText("empty_checklist"))}</p>`;
     }
     return `<div class="entity-list">${rows.join("")}</div>`;
   }
@@ -1500,13 +1500,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderSetupHealthChecklistItem(item) {
     const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
     const path = item.open_path || "";
-    const description = item.why_it_matters || this._setupHealthDescription(item.item_id);
+    const description = item.why_it_matters || this._setupHealthChecklistText(item.item_id, "why_it_matters") || this._setupHealthText("fallbacks.review_item_reason");
+    const title = item.title || this._setupHealthChecklistText(item.item_id, "title") || this._friendlyFeature(item.item_id || "setup item");
+    const affectedLabel = this._setupHealthText("labels.affected");
     return `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>
-        <strong>${this._escape(item.title || this._setupHealthTitle(item.item_id))}</strong>
+        <strong>${this._escape(title)}</strong>
         <p>${this._escape(description)}</p>
-        ${affected.length ? `<p class="muted">Affected: ${this._escape(affected.join(", "))}</p>` : ""}
+        ${affected.length ? `<p class="muted">${this._escape(affectedLabel)}: ${this._escape(affected.join(", "))}</p>` : ""}
         ${item.fix ? this._setupHealthAction(path, item.fix) : ""}
       </div>
     `;
@@ -1517,9 +1519,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return safeIssues.map((item) => `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
-        <strong>${this._escape(item.fix || item.recommended_action || item.state || "Review setup")}</strong>
-        <p>${this._escape(item.reason || "Review this setup item before relying on appliance guidance.")}</p>
-        ${item.affected_circuit_name || item.affected_circuit ? `<p class="muted">Circuit: ${this._escape(item.affected_circuit_name || item.affected_circuit)}</p>` : ""}
+        <strong>${this._escape(item.fix || item.recommended_action || item.state || this._setupHealthText("fallbacks.review_setup"))}</strong>
+        <p>${this._escape(item.reason || this._setupHealthText("fallbacks.review_item_reason"))}</p>
+        ${item.affected_circuit_name || item.affected_circuit ? `<p class="muted">${this._escape(this._setupHealthText("labels.circuit"))}: ${this._escape(item.affected_circuit_name || item.affected_circuit)}</p>` : ""}
         ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
       </div>
     `);
@@ -1529,39 +1531,29 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!path) {
       return fallbackText ? `<p class="muted">${this._escape(fallbackText)}</p>` : "";
     }
-    return `<div class="actions setup-health-actions"><a class="button secondary" data-setup-health-path href="${this._escape(path)}">Open setting</a></div>`;
+    return `<div class="actions setup-health-actions"><a class="button secondary" data-setup-health-path href="${this._escape(path)}">${this._escape(this._setupHealthText("open_setting"))}</a></div>`;
   }
 
-  _setupHealthDescription(itemId) {
-    const descriptions = {
-      source_data_found: "Confirms Home Assistant is receiving live readings for each circuit.",
-      circuit_assignments_reviewed: "Names, profiles, and sensor roles identify each circuit.",
-      ct_direction_valid: "Checks that power flow matches the selected circuit role.",
-      cumulative_kwh_sources_found: "Energy totals power today-vs-normal and utility comparisons.",
-      appliance_profiles_selected: "Profiles choose the right runtime, standby, demand, and context checks.",
-      entity_detail_level_selected: "Controls which helper sensors and dashboard diagnostics HA creates.",
-      dashboard_created: "Provides setup health, appliance status, and evidence links in one view.",
-      notifications_enabled: "Keeps alert notifications linked to the evidence that caused them.",
-      nilm_enabled: "Optional mains NILM can discover unknown loads from aggregate sensors.",
-      learning_progress: "Recent history is needed before comparisons and alerts become reliable.",
-    };
-    return descriptions[itemId] || "Review this setup item before relying on appliance guidance.";
+  _setupHealthChecklistText(itemId, key) {
+    const checklist = this._setupHealthTextObject().checklist || {};
+    const item = checklist[itemId] || {};
+    return typeof item[key] === "string" ? item[key] : "";
   }
 
-  _setupHealthTitle(itemId) {
-    const titles = {
-      source_data_found: "Source data found",
-      circuit_assignments_reviewed: "Circuit assignments reviewed",
-      ct_direction_valid: "CT direction looks valid",
-      cumulative_kwh_sources_found: "Cumulative kWh sources found",
-      appliance_profiles_selected: "Appliance profiles selected",
-      entity_detail_level_selected: "Entity detail level selected",
-      dashboard_created: "Dashboard created",
-      notifications_enabled: "Notifications enabled",
-      nilm_enabled: "NILM enabled",
-      learning_progress: "Learning progress",
-    };
-    return titles[itemId] || this._friendlyFeature(itemId || "setup item");
+  _setupHealthText(path) {
+    const parts = path.split(".");
+    let value = this._setupHealthTextObject();
+    for (const part of parts) {
+      if (!value || typeof value !== "object") {
+        return "";
+      }
+      value = value[part];
+    }
+    return typeof value === "string" ? value : "";
+  }
+
+  _setupHealthTextObject() {
+    return (this._setupHealth && this._setupHealth.text) || {};
   }
 
   _renderApplianceDetail() {

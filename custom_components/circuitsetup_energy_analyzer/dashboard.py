@@ -12,8 +12,18 @@ from .const import (
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
+from .localized_text import translation_text
 
-DASHBOARD_TITLE = "CircuitSetup Energy Analyzer"
+
+def _dashboard_text(*keys: str) -> str:
+    return translation_text("dashboard", *keys)
+
+
+def _section_title(key: str) -> str:
+    return _dashboard_text("sections", key)
+
+
+DASHBOARD_TITLE = _dashboard_text("title")
 DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
 DASHBOARD_COLUMNS = 4
@@ -21,40 +31,84 @@ NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-grap
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
-    ("sensor", "activity_summary", "Activity"),
-    ("sensor", "electrical_health", "Electrical Health"),
-    ("sensor", "energy_summary", "Energy Summary"),
-    ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+    ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
+    (
+        "sensor",
+        "electrical_health",
+        _dashboard_text("entity_labels", "electrical_health"),
+    ),
+    ("sensor", "energy_summary", _dashboard_text("entity_labels", "energy_summary")),
+    (
+        "sensor",
+        "daily_energy_usage",
+        _dashboard_text("entity_labels", "daily_energy_usage"),
+    ),
 )
 MAINS_ROLLUP_ENTITY_SPECS = (
-    ("sensor", "activity_summary", "Activity"),
-    ("sensor", "electrical_health", "Electrical"),
-    ("sensor", "energy_summary", "Energy"),
+    ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
+    ("sensor", "electrical_health", _dashboard_text("entity_labels", "electrical")),
+    ("sensor", "energy_summary", _dashboard_text("entity_labels", "energy")),
 )
 MAINS_LOAD_MATCH_ENTITY_SPECS = (
-    ("sensor", "monitored_power", "Known Appliance Load"),
-    ("sensor", "balance_power", "Unassigned Mains Load"),
-    ("sensor", "monitored_coverage", "Known Load Share"),
+    (
+        "sensor",
+        "monitored_power",
+        _dashboard_text("entity_labels", "known_appliance_load"),
+    ),
+    (
+        "sensor",
+        "balance_power",
+        _dashboard_text("entity_labels", "unassigned_mains_load"),
+    ),
+    (
+        "sensor",
+        "monitored_coverage",
+        _dashboard_text("entity_labels", "known_load_share"),
+    ),
 )
 UNKNOWN_LOAD_SIGNAL_ENTITY_SPECS = (
-    ("sensor", "nilm_unknown_loads", "Inventory"),
-    ("sensor", "nilm_signature_count", "Signatures"),
-    ("sensor", "monitored_coverage", "Known Load Share"),
+    ("sensor", "nilm_unknown_loads", _dashboard_text("entity_labels", "inventory")),
+    ("sensor", "nilm_signature_count", _dashboard_text("entity_labels", "signatures")),
+    (
+        "sensor",
+        "monitored_coverage",
+        _dashboard_text("entity_labels", "known_load_share"),
+    ),
 )
 SOLAR_FLOW_ENTITY_SPECS = (
-    ("sensor", "solar_flow_status", "Solar Flow"),
-    ("sensor", "solar_surplus_power", "Solar Surplus"),
+    ("sensor", "solar_flow_status", _dashboard_text("entity_labels", "solar_flow")),
+    (
+        "sensor",
+        "solar_surplus_power",
+        _dashboard_text("entity_labels", "solar_surplus"),
+    ),
 )
 UTILITY_COMPARISON_ENTITY_SPECS = (
-    ("sensor", "utility_comparison_difference", "Utility Difference"),
-    ("sensor", "utility_comparison_status", "Utility Status"),
+    (
+        "sensor",
+        "utility_comparison_difference",
+        _dashboard_text("entity_labels", "utility_difference"),
+    ),
+    (
+        "sensor",
+        "utility_comparison_status",
+        _dashboard_text("entity_labels", "utility_status"),
+    ),
 )
 HVAC_WEATHER_ENTITY_SPECS = (
-    ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+    (
+        "sensor",
+        "daily_energy_usage",
+        _dashboard_text("entity_labels", "daily_energy_usage"),
+    ),
 )
 TODAYS_COST_ENTITY_SPECS = (
-    ("sensor", "cost_cycle", "Cost so far"),
-    ("sensor", "cost_cycle_forecast", "Projected cost"),
+    ("sensor", "cost_cycle", _dashboard_text("entity_labels", "cost_so_far")),
+    (
+        "sensor",
+        "cost_cycle_forecast",
+        _dashboard_text("entity_labels", "projected_cost"),
+    ),
 )
 WATER_FLOW_PROFILES = {
     "sump_pump",
@@ -183,7 +237,7 @@ def build_recommended_dashboard(
         "title": DASHBOARD_TITLE,
         "views": [
             {
-                "title": "Overview",
+                "title": _dashboard_text("views", "overview"),
                 "path": "overview",
                 "icon": DASHBOARD_ICON,
                 "type": "sections",
@@ -227,15 +281,15 @@ def dashboard_preflight_summary(
         include_expert_links=include_expert_links,
     )
     all_sections = [
-        "Household Overview",
-        "Today's Energy",
-        "Appliance Status",
-        "Mains, Solar, and NILM",
-        "Energy Tracking",
-        "Appliance Run Timeline",
-        "NILM Review",
-        "HVAC Weather Context",
-        "Diagnostics and Evidence",
+        _section_title("household_overview"),
+        _section_title("todays_energy"),
+        _section_title("appliance_status"),
+        _section_title("mains_solar_nilm"),
+        _section_title("energy_tracking"),
+        _section_title("appliance_run_timeline"),
+        _section_title("nilm_review"),
+        _section_title("hvac_weather_context"),
+        _section_title("diagnostics_and_evidence"),
     ]
     registry_lookup = _registry_entity_lookup(hass, entry_id)
     missing_source_data, disabled_entities = _dashboard_preflight_entity_gaps(
@@ -336,19 +390,24 @@ def _dashboard_section_titles(
     include_expert_links: bool,
 ) -> list[str]:
     titles = [
-        "Household Overview",
-        "Today's Energy",
-        "Appliance Status",
+        _section_title("household_overview"),
+        _section_title("todays_energy"),
+        _section_title("appliance_status"),
     ]
     if mains_circuits:
-        titles.append("Mains, Solar, and NILM")
-    titles.extend(["Energy Tracking", "Appliance Run Timeline"])
+        titles.append(_section_title("mains_solar_nilm"))
+    titles.extend(
+        [
+            _section_title("energy_tracking"),
+            _section_title("appliance_run_timeline"),
+        ]
+    )
     if include_feature_cards and mains_circuits:
-        titles.append("NILM Review")
+        titles.append(_section_title("nilm_review"))
     if include_feature_cards and hvac_circuits:
-        titles.append("HVAC Weather Context")
+        titles.append(_section_title("hvac_weather_context"))
     if include_expert_links:
-        titles.append("Diagnostics and Evidence")
+        titles.append(_section_title("diagnostics_and_evidence"))
     return titles
 
 
@@ -386,7 +445,7 @@ def _household_overview_section(
             {
                 "type": "tile",
                 "entity": setup_health,
-                "name": "Setup Health",
+                "name": _dashboard_text("cards", "setup_health"),
                 "vertical": False,
                 "tap_action": {
                     "action": "navigate",
@@ -399,8 +458,16 @@ def _household_overview_section(
         overview_rows, _ = _resolved_entity_rows(
             _circuit_id(mains_list[0]),
             (
-                ("sensor", "monitored_power", "Total Monitored Power"),
-                ("sensor", "monitored_coverage", "Known Load Coverage"),
+                (
+                    "sensor",
+                    "monitored_power",
+                    _dashboard_text("entity_labels", "total_monitored_power"),
+                ),
+                (
+                    "sensor",
+                    "monitored_coverage",
+                    _dashboard_text("entity_labels", "known_load_coverage"),
+                ),
             ),
             registry_lookup=registry_lookup,
             hass=hass,
@@ -409,21 +476,33 @@ def _household_overview_section(
         if include_feature_cards:
             unknown_loads = _resolved_entity_id(
                 _circuit_id(mains_list[0]),
-                ("sensor", "nilm_unknown_loads", "NILM Review Count"),
+                (
+                    "sensor",
+                    "nilm_unknown_loads",
+                    _dashboard_text("entity_labels", "nilm_review_count"),
+                ),
                 registry_lookup=registry_lookup,
                 hass=hass,
                 entry_id=entry_id,
             )
             if unknown_loads:
                 overview_rows.append(
-                    {"entity": unknown_loads, "name": "NILM Review Count"}
+                    {
+                        "entity": unknown_loads,
+                        "name": _dashboard_text("entity_labels", "nilm_review_count"),
+                    }
                 )
         if overview_rows:
-            cards.append(_entities_card("Household energy overview", overview_rows))
+            cards.append(
+                _entities_card(
+                    _dashboard_text("cards", "household_energy_overview"),
+                    overview_rows,
+                )
+            )
 
     activity_rows = _resolved_rows_for_circuits(
         appliance_list[:5],
-        ("sensor", "activity_summary", "Activity"),
+        ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
@@ -432,14 +511,20 @@ def _household_overview_section(
         cards.append(
             {
                 "type": "glance",
-                "title": "Top appliances right now",
+                "title": _dashboard_text("cards", "top_appliances_right_now"),
                 "columns": DASHBOARD_COLUMNS,
                 "entities": activity_rows,
             }
         )
     if not cards:
-        cards.append(_markdown_card("Household overview appears after setup."))
-    return {"type": "grid", "title": "Household Overview", "cards": cards}
+        cards.append(
+            _markdown_card(_dashboard_text("notes", "household_overview_after_setup"))
+        )
+    return {
+        "type": "grid",
+        "title": _section_title("household_overview"),
+        "cards": cards,
+    }
 
 
 def _todays_energy_section(
@@ -453,7 +538,11 @@ def _todays_energy_section(
     circuits = [*list(appliance_circuits), *list(mains_circuits)]
     daily_rows = _resolved_rows_for_circuits(
         circuits,
-        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        (
+            "sensor",
+            "daily_energy_usage",
+            _dashboard_text("entity_labels", "daily_energy_usage"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
@@ -463,14 +552,14 @@ def _todays_energy_section(
         cards.append(
             {
                 "type": "glance",
-                "title": "Top energy users today",
+                "title": _dashboard_text("cards", "top_energy_users_today"),
                 "columns": DASHBOARD_COLUMNS,
                 "entities": daily_rows[:5],
             }
         )
         cards.append(
             _statistics_graph_card(
-                "Today's appliance energy",
+                _dashboard_text("cards", "todays_appliance_energy"),
                 [row["entity"] for row in daily_rows],
             )
         )
@@ -491,10 +580,16 @@ def _todays_energy_section(
                 for row in rows
             )
         if cost_rows:
-            cards.append(_entities_card("Cost estimate", cost_rows))
+            cards.append(
+                _entities_card(_dashboard_text("cards", "cost_estimate"), cost_rows)
+            )
         solar_rows = _resolved_rows_for_circuits(
             circuits,
-            ("sensor", "solar_flexible_load_coverage", "Solar-covered share"),
+            (
+                "sensor",
+                "solar_flexible_load_coverage",
+                _dashboard_text("entity_labels", "solar_covered_share"),
+            ),
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -503,14 +598,16 @@ def _todays_energy_section(
             cards.append(
                 {
                     "type": "glance",
-                    "title": "Solar-covered share",
+                    "title": _dashboard_text("entity_labels", "solar_covered_share"),
                     "columns": DASHBOARD_COLUMNS,
                     "entities": solar_rows[:5],
                 }
             )
     else:
-        cards.append(_markdown_card("Today's energy appears after kWh sources report."))
-    return {"type": "grid", "title": "Today's Energy", "cards": cards}
+        cards.append(
+            _markdown_card(_dashboard_text("notes", "todays_energy_after_sources"))
+        )
+    return {"type": "grid", "title": _section_title("todays_energy"), "cards": cards}
 
 
 def _appliance_status_section(
@@ -522,9 +619,7 @@ def _appliance_status_section(
 ) -> dict[str, Any]:
     cards: list[dict[str, Any]] = [
         _markdown_card(
-            "These cards keep each appliance to Activity, Electrical Health, "
-            "Energy Summary, and Daily Energy Usage. Daily Energy Usage may show "
-            "Waiting For Energy Change until a cumulative kWh source increases."
+            _dashboard_text("notes", "appliance_status_summary")
         )
     ]
     for circuit in circuits:
@@ -546,7 +641,7 @@ def _appliance_status_section(
 
     return {
         "type": "grid",
-        "title": "Appliance Status",
+        "title": _section_title("appliance_status"),
         "cards": cards,
     }
 
@@ -574,7 +669,7 @@ def _mains_section(
         cards.append(
             {
                 "type": "glance",
-                "title": "Mains rollups",
+                "title": _dashboard_text("cards", "mains_rollups"),
                 "columns": DASHBOARD_COLUMNS,
                 "entities": rollup_rows,
             }
@@ -583,7 +678,11 @@ def _mains_section(
     if include_feature_cards:
         coverage_entity = _resolved_entity_id(
             circuit_id,
-            ("sensor", "monitored_coverage", "Known Load Share"),
+            (
+                "sensor",
+                "monitored_coverage",
+                _dashboard_text("entity_labels", "known_load_share"),
+            ),
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -593,18 +692,14 @@ def _mains_section(
                 {
                     "type": "gauge",
                     "entity": coverage_entity,
-                    "name": "Known Load Share",
+                    "name": _dashboard_text("entity_labels", "known_load_share"),
                     "min": 0,
                     "max": 100,
                     "severity": {"red": 0, "yellow": 40, "green": 70},
                 }
             )
             cards.append(
-                _markdown_card(
-                    "Known Load Share is how much of current mains power is explained "
-                    "by the circuits you selected. Low values usually mean normal "
-                    "unmonitored loads, not necessarily a problem."
-                )
+                _markdown_card(_dashboard_text("notes", "known_load_share"))
             )
 
         load_rows, _ = _resolved_entity_rows(
@@ -615,11 +710,17 @@ def _mains_section(
             entry_id=entry_id,
         )
         if load_rows:
-            cards.append(_entities_card("Mains Load Match", load_rows))
+            cards.append(
+                _entities_card(_dashboard_text("cards", "mains_load_match"), load_rows)
+            )
 
         unknown_inventory = _resolved_entity_id(
             circuit_id,
-            ("sensor", "nilm_unknown_loads", "Unknown Load Inventory"),
+            (
+                "sensor",
+                "nilm_unknown_loads",
+                _dashboard_text("entity_labels", "unknown_load_inventory"),
+            ),
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -629,7 +730,7 @@ def _mains_section(
                 {
                     "type": "tile",
                     "entity": unknown_inventory,
-                    "name": "Unknown Load Inventory",
+                    "name": _dashboard_text("entity_labels", "unknown_load_inventory"),
                     "vertical": False,
                 }
             )
@@ -645,7 +746,7 @@ def _mains_section(
             cards.append(
                 {
                     "type": "glance",
-                    "title": "Unknown load signals",
+                    "title": _dashboard_text("cards", "unknown_load_signals"),
                     "columns": DASHBOARD_COLUMNS,
                     "entities": unknown_rows,
                 }
@@ -654,7 +755,7 @@ def _mains_section(
         cards.append(
             {
                 "type": "button",
-                "name": "Open NILM Graph & Review",
+                "name": _dashboard_text("cards", "open_nilm_graph_review"),
                 "icon": "mdi:chart-line",
                 "tap_action": {
                     "action": "navigate",
@@ -686,7 +787,7 @@ def _mains_section(
         if solar_card := _conditional_entities_card(
             circuit_id,
             SOLAR_FLOW_ENTITY_SPECS,
-            "Solar flow",
+            _dashboard_text("cards", "solar_flow"),
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -695,7 +796,7 @@ def _mains_section(
         if utility_card := _conditional_entities_card(
             circuit_id,
             UTILITY_COMPARISON_ENTITY_SPECS,
-            "Utility comparison",
+            _dashboard_text("cards", "utility_comparison"),
             registry_lookup=registry_lookup,
             hass=hass,
             entry_id=entry_id,
@@ -704,17 +805,26 @@ def _mains_section(
 
     daily_energy = _resolved_entity_id(
         circuit_id,
-        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        (
+            "sensor",
+            "daily_energy_usage",
+            _dashboard_text("entity_labels", "daily_energy_usage"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
     )
     if daily_energy:
-        cards.append(_statistics_graph_card("Mains daily energy", [daily_energy]))
+        cards.append(
+            _statistics_graph_card(
+                _dashboard_text("cards", "mains_daily_energy"),
+                [daily_energy],
+            )
+        )
 
     return {
         "type": "grid",
-        "title": "Mains, Solar, and NILM",
+        "title": _section_title("mains_solar_nilm"),
         "cards": cards,
     }
 
@@ -730,14 +840,23 @@ def _energy_tracking_section(
     appliance_circuits = list(circuits)
     daily_entities = _resolved_entities_for_circuits(
         appliance_circuits,
-        ("sensor", "daily_energy_usage", "Daily Energy Usage"),
+        (
+            "sensor",
+            "daily_energy_usage",
+            _dashboard_text("entity_labels", "daily_energy_usage"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
     )
     cards: list[dict[str, Any]] = []
     if daily_entities:
-        cards.append(_statistics_graph_card("Daily energy trend", daily_entities))
+        cards.append(
+            _statistics_graph_card(
+                _dashboard_text("cards", "daily_energy_trend"),
+                daily_entities,
+            )
+        )
     if include_feature_cards and (
         water_flow_card := _water_flow_context_card(
             appliance_circuits,
@@ -751,14 +870,13 @@ def _energy_tracking_section(
     if not cards:
         cards.append(
             _markdown_card(
-                "Energy tracking cards appear after analyzer summary entities are "
-                "created and available."
+                _dashboard_text("notes", "energy_tracking_after_entities")
             )
         )
 
     return {
         "type": "grid",
-        "title": "Energy Tracking",
+        "title": _section_title("energy_tracking"),
         "cards": cards,
     }
 
@@ -772,7 +890,11 @@ def _appliance_run_timeline_section(
 ) -> dict[str, Any]:
     activity_entities = _resolved_entities_for_circuits(
         circuits,
-        ("sensor", "activity_summary", "Activity Summary"),
+        (
+            "sensor",
+            "activity_summary",
+            _dashboard_text("entity_labels", "activity_summary"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
@@ -782,14 +904,20 @@ def _appliance_run_timeline_section(
         cards.append(
             {
                 "type": "history-graph",
-                "title": "Appliance run timeline",
+                "title": _dashboard_text("cards", "appliance_run_timeline"),
                 "hours_to_show": 24,
                 "entities": [{"entity": entity_id} for entity_id in activity_entities],
             }
         )
     else:
-        cards.append(_markdown_card("Run timeline appears after activity summaries."))
-    return {"type": "grid", "title": "Appliance Run Timeline", "cards": cards}
+        cards.append(
+            _markdown_card(_dashboard_text("notes", "run_timeline_after_activity"))
+        )
+    return {
+        "type": "grid",
+        "title": _section_title("appliance_run_timeline"),
+        "cards": cards,
+    }
 
 
 def _nilm_review_section(
@@ -812,7 +940,7 @@ def _nilm_review_section(
         cards.append(
             {
                 "type": "glance",
-                "title": "NILM review",
+                "title": _dashboard_text("cards", "nilm_review"),
                 "columns": DASHBOARD_COLUMNS,
                 "entities": rows,
             }
@@ -820,7 +948,7 @@ def _nilm_review_section(
     cards.append(
         {
             "type": "button",
-            "name": "Review NILM Assignments",
+            "name": _dashboard_text("cards", "review_nilm_assignments"),
             "icon": "mdi:playlist-check",
             "tap_action": {
                 "action": "navigate",
@@ -831,7 +959,7 @@ def _nilm_review_section(
             },
         }
     )
-    return {"type": "grid", "title": "NILM Review", "cards": cards}
+    return {"type": "grid", "title": _section_title("nilm_review"), "cards": cards}
 
 
 def _hvac_weather_section(
@@ -852,17 +980,28 @@ def _hvac_weather_section(
     )
     weather_context = _resolved_entity_id(
         circuit_id,
-        ("sensor", "weather_context", "Outdoor Weather Context"),
+        (
+            "sensor",
+            "weather_context",
+            _dashboard_text("entity_labels", "outdoor_weather_context"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
     )
     cards: list[dict[str, Any]] = []
     if weather_notes:
-        cards.append(_markdown_card(_note_content("HVAC weather note", weather_notes)))
+        cards.append(
+            _markdown_card(
+                _note_content(
+                    _dashboard_text("notes", "hvac_weather_note"),
+                    weather_notes,
+                )
+            )
+        )
     temperature_row = _source_entity_row(
         outdoor_temperature_entity,
-        "Outdoor Temperature",
+        _dashboard_text("entity_labels", "outdoor_temperature"),
         include_name=True,
     )
     if temperature_row is not None:
@@ -874,7 +1013,7 @@ def _hvac_weather_section(
                 weather_entities,
                 {
                     "type": "statistics-graph",
-                    "title": "HVAC daily energy and outdoor temperature",
+                    "title": _dashboard_text("cards", "hvac_energy_temperature"),
                     "days_to_show": 7,
                     "period": "day",
                     "stat_types": ["max"],
@@ -889,25 +1028,18 @@ def _hvac_weather_section(
                 {
                     "type": "tile",
                     "entity": weather_context,
-                    "name": "Outdoor Weather Context",
+                    "name": _dashboard_text("entity_labels", "outdoor_weather_context"),
                     "vertical": False,
                 },
             )
         )
     cards.append(
-        _markdown_card(
-            "Notifications and repairs: appliance alerts use persistent "
-            "notifications with observed evidence. Repairs are reserved for "
-            "setup, configuration, missing sensors, stale data, or other "
-            "data-quality problems. Demand and capacity findings are "
-            "operational evidence from energy measurements, not electrical "
-            "safety verification, code compliance, or breaker sizing advice."
-        )
+        _markdown_card(_dashboard_text("notes", "notifications_and_repairs"))
     )
 
     return {
         "type": "grid",
-        "title": "HVAC Weather Context",
+        "title": _section_title("hvac_weather_context"),
         "cards": cards,
     }
 
@@ -915,7 +1047,7 @@ def _hvac_weather_section(
 def _expert_evidence_section(circuits: Iterable[Any]) -> dict[str, Any]:
     return {
         "type": "grid",
-        "title": "Diagnostics and Evidence",
+        "title": _section_title("diagnostics_and_evidence"),
         "cards": [
             _markdown_card(
                 _expert_evidence_markdown(circuits)
@@ -961,7 +1093,11 @@ def _water_flow_context_card(
             for circuit in circuits
             if _circuit_profile(circuit) in WATER_FLOW_PROFILES
         ],
-        ("sensor", "water_flow_correlation", "Water Flow Correlation"),
+        (
+            "sensor",
+            "water_flow_correlation",
+            _dashboard_text("entity_labels", "water_flow_correlation"),
+        ),
         registry_lookup=registry_lookup,
         hass=hass,
         entry_id=entry_id,
@@ -972,7 +1108,7 @@ def _water_flow_context_card(
         [row["entity"] for row in rows],
         {
             "type": "glance",
-            "title": "Water flow context",
+            "title": _dashboard_text("cards", "water_flow_context"),
             "columns": DASHBOARD_COLUMNS,
             "entities": rows,
         },
@@ -997,7 +1133,7 @@ def _defined_nilm_appliance_power_graph(
         return None
     return {
         "type": "history-graph",
-        "title": "Defined NILM appliance power",
+        "title": _dashboard_text("cards", "defined_nilm_appliance_power"),
         "hours_to_show": 24,
         "entities": list(appliance_power_rows),
     }
@@ -1011,7 +1147,7 @@ def _nilm_dashboard_graphs_card(
 ) -> dict[str, Any] | None:
     return {
         "type": NILM_DASHBOARD_GRAPHS_CARD,
-        "title": "NILM mains power",
+        "title": _dashboard_text("cards", "nilm_mains_power"),
         "entry_id": entry_id,
         "circuit_id": circuit_id,
         "detail_path": (
@@ -1380,7 +1516,10 @@ def _entity_is_unavailable(hass: Any | None, entity_id: str) -> bool:
 
 
 def _circuit_note(name: str, notes: Iterable[str]) -> str:
-    return _note_content(f"{name} dashboard note", notes)
+    return _note_content(
+        _dashboard_text("notes", "circuit_dashboard_note").format(name=name),
+        notes,
+    )
 
 
 def _note_content(title: str, notes: Iterable[str]) -> str:
@@ -1392,25 +1531,16 @@ def _note_content(title: str, notes: Iterable[str]) -> str:
 def _dashboard_gap_note(reason: str, labels: Iterable[str]) -> str:
     label_text = ", ".join(labels)
     if reason == "ambiguous":
-        return (
-            f"Ambiguous entities: {label_text}\n"
-            "Next step: remove duplicate stale analyzer entities or reload "
-            "the integration."
-        )
+        template = _dashboard_text("gap_notes", "ambiguous")
+        return template.format(labels=label_text)
     if reason == "disabled":
-        return (
-            f"Disabled entities: {label_text}\n"
-            "Next step: enable these entities from Home Assistant entity settings."
-        )
+        template = _dashboard_text("gap_notes", "disabled")
+        return template.format(labels=label_text)
     if reason == "unavailable":
-        return (
-            f"Unavailable entities: {label_text}\n"
-            "Next step: open the entity details and follow its availability reason."
-        )
-    return (
-        f"Missing entities: {label_text}\n"
-        "Next step: reload the integration or review Entity Detail Level."
-    )
+        template = _dashboard_text("gap_notes", "unavailable")
+        return template.format(labels=label_text)
+    template = _dashboard_text("gap_notes", "missing")
+    return template.format(labels=label_text)
 
 
 def _expected_unique_id(entry_id: str, circuit_id: str, entity_key: str) -> str:
@@ -1516,20 +1646,18 @@ def _markdown_card(content: str) -> dict[str, str]:
 
 def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:
     lines = [
-        "**Analyzer evidence links**",
-        (
-            "Open these views when you want alert evidence, analyzer actions, "
-            "and troubleshooting context without adding more diagnostic rows "
-            "to every appliance card."
-        ),
+        f"**{_dashboard_text('expert', 'heading')}**",
+        _dashboard_text("expert", "description"),
     ]
     for circuit in circuits:
         circuit_id = _circuit_id(circuit)
         if not circuit_id:
             continue
+        link_label = _dashboard_text("expert", "link_label").format(
+            name=_circuit_name(circuit)
+        )
         lines.append(
-            f"- [{_circuit_name(circuit)} evidence]"
-            f"({DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id})"
+            f"- [{link_label}]({DEFAULT_ALERT_EVIDENCE_PATH}?circuit_id={circuit_id})"
         )
     return "\n".join(lines)
 

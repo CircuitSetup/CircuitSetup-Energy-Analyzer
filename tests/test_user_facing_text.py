@@ -2365,8 +2365,7 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
 
 
 def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
-    _run_panel_node_script(
-        """
+    body = """
 const panel = new context.Panel();
 const basePath = "/config/integrations/dashboard#config_entry=entry-hvac";
 const escapedBasePath = "/config/integrations/dashboard#config_entry=entry-hvac";
@@ -2378,6 +2377,7 @@ panel._setupHealthLoading = false;
 panel._setupHealthError = "";
 panel._setupHealth = {
   status: "ok",
+  text: __SETUP_HEALTH_TEXT__,
   state: "Configure breaker amps",
   next_step: "Configure breaker amps for HVAC",
   message: "Configure breaker amps for HVAC",
@@ -2443,7 +2443,100 @@ for (const expected of [
   }
 }
 """
+    _run_panel_node_script(
+        body.replace(
+            "__SETUP_HEALTH_TEXT__",
+            json.dumps(_translations()["config_panel"]["panel"]["setup_health"]),
+        )
     )
+
+
+def test_setup_health_user_text_lives_in_translations() -> None:
+    translations = _translations()
+    setup_health = translations["config_panel"]["panel"]["setup_health"]
+    checklist = setup_health["checklist"]
+
+    for item_id in (
+        "source_data_found",
+        "circuit_assignments_reviewed",
+        "ct_direction_valid",
+        "cumulative_kwh_sources_found",
+        "appliance_profiles_selected",
+        "entity_detail_level_selected",
+        "dashboard_created",
+        "notifications_enabled",
+        "nilm_enabled",
+        "learning_progress",
+    ):
+        assert checklist[item_id]["title"]
+        assert checklist[item_id]["why_it_matters"]
+        assert checklist[item_id]["fix"]
+
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            INTEGRATION_DIR / "entities" / "setup_health.py",
+            INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js",
+            INTEGRATION_DIR / "panel.py",
+        )
+    )
+    translated_text = json.dumps(setup_health)
+    for text in (
+        "Confirms Home Assistant is receiving live readings for each circuit.",
+        "Names, profiles, and sensor roles identify each circuit.",
+        "Checks that power flow matches the selected circuit role.",
+        "Energy totals power today-vs-normal and utility comparisons.",
+        "Profiles choose the right runtime, standby, demand, and context checks.",
+        "Controls which helper sensors and dashboard diagnostics HA creates.",
+        "Provides setup health, appliance status, and evidence links in one view.",
+        "Keeps alert notifications linked to the evidence that caused them.",
+        "Optional mains NILM can discover unknown loads from aggregate sensors.",
+        "Recent history is needed before comparisons and alerts become reliable.",
+        "Open setting",
+        "No setup checklist items are available yet.",
+        "Setup Health is not available because the integration is not loaded.",
+        "Reload the integration, then open Setup Health again.",
+    ):
+        assert text in translated_text
+        assert text not in source_text
+
+
+def test_notification_and_dashboard_text_live_in_translations() -> None:
+    translations = _translations()
+    notification_text = translations["config_panel"]["notifications"]
+    dashboard_text = translations["config_panel"]["dashboard"]
+
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            INTEGRATION_DIR / "notifications.py",
+            INTEGRATION_DIR / "dashboard.py",
+        )
+    )
+    translated_text = json.dumps(
+        {
+            "notifications": notification_text,
+            "dashboard": dashboard_text,
+        }
+    )
+    for text in (
+        "Energy Analyzer Alert",
+        "Open evidence graph",
+        "Observed value",
+        "Repeated observations",
+        "CircuitSetup Energy Analyzer suggested settings",
+        "Top appliances right now",
+        "Today's Energy",
+        "Appliance Status",
+        "Known Load Share",
+        "Open NILM Graph & Review",
+        "Mains, Solar, and NILM",
+        "Diagnostics and Evidence",
+        "Missing entities",
+        "Next step",
+    ):
+        assert text in translated_text
+        assert text not in source_text
 
 
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
