@@ -3109,7 +3109,7 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
 
 
 @pytest.mark.parametrize(
-    ("circuit_name", "profile", "source_entities"),
+    ("circuit_name", "profile", "source_entities", "expected_mode"),
     [
         (
             "Well Pump",
@@ -3118,6 +3118,7 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
                 "sensor.well_pump_l1_active_power",
                 "sensor.well_pump_l2_active_power",
             ],
+            "dual_phase",
         ),
         (
             "Sump Pump",
@@ -3126,6 +3127,7 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
                 "sensor.sump_pump_l1_active_power",
                 "sensor.sump_pump_l2_active_power",
             ],
+            "dual_phase",
         ),
         (
             "Pool Pump",
@@ -3134,6 +3136,40 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
                 "sensor.pool_pump_l1_active_power",
                 "sensor.pool_pump_l2_active_power",
             ],
+            "dual_phase",
+        ),
+        (
+            "Well Pump",
+            "water_pump",
+            [
+                "sensor.well_pump_l1_active_power",
+            ],
+            "single_phase",
+        ),
+        (
+            "Booster Pump",
+            "water_pump",
+            [
+                "sensor.booster_pump_l1_active_power",
+            ],
+            "single_phase",
+        ),
+        (
+            "Electric Heat",
+            "electric_heat",
+            [
+                "sensor.garage_electric_heat_l1_active_power",
+                "sensor.garage_electric_heat_l2_active_power",
+            ],
+            "dual_phase",
+        ),
+        (
+            "Electric Heat",
+            "electric_heat",
+            [
+                "sensor.garage_electric_heat_l1_active_power",
+            ],
+            "single_phase",
         ),
     ],
 )
@@ -3142,6 +3178,7 @@ async def test_user_flow_treats_two_leg_pumps_as_dual_phase(
     circuit_name: str,
     profile: str,
     source_entities: list[str],
+    expected_mode: str,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerConfigFlow,
@@ -3156,7 +3193,7 @@ async def test_user_flow_treats_two_leg_pumps_as_dual_phase(
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert _schema_default(result["data_schema"], "appliance_profile") == profile
-    assert result["description_placeholders"]["circuit_mode"] == "dual_phase"
+    assert result["description_placeholders"]["circuit_mode"] == expected_mode
 
     result = await flow.async_step_assign(
         {
@@ -3169,8 +3206,9 @@ async def test_user_flow_treats_two_leg_pumps_as_dual_phase(
 
     circuit = flow._pending_final_config[CONF_CIRCUITS][0]
     assert result["type"] == "form"
-    assert circuit["mode"] == "dual_phase"
-    assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
+    assert circuit["mode"] == expected_mode
+    if expected_mode == "dual_phase":
+        assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
 
 
 @pytest.mark.parametrize(
