@@ -344,6 +344,32 @@ def test_generated_dashboard_spreads_glance_cards_across_four_columns() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("layout", "circuits", "expected_spans"),
+    (
+        (DASHBOARD_LAYOUT_SIMPLE, _example_circuits(), [2, 2]),
+        (DASHBOARD_LAYOUT_STANDARD, _circuits(), [1, 2, 1]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:1], [2, 2]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:2], [1, 2, 1]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits(), [4]),
+    ),
+)
+def test_generated_dashboard_balances_last_four_column_row(
+    layout: str,
+    circuits: tuple[CircuitConfig, ...],
+    expected_spans: list[int],
+) -> None:
+    dashboard = build_recommended_dashboard(
+        circuits,
+        layout,
+    )
+    sections = _dashboard_sections(dashboard)
+    last_row = sections[-len(expected_spans):]
+
+    assert sum(section.get("column_span", 1) for section in last_row) == 4
+    assert [section.get("column_span", 1) for section in last_row] == expected_spans
+
+
 def test_generated_dashboard_omits_duplicate_appliance_summary_cards() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
