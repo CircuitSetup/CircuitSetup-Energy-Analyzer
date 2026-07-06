@@ -117,7 +117,7 @@ PANEL_MODULE_VERSION = (
     "interval-running-prompt-low-confidence-nilm-expanded-comparisons-"
     "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-"
     "refresh-route-stop-save-nilm-reload-setup-health-checklist-actions-"
-    "setup-health-translations"
+    "setup-health-translations-merge"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"

@@ -231,6 +231,7 @@ def build_recommended_dashboard(
         )
     if include_expert_links:
         sections.append(_expert_evidence_section(circuit_list))
+    _balance_last_section_row(sections)
 
     return {
         "title": DASHBOARD_TITLE,
@@ -408,6 +409,18 @@ def _dashboard_section_titles(
     if include_expert_links:
         titles.append(_section_title("diagnostics_and_evidence"))
     return titles
+
+
+def _balance_last_section_row(sections: Sequence[dict[str, Any]]) -> None:
+    spans = {
+        1: (DASHBOARD_COLUMNS,),
+        2: (2, 2),
+        3: (1, 2, 1),
+    }.get(len(sections) % DASHBOARD_COLUMNS)
+    if not spans:
+        return
+    for section, span in zip(sections[-len(spans):], spans, strict=True):
+        section["column_span"] = span
 
 
 def _household_overview_section(

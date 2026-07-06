@@ -2826,6 +2826,35 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     assert payload["open_path"].startswith("/config/integrations/")
 
 
+def test_setup_health_payload_links_checklist_actions_to_option_steps() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    coordinator = _coordinator(config=_config("hvac"))
+    coordinator.entry_id = "entry-hvac"
+
+    payload = setup_health_payload([coordinator])
+
+    capacity_issue = next(
+        item
+        for item in payload["issues"]
+        if item["issue"] == "missing_capacity_setting"
+    )
+    parsed = urlparse(capacity_issue["open_path"])
+    params = parse_qs(parsed.fragment)
+    assert parsed.path == "/config/integrations/dashboard"
+    assert params["config_entry"] == ["entry-hvac"]
+    assert params["circuit_id"] == ["hvac"]
+    assert params["options_step"] == ["advanced_settings"]
+
+    checklist = {item["item_id"]: item for item in payload["checklist"]}
+    entity_detail = urlparse(checklist["entity_detail_level_selected"]["open_path"])
+    dashboard = urlparse(checklist["dashboard_created"]["open_path"])
+    assert parse_qs(entity_detail.fragment)["options_step"] == ["entity_detail"]
+    assert parse_qs(dashboard.fragment)["options_step"] == ["dashboard"]
+
+
 def test_setup_health_payload_uses_requested_entry_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         setup_health_payload,
