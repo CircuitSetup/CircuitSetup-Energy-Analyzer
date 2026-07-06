@@ -149,6 +149,8 @@ questions instead of raw diagnostic entity lists:
   value, what the setting controls, why the suggestion exists, expected effect,
   and reset/apply/dismiss actions.
 
+![Appliance detail panel showing refrigerator health, activity, energy, and recent evidence](docs/images/readme/appliance-detail.png)
+
 ## First-time setup checklist
 
 1. Install the integration, restart Home Assistant, and add it from **Settings > Devices & services**.
@@ -170,6 +172,8 @@ questions instead of raw diagnostic entity lists:
 11. Save the configuration.
 12. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
 13. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, or other feature settings.
+
+![Setup Health checklist showing recommended setup actions for configured circuits](docs/images/readme/setup-health.png)
 
 ## Classify circuits carefully
 
@@ -232,6 +236,8 @@ The integration has an **Entity Detail Level** option under **Settings > Devices
 - **Expert**: creates only the diagnostic or graph groups you select under **Expert Entity Groups**, useful for troubleshooting and custom diagnostic dashboards.
 
 Changing **Entity Detail Level** reloads the integration so the entity set matches the selected profile. Expert creates only the diagnostic or graph groups you select, such as Developer Diagnostics, Energy Detail, Demand and Capacity, Mains and Solar Detail, NILM Detail, Cycle Metrics, Electrical Scores, Power Quality Drift, Billing Forecasts, Standby, Weather, and Water. Existing manual entity-registry customizations are respected; use **Migrate To Compact Entity Model** when you want to remove preserved legacy rows.
+
+![Entity Detail Level options showing Simple, Standard, and Expert entity profiles](docs/images/readme/entity-detail-level.png)
 
 For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, the main entities follow this pattern:
 
@@ -646,6 +652,8 @@ Experimental NILM is opt-in. It can look for recurring unknown load signatures f
 
 On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace graph and review actions.
 
+![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
+
 Unknown load estimates may include:
 
 - Likely load type
@@ -669,6 +677,8 @@ After enough history, the analyzer can suggest advanced settings based on observ
 Review them from:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Review Suggested Settings**
+
+![Suggested settings review panel showing evidence-backed advanced-setting recommendations](docs/images/readme/suggested-settings.png)
 
 For each suggestion, you can:
 
