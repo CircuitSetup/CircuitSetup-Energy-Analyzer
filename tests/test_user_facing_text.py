@@ -2364,6 +2364,143 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     assert "_renderSetupHealthBody" in asset
 
 
+def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
+    body = """
+const panel = new context.Panel();
+const basePath = "/config/integrations/dashboard#config_entry=entry-hvac";
+const escapedBasePath = "/config/integrations/dashboard#config_entry=entry-hvac";
+const advancedHref = 'href="' + escapedBasePath
+  + "&amp;circuit_id=hvac&amp;options_step=advanced_settings" + '"';
+const entityDetailHref = 'href="' + escapedBasePath
+  + "&amp;options_step=entity_detail" + '"';
+panel._setupHealthLoading = false;
+panel._setupHealthError = "";
+panel._setupHealth = {
+  status: "ok",
+  text: __SETUP_HEALTH_TEXT__,
+  state: "Configure breaker amps",
+  next_step: "Configure breaker amps for HVAC",
+  message: "Configure breaker amps for HVAC",
+  open_path: `${basePath}&options_step=sources`,
+  issue_count: 1,
+  checklist_ready_count: 1,
+  checklist_total_count: 3,
+  checklist: [
+    { item_id: "source_data_found", status: "ok" },
+    {
+      item_id: "entity_detail_level_selected",
+      status: "needs_attention",
+      title: "Entity detail level selected",
+      why_it_matters: "Choose how much setup detail Home Assistant should create.",
+      fix: "Choose entity detail level",
+      open_path: `${basePath}&options_step=entity_detail`,
+    },
+  ],
+  issues: [
+    {
+      issue: "missing_capacity_setting",
+      severity: "warning",
+      fix: "Configure breaker amps for HVAC",
+      reason: "Capacity tracking needs the circuit breaker size.",
+      affected_circuit_name: "HVAC",
+      open_path: `${basePath}&circuit_id=hvac&options_step=advanced_settings`,
+    },
+  ],
+};
+const rendered = panel._renderSetupHealthContent();
+for (const unexpected of [
+  ">Status<",
+  ">Next Step<",
+  ">Checklist<",
+  ">Issues<",
+  "What To Check First",
+  "This affects appliance analysis quality.",
+  "source_data_found",
+]) {
+  if (rendered.includes(unexpected)) {
+    throw new Error(`unexpected setup health duplicate or raw text: ${unexpected}`);
+  }
+}
+const nextStepCount = (
+  rendered.match(/Configure breaker amps for HVAC/g) || []
+).length;
+if (nextStepCount !== 1) {
+  throw new Error(
+    `expected one next-step rendering in checklist, got ${nextStepCount}`,
+  );
+}
+for (const expected of [
+  "Source data found",
+  "Confirms Home Assistant is receiving live readings for each circuit.",
+  "Entity detail level selected",
+  "Capacity tracking needs the circuit breaker size.",
+  "Open setting",
+  advancedHref,
+  entityDetailHref,
+]) {
+  if (!rendered.includes(expected)) {
+    throw new Error(`missing setup health checklist content: ${expected}`);
+  }
+}
+"""
+    _run_panel_node_script(
+        body.replace(
+            "__SETUP_HEALTH_TEXT__",
+            json.dumps(_translations()["panel"]["setup_health"]),
+        )
+    )
+
+
+def test_setup_health_user_text_lives_in_translations() -> None:
+    translations = _translations()
+    setup_health = translations["panel"]["setup_health"]
+    checklist = setup_health["checklist"]
+
+    for item_id in (
+        "source_data_found",
+        "circuit_assignments_reviewed",
+        "ct_direction_valid",
+        "cumulative_kwh_sources_found",
+        "appliance_profiles_selected",
+        "entity_detail_level_selected",
+        "dashboard_created",
+        "notifications_enabled",
+        "nilm_enabled",
+        "learning_progress",
+    ):
+        assert checklist[item_id]["title"]
+        assert checklist[item_id]["why_it_matters"]
+        assert checklist[item_id]["fix"]
+
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            INTEGRATION_DIR / "entities" / "setup_health.py",
+            INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js",
+            INTEGRATION_DIR / "panel.py",
+        )
+    )
+    translated_text = json.dumps(setup_health)
+    for text in (
+        "Confirms Home Assistant is receiving live readings for each circuit.",
+        "Names, profiles, and sensor roles identify each circuit.",
+        "Checks that power flow matches the selected circuit role.",
+        "Energy totals power today-vs-normal and utility comparisons.",
+        "Profiles choose the right runtime, standby, demand, and context checks.",
+        "Controls which helper sensors and dashboard diagnostics HA creates.",
+        "Provides setup health, appliance status, and evidence links in one view.",
+        "Keeps alert notifications linked to the evidence that caused them.",
+        "Optional mains NILM can discover unknown loads from aggregate sensors.",
+        "Recent history is needed before comparisons and alerts become reliable.",
+        "Open setting",
+        "No setup checklist items are available yet.",
+        "Setup Health is not available because the integration is not loaded.",
+        "Reload the integration, then open Setup Health again.",
+    ):
+        assert text in translated_text
+        assert text not in source_text
+
+
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
     asset_path = (
         INTEGRATION_DIR

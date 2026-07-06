@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from ..const import (
     CONF_ADVANCED_SETTINGS,
@@ -24,6 +28,8 @@ from ..models import ApplianceProfile, CircuitMode, SensorRole
 from ..profiles import get_profile_definition
 
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
+SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
+_TRANSLATIONS_PATH = Path(__file__).resolve().parents[1] / "translations" / "en.json"
 
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
@@ -73,6 +79,56 @@ _MAX_SETUP_HEALTH_ISSUES = 3
 _MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE = 2
 _MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH = 80
 _MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS = 3
+_SETUP_HEALTH_CHECKLIST_OPTION_STEPS = {
+    "source_data_found": "sources",
+    "circuit_assignments_reviewed": "assign",
+    "ct_direction_valid": "assign",
+    "cumulative_kwh_sources_found": "sources",
+    "appliance_profiles_selected": "assign",
+    "entity_detail_level_selected": "entity_detail",
+    "dashboard_created": "dashboard",
+    "nilm_enabled": "mains",
+}
+_SETUP_HEALTH_ISSUE_OPTION_STEPS = {
+    "missing_circuit_assignments": "assign",
+    "missing_energy_source": "sources",
+    "missing_temperature_source": "sources",
+    "circuit_mode_mismatch": "assign",
+    "missing_electrical_metrics": "assign",
+    "missing_mains_source": "mains",
+    "check_ct_direction": "assign",
+    "missing_rain_context_source": "sources",
+    "missing_water_flow_source": "sources",
+    "missing_source_entities": "sources",
+    "stale_source": "sources",
+    "missing_source_sensor": "assign",
+    "invalid_source_state": "sources",
+    "source_data_quality": "assign",
+    "utility_comparison_missing_utility_source": "utility",
+    "utility_comparison_missing_measured_source": "utility",
+    "utility_comparison_source_mismatch": "utility",
+}
+
+
+@lru_cache(maxsize=1)
+def setup_health_panel_text() -> dict[str, Any]:
+    """Return English setup-health panel text from Home Assistant translations."""
+    translations = json.loads(_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+    setup_health = translations.get("panel", {}).get("setup_health", {})
+    return dict(setup_health) if isinstance(setup_health, Mapping) else {}
+
+
+def _setup_health_checklist_text(item_id: str) -> Mapping[str, Any]:
+    checklist = setup_health_panel_text().get("checklist", {})
+    if not isinstance(checklist, Mapping):
+        return {}
+    item = checklist.get(item_id, {})
+    return item if isinstance(item, Mapping) else {}
+
+
+def _setup_health_checklist_value(item_id: str, key: str) -> str:
+    value = _setup_health_checklist_text(item_id).get(key, "")
+    return str(value) if value is not None else ""
 
 
 def setup_health_value(coordinator: Any) -> str:
@@ -160,7 +216,7 @@ def _setup_health_attributes_for_issues(
         issues,
         issue_keys=_UTILITY_COMPARISON_SETUP_ISSUES,
     )
-    bounded_issues = _bounded_setup_health_issues(issues)
+    bounded_issues = _bounded_setup_health_issues(coordinator, issues)
     checklist = _setup_health_checklist(coordinator, issues)
     ready = not issues
     return {
@@ -283,100 +339,116 @@ def _setup_health_checklist(
     )
     compact = len(issues) > _MAX_SETUP_HEALTH_ISSUES
 
-    return [
+    items = [
         _setup_health_checklist_item(
             "source_data_found",
-            "Source data found",
+            _setup_health_checklist_value("source_data_found", "title"),
             "ok" if has_circuits and not source_circuits else "needs_attention",
-            "Appliance status needs fresh source sensors.",
+            _setup_health_checklist_value("source_data_found", "why_it_matters"),
             affected_circuits=source_circuits,
             fix=(
-                "Review source sensors"
+                _setup_health_checklist_value("source_data_found", "fix")
                 if has_circuits
-                else "Review circuit assignments"
+                else _setup_health_checklist_value(
+                    "circuit_assignments_reviewed",
+                    "fix",
+                )
             ),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "circuit_assignments_reviewed",
-            "Circuit assignments reviewed",
+            _setup_health_checklist_value("circuit_assignments_reviewed", "title"),
             "ok" if has_circuits else "needs_attention",
-            "Appliance guidance depends on circuit names, profiles, and sensors.",
-            fix="Review circuit assignments",
+            _setup_health_checklist_value(
+                "circuit_assignments_reviewed",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("circuit_assignments_reviewed", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "ct_direction_valid",
-            "CT direction looks valid",
+            _setup_health_checklist_value("ct_direction_valid", "title"),
             "ok" if not ct_circuits else "needs_attention",
-            "Signed power should match the circuit's load or generation role.",
+            _setup_health_checklist_value("ct_direction_valid", "why_it_matters"),
             affected_circuits=ct_circuits,
-            fix="Check CT direction",
+            fix=_setup_health_checklist_value("ct_direction_valid", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "cumulative_kwh_sources_found",
-            "Cumulative kWh sources found",
+            _setup_health_checklist_value("cumulative_kwh_sources_found", "title"),
             "ok" if has_circuits and not energy_circuits else "needs_attention",
-            "Today vs Normal needs cumulative energy history.",
+            _setup_health_checklist_value(
+                "cumulative_kwh_sources_found",
+                "why_it_matters",
+            ),
             affected_circuits=energy_circuits,
-            fix="Add cumulative kWh source",
+            fix=_setup_health_checklist_value("cumulative_kwh_sources_found", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "appliance_profiles_selected",
-            "Appliance profiles selected",
+            _setup_health_checklist_value("appliance_profiles_selected", "title"),
             "ok" if has_circuits else "needs_attention",
-            "Profile selection controls appliance-specific expectations.",
-            fix="Review appliance profiles",
+            _setup_health_checklist_value(
+                "appliance_profiles_selected",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("appliance_profiles_selected", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "entity_detail_level_selected",
-            "Entity detail level selected",
+            _setup_health_checklist_value("entity_detail_level_selected", "title"),
             "ok" if entity_detail_level else "needs_attention",
-            "The dashboard and registry cleanup need a chosen entity profile.",
-            fix="Choose entity detail level",
+            _setup_health_checklist_value(
+                "entity_detail_level_selected",
+                "why_it_matters",
+            ),
+            fix=_setup_health_checklist_value("entity_detail_level_selected", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "dashboard_created",
-            "Dashboard created",
+            _setup_health_checklist_value("dashboard_created", "title"),
             "ok" if dashboard_action in {"created", "updated"} else "needs_attention",
-            "The recommended dashboard is the first-stop appliance overview.",
-            fix="Create recommended dashboard",
+            _setup_health_checklist_value("dashboard_created", "why_it_matters"),
+            fix=_setup_health_checklist_value("dashboard_created", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "notifications_enabled",
-            "Notifications enabled",
+            _setup_health_checklist_value("notifications_enabled", "title"),
             "ok",
-            "Persistent notifications link alerts to appliance evidence.",
-            fix="Review notification preferences",
+            _setup_health_checklist_value("notifications_enabled", "why_it_matters"),
+            fix=_setup_health_checklist_value("notifications_enabled", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "nilm_enabled",
-            "NILM enabled",
+            _setup_health_checklist_value("nilm_enabled", "title"),
             "ok" if nilm_enabled else "optional",
-            "NILM can estimate unknown appliances from mains power when enabled.",
-            fix="Enable NILM if desired",
+            _setup_health_checklist_value("nilm_enabled", "why_it_matters"),
+            fix=_setup_health_checklist_value("nilm_enabled", "fix"),
             compact=compact,
         ),
         _setup_health_checklist_item(
             "learning_progress",
-            "Learning progress",
+            _setup_health_checklist_value("learning_progress", "title"),
             (
                 "learning"
                 if learning_circuits
                 else ("ok" if has_circuits else "needs_attention")
             ),
-            "Baseline learning makes comparisons and alerts more reliable.",
+            _setup_health_checklist_value("learning_progress", "why_it_matters"),
             affected_circuits=learning_circuits,
-            fix="Let analyzer learn",
+            fix=_setup_health_checklist_value("learning_progress", "fix"),
             compact=compact,
         ),
     ]
+    return [_setup_health_checklist_with_open_path(coordinator, item) for item in items]
 
 
 def _setup_health_checklist_item(
@@ -413,8 +485,57 @@ def _setup_health_checklist_item(
         )
     if status not in {"ok", "optional"}:
         item["fix"] = _bounded_setup_health_string(fix)
-        item["open_path"] = SETUP_HEALTH_OPEN_PATH
     return item
+
+
+def _setup_health_checklist_with_open_path(
+    coordinator: Any,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    if "fix" not in item:
+        return item
+    step = _SETUP_HEALTH_CHECKLIST_OPTION_STEPS.get(str(item.get("item_id") or ""))
+    path = _setup_health_options_path(coordinator, step)
+    if path is not None:
+        item["open_path"] = path
+    return item
+
+
+def _setup_health_issue_open_path(
+    coordinator: Any,
+    issue: Mapping[str, Any],
+) -> str | None:
+    issue_key = str(issue.get("issue") or "")
+    if issue_key == "missing_capacity_setting":
+        return _setup_health_options_path(
+            coordinator,
+            "advanced_settings",
+            circuit_id=issue.get("circuit_id") or issue.get("affected_circuit"),
+        )
+    return _setup_health_options_path(
+        coordinator,
+        _SETUP_HEALTH_ISSUE_OPTION_STEPS.get(issue_key),
+    )
+
+
+def _setup_health_options_path(
+    coordinator: Any,
+    options_step: str | None,
+    *,
+    circuit_id: Any | None = None,
+) -> str | None:
+    if not options_step:
+        return None
+    entry_id = getattr(coordinator, "entry_id", None)
+    if not isinstance(entry_id, str) or not entry_id:
+        return None
+    params = {
+        "config_entry": entry_id,
+        "options_step": options_step,
+    }
+    if circuit_id:
+        params["circuit_id"] = str(circuit_id)
+    return f"{SETUP_HEALTH_OPTIONS_PATH}#{urlencode(params)}"
 
 
 def _setup_health_config_value(coordinator: Any, key: str) -> Any:
@@ -437,18 +558,27 @@ def _truncated_count(values: list[str]) -> int:
 
 
 def _bounded_setup_health_issues(
+    coordinator: Any,
     issues: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     return [
-        _bounded_setup_health_issue(issue)
+        _bounded_setup_health_issue(coordinator, issue)
         for issue in issues[:_MAX_SETUP_HEALTH_ISSUES]
     ]
 
 
-def _bounded_setup_health_issue(issue: Mapping[str, Any]) -> dict[str, Any]:
+def _bounded_setup_health_issue(
+    coordinator: Any,
+    issue: Mapping[str, Any],
+) -> dict[str, Any]:
     bounded = {
         key: _bounded_setup_health_value(value) for key, value in issue.items()
     }
+    path = _setup_health_issue_open_path(coordinator, bounded)
+    if path is None:
+        bounded.pop("open_path", None)
+    else:
+        bounded["open_path"] = path
     source_entities = [
         _bounded_setup_health_string(entity_id)
         for entity_id in bounded.get("source_entities", ())

@@ -15,7 +15,11 @@ from .appliance_detail import (
     appliance_detail_for_circuit,
 )
 from .const import DOMAIN
-from .entities.setup_health import setup_health_attributes, setup_health_value
+from .entities.setup_health import (
+    setup_health_attributes,
+    setup_health_panel_text,
+    setup_health_value,
+)
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
@@ -111,7 +115,9 @@ PANEL_MODULE_VERSION = (
     "20260701-appliance-timeline-nilm-lanes-dashboard-nilm-lanes-"
     "nilm-review-card-candidate-facts-session-validation-card-"
     "interval-running-prompt-low-confidence-nilm-expanded-comparisons-"
-    "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-refresh-route-stop-save-nilm-reload"
+    "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-"
+    "refresh-route-stop-save-nilm-reload-setup-health-checklist-actions-"
+    "setup-health-translations"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
@@ -492,21 +498,22 @@ def setup_health_payload(
     """Return bounded Setup Health data for the panel."""
     requested_entry_id = str(entry_id or "").strip() or None
     coordinator = _setup_health_coordinator(coordinators, requested_entry_id)
+    text = setup_health_panel_text()
     if coordinator is None:
+        unavailable = text.get("unavailable", {})
         return {
             "status": "not_found",
             "requested_entry_id": requested_entry_id,
-            "state": "Unavailable",
+            "state": str(unavailable.get("state") or ""),
             "attributes": {},
             "checklist": [],
             "issues": [],
-            "message": (
-                "Setup Health is not available because the integration is not loaded."
-            ),
-            "next_step": "Reload the integration, then open Setup Health again.",
+            "message": str(unavailable.get("message") or ""),
+            "next_step": str(unavailable.get("next_step") or ""),
             "open_path": None,
             "checklist_ready_count": 0,
             "checklist_total_count": 0,
+            "text": text,
         }
 
     attributes = setup_health_attributes(coordinator)
@@ -530,6 +537,7 @@ def setup_health_payload(
         "warning_count": attributes.get("warning_count"),
         "checklist_ready_count": attributes.get("checklist_ready_count"),
         "checklist_total_count": attributes.get("checklist_total_count"),
+        "text": text,
     }
 
 

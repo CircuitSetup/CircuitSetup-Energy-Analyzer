@@ -513,6 +513,81 @@
       "confirm_required": "Check Remove Legacy Entities to confirm this compact entity model migration."
     }
   },
+  "panel": {
+    "setup_health": {
+      "heading": "Setup Health",
+      "header_message": "Guided setup checklist for appliance energy analysis.",
+      "loading": "Loading Setup Health...",
+      "checklist_heading": "Setup Checklist",
+      "empty_checklist": "No setup checklist items are available yet.",
+      "open_setting": "Open setting",
+      "labels": {
+        "affected": "Affected",
+        "circuit": "Circuit"
+      },
+      "fallbacks": {
+        "review_setup": "Review setup",
+        "review_item_reason": "Review this setup item before relying on appliance guidance."
+      },
+      "unavailable": {
+        "state": "Unavailable",
+        "message": "Setup Health is not available because the integration is not loaded.",
+        "next_step": "Reload the integration, then open Setup Health again."
+      },
+      "checklist": {
+        "source_data_found": {
+          "title": "Source data found",
+          "why_it_matters": "Confirms Home Assistant is receiving live readings for each circuit.",
+          "fix": "Review source sensors"
+        },
+        "circuit_assignments_reviewed": {
+          "title": "Circuit assignments reviewed",
+          "why_it_matters": "Names, profiles, and sensor roles identify each circuit.",
+          "fix": "Review circuit assignments"
+        },
+        "ct_direction_valid": {
+          "title": "CT direction looks valid",
+          "why_it_matters": "Checks that power flow matches the selected circuit role.",
+          "fix": "Check CT direction"
+        },
+        "cumulative_kwh_sources_found": {
+          "title": "Cumulative kWh sources found",
+          "why_it_matters": "Energy totals power today-vs-normal and utility comparisons.",
+          "fix": "Add cumulative kWh source"
+        },
+        "appliance_profiles_selected": {
+          "title": "Appliance profiles selected",
+          "why_it_matters": "Profiles choose the right runtime, standby, demand, and context checks.",
+          "fix": "Review appliance profiles"
+        },
+        "entity_detail_level_selected": {
+          "title": "Entity detail level selected",
+          "why_it_matters": "Controls which helper sensors and dashboard diagnostics HA creates.",
+          "fix": "Choose entity detail level"
+        },
+        "dashboard_created": {
+          "title": "Dashboard created",
+          "why_it_matters": "Provides setup health, appliance status, and evidence links in one view.",
+          "fix": "Create recommended dashboard"
+        },
+        "notifications_enabled": {
+          "title": "Notifications enabled",
+          "why_it_matters": "Keeps alert notifications linked to the evidence that caused them.",
+          "fix": "Review notification preferences"
+        },
+        "nilm_enabled": {
+          "title": "NILM enabled",
+          "why_it_matters": "Optional mains NILM can discover unknown loads from aggregate sensors.",
+          "fix": "Enable NILM if desired"
+        },
+        "learning_progress": {
+          "title": "Learning progress",
+          "why_it_matters": "Recent history is needed before comparisons and alerts become reliable.",
+          "fix": "Let analyzer learn"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "setup_health": {
