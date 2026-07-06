@@ -1065,7 +1065,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? "NILM Workspace"
       : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
     const headerMessage = setupHealthRoute
-      ? (this._setupHealth && this._setupHealth.next_step) || "Guided setup checklist for appliance energy analysis."
+      ? "Guided setup checklist for appliance energy analysis."
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
       : nilmWorkspaceRoute
@@ -1232,20 +1232,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           line-height: 1.3;
         }
         button, a.button {
+          align-items: center;
           appearance: none;
           border: 1px solid var(--primary-color, #0b6bcb);
           border-radius: 6px;
           background: var(--primary-color, #0b6bcb);
           color: var(--text-primary-color, #fff);
           cursor: pointer;
+          display: inline-flex;
           font: inherit;
           font-weight: 700;
+          justify-content: center;
+          line-height: 1.2;
           padding: 10px 14px;
           text-decoration: none;
         }
-        button.secondary {
+        button.secondary, a.button.secondary {
           background: transparent;
           color: var(--primary-color, #0b6bcb);
+        }
+        .setup-health-actions {
+          margin-top: 10px;
         }
         button:disabled {
           cursor: wait;
@@ -1433,6 +1440,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._navigate(button.dataset.nilmApplianceDetailPath);
       });
     }
+    for (const link of this.shadowRoot.querySelectorAll("[data-setup-health-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.getAttribute("href"));
+      });
+    }
   }
 
   _renderApplianceDetailBody() {
@@ -1464,65 +1477,91 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </section>
       `;
     }
-    const readyCount = payload.checklist_ready_count === null || payload.checklist_ready_count === undefined
-      ? "Unknown"
-      : payload.checklist_ready_count;
-    const totalCount = payload.checklist_total_count === null || payload.checklist_total_count === undefined
-      ? "Unknown"
-      : payload.checklist_total_count;
     return `
-      <section class="panel summary">
-        ${this._metric("Status", payload.state || "Learning")}
-        ${this._metric("Next Step", payload.next_step || "No setup action needed")}
-        ${this._metric("Checklist", `${readyCount} / ${totalCount}`)}
-        ${this._metric("Issues", this._formatMetricValue(payload.issue_count))}
-      </section>
       <section class="panel">
         <h2>Setup Checklist</h2>
-        <p class="muted">${this._escape(payload.message || "Review setup items that affect appliance analysis.")}</p>
-        ${this._renderSetupHealthChecklist(payload.checklist, payload.open_path)}
-      </section>
-      <section class="panel">
-        <h2>What To Check First</h2>
-        ${this._renderSetupHealthIssues(payload.issues, payload.next_step)}
+        ${this._renderSetupHealthChecklist(payload.checklist, payload.issues)}
       </section>
     `;
   }
 
-  _renderSetupHealthChecklist(items, fallbackOpenPath) {
+  _renderSetupHealthChecklist(items, issues) {
     const safeItems = Array.isArray(items) ? items : [];
-    if (!safeItems.length) {
+    const rows = [
+      ...this._renderSetupHealthIssueItems(issues),
+      ...safeItems.map((item) => this._renderSetupHealthChecklistItem(item)),
+    ];
+    if (!rows.length) {
       return `<p class="muted">No setup checklist items are available yet.</p>`;
     }
-    return `<div class="entity-list">${safeItems.map((item) => {
-      const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
-      const path = item.open_path || fallbackOpenPath || "";
-      return `
-        <div class="metric">
-          <span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>
-          <strong>${this._escape(item.title || item.item_id || "Setup item")}</strong>
-          <p>${this._escape(item.why_it_matters || "This affects appliance analysis quality.")}</p>
-          ${affected.length ? `<p class="muted">Affected: ${this._escape(affected.join(", "))}</p>` : ""}
-          ${item.fix ? (path ? `<a class="button secondary" href="${this._escape(path)}">${this._escape(item.fix)}</a>` : `<p class="muted">${this._escape(item.fix)}</p>`) : ""}
-        </div>
-      `;
-    }).join("")}</div>`;
+    return `<div class="entity-list">${rows.join("")}</div>`;
   }
 
-  _renderSetupHealthIssues(issues, fallbackText) {
-    const safeIssues = Array.isArray(issues) ? issues : [];
-    if (!safeIssues.length) {
-      return `<p class="muted">${this._escape(fallbackText || "No setup problems were found.")}</p>`;
-    }
-    return `<div class="entity-list">${safeIssues.map((item) => `
+  _renderSetupHealthChecklistItem(item) {
+    const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
+    const path = item.open_path || "";
+    const description = item.why_it_matters || this._setupHealthDescription(item.item_id);
+    return `
       <div class="metric">
-        <span>${this._escape(item.severity || item.state || "review")}</span>
+        <span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>
+        <strong>${this._escape(item.title || this._setupHealthTitle(item.item_id))}</strong>
+        <p>${this._escape(description)}</p>
+        ${affected.length ? `<p class="muted">Affected: ${this._escape(affected.join(", "))}</p>` : ""}
+        ${item.fix ? this._setupHealthAction(path, item.fix) : ""}
+      </div>
+    `;
+  }
+
+  _renderSetupHealthIssueItems(issues) {
+    const safeIssues = Array.isArray(issues) ? issues : [];
+    return safeIssues.map((item) => `
+      <div class="metric">
+        <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
         <strong>${this._escape(item.fix || item.recommended_action || item.state || "Review setup")}</strong>
         <p>${this._escape(item.reason || "Review this setup item before relying on appliance guidance.")}</p>
         ${item.affected_circuit_name || item.affected_circuit ? `<p class="muted">Circuit: ${this._escape(item.affected_circuit_name || item.affected_circuit)}</p>` : ""}
-        ${item.open_path ? `<a class="button secondary" href="${this._escape(item.open_path)}">Open Setup</a>` : ""}
+        ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
       </div>
-    `).join("")}</div>`;
+    `);
+  }
+
+  _setupHealthAction(path, fallbackText) {
+    if (!path) {
+      return fallbackText ? `<p class="muted">${this._escape(fallbackText)}</p>` : "";
+    }
+    return `<div class="actions setup-health-actions"><a class="button secondary" data-setup-health-path href="${this._escape(path)}">Open setting</a></div>`;
+  }
+
+  _setupHealthDescription(itemId) {
+    const descriptions = {
+      source_data_found: "Confirms Home Assistant is receiving live readings for each circuit.",
+      circuit_assignments_reviewed: "Names, profiles, and sensor roles identify each circuit.",
+      ct_direction_valid: "Checks that power flow matches the selected circuit role.",
+      cumulative_kwh_sources_found: "Energy totals power today-vs-normal and utility comparisons.",
+      appliance_profiles_selected: "Profiles choose the right runtime, standby, demand, and context checks.",
+      entity_detail_level_selected: "Controls which helper sensors and dashboard diagnostics HA creates.",
+      dashboard_created: "Provides setup health, appliance status, and evidence links in one view.",
+      notifications_enabled: "Keeps alert notifications linked to the evidence that caused them.",
+      nilm_enabled: "Optional mains NILM can discover unknown loads from aggregate sensors.",
+      learning_progress: "Recent history is needed before comparisons and alerts become reliable.",
+    };
+    return descriptions[itemId] || "Review this setup item before relying on appliance guidance.";
+  }
+
+  _setupHealthTitle(itemId) {
+    const titles = {
+      source_data_found: "Source data found",
+      circuit_assignments_reviewed: "Circuit assignments reviewed",
+      ct_direction_valid: "CT direction looks valid",
+      cumulative_kwh_sources_found: "Cumulative kWh sources found",
+      appliance_profiles_selected: "Appliance profiles selected",
+      entity_detail_level_selected: "Entity detail level selected",
+      dashboard_created: "Dashboard created",
+      notifications_enabled: "Notifications enabled",
+      nilm_enabled: "NILM enabled",
+      learning_progress: "Learning progress",
+    };
+    return titles[itemId] || this._friendlyFeature(itemId || "setup item");
   }
 
   _renderApplianceDetail() {
