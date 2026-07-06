@@ -2818,7 +2818,9 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
         "item_id": "source_data_found",
         "status": "ok",
         "title": "Source data found",
-        "why_it_matters": "Appliance status needs fresh source sensors.",
+        "why_it_matters": (
+            "Confirms Home Assistant is receiving live readings for each circuit."
+        ),
     }
     assert payload["checklist_total_count"] == 10
     assert payload["open_path"].startswith("/config/integrations/")
