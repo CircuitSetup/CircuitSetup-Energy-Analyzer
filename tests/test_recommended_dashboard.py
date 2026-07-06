@@ -345,20 +345,23 @@ def test_generated_dashboard_spreads_glance_cards_across_four_columns() -> None:
 
 
 @pytest.mark.parametrize(
-    ("circuits", "expected_spans"),
+    ("layout", "circuits", "expected_spans"),
     (
-        (_example_circuits()[:1], [2, 2]),
-        (_example_circuits()[:2], [1, 2, 1]),
-        (_example_circuits(), [4]),
+        (DASHBOARD_LAYOUT_SIMPLE, _example_circuits(), [2, 2]),
+        (DASHBOARD_LAYOUT_STANDARD, _circuits(), [1, 2, 1]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:1], [2, 2]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:2], [1, 2, 1]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits(), [4]),
     ),
 )
-def test_expert_dashboard_balances_last_four_column_row(
+def test_generated_dashboard_balances_last_four_column_row(
+    layout: str,
     circuits: tuple[CircuitConfig, ...],
     expected_spans: list[int],
 ) -> None:
     dashboard = build_recommended_dashboard(
         circuits,
-        DASHBOARD_LAYOUT_EXPERT,
+        layout,
     )
     sections = _dashboard_sections(dashboard)
     last_row = sections[-len(expected_spans):]

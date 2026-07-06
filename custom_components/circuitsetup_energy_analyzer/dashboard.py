@@ -177,7 +177,7 @@ def build_recommended_dashboard(
         )
     if include_expert_links:
         sections.append(_expert_evidence_section(circuit_list))
-        _balance_last_section_row(sections)
+    _balance_last_section_row(sections)
 
     return {
         "title": DASHBOARD_TITLE,
