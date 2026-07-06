@@ -5113,8 +5113,10 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
 
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         DATA_SCHEMA,
+        _advanced_settings_schema,
         _entity_detail_schema,
         _options_schema,
+        _time_selector,
     )
 
     def serialize_ha_selector(schema):
@@ -5134,6 +5136,17 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
     assert voluptuous_serialize.convert(
         _entity_detail_schema(SimpleNamespace(data={}, options={})),
         custom_serializer=serialize_ha_selector,
+    )
+    assert _time_selector().serialize() == {"selector": {"time": {}}}
+
+    try:
+        from homeassistant.helpers import config_validation as cv
+    except ModuleNotFoundError:
+        return
+
+    assert voluptuous_serialize.convert(
+        _advanced_settings_schema({}),
+        custom_serializer=cv.custom_serializer,
     )
 
 

@@ -49,6 +49,7 @@ except ModuleNotFoundError:
 try:
     from homeassistant import config_entries
     from homeassistant.core import callback
+    from homeassistant.helpers.selector import Selector as _HASelector
     from homeassistant.helpers.selector import selector as ha_selector
 except ModuleNotFoundError:
 
@@ -108,6 +109,7 @@ except ModuleNotFoundError:
         OptionsFlowWithReload=_OptionsFlow,
     )
     ha_selector = None
+    _HASelector = object
 
 try:
     from homeassistant.data_entry_flow import section
@@ -1092,12 +1094,15 @@ def _selector(
     return validator
 
 
-class _OptionalBlankSelector:
+class _OptionalBlankSelector(_HASelector):  # type: ignore[misc]
     """Selector wrapper for optional HA fields whose native selector rejects blanks."""
 
     def __init__(self, config: dict[str, Any], validator: Any) -> None:
         self._config = config
         self._validator = validator
+        self.selector_type = str(next(iter(config), ""))
+        selector_config = config.get(self.selector_type, {})
+        self.config = selector_config if isinstance(selector_config, Mapping) else {}
 
     def __call__(self, value: Any) -> Any:
         if value in (None, ""):
@@ -1110,7 +1115,7 @@ class _OptionalBlankSelector:
         return other == self._config
 
     def serialize(self) -> dict[str, Any]:
-        return self._config
+        return {"selector": self._config}
 
 
 class _SerializableSelectorFallback:

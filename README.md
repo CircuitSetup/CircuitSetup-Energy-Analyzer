@@ -107,7 +107,7 @@ During setup, you choose:
 
 ![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
 
-![Circuit assignment editor showing circuit mode and power flow controls](docs/images/readme/assignment-editor.png)
+![Circuit assignment editor showing automatic classification, included sensors, and retention controls](docs/images/readme/assignment-editor.png)
 
 ## Using The Integration
 
@@ -372,7 +372,7 @@ Go to:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
-![Advanced circuit settings panel with sensitivity and energy window controls](docs/images/readme/advanced-settings.png)
+![Advanced circuit settings panel showing circuit-specific sensitivity and applicable tuning sections](docs/images/readme/advanced-settings.png)
 
 Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 
@@ -711,9 +711,11 @@ Persistent notifications include a Markdown link to **Open evidence graph** when
 
 The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. Companion App notifications can use the same target through `clickAction`.
 
+The analyzer can also notify when suggested Advanced Circuit Settings are ready for review.
+
 For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
 
-![Home Assistant notification drawer showing a CircuitSetup Energy Analyzer possible-issue notification](docs/images/readme/notifications-panel.png)
+![Home Assistant notification drawer showing CircuitSetup Energy Analyzer suggested settings](docs/images/readme/notifications-panel.png)
 
 ![Dynamic Energy Analyzer evidence graph opened from a notification link](docs/images/readme/notifications-repairs.png)
 
