@@ -2446,14 +2446,14 @@ for (const expected of [
     _run_panel_node_script(
         body.replace(
             "__SETUP_HEALTH_TEXT__",
-            json.dumps(_translations()["panel"]["setup_health"]),
+            json.dumps(_translations()["config_panel"]["panel"]["setup_health"]),
         )
     )
 
 
 def test_setup_health_user_text_lives_in_translations() -> None:
     translations = _translations()
-    setup_health = translations["panel"]["setup_health"]
+    setup_health = translations["config_panel"]["panel"]["setup_health"]
     checklist = setup_health["checklist"]
 
     for item_id in (
@@ -2503,8 +2503,8 @@ def test_setup_health_user_text_lives_in_translations() -> None:
 
 def test_notification_and_dashboard_text_live_in_translations() -> None:
     translations = _translations()
-    notification_text = translations["notifications"]
-    dashboard_text = translations["dashboard"]
+    notification_text = translations["config_panel"]["notifications"]
+    dashboard_text = translations["config_panel"]["dashboard"]
 
     source_text = "\n".join(
         path.read_text(encoding="utf-8")
