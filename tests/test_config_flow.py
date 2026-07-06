@@ -3147,6 +3147,23 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
             "single_phase",
         ),
         (
+            "Water Pump",
+            "water_pump",
+            [
+                "sensor.water_pump_l1_active_power",
+            ],
+            "single_phase",
+        ),
+        (
+            "Water Pump",
+            "water_pump",
+            [
+                "sensor.water_pump_l1_active_power",
+                "sensor.water_pump_l2_active_power",
+            ],
+            "dual_phase",
+        ),
+        (
             "Booster Pump",
             "water_pump",
             [
