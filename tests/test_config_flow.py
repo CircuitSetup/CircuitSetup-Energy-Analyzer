@@ -3109,6 +3109,71 @@ async def test_user_flow_downgrades_normally_dual_phase_appliance_with_one_leg()
 
 
 @pytest.mark.parametrize(
+    ("circuit_name", "profile", "source_entities"),
+    [
+        (
+            "Well Pump",
+            "water_pump",
+            [
+                "sensor.well_pump_l1_active_power",
+                "sensor.well_pump_l2_active_power",
+            ],
+        ),
+        (
+            "Sump Pump",
+            "sump_pump",
+            [
+                "sensor.sump_pump_l1_active_power",
+                "sensor.sump_pump_l2_active_power",
+            ],
+        ),
+        (
+            "Pool Pump",
+            "pool_pump",
+            [
+                "sensor.pool_pump_l1_active_power",
+                "sensor.pool_pump_l2_active_power",
+            ],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_user_flow_treats_two_leg_pumps_as_dual_phase(
+    circuit_name: str,
+    profile: str,
+    source_entities: list[str],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user(
+        {CONF_EXTRA_SOURCE_ENTITIES: source_entities}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "appliance_profile") == profile
+    assert result["description_placeholders"]["circuit_mode"] == "dual_phase"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": circuit_name,
+            "appliance_profile": profile,
+            "included_sensors": source_entities,
+        }
+    )
+
+    circuit = flow._pending_final_config[CONF_CIRCUITS][0]
+    assert result["type"] == "form"
+    assert circuit["mode"] == "dual_phase"
+    assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
     ("circuit_id", "expected_name", "expected_profile", "expected_mode", "suffixes"),
     [
         (
