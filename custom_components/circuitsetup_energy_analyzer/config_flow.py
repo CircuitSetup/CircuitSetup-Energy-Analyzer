@@ -2486,6 +2486,9 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
         ApplianceProfile.OVEN.value,
         ApplianceProfile.DRYER.value,
         ApplianceProfile.POOL_PUMP.value,
+        ApplianceProfile.WATER_PUMP.value,
+        ApplianceProfile.WELL_PUMP.value,
+        ApplianceProfile.SUMP_PUMP.value,
         ApplianceProfile.EV_CHARGER.value,
     }:
         return CircuitMode.DUAL_PHASE.value
@@ -3297,11 +3300,23 @@ def _suggest_assignment_profile_mode(
             entity_id_list,
         )
     if "_water_pump_" in text or "_well_pump_" in text or "_booster_pump_" in text:
-        return ApplianceProfile.WATER_PUMP.value, CircuitMode.SINGLE_PHASE.value
+        profile = ApplianceProfile.WATER_PUMP.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
     if "_sump_pump_" in text:
-        return ApplianceProfile.SUMP_PUMP.value, CircuitMode.SINGLE_PHASE.value
+        profile = ApplianceProfile.SUMP_PUMP.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
     if "_pool_pump_" in text:
-        return ApplianceProfile.POOL_PUMP.value, CircuitMode.SINGLE_PHASE.value
+        profile = ApplianceProfile.POOL_PUMP.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
     for token, profile, _mode in (
         (
             "_fridge_",
