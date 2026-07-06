@@ -2501,6 +2501,44 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         assert text not in source_text
 
 
+def test_notification_and_dashboard_text_live_in_translations() -> None:
+    translations = _translations()
+    notification_text = translations["notifications"]
+    dashboard_text = translations["dashboard"]
+
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            INTEGRATION_DIR / "notifications.py",
+            INTEGRATION_DIR / "dashboard.py",
+        )
+    )
+    translated_text = json.dumps(
+        {
+            "notifications": notification_text,
+            "dashboard": dashboard_text,
+        }
+    )
+    for text in (
+        "Energy Analyzer Alert",
+        "Open evidence graph",
+        "Observed value",
+        "Repeated observations",
+        "CircuitSetup Energy Analyzer suggested settings",
+        "Top appliances right now",
+        "Today's Energy",
+        "Appliance Status",
+        "Known Load Share",
+        "Open NILM Graph & Review",
+        "Mains, Solar, and NILM",
+        "Diagnostics and Evidence",
+        "Missing entities",
+        "Next step",
+    ):
+        assert text in translated_text
+        assert text not in source_text
+
+
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
     asset_path = (
         INTEGRATION_DIR

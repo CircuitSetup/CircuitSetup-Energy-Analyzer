@@ -7,6 +7,7 @@ from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import DOMAIN
 from .ids import readable_component as _readable_component
 from .ids import tuple_id as _tuple_id
+from .localized_text import translation_text
 from .models import AlertEvidence, CircuitConfig
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
@@ -49,19 +50,22 @@ def alert_notification_message(
     lines.extend(
         [
             "",
-            "[Open evidence graph]"
+            f"[{_notification_text('alert', 'open_evidence_graph')}]"
             f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
             "",
-            f"- Observed value: {alert.observed_value}",
+            f"- {_notification_text('alert', 'observed_value')}: "
+            f"{alert.observed_value}",
             f"- {_comparison_value_label(alert)}: {alert.baseline_value}",
-            f"- Repeated observations: {alert.repeated_count}",
+            f"- {_notification_text('alert', 'repeated_observations')}: "
+            f"{alert.repeated_count}",
         ]
     )
     if feature_needs_electrical_safety_notice(alert.feature):
         lines.extend(
             (
                 "",
-                f"Safety notice: {ELECTRICAL_SAFETY_NOTICE}",
+                f"{_notification_text('alert', 'safety_notice')}: "
+                f"{ELECTRICAL_SAFETY_NOTICE}",
             )
         )
     return "\n".join(lines)
@@ -72,12 +76,14 @@ def _nilm_source_lines(alert: AlertEvidence) -> list[str]:
         return []
 
     lines: list[str] = []
-    if "Estimated from mains power by NILM." not in alert.message:
-        lines.append("Estimated from mains power by NILM.")
+    nilm_estimated = _notification_text("alert", "nilm_estimated")
+    if nilm_estimated not in alert.message:
+        lines.append(nilm_estimated)
 
     confidence = _nilm_confidence(alert)
-    if confidence is not None and "Confidence:" not in alert.message:
-        lines.append(f"Confidence: {round(confidence * 100)}%.")
+    confidence_label = _notification_text("alert", "confidence")
+    if confidence is not None and f"{confidence_label}:" not in alert.message:
+        lines.append(f"{confidence_label}: {round(confidence * 100)}%.")
     return lines
 
 
@@ -134,7 +140,7 @@ async def async_create_alert_notification(
                 config=config,
                 dashboard_path=dashboard_path,
             ),
-            title="Energy Analyzer Alert",
+            title=_notification_text("alert", "title"),
             notification_id=notification_id_for_alert(alert),
         )
     except (AttributeError, TypeError):
@@ -163,7 +169,7 @@ async def async_create_settings_recommendation_notification(
         create(
             hass,
             _settings_recommendation_message(total_pending),
-            title="CircuitSetup Energy Analyzer suggested settings",
+            title=_notification_text("settings_recommendations", "title"),
             notification_id=settings_recommendation_notification_id(entry_id),
         )
     except (AttributeError, TypeError):
@@ -172,18 +178,17 @@ async def async_create_settings_recommendation_notification(
 
 def _settings_recommendation_message(total_pending: int) -> str:
     if total_pending == 1:
-        return (
-            "There is 1 suggested Advanced Circuit Setting to review via "
-            "CircuitSetup Energy Analyzer > Configure > Review Suggested Settings."
-        )
-    return (
-        f"There are {total_pending} suggested Advanced Circuit Settings "
-        "to review via CircuitSetup Energy Analyzer > "
-        "Configure > Review Suggested Settings."
-    )
+        template = _notification_text("settings_recommendations", "singular_message")
+    else:
+        template = _notification_text("settings_recommendations", "plural_message")
+    return template.format(total_pending=total_pending)
 
 
 def _comparison_value_label(alert: AlertEvidence) -> str:
     if alert.feature in {"demand_limit", "demand_monthly_peak"}:
-        return "Comparison value"
-    return "Baseline value"
+        return _notification_text("alert", "comparison_value")
+    return _notification_text("alert", "baseline_value")
+
+
+def _notification_text(*keys: str) -> str:
+    return translation_text("notifications", *keys)

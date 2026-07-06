@@ -3,11 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-ELECTRICAL_SAFETY_NOTICE = (
-    "This is operational evidence from energy measurements, not electrical "
-    "safety verification, code compliance, or breaker sizing advice. Consult a "
-    "qualified electrician for safety or code concerns."
-)
+from .localized_text import translation_text
+
+ELECTRICAL_SAFETY_NOTICE = translation_text("safety", "electrical_notice")
 
 _ELECTRICAL_SAFETY_FEATURE_TOKENS = (
     "capacity",

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,12 +21,12 @@ from ..const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
 )
 from ..entity import circuit_info_from_config
+from ..localized_text import translation_section
 from ..models import ApplianceProfile, CircuitMode, SensorRole
 from ..profiles import get_profile_definition
 
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
 SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
-_TRANSLATIONS_PATH = Path(__file__).resolve().parents[1] / "translations" / "en.json"
 
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
@@ -110,12 +107,9 @@ _SETUP_HEALTH_ISSUE_OPTION_STEPS = {
 }
 
 
-@lru_cache(maxsize=1)
 def setup_health_panel_text() -> dict[str, Any]:
     """Return English setup-health panel text from Home Assistant translations."""
-    translations = json.loads(_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
-    setup_health = translations.get("panel", {}).get("setup_health", {})
-    return dict(setup_health) if isinstance(setup_health, Mapping) else {}
+    return dict(translation_section("panel", "setup_health"))
 
 
 def _setup_health_checklist_text(item_id: str) -> Mapping[str, Any]:
