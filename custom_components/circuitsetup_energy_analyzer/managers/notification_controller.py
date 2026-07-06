@@ -37,7 +37,7 @@ class NotificationController:
 
     async def async_notify_alert(self, alert: AlertEvidence) -> None:
         """Create one persistent alert notification when it is not suppressed."""
-        if alert.circuit_id in self._coordinator.paused_circuits:
+        if self._coordinator.evidence_actions.alerts_paused(alert.circuit_id):
             return
         if self._coordinator.evidence_actions.has_suppressed_alert_feedback(alert):
             return

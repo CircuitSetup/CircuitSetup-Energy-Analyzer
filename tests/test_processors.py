@@ -265,6 +265,86 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_processing_pipeline_applies_cross_circuit_feature_results() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    applied: list[FeatureResult] = []
+    balance_result = FeatureResult(
+        state_updates=[
+            StateUpdate(
+                ("health_summary_by_circuit", "mains"),
+                "Balanced",
+            )
+        ]
+    )
+    solar_result = FeatureResult(
+        state_updates=[
+            StateUpdate(
+                ("solar_flow_status_by_circuit", "mains"),
+                "surplus",
+            )
+        ],
+        store_dirty=True,
+    )
+
+    class _Processor:
+        def __init__(self, result: FeatureResult | None = None) -> None:
+            self.result = result or FeatureResult()
+
+        def process(self, *args: object, **kwargs: object) -> FeatureResult:
+            del args, kwargs
+            return self.result
+
+    class _Coordinator:
+        state = SimpleNamespace()
+        store_data = SimpleNamespace(utility_comparison_settings_by_circuit={})
+        circuit_registry = SimpleNamespace(config_for_circuit=lambda circuit_id: None)
+        state_reducer = SimpleNamespace(apply_updates=lambda state, updates: None)
+
+        async def async_apply_feature_result(
+            self,
+            result: FeatureResult,
+        ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
+            applied.append(result)
+            return result.events, result.alerts
+
+    pipeline = processing_pipeline.ProcessingPipeline(_Coordinator())
+    pipeline.configure_processors(
+        event_processor=_Processor(),
+        power_quality_processor=_Processor(),
+        energy_usage_processor=_Processor(),
+        energy_goal_processor=_Processor(),
+        run_cycle_processor=_Processor(),
+        activity_alert_processor=_Processor(),
+        billing_cycle_processor=_Processor(),
+        cost_processor=_Processor(),
+        demand_processor=_Processor(),
+        capacity_processor=_Processor(),
+        leg_imbalance_processor=_Processor(),
+        metric_consistency_processor=_Processor(),
+        standby_processor=_Processor(),
+        mains_balance_processor=_Processor(balance_result),
+        solar_flow_processor=_Processor(solar_result),
+        utility_comparison_processor=_Processor(),
+        clear_power_quality_state=lambda circuit_id: None,
+        clear_standby_state=lambda circuit_id: None,
+        sync_setup_health_repairs=lambda circuit_id: None,
+    )
+
+    alerts = await pipeline.async_process_cross_circuit([], SimpleNamespace())
+
+    assert alerts == []
+    assert applied == [balance_result, solar_result]
+    assert any(result.store_dirty for result in applied)
+
+
+@pytest.mark.asyncio
 async def test_coordinator_applies_feature_result() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

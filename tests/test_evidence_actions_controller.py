@@ -159,6 +159,41 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_evidence_action_controller_expires_timed_maintenance() -> None:
+    coordinator = _ActionCoordinator()
+    controller = EvidenceActionController(coordinator)
+
+    await controller.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+    )
+
+    maintenance = coordinator.store_data.maintenance_by_circuit["fridge"]
+    assert maintenance["active"] is True
+    assert maintenance["expires_at"] == "2026-06-30T13:30:00+00:00"
+    assert "fridge" in coordinator.paused_circuits
+
+    coordinator.now = datetime(2026, 6, 30, 13, 30, tzinfo=UTC)
+
+    assert controller.alerts_paused("fridge") is False
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+
+
+@pytest.mark.asyncio
+async def test_evidence_action_controller_timed_pause_uses_maintenance_expiry() -> None:
+    coordinator = _ActionCoordinator()
+    controller = EvidenceActionController(coordinator)
+
+    await controller.async_pause_alerts("fridge", duration="00:30:00")
+
+    maintenance = coordinator.store_data.maintenance_by_circuit["fridge"]
+    assert maintenance["active"] is True
+    assert maintenance["expires_at"] == "2026-06-30T12:30:00+00:00"
+    assert maintenance["source"] == "pause_alerts"
+
+
+@pytest.mark.asyncio
 async def test_evidence_action_controller_stores_feedback_and_retires_alert() -> None:
     coordinator = _ActionCoordinator()
     alert = _alert("fridge", "reactive_power")

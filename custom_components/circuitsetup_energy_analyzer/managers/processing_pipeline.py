@@ -176,26 +176,22 @@ class ProcessingPipeline:
         context: Any,
     ) -> list[Any]:
         coordinator = self._coordinator
+        alerts: list[Any] = []
 
         balance_result = self._mains_balance_processor.process(
             samples,
             context,
         )
-        coordinator.state_reducer.apply_updates(
-            coordinator.state,
-            balance_result.state_updates,
-        )
+        _, balance_alerts = await coordinator.async_apply_feature_result(balance_result)
+        alerts.extend(balance_alerts)
 
         solar_result = self._solar_flow_processor.process(
             samples,
             context,
         )
-        coordinator.state_reducer.apply_updates(
-            coordinator.state,
-            solar_result.state_updates,
-        )
+        _, solar_alerts = await coordinator.async_apply_feature_result(solar_result)
+        alerts.extend(solar_alerts)
 
-        alerts: list[Any] = []
         for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
             config = coordinator.circuit_registry.config_for_circuit(circuit_id)
             if config is None:
