@@ -19,8 +19,11 @@ class UxStateManager:
 
     def hydrate_state_from_store(self) -> None:
         coordinator = self._coordinator
+        now = coordinator.current_time()
         maintenance_by_circuit = coordinator.store_data.maintenance_by_circuit
         for circuit_id, maintenance in maintenance_by_circuit.items():
+            if coordinator.evidence_actions.expire_maintenance_if_due(circuit_id, now):
+                continue
             if maintenance.get("active") is True:
                 coordinator.paused_circuits.add(circuit_id)
         coordinator.nilm_controller.hydrate_state_from_store()
@@ -28,8 +31,8 @@ class UxStateManager:
             coordinator.state,
             coordinator.store_data,
         )
-        self.refresh_all(coordinator.current_time())
-        coordinator._refresh_settings_recommendation_state(coordinator.current_time())
+        self.refresh_all(now)
+        coordinator._refresh_settings_recommendation_state(now)
 
     def refresh_all(self, now: datetime) -> None:
         for config in self._coordinator.circuit_configs:
@@ -49,6 +52,7 @@ class UxStateManager:
     ) -> None:
         coordinator = self._coordinator
         circuit_id = config.circuit_id
+        coordinator.evidence_actions.expire_maintenance_if_due(circuit_id, now)
         checklist = data_quality_checklist(config, sample)
         if (
             sample is None

@@ -38,7 +38,13 @@ class EvidenceActionController:
         duration: str | None = None,
     ) -> None:
         """Pause alert notifications for a circuit."""
-        del duration
+        if duration is not None:
+            await self.async_start_maintenance(
+                circuit_id,
+                duration=duration,
+                source="pause_alerts",
+            )
+            return
         coordinator = self._coordinator
         coordinator.paused_circuits.add(circuit_id)
         coordinator.refresh_ux_state_for_circuit(
@@ -65,6 +71,7 @@ class EvidenceActionController:
         note: str = "",
         duration: str | None = None,
         relearn_on_end: bool = False,
+        source: str = "maintenance",
     ) -> None:
         """Mark one circuit in maintenance and pause appliance notifications."""
         coordinator = self._coordinator
@@ -77,6 +84,11 @@ class EvidenceActionController:
         }
         if duration is not None:
             payload["duration"] = str(duration)
+            expires_at = _duration_expires_at(duration, now)
+            if expires_at is not None:
+                payload["expires_at"] = expires_at.isoformat()
+        if source != "maintenance":
+            payload["source"] = source
         coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
         coordinator.paused_circuits.add(circuit_id)
         coordinator.store_persistence.mark_dirty()
@@ -106,6 +118,36 @@ class EvidenceActionController:
         coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
+
+    def alerts_paused(self, circuit_id: str, now: datetime | None = None) -> bool:
+        """Return whether circuit alerts are currently paused."""
+        self.expire_maintenance_if_due(circuit_id, now)
+        return circuit_id in self._coordinator.paused_circuits
+
+    def expire_maintenance_if_due(
+        self,
+        circuit_id: str,
+        now: datetime | None = None,
+    ) -> bool:
+        """Clear a timed maintenance pause once its expiry is reached."""
+        coordinator = self._coordinator
+        maintenance = dict(
+            coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
+        )
+        if maintenance.get("active") is not True:
+            return False
+        expires_at = mapping_datetime(maintenance.get("expires_at"))
+        if expires_at is None:
+            return False
+        now = now or coordinator.current_time()
+        if expires_at > _datetime_for_comparison(now, expires_at):
+            return False
+
+        maintenance.update({"active": False, "ended_at": now.isoformat()})
+        coordinator.store_data.maintenance_by_circuit[circuit_id] = maintenance
+        coordinator.paused_circuits.discard(circuit_id)
+        coordinator.store_persistence.mark_dirty()
+        return True
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
@@ -331,6 +373,45 @@ def _alert_feedback_expires_at(action: str, now: datetime) -> datetime | None:
     if action == "unhelpful":
         return now + ALERT_UNHELPFUL_FEEDBACK_TTL
     return None
+
+
+def _duration_expires_at(duration: Any, now: datetime) -> datetime | None:
+    delta = _duration_delta(duration)
+    if delta is None or delta.total_seconds() <= 0:
+        return None
+    return now + delta
+
+
+def _duration_delta(duration: Any) -> timedelta | None:
+    if isinstance(duration, timedelta):
+        return duration
+    text = str(duration or "").strip()
+    if not text:
+        return None
+    try:
+        parts = [float(part) for part in text.split(":")]
+    except ValueError:
+        return None
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours = 0.0
+        minutes, seconds = parts
+    elif len(parts) == 1:
+        hours = 0.0
+        minutes = 0.0
+        seconds = parts[0]
+    else:
+        return None
+    return timedelta(hours=hours, minutes=minutes, seconds=seconds)
+
+
+def _datetime_for_comparison(now: datetime, target: datetime) -> datetime:
+    if now.tzinfo is None and target.tzinfo is not None:
+        return now.replace(tzinfo=target.tzinfo)
+    if now.tzinfo is not None and target.tzinfo is None:
+        return now.replace(tzinfo=None)
+    return now
 
 
 def _positive_int_value(value: Any, *, default: int) -> int:
