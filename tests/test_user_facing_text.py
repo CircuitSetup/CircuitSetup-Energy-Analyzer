@@ -3177,6 +3177,26 @@ def test_readme_includes_practical_usage_guide() -> None:
     )
 
 
+def test_readme_documents_assignment_defaults() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        "choose the appliance type, circuit mode, power-flow mode" not in readme_text
+    )
+    for expected in (
+        "choose the appliance type and source sensors",
+        "The integration derives circuit mode and power-flow mode",
+        "| Profile | Default phase/topology | Default power flow |",
+        "| `refrigerator` | Single phase | Load |",
+        "| `hvac` | Dual phase when both legs are selected; "
+        "otherwise single phase | Load |",
+        "| `solar_inverter` | Single phase | Generation |",
+        "| `mains_nilm` | Mains NILM | Mains/net |",
+        "| `mixed` | Mixed | Load |",
+    ):
+        assert expected in readme_text
+
+
 def test_readme_explains_notification_evidence_graph_links() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())

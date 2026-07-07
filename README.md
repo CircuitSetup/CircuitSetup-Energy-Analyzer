@@ -115,7 +115,7 @@ Use the integration in this order:
 
 - **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
 - **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as adding a cumulative kWh source, fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
-- **Classify circuits deliberately**: choose the appliance type, circuit mode, power-flow mode, and source sensors before trusting appliance evidence.
+- **Classify circuits deliberately**: choose the appliance type and source sensors, then review the automatically derived circuit mode and power-flow mode before trusting appliance evidence.
 - **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
 - **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
@@ -166,9 +166,8 @@ questions instead of raw diagnostic entity lists:
    - Whether to include the circuit.
    - The circuit name.
    - The appliance type.
-   - The circuit mode.
-   - The power-flow mode.
    - The selected source sensors.
+   - The automatically derived circuit mode and power-flow mode shown in the review text.
 11. Save the configuration.
 12. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
 13. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, or other feature settings.
@@ -179,6 +178,10 @@ questions instead of raw diagnostic entity lists:
 
 Correct circuit classification is the most important part of setup.
 
+In **Appliance Circuit Assignments**, you choose the appliance type and source
+sensors. The integration derives circuit mode and power-flow mode from that
+selection.
+
 | Mode | Use for | Notes |
 |---|---|---|
 | **Single Phase** | One CT/channel tracking one main 120 V load, such as a refrigerator, washer, sump pump, microwave, or water pump. | Best for dedicated appliance circuits. |
@@ -186,9 +189,10 @@ Correct circuit classification is the most important part of setup.
 | **Mixed** | A branch circuit with multiple unrelated loads, such as plugs and lights. | The analyzer stays conservative and avoids appliance-specific claims. |
 | **Mains NILM** | Whole-home mains or feed circuits. | Required for experimental whole-home load-signature discovery. |
 
-## Choose the right power-flow mode
+## Review the derived power-flow mode
 
-Power-flow mode tells the analyzer how to interpret signed watts.
+Power-flow mode tells the analyzer how to interpret signed watts. It is selected
+automatically during guided assignment.
 
 | Power flow | Use for | How negative watts are treated |
 |---|---|---|
@@ -200,30 +204,33 @@ If a normal load circuit shows sustained negative watts, check CT orientation be
 
 ## Supported appliance profiles
 
-Recommended appliance types include:
+Supported profile values include:
 
-- `refrigerator`
-- `freezer`
-- `hvac`
-- `hvac_compressor`
-- `hvac_blower`
-- `electric_heat`
-- `water_heater`
-- `oven`
-- `microwave`
-- `washer`
-- `dryer`
-- `pool_pump`
-- `water_pump`
-- `well_pump`
-- `sump_pump`
-- `ev_charger`
-- `solar_inverter`
-- `motor_load`
-- `resistive_load`
-- `mixed`
+| Profile | Default phase/topology | Default power flow |
+|---|---|---|
+| `refrigerator` | Single phase | Load |
+| `freezer` | Single phase | Load |
+| `hvac` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `hvac_compressor` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `hvac_blower` | Single phase | Load |
+| `electric_heat` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `water_heater` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `oven` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `microwave` | Single phase | Load |
+| `washer` | Single phase | Load |
+| `dryer` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `pool_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `water_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `well_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `sump_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `ev_charger` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `solar_inverter` | Single phase | Generation |
+| `mains_nilm` | Mains NILM | Mains/net |
+| `motor_load` | Single phase | Load |
+| `resistive_load` | Single phase | Load |
+| `mixed` | Mixed | Load |
 
-Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works.
+Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
 
 ## Summary-First Diagnostics
 
