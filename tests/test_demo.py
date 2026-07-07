@@ -59,6 +59,23 @@ def test_demo_module_exposes_shared_history_seed_templates() -> None:
     ) == "water_heater"
 
 
+def test_demo_nilm_workspace_seed_does_not_read_json_at_runtime(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import demo
+
+    def fail_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        raise AssertionError(f"unexpected runtime read: {self}")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    seed = demo.demo_nilm_workspace_seed(
+        datetime(2026, 6, 7, 12, 0, tzinfo=UTC),
+    )
+
+    assert seed["assignments"][0]["display_name"] == "Demo Pool Pump"
+
+
 def test_demo_module_loads_nilm_workspace_seed_from_json() -> None:
     from custom_components.circuitsetup_energy_analyzer import demo
 

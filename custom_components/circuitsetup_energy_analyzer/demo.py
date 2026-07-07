@@ -244,7 +244,7 @@ def demo_nilm_workspace_seed(
 ) -> dict[str, Any]:
     """Return the bundled NILM demo workspace scenario for a point in time."""
     return _resolve_demo_seed_values(
-        _demo_nilm_workspace_seed_template(),
+        DEMO_NILM_WORKSPACE_SEED_TEMPLATE,
         now,
         circuit_id,
     )
@@ -253,6 +253,9 @@ def demo_nilm_workspace_seed(
 @lru_cache(maxsize=1)
 def _demo_nilm_workspace_seed_template() -> dict[str, Any]:
     return json.loads(DEMO_NILM_WORKSPACE_DATA_PATH.read_text(encoding="utf-8"))
+
+
+DEMO_NILM_WORKSPACE_SEED_TEMPLATE = _demo_nilm_workspace_seed_template()
 
 
 def _resolve_demo_seed_values(value: Any, now: datetime, circuit_id: str) -> Any:
