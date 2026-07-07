@@ -43,3 +43,37 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
         SensorRole.REAL_POWER,
         SensorRole.CURRENT,
     ]
+
+
+def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {CONF_SOURCE_ENTITIES: ["sensor.roof_solar_inverter_active_power"]}
+    )
+
+    assert configs[0].appliance_profile is ApplianceProfile.SOLAR_INVERTER
+    assert configs[0].mode is CircuitMode.DUAL_PHASE
+
+
+def test_config_parser_coerces_raw_solar_inverter_to_dual_phase() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "solar",
+                    "appliance_profile": "solar_inverter",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.roof_solar_inverter_active_power"],
+                }
+            ]
+        }
+    )
+
+    assert configs[0].mode is CircuitMode.DUAL_PHASE

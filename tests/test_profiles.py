@@ -138,10 +138,7 @@ def test_mains_nilm_profile_is_experimental_aggregate_mode() -> None:
 def test_solar_inverter_profile_supports_generation_power_quality() -> None:
     definition = get_profile_definition(ApplianceProfile.SOLAR_INVERTER)
 
-    assert definition.supported_modes == {
-        CircuitMode.SINGLE_PHASE,
-        CircuitMode.DUAL_PHASE,
-    }
+    assert definition.supported_modes == {CircuitMode.DUAL_PHASE}
     assert SensorRole.REAL_POWER in definition.required_roles
     assert SensorRole.VOLTAGE in definition.recommended_roles
     assert SensorRole.POWER_FACTOR in definition.recommended_roles
