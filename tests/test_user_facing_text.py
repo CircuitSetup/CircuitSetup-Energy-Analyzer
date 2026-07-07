@@ -3190,7 +3190,7 @@ def test_readme_documents_assignment_defaults() -> None:
         "| `refrigerator` | Single phase | Load |",
         "| `hvac` | Dual phase when both legs are selected; "
         "otherwise single phase | Load |",
-        "| `solar_inverter` | Single phase | Generation |",
+        "| `solar_inverter` | Dual phase | Generation |",
         "| `mains_nilm` | Mains NILM | Mains/net |",
         "| `mixed` | Mixed | Load |",
     ):

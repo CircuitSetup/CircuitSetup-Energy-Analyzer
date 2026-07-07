@@ -215,7 +215,7 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
     ),
     ApplianceProfile.SOLAR_INVERTER: ProfileDefinition(
         appliance_profile=ApplianceProfile.SOLAR_INVERTER,
-        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        supported_modes=frozenset({CircuitMode.DUAL_PHASE}),
         required_roles=frozenset({SensorRole.REAL_POWER}),
         recommended_roles=_POWER_CONTEXT,
         features=frozenset({

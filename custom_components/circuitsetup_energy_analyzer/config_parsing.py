@@ -270,6 +270,8 @@ def _circuit_config_from_raw(
             raw_circuit.get("appliance_profile", ApplianceProfile.MIXED.value)
         )
         mode = CircuitMode(raw_circuit.get("mode", CircuitMode.MIXED.value))
+        if appliance_profile is ApplianceProfile.SOLAR_INVERTER:
+            mode = CircuitMode.DUAL_PHASE
         retention_mode = RetentionMode(
             raw_circuit.get("retention_mode", default_retention_mode.value)
         )
@@ -865,7 +867,7 @@ def _appliance_profile_mode_from_circuit_id(
         (
             ("_solar_", "_inverter_", "_pv_"),
             ApplianceProfile.SOLAR_INVERTER,
-            CircuitMode.SINGLE_PHASE,
+            CircuitMode.DUAL_PHASE,
         ),
     ):
         if any(token in normalized for token in tokens):

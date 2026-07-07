@@ -2495,6 +2495,7 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
         ApplianceProfile.WELL_PUMP.value,
         ApplianceProfile.SUMP_PUMP.value,
         ApplianceProfile.EV_CHARGER.value,
+        ApplianceProfile.SOLAR_INVERTER.value,
     }:
         return CircuitMode.DUAL_PHASE.value
     return CircuitMode.SINGLE_PHASE.value
@@ -2505,6 +2506,8 @@ def _assignment_mode_for_profile_and_entities(
     entity_ids: Iterable[str],
 ) -> str:
     default_mode = _default_mode_for_assignment_profile(profile)
+    if profile == ApplianceProfile.SOLAR_INVERTER.value:
+        return CircuitMode.DUAL_PHASE.value
     if default_mode != CircuitMode.DUAL_PHASE.value:
         return default_mode
     return (
@@ -3385,12 +3388,12 @@ def _suggest_assignment_profile_mode(
         (
             "_solar_",
             ApplianceProfile.SOLAR_INVERTER.value,
-            CircuitMode.SINGLE_PHASE.value,
+            CircuitMode.DUAL_PHASE.value,
         ),
         (
             "_inverter_",
             ApplianceProfile.SOLAR_INVERTER.value,
-            CircuitMode.SINGLE_PHASE.value,
+            CircuitMode.DUAL_PHASE.value,
         ),
         ("_charger_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),
         ("_charging_", ApplianceProfile.EV_CHARGER.value, CircuitMode.DUAL_PHASE.value),

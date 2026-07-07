@@ -185,7 +185,7 @@ selection.
 | Mode | Use for | Notes |
 |---|---|---|
 | **Single Phase** | One CT/channel tracking one main 120 V load, such as a refrigerator, washer, sump pump, microwave, or water pump. | Best for dedicated appliance circuits. |
-| **Dual Phase** | Two CT/channels that are the two legs of one 240 V appliance, such as HVAC, electric heat, water heater, dryer, oven, pool pump, or EV charger. | Enables leg-balance and combined-appliance analysis. |
+| **Dual Phase** | Two CT/channels that are the two legs of one 240 V appliance, such as HVAC, electric heat, water heater, dryer, oven, pool pump, EV charger, or solar inverter. | Enables leg-balance and combined-appliance analysis. |
 | **Mixed** | A branch circuit with multiple unrelated loads, such as plugs and lights. | The analyzer stays conservative and avoids appliance-specific claims. |
 | **Mains NILM** | Whole-home mains or feed circuits. | Required for experimental whole-home load-signature discovery. |
 
@@ -224,7 +224,7 @@ Supported profile values include:
 | `well_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `sump_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `ev_charger` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `solar_inverter` | Single phase | Generation |
+| `solar_inverter` | Dual phase | Generation |
 | `mains_nilm` | Mains NILM | Mains/net |
 | `motor_load` | Single phase | Load |
 | `resistive_load` | Single phase | Load |

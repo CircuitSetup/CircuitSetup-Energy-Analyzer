@@ -4179,6 +4179,7 @@ async def test_assignment_step_exposes_power_flow_for_solar_and_mains() -> None:
     assert _schema_default(result["data_schema"], "appliance_profile") == (
         "solar_inverter"
     )
+    assert result["description_placeholders"]["circuit_mode"] == "dual_phase"
     assert "power_flow" not in _schema_keys(result["data_schema"])
 
     result = await flow.async_step_assign(
@@ -4194,6 +4195,7 @@ async def test_assignment_step_exposes_power_flow_for_solar_and_mains() -> None:
     result = await flow.async_step_utility({"enable_utility_comparison": False})
 
     assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS][0]["mode"] == "dual_phase"
     assert result["data"][CONF_CIRCUITS][0]["power_flow"] == "generation"
 
 
