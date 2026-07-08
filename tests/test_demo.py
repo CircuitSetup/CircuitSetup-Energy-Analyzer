@@ -3,7 +3,90 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from custom_components.circuitsetup_energy_analyzer.models import SensorRole
+from custom_components.circuitsetup_energy_analyzer.models import SensorRef, SensorRole
+
+
+def test_demo_simulation_generates_values_for_every_source_role() -> None:
+    from custom_components.circuitsetup_energy_analyzer import demo
+
+    for circuit_id, role_values in demo.DEMO_SOURCE_VALUES.items():
+        for role in role_values:
+            value = demo.demo_simulated_source_value(circuit_id, role, tick=42)
+            assert value is not None, (circuit_id, role)
+
+
+def test_demo_simulation_covers_two_weeks_with_monotonic_energy() -> None:
+    from custom_components.circuitsetup_energy_analyzer import demo
+
+    assert demo.DEMO_SIMULATION_INTERVAL_SECONDS == 10
+    assert demo.DEMO_SIMULATION_WINDOW_DAYS == 14
+
+    ticks_per_day = 24 * 60 * 60 // demo.DEMO_SIMULATION_INTERVAL_SECONDS
+    samples = [
+        demo.demo_simulated_source_value(
+            "refrigerator",
+            SensorRole.ENERGY,
+            tick=tick,
+        )
+        for tick in (0, 1, ticks_per_day, 7 * ticks_per_day, 14 * ticks_per_day)
+    ]
+
+    assert samples == sorted(samples)
+    assert samples[-1] > samples[0]
+
+
+def test_demo_simulation_varies_values_to_exercise_alert_scenarios() -> None:
+    from custom_components.circuitsetup_energy_analyzer import demo
+
+    ticks_per_day = 24 * 60 * 60 // demo.DEMO_SIMULATION_INTERVAL_SECONDS
+    hvac_alert_tick = 2 * ticks_per_day + 13 * 60 * 6
+    microwave_alert_tick = 4 * ticks_per_day + 18 * 60 * 6
+
+    hvac_l1 = demo.demo_simulated_source_value(
+        "hvac_l1",
+        SensorRole.REAL_POWER,
+        tick=hvac_alert_tick,
+    )
+    hvac_l2 = demo.demo_simulated_source_value(
+        "hvac_l2",
+        SensorRole.REAL_POWER,
+        tick=hvac_alert_tick,
+    )
+    microwave_real = demo.demo_simulated_source_value(
+        "microwave",
+        SensorRole.REAL_POWER,
+        tick=microwave_alert_tick,
+    )
+    microwave_apparent = demo.demo_simulated_source_value(
+        "microwave",
+        SensorRole.APPARENT_POWER,
+        tick=microwave_alert_tick,
+    )
+
+    assert hvac_l1 is not None
+    assert hvac_l2 is not None
+    assert microwave_real is not None
+    assert microwave_apparent is not None
+    assert hvac_l1 > hvac_l2 * 3
+    assert microwave_apparent < microwave_real * 0.8
+
+
+def test_demo_source_sensor_advances_after_one_simulation_tick(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import sensor as sensor_module
+
+    monkeypatch.setattr(sensor_module, "monotonic", lambda: 100.0, raising=False)
+    source = sensor_module.DemoSourceSensor(
+        entry_id="demo",
+        sensor=SensorRef(
+            entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            role=SensorRole.REAL_POWER,
+        ),
+    )
+    first = source.native_value
+
+    monkeypatch.setattr(sensor_module, "monotonic", lambda: 110.0, raising=False)
+
+    assert source.native_value != first
 
 
 def test_demo_module_exposes_shared_source_metadata() -> None:

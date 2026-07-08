@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
+from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 from .appliance_metadata import appliance_icon_for_profile
@@ -17,10 +19,16 @@ from .const import (
     DOMAIN,
 )
 from .demo import (
+    DEMO_SIMULATION_INTERVAL_SECONDS as _DEMO_SIMULATION_INTERVAL_SECONDS,
+)
+from .demo import (
     DEMO_SOURCE_ROLE_METADATA as _DEMO_SOURCE_ROLE_METADATA,
 )
 from .demo import (
     demo_circuit_id_from_entity_id as _demo_circuit_id_from_entity_id,
+)
+from .demo import (
+    demo_simulated_source_value as _demo_simulated_source_value,
 )
 from .demo import (
     demo_source_value as _demo_source_value,
@@ -120,6 +128,11 @@ except ModuleNotFoundError:
         """Fallback sensor state class constants."""
 
         MEASUREMENT = "measurement"
+
+try:
+    from homeassistant.helpers.event import async_track_time_interval
+except ModuleNotFoundError:
+    async_track_time_interval = None
 
 
 SETUP_HEALTH_ENTITY_NAME = "CircuitSetup Energy Analyzer Setup Health"
@@ -3181,6 +3194,30 @@ class DemoSourceSensor(SensorEntity):
         self._attr_state_class = metadata.get("state_class")
         self._attr_icon = metadata.get("icon")
         self._entry_id = entry_id
+        self._demo_circuit_id = circuit_id
+        self._demo_role = role
+        self._demo_started_at = monotonic()
+
+    async def async_added_to_hass(self) -> None:
+        """Start automatic 10-second demo source refreshes."""
+        if async_track_time_interval is None:
+            return
+        async_on_remove = getattr(self, "async_on_remove", None)
+        hass = getattr(self, "hass", None)
+        if async_on_remove is None or hass is None:
+            return
+        async_on_remove(
+            async_track_time_interval(
+                hass,
+                self._handle_demo_tick,
+                timedelta(seconds=_DEMO_SIMULATION_INTERVAL_SECONDS),
+            )
+        )
+
+    def _handle_demo_tick(self, _now: Any) -> None:
+        write_state = getattr(self, "async_write_ha_state", None)
+        if write_state is not None:
+            write_state()
 
     @property
     def unique_id(self) -> str:
@@ -3200,7 +3237,15 @@ class DemoSourceSensor(SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return the demo measurement value."""
-        return self._attr_native_value
+        tick = int(
+            (monotonic() - self._demo_started_at)
+            // _DEMO_SIMULATION_INTERVAL_SECONDS
+        )
+        return _demo_simulated_source_value(
+            self._demo_circuit_id,
+            self._demo_role,
+            tick,
+        )
 
     @property
     def device_class(self) -> str | None:
