@@ -3516,6 +3516,7 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include a Markdown link" in normalized_text
+    assert "link directly to **Configure > Review Suggested Settings**" in readme_text
 
 
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
