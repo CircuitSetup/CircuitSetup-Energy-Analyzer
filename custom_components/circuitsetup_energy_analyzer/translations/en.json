@@ -1032,6 +1032,19 @@
             "fix": "Let analyzer learn"
           }
         }
+      },
+      "evidence": {
+        "loading": "Loading alert evidence...",
+        "fallbacks": {
+          "current_circuit_heading": "No current alert evidence",
+          "current_circuit_message": "No current alert evidence is available for this circuit.",
+          "historical_heading": "Historical alert not found",
+          "historical_message": "The alert from this notification is no longer available.",
+          "historical_next_step": "Open a newer notification or review the appliance summary sensors for current evidence."
+        },
+        "actions": {
+          "available_circuit_actions": "Available Circuit Actions"
+        }
       }
     }
   }

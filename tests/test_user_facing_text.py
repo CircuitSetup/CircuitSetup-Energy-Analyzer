@@ -2802,6 +2802,26 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         assert text not in source_text
 
 
+def test_alert_evidence_panel_text_lives_in_translations() -> None:
+    translations = _translations()
+    evidence = translations["config_panel"]["panel"]["evidence"]
+    translated_text = json.dumps(evidence)
+
+    for text in (
+        "Loading alert evidence...",
+        "No current alert evidence",
+        "No current alert evidence is available for this circuit.",
+        "Historical alert not found",
+        "The alert from this notification is no longer available.",
+        (
+            "Open a newer notification or review the appliance summary sensors "
+            "for current evidence."
+        ),
+        "Available Circuit Actions",
+    ):
+        assert text in translated_text
+
+
 def test_notification_and_dashboard_text_live_in_translations() -> None:
     translations = _translations()
     notification_text = translations["config_panel"]["notifications"]
