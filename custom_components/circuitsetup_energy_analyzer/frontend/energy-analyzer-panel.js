@@ -242,7 +242,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._payload = null;
-      this._error = `Could not load alert evidence from ${fetchPath}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.load_alert_evidence", { path: fetchPath, message: error.message });
       this._loading = false;
       this._render();
     }
@@ -266,7 +266,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._historyError = `Could not load history samples from ${fetchPath}: ${error.message}`;
+      this._historyError = this._panelTextFormat("errors.load_history", { path: fetchPath, message: error.message });
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._historyLoading = false;
@@ -316,14 +316,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           if (!this._isCurrentRequest(requestId, routeKey)) {
             return;
           }
-          this._nilmWorkspaceError = `Could not load NILM workspace history: ${error.message}`;
+          this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
         }
       }
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._nilmWorkspaceError = `Could not load NILM workspace: ${error.message}`;
+      this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace", { message: error.message });
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._nilmWorkspaceLoading = false;
@@ -365,7 +365,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._applianceDetailError = `Could not load Appliance Detail from ${fetchPath}: ${error.message}`;
+      this._applianceDetailError = this._panelTextFormat("errors.load_appliance_detail", { path: fetchPath, message: error.message });
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._applianceDetailLoading = false;
@@ -449,7 +449,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
       this._scrollToTop();
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -480,7 +480,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       await this._loadEvidence({ routeKey: this._routeKey() });
       this._scrollToTop();
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -499,7 +499,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const existingAssignment = actionKey === "assign" ? this._nilmExistingAssignmentSelection(`signature_${index}`) : null;
       const label = existingAssignment ? existingAssignment.label : labelInput ? labelInput.value.trim() : "";
       if (!label) {
-        this._error = "Enter a label for this NILM signature before saving.";
+        this._error = this._panelText("errors.nilm_signature_label_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -512,7 +512,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
       const target = targetList ? targetList.dataset.selected || "" : "";
       if (!target) {
-        this._error = "Choose a merge target before merging NILM signatures.";
+        this._error = this._panelText("errors.nilm_merge_target_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -535,7 +535,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
       this._scrollToTop();
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -549,7 +549,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (actionKey === "adjust") {
       const interval = intervals && intervals[index];
       if (!interval) {
-        this._error = "Choose a saved NILM interval before adjusting it.";
+        this._error = this._panelText("errors.nilm_interval_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -561,7 +561,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         appliance_id: String(interval.appliance_id || ""),
         ground_truth_entity_id: String(interval.ground_truth_entity_id || ""),
       };
-      this._lastActionMessage = "Loaded interval label for adjustment.";
+      this._lastActionMessage = this._panelText("messages.loaded_interval_adjustment");
       this._renderAndScrollToTop();
       return;
     }
@@ -577,7 +577,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const start = this._datetimeLocalToIso(draft.start);
       const end = this._datetimeLocalToIso(draft.end);
       if (!label || !start || !end) {
-        this._error = "Choose start, end, and label before saving a NILM interval.";
+        this._error = this._panelText("errors.nilm_interval_fields_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -591,7 +591,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
       if (actionKey === "generate_sensor" && !groundTruthEntityId) {
-        this._error = "Choose a ground truth sensor before generating NILM intervals.";
+        this._error = this._panelText("errors.nilm_ground_truth_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -615,7 +615,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         data.assignment_id = existingAssignment.assignment_id;
       }
       if (!data.label) {
-        this._error = "Add a label to this NILM interval before assigning it.";
+        this._error = this._panelText("errors.nilm_interval_label_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -638,12 +638,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
       this._lastActionMessage = actionKey === "save"
-        ? `Saved interval label: ${data.label}.`
+        ? this._panelTextFormat("messages.saved_interval_label", { label: data.label })
         : actionKey === "generate_sensor"
-          ? `Generated sensor labels for ${data.label}.`
+          ? this._panelTextFormat("messages.generated_sensor_labels", { label: data.label })
           : actionKey === "assign"
-            ? `Assigned interval to ${data.label}.`
-            : "Deleted interval label.";
+            ? this._panelTextFormat("messages.assigned_interval", { label: data.label })
+            : this._panelText("messages.deleted_interval_label");
       if (actionKey === "save" || actionKey === "generate_sensor") {
         this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
       }
@@ -651,7 +651,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_label_interval") });
       this._scrollToTop();
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -683,7 +683,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ? labelInput.value
         : item.display_name || item.label || item.appliance_id || "";
       if (!label || !label.trim()) {
-        this._error = "Enter an appliance name before assigning this NILM session.";
+        this._error = this._panelText("errors.nilm_session_label_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -699,7 +699,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const profileInput = this.shadowRoot.querySelector(`#nilm_assignment_profile_${index}`);
       const profile = profileInput ? profileInput.value.trim() : "";
       if (!profile) {
-        this._error = "Enter an appliance type before changing this NILM assignment.";
+        this._error = this._panelText("errors.nilm_assignment_type_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -709,7 +709,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const targetInput = this.shadowRoot.querySelector(`#nilm_assignment_merge_target_${index}`);
       const target = targetInput ? targetInput.value.trim() : "";
       if (!target) {
-        this._error = "Choose an assignment to merge into.";
+        this._error = this._panelText("errors.nilm_assignment_merge_required");
         this._renderAndScrollToTop();
         return;
       }
@@ -735,7 +735,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._storeActionMessageForReload(this._lastActionMessage);
       window.location.assign(routeKey);
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -747,7 +747,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const item = assignments && assignments[index];
     const actions = item && item.actions;
     if (!actions) {
-      this._error = "Action unavailable: NILM assignment save.";
+      this._error = this._panelText("errors.nilm_assignment_save_unavailable");
       this._renderAndScrollToTop();
       return;
     }
@@ -774,7 +774,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
     }
     if (!calls.length) {
-      this._error = "No assignment changes to save.";
+      this._error = this._panelText("errors.nilm_assignment_no_changes");
       this._renderAndScrollToTop();
       return;
     }
@@ -797,7 +797,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._storeActionMessageForReload(this._lastActionMessage);
       window.location.assign(routeKey);
     } catch (error) {
-      this._error = `Could not save assignment changes: ${error.message}`;
+      this._error = this._panelTextFormat("errors.save_assignment", { message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -828,7 +828,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       await this._loadEvidence({ routeKey: this._routeKey() });
       this._scrollToTop();
     } catch (error) {
-      this._error = `Could not run ${action.service}: ${error.message}`;
+      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
     }
@@ -855,12 +855,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _guardActionCall(action, label) {
     if (!action) {
-      this._error = `Action unavailable: ${label}. Reload the evidence panel and try again.`;
+      this._error = this._panelTextFormat("errors.action_unavailable", { label });
       this._renderAndScrollToTop();
       return false;
     }
     if (action.enabled === false) {
-      this._error = action.unavailable_label || `Action unavailable: ${action.unavailable_reason || label}.`;
+      this._error = action.unavailable_label || this._panelTextFormat("errors.action_unavailable_reason", { reason: action.unavailable_reason || label });
       this._renderAndScrollToTop();
       return false;
     }
@@ -868,12 +868,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return true;
     }
     if (!action.service) {
-      this._error = `Action unavailable: ${label}. The panel did not receive a service to call.`;
+      this._error = this._panelTextFormat("errors.action_service_missing", { label });
       this._renderAndScrollToTop();
       return false;
     }
     if (!this._hass || !this._hass.callService) {
-      this._error = "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.";
+      this._error = this._panelText("errors.service_calls_unavailable");
       this._renderAndScrollToTop();
       return false;
     }
@@ -959,91 +959,91 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _nilmActionMessage(actionKey, data) {
     if (actionKey === "label") {
-      return `Saved label: ${data.label}.`;
+      return this._panelTextFormat("messages.saved_label", { label: data.label });
     }
     if (actionKey === "ignore") {
-      return "Ignored signature.";
+      return this._panelText("messages.ignored_signature");
     }
     if (actionKey === "mark_expected") {
-      return "Marked signature expected.";
+      return this._panelText("messages.marked_signature_expected");
     }
     if (actionKey === "merge") {
-      return "Merged signature.";
+      return this._panelText("messages.merged_signature");
     }
     if (actionKey === "assign") {
-      return `Assigned signature to ${data.label}.`;
+      return this._panelTextFormat("messages.assigned_signature", { label: data.label });
     }
-    return "Action complete.";
+    return this._panelText("common.action_complete");
   }
 
   _alertActionMessage(actionKey) {
     const messages = {
-      acknowledge: "Alert acknowledged.",
-      mark_expected: "Marked as expected behavior.",
-      mark_unhelpful: "Marked as not helpful.",
-      pause_alerts: "Alert pause updated.",
-      relearn_baseline: "Baseline relearn requested.",
+      acknowledge: "messages.alert_acknowledged",
+      mark_expected: "messages.marked_expected",
+      mark_unhelpful: "messages.marked_unhelpful",
+      pause_alerts: "messages.alert_pause_updated",
+      relearn_baseline: "messages.baseline_relearn_requested",
     };
-    return messages[actionKey] || "Action complete.";
+    return this._panelText(messages[actionKey] || "common.action_complete");
   }
 
   _applianceDetailActionMessage(actionKey) {
     const messages = {
-      pause_alerts: "Alert pause updated.",
-      relearn_baseline: "Baseline relearn requested.",
-      open_advanced_circuit_settings: "Opening Advanced Circuit Settings.",
-      open_evidence: "Opening evidence.",
-      review_nilm_assignment: "Opening NILM assignment review.",
+      pause_alerts: "messages.alert_pause_updated",
+      relearn_baseline: "messages.baseline_relearn_requested",
+      open_advanced_circuit_settings: "messages.opening_advanced_settings",
+      open_evidence: "messages.opening_evidence",
+      review_nilm_assignment: "messages.opening_nilm_assignment_review",
     };
-    return messages[actionKey] || "Action complete.";
+    return this._panelText(messages[actionKey] || "common.action_complete");
   }
 
   _nilmWorkspaceActionMessage(actionKey, data, item) {
-    const name = (data && data.label) || (item && (item.display_name || item.label)) || "appliance";
+    const name = (data && data.label) || (item && (item.display_name || item.label)) || this._panelText("common.appliance");
     if (actionKey === "assign") {
-      return `Assigned to ${name}.`;
+      return this._panelTextFormat("messages.assigned_to", { name });
     }
     if (actionKey === "publish") {
-      return "Created an estimated HA appliance device.";
+      return this._panelText("messages.created_estimated_device");
     }
     if (actionKey === "unpublish") {
-      return "Removed the estimated HA appliance device.";
+      return this._panelText("messages.removed_estimated_device");
     }
     if (actionKey === "retire") {
-      return "Removed appliance assignment.";
+      return this._panelText("messages.removed_assignment");
     }
     if (actionKey === "save") {
-      return "Saved assignment changes.";
+      return this._panelText("messages.saved_assignment_changes");
     }
     if (actionKey === "rename") {
-      return `Renamed assignment to ${name}.`;
+      return this._panelTextFormat("messages.renamed_assignment", { name });
     }
     if (actionKey === "change_profile") {
-      return "Changed appliance type.";
+      return this._panelText("messages.changed_appliance_type");
     }
     if (actionKey === "validate_history") {
-      return `Validated ${name} history.`;
+      return this._panelTextFormat("messages.validated_history", { name });
     }
     if (actionKey === "merge") {
-      return `Merged ${name}.`;
+      return this._panelTextFormat("messages.merged_assignment", { name });
     }
     if (actionKey === "validate") {
-      return `Confirmed ${name}.`;
+      return this._panelTextFormat("messages.confirmed_assignment", { name });
     }
     if (actionKey === "reject") {
-      return `Marked ${name} for review.`;
+      return this._panelTextFormat("messages.marked_assignment_for_review", { name });
     }
-    return "Action complete.";
+    return this._panelText("common.action_complete");
   }
 
   _recommendationActionMessage(actionKey) {
     const messages = {
-      apply: "Recommendation applied.",
-      dismiss: "Recommendation dismissed.",
-      undo: "Recommendation change undone.",
-      reset: "Recommendation setting reset to default.",
+      apply: "messages.recommendation_applied",
+      dismiss: "messages.recommendation_dismissed",
+      undo: "messages.recommendation_undone",
+      reset: "messages.recommendation_reset",
     };
-    return messages[actionKey] || "Recommendation action complete.";
+    return this._panelText(messages[actionKey] || "messages.recommendation_action_complete");
   }
 
   _isCurrentRequest(requestId, routeKey) {
@@ -1061,23 +1061,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const statusText = setupHealthRoute
       ? this._setupHealthText("heading")
       : applianceDetailRoute
-      ? "Appliance Detail"
+      ? this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
-      ? "NILM Workspace"
+      ? this._panelText("headers.nilm_workspace")
       : this._statusText(payload && payload.status);
     const headerTitle = setupHealthRoute
       ? this._setupHealthText("heading")
       : applianceDetailRoute
-      ? (applianceDetail && applianceDetail.display_name) || "Appliance Detail"
+      ? (applianceDetail && applianceDetail.display_name) || this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
-      ? "NILM Workspace"
-      : (circuit && circuit.name) || (alert && alert.circuit_id) || "Alert Evidence";
+      ? this._panelText("headers.nilm_workspace")
+      : (circuit && circuit.name) || (alert && alert.circuit_id) || this._panelText("headers.alert_evidence");
     const headerMessage = setupHealthRoute
       ? this._setupHealthText("header_message")
       : applianceDetailRoute
-      ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
+      ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
       : nilmWorkspaceRoute
-      ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
+      ? this._panelTextFormat("headers.nilm_workspace_message", { circuit: circuit && circuit.name ? this._panelTextFormat("headers.nilm_workspace_circuit", { name: circuit.name }) : "" })
       : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? this._evidenceText("fallbacks.current_circuit_message") : this._evidenceText("fallbacks.historical_heading"));
     const loadingText = setupHealthRoute ? this._setupHealthText("loading") : this._evidenceText("loading");
 
@@ -1341,7 +1341,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </section>
       ${this._loading ? `<section class="panel"><p>${this._escape(loadingText)}</p></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
-      ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">Retry</button></section>` : ""}
+      ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
       ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))}
       </main>
@@ -1509,7 +1509,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
     const path = item.open_path || "";
     const description = item.why_it_matters || this._setupHealthChecklistText(item.item_id, "why_it_matters") || this._setupHealthText("fallbacks.review_item_reason");
-    const title = item.title || this._setupHealthChecklistText(item.item_id, "title") || this._friendlyFeature(item.item_id || "setup item");
+    const title = item.title || this._setupHealthChecklistText(item.item_id, "title") || this._friendlyFeature(item.item_id || this._setupHealthText("fallbacks.setup_item"));
     const affectedLabel = this._setupHealthText("labels.affected");
     return `
       <div class="metric">
@@ -1561,12 +1561,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _setupHealthTextObject() {
-    return (this._setupHealth && this._setupHealth.text) || {};
+    const text = this._setupHealth && this._setupHealth.text;
+    if (text && (text.heading || text.checklist)) {
+      return text;
+    }
+    return this._panelTextObject().setup_health || {};
   }
 
   _evidenceText(path) {
+    return this._panelText(`evidence.${path}`);
+  }
+
+  _panelText(path) {
     const parts = path.split(".");
-    let value = this._evidenceTextObject();
+    let value = this._panelTextObject();
     for (const part of parts) {
       if (!value || typeof value !== "object") {
         return "";
@@ -1576,8 +1584,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return typeof value === "string" ? value : "";
   }
 
-  _evidenceTextObject() {
-    return (this._payload && this._payload.text) || (this._panel && this._panel.config && this._panel.config.text) || {};
+  _panelTextFormat(path, values = {}) {
+    return this._panelText(path).replace(/\{([^}]+)\}/g, (_match, key) => (
+      values[key] !== undefined && values[key] !== null ? String(values[key]) : ""
+    ));
+  }
+
+  _panelTextObject() {
+    const sources = [
+      this._payload && this._payload.text,
+      this._panel && this._panel.config && this._panel.config.text,
+      this._dashboardConfig && this._dashboardConfig.text,
+    ];
+    for (const text of sources) {
+      if (!text || typeof text !== "object") {
+        continue;
+      }
+      if (text.evidence || text.common || text.headers) {
+        return text;
+      }
+      if (text.fallbacks || text.actions) {
+        return { evidence: text };
+      }
+    }
+    return {};
   }
 
   _renderApplianceDetail() {
@@ -1586,7 +1616,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderApplianceDetailContent() {
     if (this._applianceDetailLoading) {
-      return `<section class="panel"><p>Loading Appliance Detail...</p></section>`;
+      return `<section class="panel"><p>${this._escape(this._panelText("appliance_detail.loading"))}</p></section>`;
     }
     if (this._applianceDetailError) {
       return `<section class="panel error"><p>${this._escape(this._applianceDetailError)}</p></section>`;
@@ -1596,53 +1626,53 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!detail) {
       return `
         <section class="panel">
-          <h2>Appliance Detail</h2>
-          <p>${this._escape(payload.message || "No appliance detail is available for the requested appliance.")}</p>
-          <p class="muted">${this._escape(payload.next_step || "Open the generated dashboard or review the appliance summary sensors.")}</p>
+          <h2>${this._escape(this._panelText("headers.appliance_detail"))}</h2>
+          <p>${this._escape(payload.message || this._panelText("appliance_detail.fallback_message"))}</p>
+          <p class="muted">${this._escape(payload.next_step || this._panelText("appliance_detail.fallback_next_step"))}</p>
         </section>
       `;
     }
     return `
       <section class="panel summary">
-        ${this._metric("Activity", detail.activity_state)}
-        ${this._metric("Power", this._formatPower(detail.current_power_w))}
-        ${this._metric("Source", this._sourceLabel(detail.source_type))}
-        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric("Confidence", this._formatConfidence(detail.confidence)) : ""}
+        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state)}
+        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w))}
+        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type))}
+        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence)) : ""}
       </section>
       <section class="panel summary">
-        ${this._metric("Health", detail.health_state)}
-        ${this._metric("Electrical", detail.electrical_state)}
-        ${this._metric("Energy", detail.energy_state)}
-        ${this._metric("Model", detail.model_status || "Direct meter")}
+        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state)}
+        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state)}
+        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state)}
+        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"))}
       </section>
       <section class="panel summary">
-        ${this._metric("Energy Today", this._formatKwh(detail.daily_energy_kwh))}
-        ${this._metric("Runtime Today", this._formatDuration(detail.runtime_today_seconds))}
-        ${this._metric("Runs Today", detail.run_count_today)}
-        ${this._metric("Cost Today", this._formatCost(detail.cost_today))}
+        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh))}
+        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds))}
+        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today)}
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today))}
       </section>
       <section class="panel">
-        <h2>Recent Timeline</h2>
+        <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
         ${this._renderApplianceTimeline(detail.recent_timeline)}
       </section>
       <section class="panel">
-        <h2>Today vs Normal</h2>
+        <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
         ${this._renderApplianceComparisons(detail.today_vs_normal)}
       </section>
       <section class="panel">
-        <h2>Behavior Expectations</h2>
+        <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
       </section>
       <section class="panel">
-        <h2>What To Check First</h2>
-        ${this._renderSimpleList(detail.what_to_check_first, detail.next_step || "No immediate check is needed.")}
+        <h2>${this._escape(this._panelText("appliance_detail.what_to_check_first"))}</h2>
+        ${this._renderSimpleList(detail.what_to_check_first, detail.next_step || this._panelText("appliance_detail.no_immediate_check"))}
       </section>
       <section class="panel">
-        <h2>Alerts and Evidence</h2>
+        <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
       <section class="panel">
-        <h2>Actions</h2>
+        <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
         ${this._renderApplianceActions(payload.actions)}
       </section>
     `;
@@ -1651,13 +1681,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderApplianceTimeline(timeline) {
     const items = Array.isArray(timeline && timeline.items) ? timeline.items : [];
     if (!items.length) {
-      const title = timeline && timeline.latest_title ? timeline.latest_title : "No recent activity";
+      const title = timeline && timeline.latest_title ? timeline.latest_title : this._panelText("appliance_detail.no_recent_activity");
       return `<p class="muted">${this._escape(title)}</p>`;
     }
     return `<div class="entity-list">${items.map((item) => `
       <div class="metric">
         <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
-        <strong>${this._escape(item.title || this._friendlyFeature(item.kind || "activity"))}</strong>
+        <strong>${this._escape(item.title || this._friendlyFeature(item.kind || this._panelText("appliance_detail.activity")))}</strong>
         <p class="muted">${this._escape(item.detail || "")}</p>
       </div>
     `).join("")}</div>`;
@@ -1666,19 +1696,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderApplianceComparisons(comparisons) {
     const items = Array.isArray(comparisons) ? comparisons : [];
     if (!items.length) {
-      return `<p class="muted">Learning normal ranges for this appliance.</p>`;
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.learning_ranges"))}</p>`;
     }
     return `<div class="entity-list">${items.map((item) => {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
-        : "Learning";
+        : this._panelText("common.learning");
       return `
         <div class="metric">
           <span>${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
           <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
-          <p class="muted">Normal ${this._escape(normal)}. Status ${this._escape(this._friendlyFeature(item.status))}.</p>
-          ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(this._formatConfidence(item.confidence))}</p>` : ""}
-          ${item.source ? `<p class="muted">Source ${this._escape(this._friendlyFeature(item.source))}</p>` : ""}
+          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
+          ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
+          ${item.source ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.source_value", { source: this._friendlyFeature(item.source) }))}</p>` : ""}
         </div>
       `;
     }).join("")}</div>`;
@@ -1687,14 +1717,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderApplianceExpectations(expectations) {
     const items = Array.isArray(expectations) ? expectations : [];
     if (!items.length) {
-      return `<p class="muted">Not enough data for appliance-specific expectations yet.</p>`;
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.not_enough_expectations"))}</p>`;
     }
     return `<div class="entity-list">${items.map((item) => `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.status))}</span>
-        <strong>${this._escape(item.title || "Appliance expectation")}</strong>
-        <p>${this._escape(item.observed || "Observed behavior is still learning.")}</p>
-        <p class="muted">Expected: ${this._escape(item.expected || "Normal appliance behavior is still learning.")}</p>
+        <strong>${this._escape(item.title || this._panelText("appliance_detail.expectation_title"))}</strong>
+        <p>${this._escape(item.observed || this._panelText("appliance_detail.observed_learning"))}</p>
+        <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.expected_prefix", { expected: item.expected || this._panelText("appliance_detail.expected_learning") }))}</p>
         <p class="muted">${this._escape(item.why_it_matters || "")}</p>
         ${this._renderSimpleList(item.what_to_check_first, "")}
       </div>
@@ -1704,14 +1734,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderApplianceAlerts(alerts) {
     const items = Array.isArray(alerts) ? alerts : [];
     if (!items.length) {
-      return `<p class="muted">No active appliance alerts were found.</p>`;
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_active_alerts"))}</p>`;
     }
     return `<div class="entity-list">${items.map((item) => `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.severity || item.feature))}</span>
         <strong>${this._escape(item.message || this._friendlyFeature(item.feature))}</strong>
-        <p class="muted">Repeated ${this._escape(this._formatMetricValue(item.repeated_count))} times.</p>
-        ${item.evidence_path ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">Open Evidence</a>` : ""}
+        <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.repeated_count", { count: this._formatMetricValue(item.repeated_count) }))}</p>
+        ${item.evidence_path ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
       </div>
     `).join("")}</div>`;
   }
@@ -1719,15 +1749,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderApplianceActions(actions) {
     const available = actions || {};
     const buttons = [
-      this._applianceActionButton(available, "open_evidence", "Open Evidence"),
-      this._applianceActionButton(available, "review_nilm_assignment", "Review NILM Assignment", true),
-      this._applianceActionButton(available, "mark_expected", "Mark Expected", true),
-      this._applianceActionButton(available, "mark_unhelpful", "Not Helpful", true),
-      this._applianceActionButton(available, "pause_alerts", "Pause Alerts", true),
-      this._applianceActionButton(available, "relearn_baseline", "Relearn Baseline", true),
-      this._applianceActionButton(available, "open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+      this._applianceActionButton(available, "open_evidence", this._panelText("actions.labels.open_evidence")),
+      this._applianceActionButton(available, "review_nilm_assignment", this._panelText("actions.labels.review_nilm_assignment"), true),
+      this._applianceActionButton(available, "mark_expected", this._panelText("actions.labels.mark_expected"), true),
+      this._applianceActionButton(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), true),
+      this._applianceActionButton(available, "pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
+      this._applianceActionButton(available, "relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+      this._applianceActionButton(available, "open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
     ].filter(Boolean);
-    return buttons.length ? `<div class="actions">${buttons.join("")}</div>` : `<p class="muted">No actions are available for this appliance right now.</p>`;
+    return buttons.length ? `<div class="actions">${buttons.join("")}</div>` : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
   }
 
   _applianceActionButton(actions, actionKey, label, secondary = false) {
@@ -1765,53 +1795,53 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderAlertContent(alert, circuit) {
     return `
       <section class="panel summary">
-        ${this._metric("Circuit", (circuit && circuit.name) || alert.circuit_id)}
-        ${this._metric("Feature", alert.feature_name || this._friendlyFeature(alert.feature))}
-        ${this._metric("Observed", alert.observed_value)}
-        ${this._metric("Baseline", alert.baseline_value)}
-        ${this._metric("Change", `${alert.percent_change}%`)}
-        ${this._metric("Repeated", alert.repeated_count)}
+        ${this._metric(this._panelText("evidence.labels.circuit"), (circuit && circuit.name) || alert.circuit_id)}
+        ${this._metric(this._panelText("evidence.labels.feature"), alert.feature_name || this._friendlyFeature(alert.feature))}
+        ${this._metric(this._panelText("evidence.labels.observed"), alert.observed_value)}
+        ${this._metric(this._panelText("evidence.labels.baseline"), alert.baseline_value)}
+        ${this._metric(this._panelText("evidence.labels.change"), `${alert.percent_change}%`)}
+        ${this._metric(this._panelText("evidence.labels.repeated"), alert.repeated_count)}
       </section>
       ${this._renderSafetyNotice(alert)}
       <section class="panel">
-        <h2>What Happened</h2>
-        <p>${this._escape(alert.what_happened || alert.message || "The analyzer found repeated evidence for this circuit.")}</p>
+        <h2>${this._escape(this._panelText("evidence.sections.what_happened"))}</h2>
+        <p>${this._escape(alert.what_happened || alert.message || this._panelText("evidence.fallbacks.what_happened"))}</p>
       </section>
       <section class="panel">
-        <h2>Why It Matters</h2>
-        <p>${this._escape(alert.why_it_matters || "Repeated analyzer evidence means this circuit is no longer matching its recent learned or configured behavior.")}</p>
+        <h2>${this._escape(this._panelText("evidence.sections.why_it_matters"))}</h2>
+        <p>${this._escape(alert.why_it_matters || this._panelText("evidence.fallbacks.why_it_matters"))}</p>
       </section>
       <section class="panel">
-        <h2>What Changed</h2>
+        <h2>${this._escape(this._panelText("evidence.sections.what_changed"))}</h2>
         <p>${this._escape(this._changeSummary(alert))}</p>
       </section>
       <section class="panel summary">
-        ${this._metric("Expected", alert.expected_value)}
-        ${this._metric("Threshold", alert.threshold)}
-        ${this._metric("Samples", alert.sample_count)}
-        ${this._metric("First Seen", this._formatDateTime(alert.first_seen))}
-        ${this._metric("Last Seen", this._formatDateTime(alert.last_seen))}
-        ${this._metric("Check First", alert.what_to_check_first)}
+        ${this._metric(this._panelText("common.expected"), alert.expected_value)}
+        ${this._metric(this._panelText("evidence.labels.threshold"), alert.threshold)}
+        ${this._metric(this._panelText("evidence.labels.samples"), alert.sample_count)}
+        ${this._metric(this._panelText("evidence.labels.first_seen"), this._formatDateTime(alert.first_seen))}
+        ${this._metric(this._panelText("evidence.labels.last_seen"), this._formatDateTime(alert.last_seen))}
+        ${this._metric(this._panelText("evidence.labels.check_first"), alert.what_to_check_first)}
       </section>
       <section class="panel">
-        <h2>Graph</h2>
+        <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
         ${this._renderChart(alert)}
       </section>
       ${this._renderNilmWorkspace()}
       <section class="panel">
-        <h2>Actions</h2>
-        ${this._renderActionGroup("Respond to this alert", "Review the graph, then choose how the analyzer should treat this alert.", [
-          this._actionButton("acknowledge", "Dismiss", false, "Clear this alert for now without teaching the analyzer."),
-          this._actionButton("mark_expected", "Mark Expected", true, "Teach the analyzer this behavior is expected so similar alerts are less likely."),
-          this._actionButton("mark_unhelpful", "Not Helpful", true, "Tell the analyzer this alert was inaccurate or not useful. This does not mark the behavior as normal."),
+        <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
+        ${this._renderActionGroup(this._panelText("actions.groups.respond_title"), this._panelText("actions.groups.respond_description"), [
+          this._actionButton("acknowledge", this._panelText("actions.labels.dismiss"), false, this._panelText("actions.helpers.dismiss")),
+          this._actionButton("mark_expected", this._panelText("actions.labels.mark_expected"), true, this._panelText("actions.helpers.mark_expected")),
+          this._actionButton("mark_unhelpful", this._panelText("actions.labels.not_helpful"), true, this._panelText("actions.helpers.mark_unhelpful")),
         ])}
-        ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
-          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ${this._renderActionGroup(this._panelText("actions.groups.pause_title"), this._panelText("actions.groups.pause_description"), [
+          this._actionButton("pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
         ])}
-        ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
-          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
-          this._actionButton("relearn_baseline", "Relearn Baseline", true),
-          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ${this._renderActionGroup(this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
+          this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
+          this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+          this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
         ])}
       </section>
       ${this._renderRecommendations()}
@@ -1830,19 +1860,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _renderNilmSignatureReview(signature, index) {
     const graphFingerprint = this._nilmWorkspace && this._nilmWorkspace.status === "ok" ? this._nilmSignatureFingerprint(signature) : "";
     return `
-      ${signature.user_label ? `<p class="muted">Saved label: ${this._escape(signature.user_label)}</p>` : ""}
-      ${signature.review_state ? `<p class="muted">Review state: ${this._escape(this._friendlyFeature(signature.review_state))}</p>` : ""}
-      ${signature.merged_into ? `<p class="muted">Merged into: ${this._escape(signature.merged_into)}</p>` : ""}
+      ${signature.user_label ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.saved_label", { label: signature.user_label }))}</p>` : ""}
+      ${signature.review_state ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.review_state", { state: this._friendlyFeature(signature.review_state) }))}</p>` : ""}
+      ${signature.merged_into ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.merged_into", { value: signature.merged_into }))}</p>` : ""}
       ${this._renderNilmExistingAssignmentField(signature && signature.actions && signature.actions.assign, `signature_${index}`)}
       ${this._renderNilmLabelField(signature, index)}
       ${this._renderNilmMergeTarget(signature, index)}
       <div class="actions">
-        ${this._nilmActionButton(index, "label", "Save Label")}
-        ${this._nilmActionButton(index, "assign", "Assign Appliance", true)}
-        ${this._nilmActionButton(index, "ignore", "Ignore", true)}
-        ${this._nilmActionButton(index, "mark_expected", "Mark Expected", true)}
-        ${this._nilmActionButton(index, "merge", "Merge", true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
-        ${graphFingerprint ? `<button type="button" class="secondary" data-nilm-signature-focus="${this._escape(graphFingerprint)}">Show on Graph</button>` : ""}
+        ${this._nilmActionButton(index, "label", this._panelText("actions.labels.save_label"))}
+        ${this._nilmActionButton(index, "assign", this._panelText("actions.labels.assign_appliance"), true)}
+        ${this._nilmActionButton(index, "ignore", this._panelText("actions.labels.ignore"), true)}
+        ${this._nilmActionButton(index, "mark_expected", this._panelText("actions.labels.mark_expected"), true)}
+        ${this._nilmActionButton(index, "merge", this._panelText("actions.labels.merge"), true, !(signature.actions && signature.actions.merge && signature.actions.merge.target_options && signature.actions.merge.target_options.length))}
+        ${graphFingerprint ? `<button type="button" class="secondary" data-nilm-signature-focus="${this._escape(graphFingerprint)}">${this._escape(this._panelText("actions.labels.show_on_graph"))}</button>` : ""}
       </div>
     `;
   }
@@ -1858,14 +1888,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       || "";
     return `
       <label class="nilm-label-field" for="nilm_label_${index}">
-        <span class="muted">Label this load</span>
+        <span class="muted">${this._escape(this._panelText("nilm_workspace.label_this_load"))}</span>
         <input
           id="nilm_label_${index}"
           type="text"
           data-nilm-label-input
           data-nilm-label-key="${this._escape(draftKey)}"
           value="${this._escape(currentLabel)}"
-          placeholder="Appliance name"
+          placeholder="${this._escape(this._panelText("nilm_workspace.appliance_name"))}"
         >
       </label>
     `;
@@ -1973,7 +2003,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       start: this._datetimeLocalFromMillis(start),
       end: this._datetimeLocalFromMillis(end),
     });
-    this._lastActionMessage = "Loaded NILM session interval.";
+    this._lastActionMessage = this._panelText("messages.loaded_nilm_session_interval");
     this._renderAndScrollToTop();
   }
 
@@ -1988,7 +2018,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelIntervalDraft = Object.assign({}, this._nilmLabelIntervalDraft, {
       [field]: this._datetimeLocalFromMillis(time),
     });
-    this._lastActionMessage = "Loaded NILM edge time.";
+    this._lastActionMessage = this._panelText("messages.loaded_nilm_edge_time");
     this._renderAndScrollToTop();
   }
 
@@ -1996,7 +2026,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (this._nilmFocusedSignature === signatureFingerprint) {
       this._nilmFocusedSignature = "";
       this._nilmGraphWindow = null;
-      this._lastActionMessage = "Showing all NILM graph sessions.";
+      this._lastActionMessage = this._panelText("messages.showing_all_nilm_sessions");
       this._renderAndScrollToTop();
       return;
     }
@@ -2007,8 +2037,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const focused = this._focusNilmGraphWindowForSignature(signatureFingerprint);
     this._lastActionMessage = focused
-      ? "Showing graph sessions for selected signature."
-      : "No paired sessions matched this signature yet.";
+      ? this._panelText("messages.showing_selected_signature")
+      : this._panelText("messages.no_paired_sessions");
     this._renderAndScrollToTop();
   }
 
@@ -2076,7 +2106,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       });
       return true;
     } catch (error) {
-      this._nilmWorkspaceError = `Could not load NILM workspace history: ${error.message}`;
+      this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
       return false;
     }
   }
@@ -2099,7 +2129,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const span = window.end - window.start;
     const nextSpan = Math.max(15 * 60 * 1000, Math.min(window.max - window.min, span * factor));
     const center = (window.start + window.end) / 2;
-    this._lastActionMessage = "Updated NILM graph window.";
+    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
     this._setNilmGraphWindow(center - nextSpan / 2, center + nextSpan / 2, window);
   }
 
@@ -2109,7 +2139,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     const shift = (window.end - window.start) * direction;
-    this._lastActionMessage = "Updated NILM graph window.";
+    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
     this._setNilmGraphWindow(window.start + shift, window.end + shift, window);
   }
 
@@ -2169,8 +2199,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const grouped = this._recommendationsByStatus(recommendations);
     return `
-      ${this._renderRecommendationSection("Suggested Settings", grouped.pending)}
-      ${this._renderRecommendationSection("Applied Suggested Settings", grouped.applied)}
+      ${this._renderRecommendationSection(this._panelText("recommendations.suggested_settings"), grouped.pending)}
+      ${this._renderRecommendationSection(this._panelText("recommendations.applied_suggested_settings"), grouped.applied)}
     `;
   }
 
@@ -2201,18 +2231,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <div class="entity-list">
           ${recommendationItems.map(({ recommendation, originalIndex }) => `
             <div class="metric">
-              <strong>${this._escape(recommendation.display_label || recommendation.title || "Suggested setting")}</strong>
+              <strong>${this._escape(recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting"))}</strong>
               ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
               ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
               ${this._recommendationValueRows(recommendation)}
-              ${recommendation.expected_effect ? `<p class="muted">Expected effect: ${this._escape(recommendation.expected_effect)}</p>` : ""}
-              ${recommendation.evidence_preview ? `<p class="muted">Evidence: ${this._escape(recommendation.evidence_preview)}</p>` : ""}
+              ${recommendation.expected_effect ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.expected_effect", { effect: recommendation.expected_effect }))}</p>` : ""}
+              ${recommendation.evidence_preview ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence", { evidence: recommendation.evidence_preview }))}</p>` : ""}
                 <div class="actions">
-                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", "Preview evidence", true) : ""}
-                 ${this._recommendationActionButton(recommendation, originalIndex, "apply", "Apply")}
-                 ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", "Dismiss", true)}
-                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, originalIndex, "undo", "Undo", true) : ""}
-                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, originalIndex, "reset", "Reset default", true) : ""}
+                 ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", this._panelText("actions.labels.preview_evidence"), true) : ""}
+                 ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
+                 ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", this._panelText("actions.labels.dismiss"), true)}
+                 ${recommendation.actions && recommendation.actions.undo ? this._recommendationActionButton(recommendation, originalIndex, "undo", this._panelText("actions.labels.undo"), true) : ""}
+                 ${recommendation.actions && recommendation.actions.reset ? this._recommendationActionButton(recommendation, originalIndex, "reset", this._panelText("actions.labels.reset_default"), true) : ""}
                 </div>
             </div>
           `).join("")}
@@ -2226,19 +2256,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!recommendation) {
       return "";
     }
-    const label = recommendation.display_label || recommendation.title || "Suggested setting";
+    const label = recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting");
     const evidenceCount = Number(recommendation.evidence_key_count || 0);
     const omittedCount = Number(recommendation.evidence_omitted_key_count || 0);
     const evidenceSummary = recommendation.evidence_preview
       ? `<p>${this._escape(recommendation.evidence_preview)}</p>`
-      : `<p class="muted">No compact evidence summary is available for this recommendation.</p>`;
+      : `<p class="muted">${this._escape(this._panelText("recommendations.no_evidence_summary"))}</p>`;
+    const omitted = omittedCount > 0
+      ? this._panelTextFormat("recommendations.evidence_omitted", { count: omittedCount })
+      : "";
     const countSummary = evidenceCount > 0
-      ? `<p class="muted">${this._escape(evidenceCount)} evidence fields were captured${omittedCount > 0 ? `; ${this._escape(omittedCount)} are hidden from this compact preview.` : "."}</p>`
+      ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence_count", { count: evidenceCount, omitted }))}</p>`
       : "";
     return `
       <section class="panel">
-        <h2>Recommendation Evidence</h2>
-        <p class="muted">Previewing evidence for ${this._escape(label)}.</p>
+        <h2>${this._escape(this._panelText("recommendations.recommendation_evidence"))}</h2>
+        <p class="muted">${this._escape(this._panelTextFormat("recommendations.previewing_evidence", { label }))}</p>
         ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
         ${this._recommendationValueRows(recommendation)}
         ${evidenceSummary}
@@ -2254,13 +2287,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const suggestedValue = applied ? undefined : recommendation.suggested_value;
     const rows = [];
     if (currentValue !== undefined) {
-      rows.push(`<code>Current: ${this._escape(currentValue)}</code>`);
+      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.current"), value: currentValue }))}</code>`);
     }
     if (recommendation.default_value !== undefined) {
-      rows.push(`<code>Default: ${this._escape(recommendation.default_value)}</code>`);
+      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.default"), value: recommendation.default_value }))}</code>`);
     }
     if (suggestedValue !== undefined) {
-      rows.push(`<code>Suggested: ${this._escape(suggestedValue)}</code>`);
+      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.suggested"), value: suggestedValue }))}</code>`);
     }
     return rows.length ? `<div class="entity-list">${rows.join("")}</div>` : "";
   }
@@ -2269,14 +2302,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const action = signature && signature.actions && signature.actions.merge;
     const options = action && action.target_options;
     if (!options || !options.length) {
-      return `<p class="muted">No other signature is available to merge into yet.</p>`;
+      return `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_merge_target"))}</p>`;
     }
     const omittedCount = Number((action && action.target_options_omitted_count) || 0);
     const summary = omittedCount > 0
-      ? `<p class="muted">Showing ${options.length} of ${action.target_option_count} merge targets. ${omittedCount} more can be selected after loading the full slim NILM list. <button type="button" class="secondary" data-load-all-nilm>Load all merge targets</button></p>`
+      ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.merge_targets_summary", { shown: options.length, total: action.target_option_count, omitted: omittedCount }))} <button type="button" class="secondary" data-load-all-nilm>${this._escape(this._panelText("actions.labels.load_all_merge_targets"))}</button></p>`
       : "";
     return `
-      <span class="muted">Merge into</span>
+      <span class="muted">${this._escape(this._panelText("nilm_workspace.merge_into"))}</span>
       ${summary}
       <div class="merge-targets" id="nilm_merge_targets_${index}" data-selected="">
         ${options.map((option) => this._nilmMergeTargetChip(index, option)).join("")}
@@ -2325,9 +2358,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     return `
       <label class="nilm-label-field">
-        <span class="muted">Existing appliance</span>
+        <span class="muted">${this._escape(this._panelText("nilm_workspace.existing_appliance"))}</span>
         <select data-nilm-existing-assignment="${this._escape(key)}">
-          <option value="">New appliance</option>
+          <option value="">${this._escape(this._panelText("nilm_workspace.new_appliance"))}</option>
           ${options.map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
         </select>
       </label>
@@ -2353,14 +2386,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmWorkspaceContent() {
     if (this._nilmWorkspaceLoading) {
-      return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">Loading NILM workspace...</p></section>`;
+      return `<section class="panel"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p class="muted">${this._escape(this._panelText("nilm_workspace.loading"))}</p></section>`;
     }
     const workspace = this._nilmWorkspace;
     if (this._nilmWorkspaceError && (!workspace || workspace.status !== "ok")) {
-      return `<section class="panel error"><h2>NILM Workspace</h2><p>${this._escape(this._nilmWorkspaceError)}</p></section>`;
+      return `<section class="panel error"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p>${this._escape(this._nilmWorkspaceError)}</p></section>`;
     }
     if (workspace && workspace.status !== "ok") {
-      return `<section class="panel"><h2>NILM Workspace</h2><p class="muted">${this._escape(workspace.message || "No NILM workspace is available for this circuit.")}</p></section>`;
+      return `<section class="panel"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p class="muted">${this._escape(workspace.message || this._panelText("nilm_workspace.unavailable"))}</p></section>`;
     }
     if (!workspace || workspace.status !== "ok") {
       return "";
@@ -2375,82 +2408,82 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const nextReviewIndex = nextReviewItem ? nextReviewItem.index : -1;
     const graph = graphWindow && series.length
       ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
-      : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
+      : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       <section class="panel">
-        <h2>NILM Workspace</h2>
-        <p class="muted">Review mains load changes, labels, and assignments used by NILM.</p>
+        <h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.description"))}</p>
         ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
-        ${this._nilmFocusedSignature ? `<p class="muted">Showing graph sessions matching selected signature.</p>` : ""}
+        ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
         ${this._renderNilmReviewQueue(workspace)}
         ${this._renderNilmWorkspaceLanes(workspace)}
         ${this._renderNilmSessionValidationCards(workspace)}
-        ${this._renderNilmWorkspaceList("NILM Signatures", workspace.signatures, "No NILM signatures are available yet.", (item, index) => `
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.signatures_title"), workspace.signatures, this._panelText("nilm_workspace.signatures_empty"), (item, index) => `
           <div class="metric">
-            <span>${this._escape(item.review_state || `${Math.round(Number(item.confidence || 0) * 100)}% confidence`)}</span>
-            <strong>${this._escape(item.display_label || item.display_name || item.likely_type || "Unknown load")}</strong>
+            <span>${this._escape(item.review_state || this._panelTextFormat("appliance_detail.confidence_value", { confidence: `${Math.round(Number(item.confidence || 0) * 100)}%` }))}</span>
+            <strong>${this._escape(item.display_label || item.display_name || item.likely_type || this._panelText("common.unknown_load"))}</strong>
             ${this._renderNilmSignatureFacts(item)}
-            ${index === nextReviewIndex ? `<p class="muted">Use Needs review above for this signature's actions.</p>` : this._renderNilmSignatureReview(item, index)}
+            ${index === nextReviewIndex ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.use_needs_review"))}</p>` : this._renderNilmSignatureReview(item, index)}
           </div>
-        `, "Signatures group similar sessions that may be the same appliance.")}
+        `, this._panelText("nilm_workspace.signatures_description"))}
         ${this._renderNilmLabelIntervals(workspace)}
-        ${this._renderNilmWorkspaceList("Estimated Appliances", workspace.virtual_appliances, "No estimated appliances are available yet.", (item) => `
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.estimated_appliances_title"), workspace.virtual_appliances, this._panelText("nilm_workspace.estimated_appliances_empty"), (item) => `
           <div class="metric">
-            <span>${this._escape(item.model_status || "candidate")}</span>
-            <strong>${this._escape(item.display_name || item.appliance_id || "Estimated appliance")} - ${this._escape(item.is_running ? "running" : "idle")}</strong>
-            <p class="muted" data-field="estimated_daily_energy">${this._escape(this._formatMetricValue(item.estimated_power_w))} W, ${this._escape(this._formatMetricValue(item.estimated_energy_kwh_today))} kWh today, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
+            <span>${this._escape(item.model_status || this._panelText("common.candidate"))}</span>
+            <strong>${this._escape(item.display_name || item.appliance_id || this._panelText("common.estimated_appliance"))} - ${this._escape(item.is_running ? this._panelText("common.running") : this._panelText("common.idle"))}</strong>
+            <p class="muted" data-field="estimated_daily_energy">${this._escape(this._panelTextFormat("nilm_workspace.estimated_appliance_summary", { power: this._formatMetricValue(item.estimated_power_w), energy: this._formatMetricValue(item.estimated_energy_kwh_today), confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
             <div class="actions">${this._nilmApplianceDetailButton(item)}</div>
           </div>
-        `, "Estimated appliances are NILM's current best grouped load guesses.")}
-        ${this._renderNilmWorkspaceList("Appliance Assignments", workspace.assignments, "No appliance assignments are saved yet.", (item, index) => `
+        `, this._panelText("nilm_workspace.estimated_appliances_description"))}
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.assignments_title"), workspace.assignments, this._panelText("nilm_workspace.assignments_empty"), (item, index) => `
           <div class="metric">
-            <span>${this._escape(item.lifecycle_state || "assigned")}</span>
-            <strong>${this._escape(item.display_name || item.appliance_id || "Assigned appliance")}</strong>
-            <p class="muted">Confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</p>
-            <p class="muted">False positives ${this._escape(Math.round(Number(item.false_positive_rate || 0) * 100))}%, False negatives ${this._escape(Math.round(Number(item.false_negative_rate || 0) * 100))}%</p>
-            <p class="muted">Median power error ${this._escape(this._formatMetricValue(item.median_power_error))} W, Energy error ${this._escape(this._formatMetricValue(item.energy_estimate_error))} kWh</p>
+            <span>${this._escape(item.lifecycle_state || this._panelText("common.assigned"))}</span>
+            <strong>${this._escape(item.display_name || item.appliance_id || this._panelText("common.assigned_appliance"))}</strong>
+            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
+            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
+            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
             ${this._renderNilmAssignmentEditFields(item, index)}
             ${this._renderNilmAssignmentActions(item, index)}
           </div>
-        `, "Assignments save a signature as a named appliance. Validate it, then create an estimated HA device when it is trustworthy.")}
+        `, this._panelText("nilm_workspace.assignments_description"))}
         ${this._renderNilmOverlayToggles(workspace)}
         ${this._renderNilmGraphControls(graphWindow)}
         ${graph}
         ${this._renderNilmValidation(workspace.validation)}
-        ${this._renderNilmWorkspaceList("Known Load Overlays", workspace.known_load_overlays, "No known-load overlays are configured.", (item) => `
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
             <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
-        `, "Known loads mark configured circuits so NILM can separate expected usage.")}
-        ${this._renderNilmWorkspaceList("Solar/Net Overlays", workspace.solar_overlays, "No solar or net-flow overlays are configured.", (item) => `
+        `, this._panelText("nilm_workspace.known_load_overlays_description"))}
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.solar_net_overlays"), workspace.solar_overlays, this._panelText("nilm_workspace.solar_net_overlays_empty"), (item) => `
           <div class="metric">
             <span>${this._escape(item.circuit_id)}</span>
             <strong>${this._escape(item.name || item.circuit_id)}</strong>
             <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
           </div>
-        `, "Solar and net-flow overlays help explain import/export changes on mains.")}
-        ${this._renderNilmWorkspaceList("NILM Sessions", workspace.sessions, "No paired NILM sessions are available yet.", (item, index) => `
+        `, this._panelText("nilm_workspace.solar_net_overlays_description"))}
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.sessions_title"), workspace.sessions, this._panelText("nilm_workspace.sessions_empty"), (item, index) => `
           <div class="metric">
             <span>${this._escape(item.start || "")}</span>
-            <strong>${this._escape(this._formatMetricValue(item.median_power_w))} W, confidence ${this._escape(Math.round(Number(item.confidence || 0) * 100))}%</strong>
-            <p class="muted">${this._escape(item.end ? `Ended ${item.end}` : "Open session")}</p>
+            <strong>${this._escape(this._panelTextFormat("nilm_workspace.session_summary", { power: this._formatMetricValue(item.median_power_w), confidence: Math.round(Number(item.confidence || 0) * 100) }))}</strong>
+            <p class="muted">${this._escape(item.end ? this._panelTextFormat("nilm_workspace.session_end", { end: item.end }) : this._panelText("common.open_session"))}</p>
             ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, index) : ""}
             ${item.actions ? `<div class="actions">
-              ${item.actions.assign ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>Assign Appliance</button>` : ""}
-              ${item.actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Confirm Appliance</button>` : ""}
-              ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong Appliance</button>` : ""}
+              ${item.actions.assign ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>` : ""}
+              ${item.actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.confirm_appliance"))}</button>` : ""}
+              ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.wrong_appliance"))}</button>` : ""}
             </div>` : ""}
           </div>
-        `, "Sessions pair on/off edges into likely appliance runs.")}
-        ${this._renderNilmWorkspaceList("NILM Edges", workspace.edges, "No NILM edges are available yet.", (item) => `
+        `, this._panelText("nilm_workspace.sessions_description"))}
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title"), workspace.edges, this._panelText("nilm_workspace.edges_empty"), (item) => `
           <div class="metric">
             <span>${this._escape(item.timestamp || "")}</span>
             <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatMetricValue(item.delta_w))} W</strong>
-            <p class="muted">${this._escape(item.split_phase_type || "unknown")}</p>
+            <p class="muted">${this._escape(item.split_phase_type || this._panelText("common.unknown"))}</p>
           </div>
-        `, "Edges are detected power changes before they are paired into sessions.")}
+        `, this._panelText("nilm_workspace.edges_description"))}
       </section>
     `;
   }
@@ -2469,22 +2502,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!reviewItems.length) {
       return `
         <div class="action-group">
-          <h3>Needs review</h3>
-          <p class="muted">No signatures need labels or decisions.</p>
+          <h3>${this._escape(this._panelText("nilm_workspace.needs_review_title"))}</h3>
+          <p class="muted">${this._escape(this._panelText("nilm_workspace.needs_review_empty"))}</p>
         </div>
       `;
     }
     const { signature, index } = reviewItems[0];
     const count = reviewItems.length;
-    const title = signature.display_label || signature.display_name || signature.likely_type || "Unknown load";
+    const title = signature.display_label || signature.display_name || signature.likely_type || this._panelText("common.unknown_load");
     return `
       <div class="action-group">
-        <h3>Needs review</h3>
-        <p class="muted">${this._escape(count)} ${count === 1 ? "signature needs" : "signatures need"} labels or decisions.</p>
+        <h3>${this._escape(this._panelText("nilm_workspace.needs_review_title"))}</h3>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.needs_review_count", { count, noun: count === 1 ? this._panelText("nilm_workspace.signature_needs") : this._panelText("nilm_workspace.signatures_need") }))}</p>
         <div class="metric">
-          <span>Next to review</span>
+          <span>${this._escape(this._panelText("nilm_workspace.next_to_review"))}</span>
           <strong>${this._escape(title)}</strong>
-          ${signature.confidence !== undefined ? `<p class="muted">Confidence ${this._escape(Math.round(Number(signature.confidence || 0) * 100))}%</p>` : ""}
+          ${signature.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(signature.confidence || 0) * 100) }))}</p>` : ""}
           ${this._renderNilmSignatureFacts(signature)}
           ${this._renderNilmSignatureReview(signature, index)}
         </div>
@@ -2500,19 +2533,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? workspace.lane_counts
       : {};
     const laneOrder = [
-      ["needs_review", "Needs Review"],
-      ["assigned", "Assigned"],
-      ["needs_validation", "Needs Validation"],
-      ["ready_to_publish", "Ready to Publish"],
-      ["published", "Published"],
-      ["ignored_expected", "Ignored / Expected"],
+      ["needs_review", this._panelText("nilm_workspace.lane_needs_review")],
+      ["assigned", this._panelText("nilm_workspace.lane_assigned")],
+      ["needs_validation", this._panelText("nilm_workspace.lane_needs_validation")],
+      ["ready_to_publish", this._panelText("nilm_workspace.lane_ready_to_publish")],
+      ["published", this._panelText("nilm_workspace.lane_published")],
+      ["ignored_expected", this._panelText("nilm_workspace.lane_ignored_expected")],
     ];
     if (!Object.keys(lanes).length && !Object.keys(laneCounts).length) {
       return "";
     }
     return `
       <div class="action-group">
-        <h3>Review lanes</h3>
+        <h3>${this._escape(this._panelText("nilm_workspace.review_lanes"))}</h3>
         <div class="summary">
           ${laneOrder.map(([key, fallbackLabel]) => {
             const lane = lanes[key] || {};
@@ -2524,7 +2557,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             return `
               <div class="metric">
                 <span>${this._escape(lane.label || fallbackLabel)}</span>
-                <strong>${this._escape(count)} ${count === 1 ? "item" : "items"}</strong>
+                <strong>${this._escape(this._panelTextFormat("nilm_workspace.item_count", { count, noun: count === 1 ? this._panelText("common.item") : this._panelText("common.items") }))}</strong>
               </div>
             `;
           }).join("")}
@@ -2551,7 +2584,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     return `
-      <h3>Session Validation</h3>
+      <h3>${this._escape(this._panelText("nilm_workspace.session_validation"))}</h3>
       <div class="entity-list">
         ${cards.map(({ session, index }) => this._renderNilmSessionValidationCard(workspace, session, index)).join("")}
       </div>
@@ -2579,12 +2612,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmSessionValidationCard(workspace, session, index) {
     const actions = session && session.actions ? session.actions : {};
-    const label = session.display_label || session.display_name || session.appliance_id || session.assignment_id || "appliance";
+    const label = session.display_label || session.display_name || session.appliance_id || session.assignment_id || this._panelText("common.appliance");
     const confidence = session.confidence !== undefined
-      ? `<p class="muted">Confidence ${this._escape(this._formatConfidence(session.confidence))}</p>`
+      ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(session.confidence) }))}</p>`
       : "";
     const lowConfidence = this._isLowNilmConfidence(session.confidence)
-      ? `<p class="muted">Low confidence</p>`
+      ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.low_confidence"))}</p>`
       : "";
     const duration = this._nilmSessionDuration(session);
     const ignoreIndex = this._nilmSignatureIndexForSession(workspace, session);
@@ -2594,16 +2627,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <div class="metric">
         <span>${this._escape(this._formatNilmSessionRange(session))}</span>
-        <strong>Predicted ${this._escape(label)}</strong>
-        <p class="muted">Estimated by NILM${duration ? `, ${this._escape(duration)}` : ""}</p>
+        <strong>${this._escape(this._panelTextFormat("nilm_workspace.predicted", { label }))}</strong>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.estimated_by_nilm", { duration: duration ? `, ${duration}` : "" }))}</p>
         ${confidence}
         ${lowConfidence}
-        <p class="muted">${this._escape(this._formatMetricValue(session.median_power_w))} W, ${this._escape(this._formatMetricValue(session.estimated_energy_kwh))} kWh estimated</p>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.session_power_summary", { power: this._formatMetricValue(session.median_power_w), energy: this._formatMetricValue(session.estimated_energy_kwh) }))}</p>
         <div class="actions">
-          ${actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>Correct</button>` : ""}
-          ${actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>Wrong appliance</button>` : ""}
-          ${session.start && session.end ? `<button type="button" class="secondary" data-nilm-session-interval-index="${index}">Adjust Interval</button>` : ""}
-          ${ignoreSignature && ignoreSignature.actions && ignoreSignature.actions.ignore ? this._nilmActionButton(ignoreIndex, "ignore", "Ignore Similar", true) : ""}
+          ${actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.correct"))}</button>` : ""}
+          ${actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.wrong_appliance_sentence"))}</button>` : ""}
+          ${session.start && session.end ? `<button type="button" class="secondary" data-nilm-session-interval-index="${index}">${this._escape(this._panelText("actions.labels.adjust_interval"))}</button>` : ""}
+          ${ignoreSignature && ignoreSignature.actions && ignoreSignature.actions.ignore ? this._nilmActionButton(ignoreIndex, "ignore", this._panelText("actions.labels.ignore_similar"), true) : ""}
         </div>
       </div>
     `;
@@ -2625,7 +2658,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _formatNilmSessionRange(session) {
     const start = this._formatDateTime(session && session.start);
     if (!session || !session.end) {
-      return `${start} - open`;
+      return this._panelTextFormat("nilm_workspace.range_open", { start });
     }
     return `${start} - ${this._formatDateTime(session.end)}`;
   }
@@ -2647,14 +2680,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         facts.push([label, value]);
       }
     };
-    addFact("Typical power", signature.typical_power_w !== undefined ? `${this._formatMetricValue(signature.typical_power_w)} W` : undefined);
-    addFact("Typical duration", signature.typical_duration_seconds !== undefined ? this._formatDuration(signature.typical_duration_seconds) : undefined);
-    addFact("Seen count", signature.seen_count);
-    addFact("Voltage class", signature.voltage_class);
-    addFact("Dominant leg", signature.dominant_leg);
-    addFact("Known-load overlap", this._formatNilmSignatureFact(signature.known_load_overlap));
-    addFact("Why grouped", signature.why_grouped);
-    addFact("Last seen", signature.last_seen ? this._formatDateTime(signature.last_seen) : undefined);
+    addFact(this._panelText("nilm_workspace.fact_typical_power"), signature.typical_power_w !== undefined ? `${this._formatMetricValue(signature.typical_power_w)} W` : undefined);
+    addFact(this._panelText("nilm_workspace.fact_typical_duration"), signature.typical_duration_seconds !== undefined ? this._formatDuration(signature.typical_duration_seconds) : undefined);
+    addFact(this._panelText("nilm_workspace.fact_seen_count"), signature.seen_count);
+    addFact(this._panelText("nilm_workspace.fact_voltage_class"), signature.voltage_class);
+    addFact(this._panelText("nilm_workspace.fact_dominant_leg"), signature.dominant_leg);
+    addFact(this._panelText("nilm_workspace.fact_known_load_overlap"), this._formatNilmSignatureFact(signature.known_load_overlap));
+    addFact(this._panelText("nilm_workspace.fact_why_grouped"), signature.why_grouped);
+    addFact(this._panelText("nilm_workspace.fact_last_seen"), signature.last_seen ? this._formatDateTime(signature.last_seen) : undefined);
     if (!facts.length) {
       return "";
     }
@@ -2684,43 +2717,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" || !groundTruthOptions.length ? "disabled" : "";
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     return `
-      <h3>Manual Labels</h3>
-      <p class="muted">Manual labels teach NILM which appliance was running during a time range.</p>
+      <h3>${this._escape(this._panelText("nilm_workspace.manual_labels"))}</h3>
+      <p class="muted">${this._escape(this._panelText("nilm_workspace.manual_labels_description"))}</p>
       <div class="metric">
-        <p class="muted"><strong>Was this appliance running here?</strong> Review the selected graph window, then save the appliance name if the interval matches.</p>
+        <p class="muted"><strong>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</strong> ${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
         <div class="nilm-interval-form">
           <label>
-            <span class="muted">Start</span>
+            <span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span>
             <input type="datetime-local" data-nilm-label-interval-input="start" value="${this._escape(draft.start || "")}">
           </label>
           <label>
-            <span class="muted">End</span>
+            <span class="muted">${this._escape(this._panelText("nilm_workspace.end"))}</span>
             <input type="datetime-local" data-nilm-label-interval-input="end" value="${this._escape(draft.end || "")}">
           </label>
           <label>
-            <span class="muted">Label</span>
-            <input type="text" data-nilm-label-interval-input="label" value="${this._escape(draft.label || "")}" placeholder="Appliance name">
+            <span class="muted">${this._escape(this._panelText("nilm_workspace.label"))}</span>
+            <input type="text" data-nilm-label-interval-input="label" value="${this._escape(draft.label || "")}" placeholder="${this._escape(this._panelText("nilm_workspace.appliance_name"))}">
           </label>
           <label>
-            <span class="muted">Ground Truth Sensor</span>
+            <span class="muted">${this._escape(this._panelText("nilm_workspace.ground_truth_sensor"))}</span>
             ${groundTruthOptions.length ? `<select data-nilm-label-interval-input="ground_truth_entity_id">
-              <option value="">Select sensor</option>
+              <option value="">${this._escape(this._panelText("nilm_workspace.select_sensor"))}</option>
               ${groundTruthOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(draft.ground_truth_entity_id || "") ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
-            </select>` : `<p class="muted">No ground-truth sensors are available from known-load circuits.</p>`}
+            </select>` : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_ground_truth_sensors"))}</p>`}
           </label>
         </div>
         <div class="actions">
-          <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>Save Interval</button>
-          <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>Generate From Sensor</button>
+          <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>${this._escape(this._panelText("actions.labels.save_interval"))}</button>
+          <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>${this._escape(this._panelText("actions.labels.generate_from_sensor"))}</button>
         </div>
-        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">Estimated energy ${this._escape(this._formatNumber(intervalPreview.energy_kwh))} kWh over ${this._escape(this._formatNumber(intervalPreview.duration_minutes))} minutes from ${this._escape(intervalPreview.source_name)}.</p>` : ""}
+        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">${this._escape(this._panelTextFormat("nilm_workspace.interval_energy_preview", { energy: this._formatNumber(intervalPreview.energy_kwh), duration: this._formatNumber(intervalPreview.duration_minutes), source: intervalPreview.source_name }))}</p>` : ""}
       </div>
       ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `
         <div class="metric">
           <span>${this._escape(item.start || "")} - ${this._escape(item.end || "")}</span>
-          <strong>${this._escape(item.label || item.appliance_id || "Labeled interval")}</strong>
+          <strong>${this._escape(item.label || item.appliance_id || this._panelText("common.labeled_interval"))}</strong>
           ${item.mains_entity_id ? `<p class="muted">${this._escape(item.mains_entity_id)}</p>` : ""}
-          ${item.ground_truth_entity_id ? `<p class="muted">Ground Truth Sensor: ${this._escape(item.ground_truth_entity_id)}</p>` : ""}
+          ${item.ground_truth_entity_id ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.ground_truth_sensor_value", { sensor: item.ground_truth_entity_id }))}</p>` : ""}
           ${item.actions && item.actions.assign ? this._renderNilmExistingAssignmentField(item.actions.assign, `label_intervals_${index}`) : ""}
           <div class="actions">
             ${item.actions && item.actions.assign ? `<button
@@ -2729,23 +2762,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               data-nilm-label-interval-index="${index}"
               data-nilm-label-interval-action="assign"
               ${this._busyAction === `nilm_label_interval_${index}_assign` ? "disabled" : ""}
-            >Assign Appliance</button>` : ""}
+            >${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>` : ""}
             <button
               type="button"
               class="secondary"
               data-nilm-label-interval-index="${index}"
               data-nilm-label-interval-action="adjust"
-            >Adjust Label</button>
+            >${this._escape(this._panelText("actions.labels.adjust_label"))}</button>
             <button
               type="button"
               class="secondary"
               data-nilm-label-interval-index="${index}"
               data-nilm-label-interval-action="delete"
               ${this._busyAction === `nilm_label_interval_${index}_delete` ? "disabled" : ""}
-            >Delete Label</button>
+            >${this._escape(this._panelText("actions.labels.delete_label"))}</button>
           </div>
         </div>
-      `).join("")}</div>` : `<p class="muted">No manual NILM labels are saved yet.</p>`}
+      `).join("")}</div>` : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_manual_labels"))}</p>`}
     `;
   }
 
@@ -2782,7 +2815,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return {
       energy_kwh: Math.max(wattHours / 1000, 0),
       duration_minutes: (end - start) / 60000,
-      source_name: powerSeries.name || powerSeries.entity_id || "displayed power samples",
+      source_name: powerSeries.name || powerSeries.entity_id || this._panelText("nilm_workspace.displayed_power_samples"),
     };
   }
 
@@ -2794,14 +2827,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       ${this._renderNilmExistingAssignmentField(session && session.actions && session.actions.assign, `sessions_${index}`)}
       <label class="nilm-label-field" for="nilm_session_label_${index}">
-        <span class="muted">Appliance name</span>
+        <span class="muted">${this._escape(this._panelText("nilm_workspace.appliance_name"))}</span>
         <input
           id="nilm_session_label_${index}"
           type="text"
           data-nilm-session-label-input
           data-nilm-session-label-key="${this._escape(draftKey)}"
           value="${this._escape(currentLabel)}"
-          placeholder="Appliance name"
+          placeholder="${this._escape(this._panelText("nilm_workspace.appliance_name"))}"
         >
       </label>
     `;
@@ -2825,19 +2858,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <div class="grid">
         ${actions.rename ? `<label class="nilm-label-field" for="nilm_assignment_label_${index}">
-          <span class="muted">Appliance name</span>
-          <input id="nilm_assignment_label_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="label" value="${this._escape(label)}" placeholder="Appliance name">
+          <span class="muted">${this._escape(this._panelText("nilm_workspace.appliance_name"))}</span>
+          <input id="nilm_assignment_label_${index}" type="text" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="label" value="${this._escape(label)}" placeholder="${this._escape(this._panelText("nilm_workspace.appliance_name"))}">
         </label>` : ""}
         ${actions.change_profile ? `<label class="nilm-label-field" for="nilm_assignment_profile_${index}">
-          <span class="muted">Appliance type</span>
+          <span class="muted">${this._escape(this._panelText("nilm_workspace.appliance_type"))}</span>
           <select id="nilm_assignment_profile_${index}" data-nilm-assignment-input data-nilm-assignment-key="${this._escape(draftKey)}" data-nilm-assignment-field="appliance_profile">
             ${profileOptions.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(profile) ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
           </select>
         </label>` : ""}
         ${actions.merge ? `<label class="nilm-label-field" for="nilm_assignment_merge_target_${index}">
-          <span class="muted">Merge into</span>
+          <span class="muted">${this._escape(this._panelText("nilm_workspace.merge_into"))}</span>
           <select id="nilm_assignment_merge_target_${index}" data-nilm-assignment-merge-target>
-            <option value="">Do not merge</option>
+            <option value="">${this._escape(this._panelText("actions.labels.do_not_merge"))}</option>
             ${(actions.merge.target_options || []).map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
           </select>
         </label>` : ""}
@@ -2869,11 +2902,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <div class="actions">
         ${detailButton}
-        ${hasSave ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" ${this._busyAction === `nilm_assignments_${index}_save` ? "disabled" : ""}>Save Assignment</button>` : ""}
-        ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>Validate History</button>` : ""}
-        ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>Create HA Device</button>` : ""}
-        ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>Remove HA Device</button>` : ""}
-        ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>Remove Assignment</button>` : ""}
+        ${hasSave ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" ${this._busyAction === `nilm_assignments_${index}_save` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.save_assignment"))}</button>` : ""}
+        ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.validate_history"))}</button>` : ""}
+        ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>` : ""}
+        ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_ha_device"))}</button>` : ""}
+        ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_assignment"))}</button>` : ""}
       </div>
     `;
   }
@@ -2883,7 +2916,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!path) {
       return "";
     }
-    return `<button type="button" class="secondary" data-nilm-appliance-detail-path="${this._escape(path)}">Open Appliance Detail</button>`;
+    return `<button type="button" class="secondary" data-nilm-appliance-detail-path="${this._escape(path)}">${this._escape(this._panelText("actions.labels.open_appliance_detail"))}</button>`;
   }
 
   _renderNilmValidation(validation) {
@@ -2895,29 +2928,29 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? validation.prediction_preview
       : [];
     return `
-      <h3>Validation</h3>
-      <p class="muted">Validation compares saved labels with NILM's predicted sessions.</p>
+      <h3>${this._escape(this._panelText("nilm_workspace.validation"))}</h3>
+      <p class="muted">${this._escape(this._panelText("nilm_workspace.validation_description"))}</p>
       <div class="summary">
         <div class="metric">
-          <span>Ground truth</span>
+          <span>${this._escape(this._panelText("nilm_workspace.ground_truth"))}</span>
           <strong>${this._escape(metrics.ground_truth_interval_count || 0)}</strong>
         </div>
         <div class="metric">
-          <span>Precision</span>
+          <span>${this._escape(this._panelText("nilm_workspace.precision"))}</span>
           <strong>${this._escape(Math.round(Number(metrics.precision || 0) * 100))}%</strong>
         </div>
         <div class="metric">
-          <span>Recall</span>
+          <span>${this._escape(this._panelText("nilm_workspace.recall"))}</span>
           <strong>${this._escape(Math.round(Number(metrics.recall || 0) * 100))}%</strong>
         </div>
       </div>
-      ${this._renderNilmWorkspaceList("Prediction Preview", preview, "No ground-truth sensor intervals are saved yet.", (item) => `
+      ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.prediction_preview"), preview, this._panelText("nilm_workspace.prediction_preview_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.ground_truth_entity_id || "")}</span>
-          <strong>${this._escape(item.label || "Ground truth")} - ${this._escape(item.prediction_status || "missed")}</strong>
-          <p class="muted">${this._escape(item.matched_assignment_id || "No matching NILM prediction")} ${this._escape(this._formatMetricValue(item.overlap_seconds))} seconds overlap</p>
+          <strong>${this._escape(item.label || this._panelText("nilm_workspace.ground_truth"))} - ${this._escape(item.prediction_status || this._panelText("nilm_workspace.prediction_missed"))}</strong>
+          <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.prediction_overlap", { match: item.matched_assignment_id || this._panelText("nilm_workspace.no_matching_prediction"), seconds: this._formatMetricValue(item.overlap_seconds) }))}</p>
         </div>
-      `, "Preview compares saved labels with NILM's predicted sessions.")}
+      `, this._panelText("nilm_workspace.prediction_preview_description"))}
     `;
   }
 
@@ -2932,7 +2965,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _overlayEntitySummary(item) {
     const count = (item.entity_ids || []).filter((entityId) => String(entityId || "").trim()).length;
-    return count === 1 ? "1 sensor" : `${count} sensors`;
+    return count === 1
+      ? this._panelTextFormat("nilm_workspace.sensor_count", { count, noun: this._panelText("common.sensor") })
+      : this._panelTextFormat("nilm_workspace.sensor_count", { count, noun: this._panelText("common.sensors") });
   }
 
   _renderSafetyNotice(alert) {
@@ -2941,7 +2976,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     return `
       <section class="panel safety-notice">
-        <h2>Safety Notice</h2>
+        <h2>${this._escape(this._panelText("chart.safety_notice"))}</h2>
         <p>${this._escape(alert.safety_notice)}</p>
       </section>
     `;
@@ -2949,14 +2984,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderChart(alert) {
     if (this._historyLoading) {
-      return `<p class="muted">Loading history samples...</p>`;
+      return `<p class="muted">${this._escape(this._panelText("chart.loading_history"))}</p>`;
     }
     if (this._historyError) {
       return `<p class="muted">${this._escape(this._historyError)}</p>`;
     }
     const series = this._chartSeries();
     if (!series.length) {
-      return `<p class="muted">No history samples were available for this graph window.</p>`;
+      return `<p class="muted">${this._escape(this._panelText("chart.no_history"))}</p>`;
     }
     return this._chartSvg(series, alert);
   }
@@ -2992,7 +3027,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
       const unit = alert.y_axis_label ? ` ${alert.y_axis_label}` : "";
       const circles = item.points.map((point) => {
-        const title = `${item.name}: ${this._formatNumber(point.value)}${unit} at ${this._formatDateTime(new Date(point.time))}`;
+        const title = this._panelTextFormat("chart.point_title", { name: item.name, value: this._formatNumber(point.value), unit, time: this._formatDateTime(new Date(point.time)) });
         return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"><title>${this._escape(title)}</title></circle>`;
       }).join("");
       return `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${points}"></polyline>${circles}`;
@@ -3013,7 +3048,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (!Number.isFinite(markerTime) || markerTime < minTime || markerTime > maxTime) {
         return null;
       }
-      return { time: markerTime, direction: edge.direction || "NILM edge" };
+      return { time: markerTime, direction: edge.direction || this._panelText("nilm_workspace.nilm_edge") };
     }).filter(Boolean);
     const edgeMarkers = edgeItems.map((edge) => {
       const markerTime = edge.time;
@@ -3032,13 +3067,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
       const lowConfidenceAttr = this._isLowNilmConfidence(confidenceValue) ? ' data-nilm-low-confidence="true"' : "";
       const confidenceStyle = confidenceValue !== null ? ` style="opacity:${(0.08 + confidenceValue * 0.2).toFixed(2)}"` : "";
-      const confidenceLabel = confidenceValue !== null ? `, confidence ${Math.round(confidenceValue * 100)}%` : "";
+      const confidenceLabel = confidenceValue !== null ? this._panelTextFormat("chart.session_confidence", { confidence: Math.round(confidenceValue * 100) }) : "";
       const left = x(Math.max(start, minTime));
       const right = x(Math.min(end, maxTime));
       const bandWidth = Math.max(right - left, 1);
       const label = this._nilmSessionGraphLabel(session);
       const visibleLabel = bandWidth >= 56 ? this._truncateNilmGraphLabel(label, Math.floor((bandWidth - 10) / 7)) : "";
-      const title = label ? `${label} (${session.session_id || "NILM session"})` : session.session_id || "NILM session";
+      const sessionId = session.session_id || this._panelText("nilm_workspace.nilm_session");
+      const title = label ? this._panelTextFormat("chart.session_title", { label, session_id: sessionId }) : sessionId;
       const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
       return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
     }).join("");
@@ -3050,7 +3086,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : "";
 
     return `
-      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Alert evidence chart"${selectAttrs}>
+      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(this._panelText("chart.alert_evidence_label"))}"${selectAttrs}>
         <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
@@ -3064,7 +3100,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${lines}
       </svg>
       <div class="legend">${legend}</div>
-      <p class="muted">Graph times shown in ${this._escape(timeZoneLabel)}.</p>
+      <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
     `;
   }
 
@@ -3136,8 +3172,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     return `<div class="actions">
-      ${hasKnown ? `<label><input type="checkbox" data-nilm-overlay-toggle="known_load" ${this._nilmOverlayVisibility.known_load ? "checked" : ""}> Show known-load overlays</label>` : ""}
-      ${hasSolar ? `<label><input type="checkbox" data-nilm-overlay-toggle="solar" ${this._nilmOverlayVisibility.solar ? "checked" : ""}> Show solar/net overlays</label>` : ""}
+      ${hasKnown ? `<label><input type="checkbox" data-nilm-overlay-toggle="known_load" ${this._nilmOverlayVisibility.known_load ? "checked" : ""}> ${this._escape(this._panelText("nilm_workspace.show_known_load_overlays"))}</label>` : ""}
+      ${hasSolar ? `<label><input type="checkbox" data-nilm-overlay-toggle="solar" ${this._nilmOverlayVisibility.solar ? "checked" : ""}> ${this._escape(this._panelText("nilm_workspace.show_solar_net_overlays"))}</label>` : ""}
     </div>`;
   }
 
@@ -3154,12 +3190,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const panLaterDisabled = window.end >= window.max ? "disabled" : "";
     return `<div data-nilm-workspace-graph>
       <div class="actions">
-        <button type="button" class="secondary" data-nilm-graph-zoom="0.5" ${zoomInDisabled}>Zoom In</button>
-        <button type="button" class="secondary" data-nilm-graph-zoom="2" ${zoomOutDisabled}>Zoom Out</button>
-        <button type="button" class="secondary" data-nilm-graph-pan="-0.5" ${panEarlierDisabled}>Pan Earlier</button>
-        <button type="button" class="secondary" data-nilm-graph-pan="0.5" ${panLaterDisabled}>Pan Later</button>
+        <button type="button" class="secondary" data-nilm-graph-zoom="0.5" ${zoomInDisabled}>${this._escape(this._panelText("actions.labels.zoom_in"))}</button>
+        <button type="button" class="secondary" data-nilm-graph-zoom="2" ${zoomOutDisabled}>${this._escape(this._panelText("actions.labels.zoom_out"))}</button>
+        <button type="button" class="secondary" data-nilm-graph-pan="-0.5" ${panEarlierDisabled}>${this._escape(this._panelText("actions.labels.pan_earlier"))}</button>
+        <button type="button" class="secondary" data-nilm-graph-pan="0.5" ${panLaterDisabled}>${this._escape(this._panelText("actions.labels.pan_later"))}</button>
       </div>
-      <p class="muted" data-nilm-graph-window>Showing NILM graph window ${this._escape(this._formatDateTime(new Date(window.start)))} - ${this._escape(this._formatDateTime(new Date(window.end)))}.</p>
+      <p class="muted" data-nilm-graph-window>${this._escape(this._panelTextFormat("nilm_workspace.graph_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }))}</p>
     </div>`;
   }
 
@@ -3284,13 +3320,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <section class="panel">
         <h2>${this._escape(this._evidenceText("actions.available_circuit_actions"))}</h2>
-        ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
-          this._actionButton("pause_alerts", "Pause Alerts", true),
+        ${this._renderActionGroup(this._panelText("actions.groups.pause_title"), this._panelText("actions.groups.pause_description"), [
+          this._actionButton("pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
         ])}
-        ${this._renderActionGroup("Tune this circuit", "Use these when the appliance summary looks wrong or the learned baseline is stale.", [
-          this._actionButton("open_appliance_detail", "Open Appliance Detail", true),
-          this._actionButton("relearn_baseline", "Relearn Baseline", true),
-          this._actionButton("open_advanced_circuit_settings", "Open Advanced Circuit Settings", true),
+        ${this._renderActionGroup(this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
+          this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
+          this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+          this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
         ])}
       </section>
       ${this._renderNilmWorkspace()}
@@ -3307,15 +3343,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _statusText(status) {
     if (status === "matched_alert") {
-      return "Matched alert";
+      return this._panelText("status.matched_alert");
     }
     if (status === "latest_for_circuit") {
-      return "Latest evidence for circuit";
+      return this._panelText("status.latest_for_circuit");
     }
     if (status === "circuit_found_no_evidence") {
-      return "Circuit actions available";
+      return this._panelText("status.circuit_found_no_evidence");
     }
-    return "Historical alert not found";
+    return this._panelText("status.not_found");
   }
 
   _metric(label, value) {
@@ -3388,14 +3424,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _changeSummary(alert) {
     if (alert.percent_change !== null && alert.percent_change !== undefined) {
-      return `${alert.feature_name || this._friendlyFeature(alert.feature)} changed by ${alert.percent_change}%.`;
+      return this._panelTextFormat("chart.changed_by", { feature: alert.feature_name || this._friendlyFeature(alert.feature), percent: alert.percent_change });
     }
     const metrics = alert.contributing_metrics || {};
     const keys = Object.keys(metrics);
     if (keys.length) {
-      return `Changed metrics: ${keys.join(", ")}.`;
+      return this._panelTextFormat("chart.changed_metrics", { metrics: keys.join(", ") });
     }
-    return alert.what_happened || alert.message || "The analyzer found a repeated change.";
+    return alert.what_happened || alert.message || this._panelText("chart.change_fallback");
   }
 
   _disabled(actionKey) {
@@ -3407,31 +3443,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _formatPower(value) {
-    return value === null || value === undefined ? "Unknown" : `${this._formatNumber(value)} W`;
+    return value === null || value === undefined ? this._panelText("common.unknown") : `${this._formatNumber(value)} W`;
   }
 
   _formatKwh(value) {
-    return value === null || value === undefined ? "Unknown" : `${this._formatNumber(value)} kWh`;
+    return value === null || value === undefined ? this._panelText("common.unknown") : `${this._formatNumber(value)} kWh`;
   }
 
   _formatCost(value) {
     if (value === null || value === undefined) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const cost = Number(value);
     if (!Number.isFinite(cost)) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     return `$${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   _formatDuration(value) {
     if (value === null || value === undefined) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const seconds = Number(value);
     if (!Number.isFinite(seconds)) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.round((seconds % 3600) / 60);
@@ -3447,7 +3483,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _formatConfidence(value) {
     const confidence = Number(value);
     if (!Number.isFinite(confidence)) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const normalized = confidence <= 1 ? confidence * 100 : confidence;
     return `${Math.round(normalized)}%`;
@@ -3464,7 +3500,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatComparisonValue(comparison, value) {
     if (value === null || value === undefined) {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const unit = comparison && comparison.unit ? String(comparison.unit) : "";
     if (unit === "$") {
@@ -3478,13 +3514,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _sourceLabel(sourceType) {
     const labels = {
-      direct_meter: "Direct meter",
-      nilm_estimate: "Estimated by NILM",
-      mixed: "Mixed circuit",
-      mains: "Mains",
-      unknown: "Unknown",
+      direct_meter: this._panelText("source_labels.direct_meter"),
+      nilm_estimate: this._panelText("source_labels.nilm_estimate"),
+      mixed: this._panelText("source_labels.mixed"),
+      mains: this._panelText("source_labels.mains"),
+      unknown: this._panelText("source_labels.unknown"),
     };
-    return labels[sourceType] || "Unknown";
+    return labels[sourceType] || this._panelText("common.unknown");
   }
 
   _formatNumber(value) {
@@ -3493,7 +3529,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatMetricValue(value) {
     if (value === null || value === undefined || value === "") {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
       return this._formatDateTime(value);
@@ -3524,7 +3560,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatDateTime(value) {
     if (value === null || value === undefined || value === "") {
-      return "Unknown";
+      return this._panelText("common.unknown");
     }
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) {
@@ -3556,7 +3592,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return (
       (this._hass && this._hass.config && this._hass.config.time_zone)
       || Intl.DateTimeFormat().resolvedOptions().timeZone
-      || "local time"
+      || this._panelText("common.local_time")
     );
   }
 
@@ -3569,21 +3605,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _friendlyFeature(value) {
     const raw = String(value || "").trim();
     if (!raw) {
-      return "Alert";
+      return this._panelText("feature_labels.alert");
     }
     const labels = {
-      hvac: "HVAC",
-      kwh: "kWh",
-      nilm: "NILM",
-      pf: "PF",
-      s: "Seconds",
-      va: "VA",
-      var: "VAR",
+      hvac: this._panelText("feature_labels.hvac"),
+      kwh: this._panelText("feature_labels.kwh"),
+      nilm: this._panelText("feature_labels.nilm"),
+      pf: this._panelText("feature_labels.pf"),
+      s: this._panelText("feature_labels.s"),
+      va: this._panelText("feature_labels.va"),
+      var: this._panelText("feature_labels.var"),
     };
     return raw.split(/[_-]+/)
       .filter((token) => token)
       .map((token) => labels[token.toLowerCase()] || token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
-      .join(" ") || "Alert";
+      .join(" ") || this._panelText("feature_labels.alert");
   }
 
   _escape(value) {
@@ -3636,9 +3672,9 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
     const workspace = this._nilmWorkspace && this._nilmWorkspace.status === "ok"
       ? this._nilmWorkspace
       : null;
-    const title = this._dashboardConfig.title || "NILM mains power";
+    const title = this._dashboardConfig.title || this._panelText("dashboard_graphs.title");
     const body = this._loading
-      ? `<p class="muted">Loading NILM graphs...</p>`
+      ? `<p class="muted">${this._escape(this._panelText("dashboard_graphs.loading"))}</p>`
       : `
         ${this._renderDashboardNotificationGraph(alert)}
         ${this._renderNilmWorkspaceLanes(workspace)}
@@ -3816,14 +3852,14 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
       return "";
     }
     const detailPath = alert.evidence_path || this._dashboardConfig.detail_path || this._routeKey();
-    const description = alert.what_happened || alert.message || "Latest related notification";
+    const description = alert.what_happened || alert.message || this._panelText("dashboard_graphs.latest_notification");
     return `
       <section>
-        <h3>Latest related notification</h3>
+        <h3>${this._escape(this._panelText("dashboard_graphs.latest_notification"))}</h3>
         <p>${this._escape(description)}</p>
         <a class="dashboard-chart-link" href="${this._escape(detailPath)}" data-dashboard-alert-detail>
           ${this._renderChart(alert)}
-          <span class="detail-link">View notification detail</span>
+          <span class="detail-link">${this._escape(this._panelText("dashboard_graphs.view_notification_detail"))}</span>
         </a>
       </section>
     `;
@@ -3842,10 +3878,10 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
         nilm_sessions: workspace.sessions,
         y_axis_label: "W",
       })
-      : `<p class="muted">No NILM workspace history samples were available for this graph window.</p>`;
+      : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       <section>
-        <h3>NILM mains power</h3>
+        <h3>${this._escape(this._panelText("dashboard_graphs.title"))}</h3>
         ${graph}
       </section>
     `;

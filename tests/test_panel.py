@@ -2767,7 +2767,7 @@ def test_alert_evidence_payload_exposes_panel_text() -> None:
 
     payload = alert_evidence_payload([_coordinator()], circuit_id="hvac")
 
-    assert payload["text"]["fallbacks"]["current_circuit_heading"] == (
+    assert payload["text"]["evidence"]["fallbacks"]["current_circuit_heading"] == (
         "No current alert evidence"
     )
 

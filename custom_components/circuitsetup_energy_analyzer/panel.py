@@ -20,7 +20,7 @@ from .entities.setup_health import (
     setup_health_panel_text,
     setup_health_value,
 )
-from .localized_text import translation_section
+from .localized_text import translation_section, translation_text
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
@@ -119,7 +119,7 @@ PANEL_MODULE_VERSION = (
     "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-"
     "refresh-route-stop-save-nilm-reload-setup-health-checklist-actions-"
     "setup-health-translations-merge-action-feedback-tooltips-available-nilm-actions-"
-    "panel-evidence-text"
+    "panel-evidence-text-panel-user-text-translations"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
@@ -139,6 +139,10 @@ _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
 _PANEL_REGISTERED_VALUE = "registered"
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
+
+
+def _panel_text(*keys: str) -> str:
+    return translation_text("panel", *keys)
 
 try:
     from aiohttp import web
@@ -401,11 +405,15 @@ def alert_evidence_payload(
                     requested_circuit_id,
                     include_all_nilm=include_all_nilm,
                 ),
-                "message": "No current alert evidence is available for this circuit.",
-                "next_step": (
-                    "Use the available circuit actions below, open Advanced "
-                    "Circuit Settings, or review the summary sensors for the "
-                    "latest state."
+                "message": _panel_text(
+                    "evidence",
+                    "fallbacks",
+                    "current_circuit_message",
+                ),
+                "next_step": _panel_text(
+                    "evidence",
+                    "fallbacks",
+                    "current_circuit_next_step",
                 ),
                 "text": text,
             },
@@ -421,12 +429,8 @@ def alert_evidence_payload(
             "alert": None,
             "circuit": None,
             "actions": {},
-            "message": (
-                "The requested alert or circuit evidence is no longer available."
-            ),
-            "next_step": (
-                "Open a newer notification or review the appliance summary sensors."
-            ),
+            "message": _panel_text("evidence", "fallbacks", "not_found_message"),
+            "next_step": _panel_text("evidence", "fallbacks", "not_found_next_step"),
             "text": text,
         },
         requested_feature,
@@ -435,8 +439,8 @@ def alert_evidence_payload(
 
 
 def alert_evidence_panel_text() -> dict[str, Any]:
-    """Return English alert evidence panel text from Home Assistant translations."""
-    return dict(translation_section("panel", "evidence"))
+    """Return English panel text from Home Assistant translations."""
+    return dict(translation_section("panel"))
 
 
 def appliance_detail_payload(
@@ -469,11 +473,13 @@ def appliance_detail_payload(
             "requested_assignment_id": requested_assignment_id,
             "detail": None,
             "actions": {},
-            "message": (
-                "The requested NILM appliance assignment is no longer available."
+            "message": _panel_text(
+                "appliance_detail",
+                "assignment_not_found_message",
             ),
-            "next_step": (
-                "Open the NILM workspace to review current appliance assignments."
+            "next_step": _panel_text(
+                "appliance_detail",
+                "assignment_not_found_next_step",
             ),
         }
 
@@ -494,10 +500,8 @@ def appliance_detail_payload(
         "requested_assignment_id": requested_assignment_id,
         "detail": None,
         "actions": {},
-        "message": "No appliance detail is available for the requested appliance.",
-        "next_step": (
-            "Open the generated dashboard or review the appliance summary sensors."
-        ),
+        "message": _panel_text("appliance_detail", "fallback_message"),
+        "next_step": _panel_text("appliance_detail", "fallback_next_step"),
     }
 
 
@@ -637,7 +641,7 @@ def nilm_workspace_payload(
         return {
             "status": "not_found",
             "requested_circuit_id": circuit_id or None,
-            "message": "No mains NILM circuit is available for this workspace.",
+            "message": _panel_text("nilm_workspace", "no_mains_circuit"),
         }
 
     coordinator, config = target
@@ -875,7 +879,7 @@ def _actions_for_context(
                 },
                 "open_appliance_detail": {
                     "type": "navigate",
-                    "label": "Open Appliance Detail",
+                    "label": _panel_text("actions", "labels", "open_appliance_detail"),
                     "path": _circuit_appliance_detail_panel_path(circuit_id),
                 },
                 "open_advanced_circuit_settings": (
@@ -1028,7 +1032,7 @@ def _recommendation_display_label(payload: Mapping[str, Any]) -> str:
     feature = str(payload.get("feature") or "").strip()
     if feature:
         return friendly_feature_name(feature)
-    return "Suggested setting"
+    return _panel_text("recommendations", "suggested_setting")
 
 
 def _recommendation_actions(
@@ -1050,7 +1054,7 @@ def _recommendation_actions(
             "data": dict(data),
             "enabled": is_pending,
             "unavailable_reason": "not_pending",
-            "unavailable_label": "This recommendation is no longer pending.",
+            "unavailable_label": _panel_text("recommendations", "not_pending"),
         },
         "dismiss": {
             "domain": DOMAIN,
@@ -1058,7 +1062,7 @@ def _recommendation_actions(
             "data": dict(data),
             "enabled": is_pending,
             "unavailable_reason": "not_pending",
-            "unavailable_label": "This recommendation is no longer pending.",
+            "unavailable_label": _panel_text("recommendations", "not_pending"),
         },
         "undo": {
             "domain": DOMAIN,
@@ -1066,7 +1070,7 @@ def _recommendation_actions(
             "data": dict(data),
             "enabled": is_applied,
             "unavailable_reason": "not_applied",
-            "unavailable_label": "Only applied recommendations can be undone.",
+            "unavailable_label": _panel_text("recommendations", "not_applied"),
         },
         "reset": {
             "domain": DOMAIN,
@@ -1300,8 +1304,9 @@ def _nilm_actions_for_signature(
             {
                 "enabled": False,
                 "unavailable_reason": "no_merge_target",
-                "unavailable_label": (
-                    "No other NILM signature is available to merge into yet."
+                "unavailable_label": _panel_text(
+                    "nilm_workspace",
+                    "no_merge_target_action",
                 ),
             }
         )
@@ -1355,7 +1360,7 @@ def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
         key: signature[key] for key in NILM_SIGNATURE_PANEL_FIELDS if key in signature
     }
     payload["source_type"] = "nilm_estimate"
-    payload["source_label"] = "Estimated by NILM"
+    payload["source_label"] = _panel_text("source_labels", "nilm_estimate")
     if "typical_watts" in signature:
         payload["typical_power_w"] = signature["typical_watts"]
     payload["why_grouped"] = _nilm_signature_explanation(signature)
@@ -1864,7 +1869,7 @@ def _nilm_virtual_appliances_for_assignments(
                     assignment.get("lifecycle_state") or "candidate"
                 ),
                 "source_type": "nilm_estimate",
-                "source_label": "Estimated by NILM",
+                "source_label": _panel_text("source_labels", "nilm_estimate"),
                 "estimated": True,
                 "mains_circuit_id": str(
                     assignment.get("mains_circuit_id") or ""
@@ -2856,7 +2861,11 @@ def _pause_alerts_action(
     return {
         "domain": DOMAIN,
         "service": SERVICE_END_MAINTENANCE if paused else SERVICE_START_MAINTENANCE,
-        "label": "Resume Alerts" if paused else "Pause Alerts",
+        "label": _panel_text(
+            "actions",
+            "labels",
+            "resume_alerts" if paused else "pause_alerts",
+        ),
         "data": data,
     }
 
