@@ -1729,6 +1729,84 @@ if (!emptyHtml.includes("data-nilm-lane-empty")) {
     )
 
 
+def test_nilm_explicit_empty_needs_review_lane_is_authoritative() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [
+    {
+      signature_id: "sig-assigned",
+      display_label: "Assigned load",
+      review_state: "new"
+    },
+    {
+      signature_id: "sig-merged",
+      display_label: "Merged load",
+      review_state: "merged"
+    }
+  ],
+  assignments: [
+    {
+      assignment_id: "assignment-1",
+      display_name: "Assigned appliance",
+      signature_id: "sig-assigned"
+    }
+  ],
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: [],
+      assignment_ids: []
+    },
+    assigned: {
+      label: "Assigned",
+      signature_ids: [],
+      assignment_ids: ["assignment-1"]
+    },
+    ignored_expected: {
+      label: "Ignored / Expected",
+      signature_ids: ["sig-merged"],
+      assignment_ids: []
+    }
+  },
+  lane_counts: { needs_review: 0 }
+};
+
+const items = panel._nilmLaneItems(panel._nilmWorkspace, "needs_review");
+if (items.length !== 0) {
+  throw new Error(`explicit empty lane was repopulated: ${JSON.stringify(items)}`);
+}
+
+const lanesHtml = panel._renderNilmWorkspaceLanes(panel._nilmWorkspace);
+const tabStart = lanesHtml.indexOf('data-nilm-lane="needs_review"');
+const tabEnd = lanesHtml.indexOf("</button>", tabStart);
+const needsReviewTab = lanesHtml.slice(tabStart, tabEnd);
+if (!needsReviewTab.includes("<strong>0</strong>")) {
+  throw new Error(`needs review count disagreed with payload: ${lanesHtml}`);
+}
+
+const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+if ((html.match(/data-nilm-lane-empty/g) || []).length !== 1) {
+  throw new Error(`expected one stable empty status: ${html}`);
+}
+for (const expected of [
+  'id="nilm_review_lane_panel"',
+  'role="tabpanel"',
+  'aria-labelledby="nilm_lane_needs_review"'
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`empty lane lost tabpanel ${expected}: ${html}`);
+  }
+}
+if (html.includes("data-nilm-review-inspector")) {
+  throw new Error(`empty lane rendered an inspector: ${html}`);
+}
+"""
+    )
+
+
 def test_nilm_lane_tabs_change_selection_without_fetching() -> None:
     _run_panel_node_script(
         """
@@ -1755,6 +1833,61 @@ if (rendered !== 1 || fetched !== 0) {
     )
 
 
+def test_nilm_review_power_percent_scales_and_clamps() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const reviewItems = [
+  { kind: "signature", item: { typical_power_w: 250 }, index: 0 },
+  { kind: "assignment", item: { estimated_power_w: 1000 }, index: 0 }
+];
+const cases = [
+  [reviewItems[0], 25],
+  [{ kind: "signature", item: { median_power_w: 2000 }, index: 1 }, 100],
+  [{ kind: "signature", item: { typical_power_w: -50 }, index: 2 }, 0],
+  [{ kind: "signature", item: {}, index: 3 }, 0]
+];
+for (const [item, expected] of cases) {
+  const actual = panel._nilmPowerPercent(item, reviewItems);
+  if (actual !== expected) {
+    throw new Error(`power percent ${actual} did not equal ${expected}`);
+  }
+}
+
+const cardItem = {
+  kind: "signature",
+  item: {
+    signature_id: "sig-1",
+    display_label: "Load",
+    typical_power_w: 250,
+    confidence: 1.4
+  },
+  index: 0
+};
+const html = panel._renderNilmReviewCard(cardItem, reviewItems, false);
+for (const expected of [
+  '--power-percent:25%',
+  '<span>100%</span>',
+  '<progress max="100" value="100"'
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`review card missed ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_lane_count_badge_respects_radius_limit() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    start = asset.index(".nilm-lane strong {")
+    end = asset.index("\n        }", start)
+    rule = asset[start:end]
+
+    assert "border-radius: 8px" in rule
+    assert "999px" not in rule
+
+
 def test_nilm_workspace_graph_controls_use_accessible_icons() -> None:
     _run_panel_node_script(
         """
@@ -1765,16 +1898,22 @@ const html = panel._renderNilmGraphControls({
   min: 0,
   max: 7200000
 });
-for (const expected of [
+for (const icon of [
   'icon="mdi:magnify-plus-outline"',
   'icon="mdi:magnify-minus-outline"',
   'icon="mdi:chevron-left"',
-  'icon="mdi:chevron-right"',
-  'title="Zoom In"',
-  'aria-label="Zoom In"'
+  'icon="mdi:chevron-right"'
 ]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing graph control ${expected}: ${html}`);
+  if (!html.includes(icon)) {
+    throw new Error(`missing graph control ${icon}: ${html}`);
+  }
+}
+for (const name of ["Zoom In", "Zoom Out", "Pan Earlier", "Pan Later"]) {
+  for (const attribute of ["title", "aria-label"]) {
+    const expected = `${attribute}="${name}"`;
+    if (!html.includes(expected)) {
+      throw new Error(`missing graph control name ${expected}: ${html}`);
+    }
   }
 }
 """

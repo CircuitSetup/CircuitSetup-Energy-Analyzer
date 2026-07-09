@@ -1605,7 +1605,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .nilm-lane strong {
           align-items: center;
           background: var(--secondary-background-color, #f4f6f8);
-          border-radius: 999px;
+          border-radius: 8px;
           display: inline-flex;
           justify-content: center;
           min-height: 24px;
@@ -2921,7 +2921,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _nilmLaneItems(workspace, laneKey = this._nilmActiveLane) {
-    const lane = (workspace && workspace.lanes && workspace.lanes[laneKey]) || {};
+    const lanes = workspace && workspace.lanes && typeof workspace.lanes === "object"
+      ? workspace.lanes
+      : null;
+    const hasLane = Boolean(lanes && Object.prototype.hasOwnProperty.call(lanes, laneKey));
+    const lane = hasLane ? lanes[laneKey] || {} : {};
     const signatureIds = new Set(Array.isArray(lane.signature_ids) ? lane.signature_ids : []);
     const assignmentIds = new Set(Array.isArray(lane.assignment_ids) ? lane.assignment_ids : []);
     const signatures = (Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [])
@@ -2930,7 +2934,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const assignments = (Array.isArray(workspace && workspace.assignments) ? workspace.assignments : [])
       .map((item, index) => ({ kind: "assignment", item, index }))
       .filter(({ item }) => assignmentIds.has(item.assignment_id));
-    if (signatures.length || assignments.length) {
+    if (hasLane) {
       return [...signatures, ...assignments];
     }
     if (laneKey === "needs_review") {
@@ -2998,18 +3002,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmReviewLayout(workspace) {
     const reviewItems = this._nilmLaneItems(workspace);
-    if (!reviewItems.length) {
-      const lane = workspace && workspace.lanes && workspace.lanes[this._nilmActiveLane];
-      const laneLabel = (lane && lane.label) || this._friendlyFeature(this._nilmActiveLane);
-      return `<p class="muted nilm-lane-empty" data-nilm-lane-empty role="status">${this._escape(this._panelTextFormat("nilm_workspace.lane_empty", { lane: laneLabel }))}</p>`;
-    }
-    const selectedItem = this._nilmSelectedReviewItem(workspace);
-    const selectedKey = this._nilmReviewKey(selectedItem);
+    const lane = workspace && workspace.lanes && workspace.lanes[this._nilmActiveLane];
+    const laneLabel = (lane && lane.label) || this._friendlyFeature(this._nilmActiveLane);
+    const selectedItem = reviewItems.length ? this._nilmSelectedReviewItem(workspace) : null;
+    const selectedKey = selectedItem ? this._nilmReviewKey(selectedItem) : "";
     return `<div class="nilm-review-layout" id="nilm_review_lane_panel" role="tabpanel" aria-labelledby="nilm_lane_${this._escape(this._nilmActiveLane)}">
-      ${reviewItems.map((reviewItem, index) => {
+      ${reviewItems.length ? reviewItems.map((reviewItem, index) => {
         const selected = this._nilmReviewKey(reviewItem) === selectedKey;
         return `${this._renderNilmReviewCard(reviewItem, reviewItems, selected)}${selected ? this._renderNilmReviewInspector(reviewItem, index + 1) : ""}`;
-      }).join("")}
+      }).join("") : `<p class="muted nilm-lane-empty" data-nilm-lane-empty role="status">${this._escape(this._panelTextFormat("nilm_workspace.lane_empty", { lane: laneLabel }))}</p>`}
     </div>`;
   }
 
