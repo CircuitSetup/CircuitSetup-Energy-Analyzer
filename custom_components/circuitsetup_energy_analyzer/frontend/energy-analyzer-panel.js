@@ -1379,7 +1379,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .decision-tile input {
           margin: 3px 0 0;
         }
-        .decision-tile ha-icon {
+        .decision-tile ha-icon,
+        .nilm-decision-option ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+        }
+        .decision-tile:has(input:checked) ha-icon,
+        .decision-tile:has(input:checked) strong,
+        .nilm-decision-option:has(input:checked) ha-icon,
+        .nilm-decision-option:has(input:checked) strong {
           color: var(--primary-color, #0b6bcb);
         }
         .decision-tile span {
@@ -1413,7 +1420,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: grid;
           gap: 12px;
         }
-        @media (min-width: 800px) {
+        @media (min-width: 801px) {
           .evidence-investigation {
             grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
           }
@@ -1449,7 +1456,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .status {
           display: inline-flex;
           width: fit-content;
-          border-radius: 999px;
+          border-radius: 8px;
           padding: 5px 10px;
           background: var(--state-icon-active-color, #0b6bcb);
           color: var(--text-primary-color, #fff);
@@ -1513,7 +1520,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           min-width: 0;
         }
         .swatch {
-          border-radius: 999px;
+          border-radius: 50%;
           display: inline-block;
           height: 10px;
           width: 10px;
@@ -1658,7 +1665,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .merge-target-chip {
           background: var(--secondary-background-color, #f4f6f8);
           border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 999px;
+          border-radius: 8px;
           color: var(--primary-text-color, #111827);
           cursor: pointer;
           font: inherit;
@@ -1680,15 +1687,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
         .nilm-lanes {
           display: flex;
-          gap: 4px;
+          gap: 8px;
           overflow-x: auto;
+          padding-bottom: 4px;
         }
         .nilm-lane {
           background: transparent;
           border-color: transparent;
           color: var(--primary-text-color, #111827);
+          flex: 0 0 auto;
           gap: 8px;
           min-height: 44px;
+          padding-inline: 6px;
           white-space: nowrap;
         }
         .nilm-lane[aria-selected="true"] {
@@ -1707,7 +1717,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
         .nilm-review-layout {
           display: grid;
-          gap: 12px 20px;
+          gap: 16px;
+          grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.6fr);
           min-width: 0;
         }
         .nilm-review-card {
@@ -1734,6 +1745,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           justify-content: space-between;
           min-width: 0;
         }
+        .review-card-heading {
+          flex-wrap: wrap;
+        }
         .review-card-heading strong {
           overflow-wrap: anywhere;
         }
@@ -1741,6 +1755,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .review-card-facts {
           color: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
+          overflow-wrap: anywhere;
         }
         .power-meter {
           background: var(--divider-color, #d8dee6);
@@ -1768,18 +1783,39 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           min-width: 0;
           padding-top: 14px;
         }
+        .nilm-review-card[aria-pressed="true"] .review-card-heading strong {
+          color: var(--primary-color, #03a9f4);
+        }
         .nilm-lane-empty {
           min-height: 44px;
           padding: 12px 0;
         }
+        .icon-button,
         .nilm-graph-controls button {
           height: 44px;
           padding: 0;
           width: 44px;
         }
-        @media (min-width: 800px) {
+        .decision-tile,
+        .nilm-lane,
+        .nilm-review-card,
+        .icon-button {
+          min-height: 44px;
+        }
+        .loading-skeleton {
+          background: var(--secondary-background-color, #f4f6f8);
+          min-height: 180px;
+          opacity: 0.72;
+        }
+        .graph-loading-skeleton {
+          min-height: 340px;
+        }
+        .nilm-loading-skeleton {
+          min-height: 480px;
+        }
+        @media (min-width: 801px) {
           .nilm-review-layout {
-            grid-template-columns: minmax(260px, 2fr) minmax(300px, 3fr);
+            grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.6fr);
           }
           .nilm-review-inspector {
             align-self: start;
@@ -1790,14 +1826,39 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
             padding: 0 0 12px 20px;
           }
         }
+        @media (max-width: 800px) {
+          :host {
+            padding: 16px;
+          }
+          .evidence-investigation,
+          .nilm-review-layout {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .nilm-review-card,
+          .nilm-review-inspector {
+            grid-column: 1;
+            grid-row: auto;
+          }
+          .comparison-marker span {
+            max-width: 8rem;
+            white-space: normal;
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            scroll-behavior: auto;
+            transition-duration: 0.01ms !important;
+          }
+        }
       </style>
       <main class="shell">
         <section class="panel page-header">
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
+          ${!setupHealthRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
         </section>
-      ${this._loading ? `<section class="panel"><p>${this._escape(loadingText)}</p></section>` : ""}
+      ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
@@ -2363,7 +2424,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </fieldset>
       <button type="button" id="apply_alert_decision" ${this._alertDecision && !busy ? "" : "disabled"}>${this._escape(this._panelText("actions.labels.apply"))}</button>
-      <div class="inline-feedback-region" aria-live="polite">${this._renderInlineFeedback("alert-response")}</div>
+      <div class="inline-feedback-region">${this._renderInlineFeedback("alert-response")}</div>
     </section>`;
   }
 
@@ -2994,7 +3055,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmWorkspaceContent() {
     if (this._nilmWorkspaceLoading) {
-      return `<section class="panel"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p class="muted">${this._escape(this._panelText("nilm_workspace.loading"))}</p></section>`;
+      const loadingText = this._panelText("nilm_workspace.loading");
+      return `<section class="panel loading-skeleton nilm-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>`;
     }
     const workspace = this._nilmWorkspace;
     if (this._nilmWorkspaceError && (!workspace || workspace.status !== "ok")) {
@@ -3021,10 +3083,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
-  _renderNilmWorkspaceSummary(_workspace) {
+  _renderNilmWorkspaceSummary(workspace) {
     return `
       <h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2>
       <p class="muted">${this._escape(this._panelText("nilm_workspace.description"))}</p>
+      ${this._renderNilmWorkspaceLanes(workspace, true)}
       ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
     `;
   }
@@ -3677,7 +3740,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderChart(alert) {
     if (this._historyLoading) {
-      return `<p class="muted">${this._escape(this._panelText("chart.loading_history"))}</p>`;
+      const loadingText = this._panelText("chart.loading_history");
+      return `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></div>`;
     }
     if (this._historyError) {
       return `<p class="muted">${this._escape(this._historyError)}</p>`;
@@ -3887,10 +3951,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const panLaterLabel = this._panelText("actions.labels.pan_later");
     return `<div data-nilm-workspace-graph>
       <div class="actions nilm-graph-controls">
-        <button type="button" class="secondary" data-nilm-graph-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
-        <button type="button" class="secondary" data-nilm-graph-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
-        <button type="button" class="secondary" data-nilm-graph-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-        <button type="button" class="secondary" data-nilm-graph-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-nilm-graph-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-nilm-graph-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-nilm-graph-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-nilm-graph-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
       </div>
       <p class="muted" data-nilm-graph-window>${this._escape(this._panelTextFormat("nilm_workspace.graph_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }))}</p>
     </div>`;
@@ -4522,7 +4586,7 @@ class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyz
             font-size: 12px;
           }
           .swatch {
-            border-radius: 999px;
+            border-radius: 50%;
             display: inline-block;
             height: 10px;
             width: 10px;

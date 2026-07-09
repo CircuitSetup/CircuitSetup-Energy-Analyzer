@@ -1413,6 +1413,19 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "friendly_name",
         "item.name",
         "_overlayEntitySummary",
+        "@media (max-width: 800px)",
+        "@media (prefers-reduced-motion: reduce)",
+        'role="tablist"',
+        'role="tab"',
+        "aria-selected",
+        "aria-pressed",
+        'aria-live="polite"',
+        "<ha-icon",
+        "min-height: 44px",
+        "overflow-x: auto",
+        "flex: 0 0 auto",
+        "data-loading-skeleton",
+        "data-nilm-lane-empty",
     ):
         assert expected in asset
 
@@ -1464,6 +1477,13 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
     assert "deny_setting_recommendation" not in asset
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
+    assert "border-radius: 12px" not in asset
+    assert "border-radius: 16px" not in asset
+    assert "border-radius: 999px" not in asset
+    assert all(
+        int(radius) <= 8
+        for radius in re.findall(r"border-radius:\s*(\d+)px", asset)
+    )
 
 
 def test_appliance_detail_renders_cost_values_as_currency() -> None:
@@ -1538,6 +1558,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "nilm-ha-device-workflow" in PANEL_MODULE_VERSION
     assert "cost-currency" in PANEL_MODULE_VERSION
     assert "available-nilm-actions" in PANEL_MODULE_VERSION
+    assert "visual-hierarchy" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -1550,6 +1571,29 @@ def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
 
     assert graph < lanes < review < secondary
     assert "_renderNilmReviewQueue" not in asset
+
+
+def test_nilm_workspace_summary_shows_review_progress_before_graph() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderNilmWorkspaceSummary({
+  lanes: {
+    needs_review: {
+      label: "Needs Review", signature_ids: ["sig-1"], assignment_ids: [],
+    },
+    assigned: {
+      label: "Assigned", signature_ids: [], assignment_ids: ["assignment-1"],
+    },
+  },
+  lane_counts: { needs_review: 1, assigned: 1 },
+});
+if (!html.includes("Review lanes") || !html.includes("Needs Review")
+    || !html.includes("1 item")) {
+  throw new Error(`missing workspace review progress: ${html}`);
+}
+"""
+    )
 
 
 def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
@@ -3921,6 +3965,41 @@ for (const marker of ["observed", "expected", "threshold"]) {
     )
 
 
+def test_alert_evidence_header_shows_latest_evidence_timestamp() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._loading = false;
+panel._payload = {
+  status: "latest_for_circuit",
+  circuit: { circuit_id: "fridge", name: "Kitchen Refrigerator" },
+  alert: {
+    circuit_id: "fridge",
+    feature: "daily_energy",
+    message: "Energy increased.",
+    observed_value: 6.2,
+    expected_value: 3.8,
+    repeated_count: 3,
+    last_seen: "2026-07-09T12:00:00Z",
+  },
+  actions: {},
+};
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+};
+panel._render();
+const start = panel.shadowRoot.innerHTML.indexOf('<section class="panel page-header">');
+const end = panel.shadowRoot.innerHTML.indexOf("</section>", start);
+const header = panel.shadowRoot.innerHTML.slice(start, end);
+if (!header.includes("Last Seen") || !header.includes("2026-07-09")) {
+  throw new Error(`latest timestamp missing from evidence header: ${header}`);
+}
+"""
+    )
+
+
 def test_alert_evidence_comparison_falls_back_for_incomplete_metrics() -> None:
     _run_panel_node_script(
         """
@@ -4008,12 +4087,51 @@ if (withoutThreshold.includes("threshold")) {
     )
 
 
+def test_alert_evidence_comparison_marker_positions_are_finite_and_bounded() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const cases = [
+  panel._alertComparisonScale({
+    observed_value: 6.2,
+    expected_value: 3.8,
+    threshold: 5,
+  }),
+  panel._alertComparisonScale({
+    observed_value: 5,
+    expected_value: 5,
+    threshold: 5,
+  }),
+];
+for (const scale of cases) {
+  if (!scale || scale.markers.length !== 3) {
+    throw new Error(`missing comparison markers: ${JSON.stringify(scale)}`);
+  }
+  for (const marker of scale.markers) {
+    if (!Number.isFinite(marker.position)
+        || marker.position < 0 || marker.position > 100) {
+      throw new Error(`invalid ${marker.key} position: ${marker.position}`);
+    }
+  }
+}
+if (!cases[1].markers.every((marker) => marker.position === 50)) {
+  throw new Error(`equal values were not centered: ${JSON.stringify(cases[1])}`);
+}
+"""
+    )
+
+
 def test_alert_feedback_uses_one_semantic_decision_flow() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
 panel._payload = {
   actions: { acknowledge: {}, mark_expected: {}, mark_unhelpful: {} },
+};
+panel._inlineFeedback = {
+  scope: "alert-response",
+  kind: "success",
+  message: "Saved",
 };
 const html = panel._renderAlertResponse();
 for (const expected of [
@@ -4030,6 +4148,9 @@ for (const expected of [
 if ((html.match(/id="apply_alert_decision"/g) || []).length !== 1) {
   throw new Error(`expected one Apply action: ${html}`);
 }
+if ((html.match(/aria-live="polite"/g) || []).length !== 1) {
+  throw new Error(`expected one live region owner: ${html}`);
+}
 for (const oldButton of [
   'id="acknowledge"',
   'id="mark_expected"',
@@ -4039,6 +4160,49 @@ for (const oldButton of [
     throw new Error(`duplicate direct action ${oldButton}: ${html}`);
   }
 }
+"""
+    )
+
+
+def test_alert_decision_radio_enables_apply_and_feedback_receives_focus() -> None:
+    _run_panel_node_script(
+        """
+const listeners = {};
+const applyButton = {
+  disabled: true,
+  addEventListener() {},
+};
+const radio = {
+  value: "mark_expected",
+  addEventListener(type, callback) { listeners[type] = callback; },
+};
+let focused = 0;
+const feedback = { focus() { focused += 1; } };
+const panel = new context.Panel();
+panel._loading = false;
+panel._payload = { status: "not_found", actions: {} };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll(selector) {
+    return selector === "[data-alert-decision]" ? [radio] : [];
+  },
+  querySelector(selector) {
+    if (selector === "#apply_alert_decision") return applyButton;
+    if (selector === '[data-inline-feedback="alert-response"]') return feedback;
+    return null;
+  },
+};
+panel._render();
+if (typeof listeners.change !== "function") {
+  throw new Error("alert decision change listener was not registered");
+}
+listeners.change();
+if (panel._alertDecision !== "mark_expected" || applyButton.disabled) {
+  throw new Error("radio change did not enable Apply");
+}
+panel._render = () => {};
+panel._setInlineFeedback("alert-response", "success", "Saved");
+if (focused !== 1) throw new Error(`feedback focus count was ${focused}`);
 """
     )
 
@@ -4379,7 +4543,7 @@ const wrappers = [
 ];
 for (const wrapper of wrappers) {
   if (!wrapper) throw new Error(`missing alert action wrapper: ${html}`);
-  if (wrapper[1].split(/\s+/).includes("panel")) {
+  if (wrapper[1].split(/\\s+/).includes("panel")) {
     throw new Error(`alert action wrapper is still framed: ${wrapper[0]}`);
   }
 }
@@ -4865,11 +5029,11 @@ def test_readme_documents_assignment_defaults() -> None:
         assert expected in readme_text
 
 
-def test_readme_explains_notification_evidence_graph_links() -> None:
+def test_readme_explains_notification_evidence_workflow() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())
 
-    assert "Open evidence graph" in readme_text
+    assert "**Open evidence**" in readme_text
     assert "Alert Evidence" in readme_text
     assert "evidence_path" in readme_text
     assert "graph_entities" in readme_text
@@ -4882,8 +5046,12 @@ def test_readme_explains_notification_evidence_graph_links() -> None:
     )
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
-    assert "Persistent notifications include a Markdown link" in normalized_text
+    assert "Persistent notifications include one final Markdown link" in normalized_text
     assert "link directly to **Configure > Review Suggested Settings**" in readme_text
+    assert "visual comparison" in normalized_text
+    assert "graph-first evidence" in normalized_text
+    assert "focused inspector" in normalized_text
+    assert "single **Apply**" in normalized_text
 
 
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
@@ -5068,6 +5236,7 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         "docs/images/readme/assignment-editor.png",
         "docs/images/readme/advanced-settings.png",
         "docs/images/readme/notifications-panel.png",
+        "docs/images/readme/alert-evidence.png",
         "docs/images/readme/notifications-repairs.png",
         "docs/images/readme/demo-dashboard.png",
     }

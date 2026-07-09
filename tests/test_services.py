@@ -110,7 +110,10 @@ def test_notification_id_for_alert_uses_nilm_notification_key() -> None:
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
 
 
-def test_alert_notification_message_includes_evidence_link_and_graph_entities() -> None:
+def test_alert_notification_message_ends_with_one_evidence_link() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_evidence_path,
+    )
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
     )
@@ -151,6 +154,9 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
     )
     offsets = [message.index(value) for value in expected_order]
     assert offsets == sorted(offsets)
+    expected_link = f"[Open evidence]({alert_evidence_path(alert)})"
+    assert message.count("[Open evidence](") == 1
+    assert message.splitlines()[-1] == expected_link
     assert "Open evidence graph" not in message
     assert "Graph entities" not in message
     assert "sensor.hvac_l1_watts" not in message
