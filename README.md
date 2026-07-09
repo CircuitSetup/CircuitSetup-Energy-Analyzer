@@ -728,7 +728,7 @@ Persistent notifications include a Markdown link to **Open evidence graph** when
 
 The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. Companion App notifications can use the same target through `clickAction`.
 
-The analyzer can also notify when suggested Advanced Circuit Settings are ready for review.
+The analyzer can also notify when suggested Advanced Circuit Settings are ready for review. Those notifications link directly to **Configure > Review Suggested Settings**.
 
 For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
 

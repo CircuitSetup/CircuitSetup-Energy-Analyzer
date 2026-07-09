@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from math import isfinite
 from typing import Any
+from urllib.parse import urlencode
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .const import DOMAIN
@@ -168,7 +169,7 @@ async def async_create_settings_recommendation_notification(
     try:
         create(
             hass,
-            _settings_recommendation_message(total_pending),
+            _settings_recommendation_message(total_pending, entry_id),
             title=_notification_text("settings_recommendations", "title"),
             notification_id=settings_recommendation_notification_id(entry_id),
         )
@@ -176,12 +177,22 @@ async def async_create_settings_recommendation_notification(
         return
 
 
-def _settings_recommendation_message(total_pending: int) -> str:
+def _settings_recommendation_message(total_pending: int, entry_id: str) -> str:
     if total_pending == 1:
         template = _notification_text("settings_recommendations", "singular_message")
     else:
         template = _notification_text("settings_recommendations", "plural_message")
-    return template.format(total_pending=total_pending)
+    return template.format(
+        total_pending=total_pending,
+        settings_url=_settings_recommendations_options_path(entry_id),
+    )
+
+
+def _settings_recommendations_options_path(entry_id: str) -> str:
+    return (
+        "/config/integrations/dashboard#"
+        f"{urlencode({'config_entry': entry_id, 'options_step': 'recommendations'})}"
+    )
 
 
 def _comparison_value_label(alert: AlertEvidence) -> str:
