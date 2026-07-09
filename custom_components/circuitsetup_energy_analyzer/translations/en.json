@@ -1037,6 +1037,7 @@
       "evidence": {
         "loading": "Loading alert evidence...",
         "comparison_summary": "Observed {observed}; expected {expected}.",
+        "comparison_summary_with_threshold": "Observed {observed}; expected {expected}; threshold {threshold}.",
         "fallbacks": {
           "current_circuit_heading": "No current alert evidence",
           "current_circuit_message": "No current alert evidence is available for this circuit.",

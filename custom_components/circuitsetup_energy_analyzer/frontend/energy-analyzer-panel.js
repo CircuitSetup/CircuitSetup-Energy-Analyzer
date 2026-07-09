@@ -1201,10 +1201,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .comparison-marker.observed::before {
           background: var(--error-color, #db4437);
         }
-        .disclosure summary {
+        .evidence-meta .metric,
+        [data-evidence-comparison] .metric,
+        [data-evidence-technical] .metric {
+          background: transparent;
+          border: 0;
+          border-radius: 0;
+          padding: 0;
+        }
+        [data-evidence-technical] > summary {
+          box-sizing: border-box;
           cursor: pointer;
           font-size: 18px;
           font-weight: 700;
+          line-height: 20px;
+          min-height: 44px;
+          padding: 12px 0;
         }
         .disclosure .summary {
           margin-top: 12px;
@@ -3510,10 +3522,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </section>`;
     }
-    const summary = this._panelTextFormat("evidence.comparison_summary", {
+    const summaryValues = {
       observed: this._formatMetricValue(scale.observed),
       expected: this._formatMetricValue(scale.expected),
-    });
+    };
+    const summary = scale.threshold === null
+      ? this._panelTextFormat("evidence.comparison_summary", summaryValues)
+      : this._panelTextFormat("evidence.comparison_summary_with_threshold", {
+        ...summaryValues,
+        threshold: this._formatMetricValue(scale.threshold),
+      });
     return `<section class="evidence-section comparison" data-evidence-comparison="visual">
       <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
       <div class="comparison-scale" role="img" aria-label="${this._escape(summary)}">

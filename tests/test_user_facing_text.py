@@ -3149,6 +3149,78 @@ if (html.includes('role="img"')) {
     )
 
 
+def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    scoped_start = asset.index("        .evidence-meta .metric,")
+    scoped_style = asset[scoped_start : asset.index("}", scoped_start)]
+    for selector in (
+        ".evidence-meta .metric",
+        '[data-evidence-comparison] .metric',
+        '[data-evidence-technical] .metric',
+    ):
+        assert selector in scoped_style
+    for declaration in (
+        "background: transparent;",
+        "border: 0;",
+        "border-radius: 0;",
+        "padding: 0;",
+    ):
+        assert declaration in scoped_style
+
+    global_start = asset.index("        .metric {")
+    global_style = asset[global_start : asset.index("}", global_start)]
+    assert "border: 1px solid" in global_style
+    assert "background: var(--secondary-background-color" in global_style
+
+
+def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    summary_start = asset.index(
+        "        [data-evidence-technical] > summary {"
+    )
+    summary_style = asset[summary_start : asset.index("}", summary_start)]
+    for declaration in (
+        "box-sizing: border-box;",
+        "line-height: 20px;",
+        "min-height: 44px;",
+        "padding: 12px 0;",
+    ):
+        assert declaration in summary_style
+
+
+def test_alert_evidence_comparison_accessible_name_includes_threshold() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const withThreshold = panel._renderAlertComparison({
+  observed_value: 6.2,
+  expected_value: 3.8,
+  threshold: 5,
+});
+if (!withThreshold.includes(
+  'aria-label="Observed 6.2; expected 3.8; threshold 5."'
+)) {
+  throw new Error(`threshold missing from accessible name: ${withThreshold}`);
+}
+
+const withoutThreshold = panel._renderAlertComparison({
+  observed_value: 6.2,
+  expected_value: 3.8,
+});
+if (!withoutThreshold.includes(
+  'aria-label="Observed 6.2; expected 3.8."'
+)) {
+  throw new Error(`two-value accessible name changed: ${withoutThreshold}`);
+}
+if (withoutThreshold.includes("threshold")) {
+  throw new Error(`missing threshold still announced: ${withoutThreshold}`);
+}
+"""
+    )
+
+
 def test_dynamic_alert_evidence_panel_feedback_actions_explain_choices() -> None:
     _run_panel_node_script(
         """
