@@ -3093,6 +3093,62 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
     assert "Evidence Window" not in asset
 
 
+def test_alert_evidence_renders_visual_comparison_before_graph_and_details() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._payload = { actions: {} };
+const html = panel._renderAlertContent({
+  circuit_id: "fridge",
+  feature: "daily_energy",
+  feature_name: "Daily Energy",
+  observed_value: 6.2,
+  baseline_value: 3.4,
+  expected_value: 3.8,
+  threshold: 5.0,
+  percent_change: 82,
+  repeated_count: 3,
+  first_seen: "2026-07-08T10:00:00Z",
+  last_seen: "2026-07-08T12:00:00Z",
+  what_happened: "Energy increased above the learned range.",
+  why_it_matters: "The refrigerator is using more energy than usual.",
+  what_to_check_first: "Check the door seal.",
+  graph_entities: []
+}, { name: "Kitchen Refrigerator" });
+const comparison = html.indexOf('data-evidence-comparison="visual"');
+const graph = html.indexOf('data-evidence-graph');
+const explanation = html.indexOf('data-evidence-explanation');
+const technical = html.indexOf('data-evidence-technical');
+if (!(comparison >= 0 && comparison < graph && graph < explanation
+      && explanation < technical)) {
+  throw new Error(`wrong evidence hierarchy: ${html}`);
+}
+for (const marker of ["observed", "expected", "threshold"]) {
+  if (!html.includes(`data-comparison-marker="${marker}"`)) {
+    throw new Error(`missing ${marker} marker: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_alert_evidence_comparison_falls_back_for_incomplete_metrics() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderAlertComparison({ observed_value: 620 });
+if (!html.includes('data-evidence-comparison="fallback"')) {
+  throw new Error(`missing comparison fallback: ${html}`);
+}
+if (html.includes('role="img"')) {
+  throw new Error(`incomplete comparison rendered a misleading scale: ${html}`);
+}
+"""
+    )
+
+
 def test_dynamic_alert_evidence_panel_feedback_actions_explain_choices() -> None:
     _run_panel_node_script(
         """

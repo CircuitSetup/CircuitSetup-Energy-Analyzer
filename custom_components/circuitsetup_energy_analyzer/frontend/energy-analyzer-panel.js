@@ -1117,10 +1117,107 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           padding: 18px;
           box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(15, 23, 42, 0.12));
         }
+        .page-header {
+          display: grid;
+          gap: 8px;
+        }
         .summary {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
           gap: 12px;
+        }
+        .evidence-section {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+        }
+        .evidence-investigation {
+          align-items: start;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 24px;
+        }
+        .evidence-explanation {
+          display: grid;
+          gap: 20px;
+        }
+        .evidence-explanation section {
+          display: grid;
+          gap: 6px;
+        }
+        .comparison-scale {
+          min-height: 160px;
+          margin: 4px 64px 0;
+          position: relative;
+        }
+        .comparison-track {
+          background: var(--divider-color, #d8dde6);
+          border-radius: 3px;
+          height: 6px;
+          left: 0;
+          position: absolute;
+          right: 0;
+          top: 61px;
+        }
+        .comparison-marker {
+          bottom: 0;
+          color: var(--primary-text-color, #1f2933);
+          position: absolute;
+          top: 0;
+          transform: translateX(-50%);
+          width: 2px;
+        }
+        .comparison-marker::before {
+          background: var(--primary-color, #0b6bcb);
+          content: "";
+          height: 28px;
+          left: 0;
+          position: absolute;
+          top: 50px;
+          width: 2px;
+        }
+        .comparison-marker span,
+        .comparison-marker strong {
+          left: 50%;
+          position: absolute;
+          transform: translateX(-50%);
+          white-space: nowrap;
+        }
+        .comparison-marker span {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .comparison-marker strong {
+          font-size: 14px;
+        }
+        .comparison-marker.expected span { top: 0; }
+        .comparison-marker.expected strong { top: 18px; }
+        .comparison-marker.threshold span { top: 84px; }
+        .comparison-marker.threshold strong { top: 102px; }
+        .comparison-marker.observed span { top: 122px; }
+        .comparison-marker.observed strong { top: 140px; }
+        .comparison-marker.threshold::before {
+          background: var(--warning-color, #f4b400);
+        }
+        .comparison-marker.observed::before {
+          background: var(--error-color, #db4437);
+        }
+        .disclosure summary {
+          cursor: pointer;
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .disclosure .summary {
+          margin-top: 12px;
+        }
+        @media (min-width: 800px) {
+          .evidence-investigation {
+            grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+          }
+        }
+        @media (max-width: 520px) {
+          .comparison-scale {
+            margin-inline: 44px;
+          }
         }
         .metric {
           border: 1px solid var(--divider-color, #d8dde6);
@@ -1336,7 +1433,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
       </style>
       <main class="shell">
-        <section class="panel">
+        <section class="panel page-header">
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
@@ -1796,39 +1893,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderAlertContent(alert, circuit) {
     return `
-      <section class="panel summary">
-        ${this._metric(this._panelText("evidence.labels.circuit"), (circuit && circuit.name) || alert.circuit_id)}
+      <section class="evidence-section evidence-meta summary">
         ${this._metric(this._panelText("evidence.labels.feature"), alert.feature_name || this._friendlyFeature(alert.feature))}
-        ${this._metric(this._panelText("evidence.labels.observed"), alert.observed_value)}
-        ${this._metric(this._panelText("evidence.labels.baseline"), alert.baseline_value)}
-        ${this._metric(this._panelText("evidence.labels.change"), `${alert.percent_change}%`)}
         ${this._metric(this._panelText("evidence.labels.repeated"), alert.repeated_count)}
       </section>
+      ${this._renderAlertComparison(alert)}
       ${this._renderSafetyNotice(alert)}
-      <section class="panel">
-        <h2>${this._escape(this._panelText("evidence.sections.what_happened"))}</h2>
-        <p>${this._escape(alert.what_happened || alert.message || this._panelText("evidence.fallbacks.what_happened"))}</p>
+      <section class="evidence-section evidence-investigation">
+        <div data-evidence-graph>
+          <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
+          ${this._renderChart(alert)}
+        </div>
+        <div class="evidence-explanation" data-evidence-explanation>
+          <section>
+            <h2>${this._escape(this._panelText("evidence.sections.what_happened"))}</h2>
+            <p>${this._escape(alert.what_happened || alert.message || this._panelText("evidence.fallbacks.what_happened"))}</p>
+          </section>
+          <section>
+            <h2>${this._escape(this._panelText("evidence.sections.why_it_matters"))}</h2>
+            <p>${this._escape(alert.why_it_matters || this._panelText("evidence.fallbacks.why_it_matters"))}</p>
+          </section>
+          <section>
+            <h2>${this._escape(this._panelText("evidence.labels.check_first"))}</h2>
+            <p>${this._escape(alert.what_to_check_first || this._changeSummary(alert))}</p>
+          </section>
+        </div>
       </section>
-      <section class="panel">
-        <h2>${this._escape(this._panelText("evidence.sections.why_it_matters"))}</h2>
-        <p>${this._escape(alert.why_it_matters || this._panelText("evidence.fallbacks.why_it_matters"))}</p>
-      </section>
-      <section class="panel">
-        <h2>${this._escape(this._panelText("evidence.sections.what_changed"))}</h2>
-        <p>${this._escape(this._changeSummary(alert))}</p>
-      </section>
-      <section class="panel summary">
-        ${this._metric(this._panelText("common.expected"), alert.expected_value)}
-        ${this._metric(this._panelText("evidence.labels.threshold"), alert.threshold)}
-        ${this._metric(this._panelText("evidence.labels.samples"), alert.sample_count)}
-        ${this._metric(this._panelText("evidence.labels.first_seen"), this._formatDateTime(alert.first_seen))}
-        ${this._metric(this._panelText("evidence.labels.last_seen"), this._formatDateTime(alert.last_seen))}
-        ${this._metric(this._panelText("evidence.labels.check_first"), alert.what_to_check_first)}
-      </section>
-      <section class="panel">
-        <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
-        ${this._renderChart(alert)}
-      </section>
+      <details class="evidence-section disclosure" data-evidence-technical>
+        <summary>${this._escape(this._panelText("evidence.sections.technical_details"))}</summary>
+        <div class="summary">
+          ${this._metric(this._panelText("evidence.labels.baseline"), alert.baseline_value)}
+          ${this._metric(this._panelText("common.expected"), alert.expected_value)}
+          ${this._metric(this._panelText("evidence.labels.threshold"), alert.threshold)}
+          ${this._metric(this._panelText("evidence.labels.samples"), alert.sample_count)}
+          ${this._metric(this._panelText("evidence.labels.first_seen"), this._formatDateTime(alert.first_seen))}
+          ${this._metric(this._panelText("evidence.labels.last_seen"), this._formatDateTime(alert.last_seen))}
+        </div>
+      </details>
       ${this._renderNilmWorkspace()}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
@@ -3358,6 +3459,68 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _metric(label, value) {
     return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
+  }
+
+  _finiteMetricValue(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  _alertComparisonScale(alert) {
+    const observed = this._finiteMetricValue(alert && alert.observed_value);
+    const expected = this._finiteMetricValue(
+      alert && alert.expected_value !== null && alert.expected_value !== undefined
+        ? alert.expected_value
+        : alert && alert.baseline_value,
+    );
+    const threshold = this._finiteMetricValue(alert && alert.threshold);
+    if (observed === null || expected === null) {
+      return null;
+    }
+    const values = [observed, expected, threshold].filter((value) => value !== null);
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    const padding = Math.max((high - low) * 0.15, Math.abs(high) * 0.05, 1);
+    const min = low - padding;
+    const max = high + padding;
+    const position = (value) => Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+    return {
+      observed,
+      expected,
+      threshold,
+      markers: [
+        { key: "expected", value: expected, position: position(expected) },
+        ...(threshold === null ? [] : [{ key: "threshold", value: threshold, position: position(threshold) }]),
+        { key: "observed", value: observed, position: position(observed) },
+      ],
+    };
+  }
+
+  _renderAlertComparison(alert) {
+    const scale = this._alertComparisonScale(alert);
+    if (!scale) {
+      return `<section class="evidence-section" data-evidence-comparison="fallback">
+        <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
+        <div class="summary">
+          ${this._metric(this._panelText("evidence.labels.observed"), alert && alert.observed_value)}
+          ${this._metric(this._panelText("common.expected"), alert && (alert.expected_value ?? alert.baseline_value))}
+        </div>
+      </section>`;
+    }
+    const summary = this._panelTextFormat("evidence.comparison_summary", {
+      observed: this._formatMetricValue(scale.observed),
+      expected: this._formatMetricValue(scale.expected),
+    });
+    return `<section class="evidence-section comparison" data-evidence-comparison="visual">
+      <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
+      <div class="comparison-scale" role="img" aria-label="${this._escape(summary)}">
+        <div class="comparison-track"></div>
+        ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatMetricValue(marker.value))}</strong></span>`).join("")}
+      </div>
+    </section>`;
   }
 
   _renderActionGroup(title, description, buttons) {

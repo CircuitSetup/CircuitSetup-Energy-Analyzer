@@ -1036,6 +1036,7 @@
       },
       "evidence": {
         "loading": "Loading alert evidence...",
+        "comparison_summary": "Observed {observed}; expected {expected}.",
         "fallbacks": {
           "current_circuit_heading": "No current alert evidence",
           "current_circuit_message": "No current alert evidence is available for this circuit.",
@@ -1052,6 +1053,7 @@
           "circuit": "Circuit",
           "feature": "Feature",
           "observed": "Observed",
+          "expected": "Expected",
           "baseline": "Baseline",
           "change": "Change",
           "repeated": "Repeated",
@@ -1062,10 +1064,12 @@
           "check_first": "Check First"
         },
         "sections": {
+          "comparison": "Observed vs expected",
           "what_happened": "What Happened",
           "why_it_matters": "Why It Matters",
           "what_changed": "What Changed",
-          "graph": "Graph"
+          "graph": "Graph",
+          "technical_details": "Technical details"
         },
         "actions": {
           "available_circuit_actions": "Available Circuit Actions"
