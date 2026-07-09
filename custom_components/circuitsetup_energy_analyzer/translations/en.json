@@ -854,7 +854,7 @@
     "notifications": {
       "alert": {
         "title": "Energy Analyzer Alert",
-        "open_evidence_graph": "Open evidence graph",
+        "open_evidence": "Open evidence",
         "observed_value": "Observed value",
         "repeated_observations": "Repeated observations",
         "safety_notice": "Safety notice",

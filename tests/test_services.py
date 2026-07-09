@@ -141,15 +141,17 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
 
     message = alert_notification_message(alert, config=config)
 
-    assert "Possible issue: HVAC leg imbalance" in message
-    assert message.startswith("**HVAC**\n\nPossible issue: HVAC leg imbalance")
-    assert "## HVAC" not in message
-    assert (
-        "[Open evidence graph](/circuitsetup-energy-analyzer-evidence?"
-        in message
+    expected_order = (
+        "**HVAC**",
+        "Possible issue: HVAC leg imbalance",
+        "Observed value: 62.0",
+        "Baseline value: 20.0",
+        "Repeated observations: 3",
+        "[Open evidence](/circuitsetup-energy-analyzer-evidence?",
     )
-    assert "Observed value: 62.0" in message
-    assert "Baseline value: 20.0" in message
+    offsets = [message.index(value) for value in expected_order]
+    assert offsets == sorted(offsets)
+    assert "Open evidence graph" not in message
     assert "Graph entities" not in message
     assert "sensor.hvac_l1_watts" not in message
     assert "sensor.hvac_l2_current" not in message
@@ -188,6 +190,7 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     message = alert_notification_message(alert)
     direct_message = alert_notification_message(direct_alert)
 
+    assert message.startswith("**mains**\n\n")
     assert "Estimated from mains power by NILM." in message
     assert "Confidence: 82%." in message
     assert "Estimated from mains power by NILM." not in direct_message

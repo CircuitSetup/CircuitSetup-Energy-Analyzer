@@ -2942,7 +2942,7 @@ def test_notification_and_dashboard_text_live_in_translations() -> None:
     )
     for text in (
         "Energy Analyzer Alert",
-        "Open evidence graph",
+        "Open evidence",
         "Observed value",
         "Repeated observations",
         "CircuitSetup Energy Analyzer suggested settings",
