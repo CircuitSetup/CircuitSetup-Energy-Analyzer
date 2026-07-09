@@ -453,7 +453,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       const message = this._alertActionMessage(actionKey);
       this._busyAction = "";
-      await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
+      const routeKey = this._actionRefreshRouteKey(actionKey);
+      if (routeKey !== this._routeKey()) {
+        // Prevent the route dispatcher from starting a duplicate refresh.
+        this._loadedRouteKey = routeKey;
+        history.replaceState(history.state, "", routeKey);
+      }
+      await this._loadEvidence({ routeKey });
       if (options.feedbackScope) {
         this._alertDecision = "";
         this._setInlineFeedback(options.feedbackScope, "success", message);
@@ -2099,7 +2105,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const busy = choices.some(([key]) => this._busyAction === key);
-    return `<section class="panel evidence-section response-section">
+    return `<section class="evidence-section response-section">
       <fieldset class="decision-group">
         <legend>${this._escape(this._panelText("actions.groups.respond_title"))}</legend>
         <p class="muted">${this._escape(this._panelText("actions.groups.respond_description"))}</p>
@@ -2117,7 +2123,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!renderedButtons.length) {
       return "";
     }
-    return `<details class="panel evidence-section disclosure action-disclosure" data-alert-disclosure="${name}">
+    return `<details class="evidence-section disclosure action-disclosure" data-alert-disclosure="${name}">
       <summary>${this._escape(title)}</summary>
       <div class="disclosure-content">
         <p class="muted">${this._escape(description)}</p>

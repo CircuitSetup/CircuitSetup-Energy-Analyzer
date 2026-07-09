@@ -3069,7 +3069,8 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
     for expected in (
         "_actionRefreshRouteKey(actionKey)",
         'routeUrl.searchParams.delete("alert_id")',
-        'this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) })',
+        'history.replaceState(history.state, "", routeKey)',
+        "this._loadEvidence({ routeKey })",
         "_formatDateTime(value)",
         "${year}-${month}-${day} ${hour12}:${minute}${suffix}",
         "_chartSvg(series, alert)",
@@ -3316,6 +3317,100 @@ if (!fallback.includes("Marked as expected behavior.")
     )
 
 
+def test_alert_acknowledgement_survives_real_alert_id_refresh() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const calls = [];
+const requests = [];
+const replacedPaths = [];
+let focused = 0;
+let scrolls = 0;
+const panel = new context.Panel();
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?alert_id=alert-1";
+context.history.replaceState = (_state, _title, path) => {
+  replacedPaths.push(path);
+  const route = new URL(path, context.window.location.origin);
+  context.window.location.pathname = route.pathname;
+  context.window.location.search = route.search;
+  panel._loadEvidenceIfRouteChanged();
+};
+panel._render = () => {};
+panel._scrollToTop = () => { scrolls += 1; };
+panel.shadowRoot.querySelector = () => ({
+  focus: () => { focused += 1; },
+});
+panel._hass = {
+  callService: async (domain, service, data) => {
+    calls.push({ domain, service, data });
+  },
+};
+panel._payload = {
+  alert: {
+    alert_id: "alert-1",
+    circuit_id: "fridge",
+    feature: "daily_energy",
+  },
+  actions: {
+    acknowledge: {
+      service: "acknowledge_alert",
+      data: { alert_id: "alert-1" },
+    },
+  },
+};
+panel._loadedRouteKey = panel._routeKey();
+panel._loading = false;
+panel._requestJson = async (apiPath, fetchPath) => {
+  requests.push({ apiPath, fetchPath });
+  return {
+    status: "circuit_found_no_evidence",
+    circuit: { circuit_id: "fridge", name: "Kitchen Refrigerator" },
+    actions: {},
+  };
+};
+panel._alertDecision = "acknowledge";
+
+await panel._applyAlertDecision();
+
+if (calls.length !== 1 || calls[0].service !== "acknowledge_alert") {
+  throw new Error(`unexpected service calls: ${JSON.stringify(calls)}`);
+}
+if (requests.length !== 1
+    || /alert_id=/.test(requests[0].apiPath)
+    || !/circuit_id=fridge/.test(requests[0].apiPath)
+    || !/feature=daily_energy/.test(requests[0].apiPath)) {
+  throw new Error(`unexpected refresh request: ${JSON.stringify(requests)}`);
+}
+if (replacedPaths.length !== 1
+    || /alert_id=/.test(replacedPaths[0])
+    || panel._routeKey() !== panel._loadedRouteKey) {
+  throw new Error(
+    `refresh route is not reload-safe: ${JSON.stringify(replacedPaths)}`
+  );
+}
+if (panel._loading || panel._payload.alert
+    || panel._payload.status !== "circuit_found_no_evidence") {
+  throw new Error(`fallback payload was discarded: ${panel._loading}`);
+}
+if (scrolls !== 0) throw new Error(`acknowledgement scrolled ${scrolls} times`);
+if (focused !== 1) throw new Error(`feedback focus count was ${focused}`);
+if (panel._inlineFeedback.message !== "Alert acknowledged.") {
+  const feedback = JSON.stringify(panel._inlineFeedback);
+  throw new Error(`missing acknowledgement feedback: ${feedback}`);
+}
+const fallback = panel._renderNotFound();
+if (!fallback.includes("Alert acknowledged.")) {
+  throw new Error(`fallback hid acknowledgement: ${fallback}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
 def test_alert_decision_service_failure_stays_local() -> None:
     _run_panel_node_script(
         """
@@ -3466,6 +3561,44 @@ for (const action of [
   'id="open_advanced_circuit_settings"',
 ]) {
   if (!html.includes(action)) throw new Error(`missing ${action}: ${html}`);
+}
+"""
+    )
+
+
+def test_alert_response_and_secondary_disclosures_are_unframed() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._payload = {
+  actions: {
+    acknowledge: {},
+    pause_alerts: {},
+    relearn_baseline: {},
+  },
+};
+const html = panel._renderAlertContent({
+  circuit_id: "fridge",
+  feature: "daily_energy",
+  graph_entities: [],
+}, { name: "Kitchen Refrigerator" });
+const wrappers = [
+  html.match(/<section class="([^"]*response-section[^"]*)">/),
+  html.match(
+    /<details class="([^"]*)" data-alert-disclosure="pause">/
+  ),
+  html.match(
+    /<details class="([^"]*)" data-alert-disclosure="tune">/
+  ),
+];
+for (const wrapper of wrappers) {
+  if (!wrapper) throw new Error(`missing alert action wrapper: ${html}`);
+  if (wrapper[1].split(/\s+/).includes("panel")) {
+    throw new Error(`alert action wrapper is still framed: ${wrapper[0]}`);
+  }
+}
+if (!html.includes('class="decision-tile"')) {
+  throw new Error(`decision choices lost their bordered tile: ${html}`);
 }
 """
     )
