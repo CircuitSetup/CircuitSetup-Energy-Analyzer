@@ -3221,41 +3221,251 @@ if (withoutThreshold.includes("threshold")) {
     )
 
 
-def test_dynamic_alert_evidence_panel_feedback_actions_explain_choices() -> None:
+def test_alert_feedback_uses_one_semantic_decision_flow() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._payload = {
+  actions: { acknowledge: {}, mark_expected: {}, mark_unhelpful: {} },
+};
+const html = panel._renderAlertResponse();
+for (const expected of [
+  '<fieldset class="decision-group"',
+  'name="alert_decision"',
+  'value="acknowledge"',
+  'value="mark_expected"',
+  'value="mark_unhelpful"',
+  'id="apply_alert_decision"',
+  'aria-live="polite"'
+]) {
+  if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
+}
+if ((html.match(/id="apply_alert_decision"/g) || []).length !== 1) {
+  throw new Error(`expected one Apply action: ${html}`);
+}
+for (const oldButton of [
+  'id="acknowledge"',
+  'id="mark_expected"',
+  'id="mark_unhelpful"',
+]) {
+  if (html.includes(oldButton)) {
+    throw new Error(`duplicate direct action ${oldButton}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_alert_decision_success_stays_local_after_refresh() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const calls = [];
+const loads = [];
+let scrolls = 0;
+const panel = new context.Panel();
+context.window.location.search = "?alert_id=alert-1";
+panel._render = () => {};
+panel._scrollToTop = () => { scrolls += 1; };
+panel.shadowRoot.querySelector = () => null;
+panel._hass = {
+  callService: async (domain, service, data) => calls.push({ domain, service, data }),
+};
+panel._payload = {
+  alert: { alert_id: "alert-1", circuit_id: "fridge", feature: "daily_energy" },
+  actions: {
+    mark_expected: {
+      service: "mark_alert_expected",
+      data: { alert_id: "alert-1" },
+    },
+  },
+};
+panel._loadEvidence = async (options) => {
+  loads.push(options);
+  panel._payload = { status: "historical_alert_not_found", actions: {} };
+  panel._loading = false;
+};
+panel._alertDecision = "mark_expected";
+
+await panel._applyAlertDecision();
+
+if (calls.length !== 1 || calls[0].service !== "mark_alert_expected") {
+  throw new Error(`unexpected service calls: ${JSON.stringify(calls)}`);
+}
+if (loads.length !== 1 || /alert_id=/.test(loads[0].routeKey)
+    || !/circuit_id=fridge/.test(loads[0].routeKey)
+    || !/feature=daily_energy/.test(loads[0].routeKey)) {
+  throw new Error(`response refresh route changed: ${JSON.stringify(loads)}`);
+}
+if (scrolls !== 0) throw new Error(`response action scrolled ${scrolls} times`);
+if (panel._inlineFeedback.scope !== "alert-response"
+    || panel._inlineFeedback.kind !== "success"
+    || panel._inlineFeedback.message !== "Marked as expected behavior.") {
+  throw new Error(`missing local success: ${JSON.stringify(panel._inlineFeedback)}`);
+}
+const fallback = panel._renderNotFound();
+if (!fallback.includes("Marked as expected behavior.")
+    || !fallback.includes('data-inline-feedback="alert-response"')) {
+  throw new Error(`refresh hid acknowledgement feedback: ${fallback}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_decision_service_failure_stays_local() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let loads = 0;
+let scrolls = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel._scrollToTop = () => { scrolls += 1; };
+panel.shadowRoot.querySelector = () => null;
+panel._hass = {
+  callService: async () => { throw new Error("service offline"); },
+};
+panel._payload = {
+  actions: {
+    mark_unhelpful: { service: "mark_alert_unhelpful", data: {} },
+  },
+};
+panel._loadEvidence = async () => { loads += 1; };
+panel._alertDecision = "mark_unhelpful";
+
+await panel._applyAlertDecision();
+
+if (loads !== 0) throw new Error("failed response unexpectedly refreshed");
+if (scrolls !== 0) throw new Error(`failed response scrolled ${scrolls} times`);
+if (panel._error) throw new Error(`response failure leaked globally: ${panel._error}`);
+if (panel._inlineFeedback.scope !== "alert-response"
+    || panel._inlineFeedback.kind !== "error"
+    || !panel._inlineFeedback.message.includes("service offline")) {
+  throw new Error(`missing local failure: ${JSON.stringify(panel._inlineFeedback)}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_decision_guard_failure_stays_local() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let calls = 0;
+let scrolls = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel._scrollToTop = () => { scrolls += 1; };
+panel.shadowRoot.querySelector = () => null;
+panel._hass = { callService: async () => { calls += 1; } };
+panel._payload = {
+  actions: {
+    mark_expected: {
+      service: "mark_alert_expected",
+      enabled: false,
+      unavailable_label: "Expected feedback is temporarily unavailable.",
+    },
+  },
+};
+panel._alertDecision = "mark_expected";
+
+await panel._applyAlertDecision();
+
+if (calls !== 0) throw new Error("guarded response called a service");
+if (scrolls !== 0) throw new Error(`guarded response scrolled ${scrolls} times`);
+if (panel._error) throw new Error(`guard failure leaked globally: ${panel._error}`);
+if (panel._inlineFeedback.scope !== "alert-response"
+    || panel._inlineFeedback.kind !== "error"
+    || panel._inlineFeedback.message
+      !== "Expected feedback is temporarily unavailable.") {
+  const feedback = JSON.stringify(panel._inlineFeedback);
+  throw new Error(`missing local guard failure: ${feedback}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_decision_requires_a_choice_locally() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let scrolls = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel._scrollToTop = () => { scrolls += 1; };
+panel.shadowRoot.querySelector = () => null;
+
+await panel._applyAlertDecision();
+
+if (scrolls !== 0) throw new Error(`decision validation scrolled ${scrolls} times`);
+if (panel._inlineFeedback.scope !== "alert-response"
+    || panel._inlineFeedback.kind !== "error"
+    || panel._inlineFeedback.message !== "Choose a response before applying.") {
+  throw new Error(`missing local validation: ${JSON.stringify(panel._inlineFeedback)}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_secondary_actions_and_recommendations_use_disclosures() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
 panel._payload = {
   actions: {
     acknowledge: {},
-    mark_expected: {},
-    mark_unhelpful: {},
+    pause_alerts: {},
+    open_appliance_detail: {},
+    relearn_baseline: {},
+    open_advanced_circuit_settings: {},
   },
+  setting_recommendations: [{
+    display_label: "Daily threshold",
+    status: "pending",
+    actions: { apply: {} },
+  }],
 };
 const html = panel._renderAlertContent({
   circuit_id: "fridge",
   feature: "daily_energy",
-  percent_change: 34,
-  repeated_count: 2,
-  first_seen: "2026-07-04T10:00:00Z",
-  last_seen: "2026-07-04T11:00:00Z",
+  graph_entities: [],
 }, { name: "Kitchen Refrigerator" });
-
-for (const expected of [
-  ">Dismiss<",
-  "Clear this alert for now without teaching the analyzer.",
-  ">Mark Expected<",
-  "Teach the analyzer this behavior is expected",
-  ">Not Helpful<",
-  "does not mark the behavior as normal",
-]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
+const response = html.indexOf('id="apply_alert_decision"');
+const pause = html.indexOf('data-alert-disclosure="pause"');
+const tune = html.indexOf('data-alert-disclosure="tune"');
+const recommendations = html.indexOf('data-alert-disclosure="recommendations"');
+if (!(response >= 0 && response < pause && pause < tune
+      && tune < recommendations)) {
+  throw new Error(`wrong response disclosure order: ${html}`);
+}
+for (const name of ["pause", "tune", "recommendations"]) {
+  if (!new RegExp(`<details[^>]+data-alert-disclosure="${name}"`).test(html)) {
+    throw new Error(`missing ${name} details disclosure: ${html}`);
   }
 }
-
-if (html.includes(">Acknowledge<")) {
-  throw new Error(`old acknowledge label still present: ${html}`);
+for (const action of [
+  'id="pause_alerts"',
+  'id="open_appliance_detail"',
+  'id="relearn_baseline"',
+  'id="open_advanced_circuit_settings"',
+]) {
+  if (!html.includes(action)) throw new Error(`missing ${action}: ${html}`);
 }
 """
     )

@@ -1128,6 +1128,7 @@
         "load_nilm_workspace_history": "Could not load NILM workspace history: {message}",
         "load_appliance_detail": "Could not load Appliance Detail from {path}: {message}",
         "run_service": "Could not run {service}: {message}",
+        "alert_decision_required": "Choose a response before applying.",
         "save_assignment": "Could not save assignment changes: {message}",
         "nilm_signature_label_required": "Enter a label for this NILM signature before saving.",
         "nilm_merge_target_required": "Choose a merge target before merging NILM signatures.",
@@ -1194,7 +1195,8 @@
           "pause_title": "Pause alerts for maintenance",
           "pause_description": "Use this when the appliance is being serviced or intentionally behaving differently.",
           "tune_title": "Tune this circuit",
-          "tune_description": "Use these when the appliance summary looks wrong or the learned baseline is stale."
+          "tune_description": "Use these when the appliance summary looks wrong or the learned baseline is stale.",
+          "recommendations_title": "Suggested settings"
         },
         "labels": {
           "apply": "Apply",

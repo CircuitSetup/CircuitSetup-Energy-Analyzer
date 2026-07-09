@@ -123,6 +123,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._setupHealthError = "";
     this._busyAction = "";
     this._lastActionMessage = "";
+    this._alertDecision = "";
+    this._inlineFeedback = { scope: "", kind: "", message: "" };
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._listeningForRouteChanges = false;
@@ -183,6 +185,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (this._loadedRouteKey && routeKey !== this._loadedRouteKey) {
       this._lastActionMessage = "";
+      this._alertDecision = "";
+      this._inlineFeedback = { scope: "", kind: "", message: "" };
     }
     this._loadEvidence({ routeKey });
   }
@@ -422,14 +426,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return response.json();
   }
 
-  async _callAction(actionKey) {
+  async _callAction(actionKey, options = {}) {
     const payloadActions = this._payload && this._payload.actions;
     const fallbackAlert = this._payload && this._payload.alert;
     const action = (payloadActions && payloadActions[actionKey]) || {
       service: ACTION_SERVICE_NAMES[actionKey],
       data: { alert_id: fallbackAlert && fallbackAlert.alert_id },
     };
-    if (!this._guardActionCall(action, actionKey)) {
+    if (!this._guardActionCall(action, actionKey, options.feedbackScope)) {
       return;
     }
     if (action.path) {
@@ -437,6 +441,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return;
     }
     this._busyAction = actionKey;
+    if (options.feedbackScope && this._inlineFeedback.scope === options.feedbackScope) {
+      this._inlineFeedback = { scope: "", kind: "", message: "" };
+    }
     this._render();
     try {
       if (action.domain) {
@@ -444,15 +451,54 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      this._lastActionMessage = this._alertActionMessage(actionKey);
+      const message = this._alertActionMessage(actionKey);
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(actionKey) });
-      this._scrollToTop();
+      if (options.feedbackScope) {
+        this._alertDecision = "";
+        this._setInlineFeedback(options.feedbackScope, "success", message);
+      } else {
+        this._lastActionMessage = message;
+        this._render();
+        this._scrollToTop();
+      }
     } catch (error) {
-      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
+      const message = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
-      this._renderAndScrollToTop();
+      if (options.feedbackScope) {
+        this._setInlineFeedback(options.feedbackScope, "error", message);
+      } else {
+        this._error = message;
+        this._renderAndScrollToTop();
+      }
     }
+  }
+
+  _setInlineFeedback(scope, kind, message) {
+    this._inlineFeedback = { scope, kind, message };
+    this._render();
+    requestAnimationFrame(() => {
+      const target = this.shadowRoot.querySelector(`[data-inline-feedback="${scope}"]`);
+      if (target && typeof target.focus === "function") {
+        target.focus();
+      }
+    });
+  }
+
+  _renderInlineFeedback(scope) {
+    const feedback = this._inlineFeedback;
+    if (!feedback || feedback.scope !== scope || !feedback.message) {
+      return "";
+    }
+    return `<p class="inline-feedback ${this._escape(feedback.kind)}" data-inline-feedback="${this._escape(scope)}" tabindex="-1" role="status" aria-live="polite">${this._escape(feedback.message)}</p>`;
+  }
+
+  async _applyAlertDecision() {
+    if (!this._alertDecision) {
+      this._setInlineFeedback("alert-response", "error", this._panelText("errors.alert_decision_required"));
+      return;
+    }
+    await this._callAction(this._alertDecision, { feedbackScope: "alert-response" });
   }
 
   async _callApplianceDetailAction(actionKey) {
@@ -853,29 +899,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._scrollToTop();
   }
 
-  _guardActionCall(action, label) {
-    if (!action) {
-      this._error = this._panelTextFormat("errors.action_unavailable", { label });
-      this._renderAndScrollToTop();
+  _guardActionCall(action, label, feedbackScope = "") {
+    const reject = (message) => {
+      if (feedbackScope) {
+        this._setInlineFeedback(feedbackScope, "error", message);
+      } else {
+        this._error = message;
+        this._renderAndScrollToTop();
+      }
       return false;
+    };
+    if (!action) {
+      return reject(this._panelTextFormat("errors.action_unavailable", { label }));
     }
     if (action.enabled === false) {
-      this._error = action.unavailable_label || this._panelTextFormat("errors.action_unavailable_reason", { reason: action.unavailable_reason || label });
-      this._renderAndScrollToTop();
-      return false;
+      return reject(action.unavailable_label || this._panelTextFormat("errors.action_unavailable_reason", { reason: action.unavailable_reason || label }));
     }
     if (action.path) {
       return true;
     }
     if (!action.service) {
-      this._error = this._panelTextFormat("errors.action_service_missing", { label });
-      this._renderAndScrollToTop();
-      return false;
+      return reject(this._panelTextFormat("errors.action_service_missing", { label }));
     }
     if (!this._hass || !this._hass.callService) {
-      this._error = this._panelText("errors.service_calls_unavailable");
-      this._renderAndScrollToTop();
-      return false;
+      return reject(this._panelText("errors.service_calls_unavailable"));
     }
     return true;
   }
@@ -1221,9 +1268,87 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .disclosure .summary {
           margin-top: 12px;
         }
+        .decision-group {
+          border: 0;
+          display: grid;
+          gap: 8px;
+          margin: 0;
+          min-width: 0;
+          padding: 0;
+        }
+        .decision-group legend,
+        .action-disclosure > summary {
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .decision-group legend {
+          padding: 0;
+        }
+        .decision-tiles {
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .decision-tile {
+          align-items: start;
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          cursor: pointer;
+          display: grid;
+          gap: 10px;
+          grid-template-columns: auto auto minmax(0, 1fr);
+          min-width: 0;
+          padding: 12px;
+        }
+        .decision-tile:has(input:checked) {
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
+        }
+        .decision-tile input {
+          margin: 3px 0 0;
+        }
+        .decision-tile ha-icon {
+          color: var(--primary-color, #0b6bcb);
+        }
+        .decision-tile span {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+        .decision-tile small {
+          color: var(--secondary-text-color, #5f6b7a);
+          line-height: 1.35;
+        }
+        .response-section > button {
+          justify-self: start;
+        }
+        .inline-feedback {
+          border-left: 4px solid var(--success-color, #2e7d32);
+          padding: 10px 12px;
+        }
+        .inline-feedback.error {
+          border-left-color: var(--error-color, #db4437);
+          color: var(--error-color, #db4437);
+        }
+        .action-disclosure > summary {
+          box-sizing: border-box;
+          cursor: pointer;
+          line-height: 20px;
+          min-height: 44px;
+          padding: 12px 0;
+        }
+        .disclosure-content {
+          display: grid;
+          gap: 12px;
+        }
         @media (min-width: 800px) {
           .evidence-investigation {
             grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+          }
+        }
+        @media (max-width: 720px) {
+          .decision-tiles {
+            grid-template-columns: minmax(0, 1fr);
           }
         }
         @media (max-width: 520px) {
@@ -1459,9 +1584,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
 
     this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
-    this._listen("#acknowledge", () => this._callAction("acknowledge"));
-    this._listen("#mark_expected", () => this._callAction("mark_expected"));
-    this._listen("#mark_unhelpful", () => this._callAction("mark_unhelpful"));
+    this._listen("#apply_alert_decision", () => this._applyAlertDecision());
+    for (const input of this.shadowRoot.querySelectorAll("[data-alert-decision]")) {
+      input.addEventListener("change", () => {
+        this._alertDecision = input.value;
+        const applyButton = this.shadowRoot.querySelector("#apply_alert_decision");
+        if (applyButton) {
+          applyButton.disabled = false;
+        }
+      });
+    }
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
@@ -1943,24 +2075,66 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         </div>
       </details>
       ${this._renderNilmWorkspace()}
-      <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
-        ${this._renderActionGroup(this._panelText("actions.groups.respond_title"), this._panelText("actions.groups.respond_description"), [
-          this._actionButton("acknowledge", this._panelText("actions.labels.dismiss"), false, this._panelText("actions.helpers.dismiss")),
-          this._actionButton("mark_expected", this._panelText("actions.labels.mark_expected"), true, this._panelText("actions.helpers.mark_expected")),
-          this._actionButton("mark_unhelpful", this._panelText("actions.labels.not_helpful"), true, this._panelText("actions.helpers.mark_unhelpful")),
-        ])}
-        ${this._renderActionGroup(this._panelText("actions.groups.pause_title"), this._panelText("actions.groups.pause_description"), [
-          this._actionButton("pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
-        ])}
-        ${this._renderActionGroup(this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
-          this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
-          this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
-          this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
-        ])}
-      </section>
-      ${this._renderRecommendations()}
+      ${this._renderAlertResponse()}
+      ${this._renderActionDisclosure("pause", this._panelText("actions.groups.pause_title"), this._panelText("actions.groups.pause_description"), [
+        this._actionButton("pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
+      ])}
+      ${this._renderActionDisclosure("tune", this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
+        this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
+        this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+        this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
+      ])}
+      ${this._renderAlertRecommendationsDisclosure()}
     `;
+  }
+
+  _renderAlertResponse() {
+    const actions = (this._payload && this._payload.actions) || {};
+    const choices = [
+      ["acknowledge", "mdi:check", "actions.labels.dismiss", "actions.helpers.dismiss"],
+      ["mark_expected", "mdi:check-decagram", "actions.labels.mark_expected", "actions.helpers.mark_expected"],
+      ["mark_unhelpful", "mdi:message-alert-outline", "actions.labels.not_helpful", "actions.helpers.mark_unhelpful"],
+    ].filter(([key]) => actions[key]);
+    if (!choices.length) {
+      return "";
+    }
+    const busy = choices.some(([key]) => this._busyAction === key);
+    return `<section class="panel evidence-section response-section">
+      <fieldset class="decision-group">
+        <legend>${this._escape(this._panelText("actions.groups.respond_title"))}</legend>
+        <p class="muted">${this._escape(this._panelText("actions.groups.respond_description"))}</p>
+        <div class="decision-tiles">
+          ${choices.map(([key, icon, label, helper]) => `<label class="decision-tile"><input type="radio" name="alert_decision" value="${key}" data-alert-decision ${this._alertDecision === key ? "checked" : ""} ${busy ? "disabled" : ""}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(this._panelText(label))}</strong><small>${this._escape(this._panelText(helper))}</small></span></label>`).join("")}
+        </div>
+      </fieldset>
+      <button type="button" id="apply_alert_decision" ${this._alertDecision && !busy ? "" : "disabled"}>${this._escape(this._panelText("actions.labels.apply"))}</button>
+      <div class="inline-feedback-region" aria-live="polite">${this._renderInlineFeedback("alert-response")}</div>
+    </section>`;
+  }
+
+  _renderActionDisclosure(name, title, description, buttons) {
+    const renderedButtons = buttons.filter(Boolean);
+    if (!renderedButtons.length) {
+      return "";
+    }
+    return `<details class="panel evidence-section disclosure action-disclosure" data-alert-disclosure="${name}">
+      <summary>${this._escape(title)}</summary>
+      <div class="disclosure-content">
+        <p class="muted">${this._escape(description)}</p>
+        <div class="actions">${renderedButtons.join("")}</div>
+      </div>
+    </details>`;
+  }
+
+  _renderAlertRecommendationsDisclosure() {
+    const recommendations = this._renderRecommendations();
+    if (!recommendations) {
+      return "";
+    }
+    return `<details class="evidence-section disclosure action-disclosure" data-alert-disclosure="recommendations">
+      <summary>${this._escape(this._panelText("actions.groups.recommendations_title"))}</summary>
+      <div class="disclosure-content">${recommendations}</div>
+    </details>`;
   }
 
   _nilmReviewSignatures() {
@@ -3419,6 +3593,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>${this._escape(title)}</h2>
         <p class="muted">${this._escape(message)} ${this._escape(nextStep)}</p>
       </section>
+      ${this._renderInlineFeedback("alert-response")}
       ${this._renderFallbackActions()}
     `;
   }
