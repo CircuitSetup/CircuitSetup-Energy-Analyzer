@@ -1312,7 +1312,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_panelText(\"nilm_workspace.sessions_title\")",
         "_panelText(\"nilm_workspace.manual_labels\")",
         "_panelText(\"nilm_workspace.edges_title\")",
-        "data-nilm-signature-focus",
+        "data-nilm-signature-fingerprint",
         "_focusNilmSignatureOnGraph",
         "_focusNilmGraphWindowForSignature",
         "_nilmSignatureFingerprint",
@@ -1394,6 +1394,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "nilm-label-field",
         "_renderNilmLabelField",
         "_renderNilmSignatureReview",
+        "_renderNilmDecisionFlow",
+        "_applyNilmDecision",
+        "data-nilm-apply-decision",
         "_nilmLabelDrafts",
         "_rememberNilmLabelDraft",
         "merge-target-chip",
@@ -1419,6 +1422,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "Respond to this alert",
         "Known Load Overlays",
         "Manual Labels",
+        "Identify this load",
+        "Sessions, assignments, validation, and technical details",
         "Save Assignment",
         "Alert evidence chart",
         "Matched alert",
@@ -1698,7 +1703,7 @@ const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
 if (!html.includes('aria-pressed="true"') || !html.includes("Unknown load 2")) {
   throw new Error(`selection not reflected: ${html}`);
 }
-if (!html.includes('data-nilm-index="2"')) {
+if (!html.includes('data-nilm-apply-decision="2"')) {
   throw new Error(`signature lost original index: ${html}`);
 }
 if ((html.match(/data-nilm-review-inspector/g) || []).length !== 1) {
@@ -1920,7 +1925,94 @@ for (const name of ["Zoom In", "Zoom Out", "Pan Earlier", "Pan Later"]) {
     )
 
 
-def test_nilm_signature_review_hides_unavailable_action_buttons() -> None:
+def test_nilm_interval_editor_is_progressively_disclosed() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {},
+  actions: {},
+};
+const initialHtml = panel._renderNilmWorkspaceBody();
+if (!initialHtml.includes('data-nilm-open-interval-editor')) {
+  throw new Error(`missing explicit Label interval control: ${initialHtml}`);
+}
+if (initialHtml.includes('class="nilm-interval-form"')) {
+  throw new Error(`interval form was not progressively disclosed: ${initialHtml}`);
+}
+panel._render = () => {};
+panel._selectNilmEdgeTime({
+  dataset: {
+    nilmEdgeTime: "2026-06-24T18:12:00Z",
+    nilmEdgeDirection: "on",
+  },
+});
+const selectedHtml = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
+if (
+  !panel._nilmIntervalEditorOpen
+  || !selectedHtml.includes('class="nilm-interval-form"')
+) {
+  throw new Error(`edge selection did not reveal interval editor: ${selectedHtml}`);
+}
+if (
+  !selectedHtml.includes('data-nilm-secondary-details')
+  || !selectedHtml.includes('<details')
+) {
+  throw new Error(`secondary collections lost their disclosure: ${selectedHtml}`);
+}
+"""
+    )
+
+
+def test_nilm_secondary_collections_use_one_disclosure() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderNilmSecondaryCollections({
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {},
+  actions: {},
+});
+if ((html.match(/<details/g) || []).length !== 1) {
+  throw new Error(`expected one secondary disclosure: ${html}`);
+}
+for (const expected of [
+  "Sessions, assignments, validation, and technical details",
+  "Manual Labels",
+  "Estimated Appliances",
+  "Appliance Assignments",
+  "Validation",
+  "NILM Sessions",
+  "NILM Edges",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing secondary collection ${expected}: ${html}`);
+  }
+}
+if (html.includes('data-nilm-decision')) {
+  throw new Error(`secondary disclosure duplicated signature decisions: ${html}`);
+}
+"""
+    )
+
+
+def test_nilm_signature_review_hides_unavailable_decisions() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -1940,20 +2032,376 @@ panel._nilmWorkspace = {
     }
   ]
 };
-const html = panel._renderNilmSignatureReview(panel._nilmWorkspace.signatures[0], 0);
-if (!html.includes('data-nilm-action="ignore"')) {
-  throw new Error(`expected available Ignore action button: ${html}`);
-}
-for (const unexpected of [
-  'data-nilm-action="label"',
-  'data-nilm-action="assign"',
-  'data-nilm-action="mark_expected"',
-  'data-nilm-action="merge"',
+const html = panel._renderNilmDecisionFlow(panel._nilmWorkspace.signatures[0], 0);
+for (const expected of [
+  'name="nilm_decision_0"',
+  'value="ignore"',
+  'data-nilm-apply-decision="0"'
 ]) {
-  if (html.includes(unexpected)) {
-    throw new Error(`rendered unavailable action button ${unexpected}: ${html}`);
+  if (!html.includes(expected)) {
+    throw new Error(`expected available decision ${expected}: ${html}`);
   }
 }
+for (const unexpected of [
+  'value="identify"',
+  'value="mark_expected"',
+  'value="merge"',
+]) {
+  if (html.includes(unexpected)) {
+    throw new Error(`rendered unavailable decision ${unexpected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_decision_flow_renders_one_apply_without_direct_action_wall() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const signature = {
+  signature_id: "sig-1",
+  actions: {
+    label: {},
+    assign: {},
+    ignore: {},
+    mark_expected: {},
+    merge: { target_options: [{ value: "sig-2", label: "Load 2" }] }
+  }
+};
+panel._nilmWorkspace = { status: "ok", signatures: [signature] };
+const html = panel._renderNilmDecisionFlow(signature, 0);
+for (const expected of [
+  'name="nilm_decision_0"',
+  'value="identify"',
+  'value="mark_expected"',
+  'value="ignore"',
+  'value="merge"',
+  'data-nilm-apply-decision="0"'
+]) {
+  if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
+}
+if ((html.match(/data-nilm-apply-decision/g) || []).length !== 1) {
+  throw new Error(`expected one NILM Apply action: ${html}`);
+}
+for (const oldAction of [
+  'data-nilm-action="label"',
+  'data-nilm-action="assign"',
+  'data-nilm-action="ignore"',
+  'data-nilm-action="mark_expected"',
+  'data-nilm-action="merge"'
+]) {
+  if (html.includes(oldAction)) {
+    throw new Error(`duplicate direct action ${oldAction}: ${html}`);
+  }
+}
+const key = panel._nilmDecisionDraftKey(signature);
+panel._nilmLabelDrafts.set(panel._nilmLabelDraftKey(signature), "Washer");
+panel._nilmDecisionDrafts.set(key, {
+  decision: "identify",
+  identifyMode: "assign",
+  assignmentId: "assignment-washer",
+  mergeTarget: "sig-2",
+});
+signature.actions.assign.assignment_options = [
+  { value: "assignment-washer", label: "Washer" },
+];
+const identifyHtml = panel._renderNilmDecisionFlow(signature, 0);
+for (const expected of [
+  'value="assign" selected',
+  'value="label"',
+  'value="assignment-washer" selected',
+  'value="Washer"',
+]) {
+  if (!identifyHtml.includes(expected)) {
+    throw new Error(`identify lost ${expected}: ${identifyHtml}`);
+  }
+}
+panel._nilmDecisionDrafts.set(
+  key,
+  Object.assign({}, panel._nilmDecisionDraft(signature), { decision: "merge" })
+);
+const mergeHtml = panel._renderNilmDecisionFlow(signature, 0);
+if (!mergeHtml.includes('data-selected="sig-2"')) {
+  throw new Error(`merge target draft was discarded: ${mergeHtml}`);
+}
+"""
+    )
+
+
+def test_nilm_decision_identify_assigns_without_scrolling_to_top() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const calls = [];
+let scrolled = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel._scrollToTop = () => { scrolled += 1; };
+panel._renderAndScrollToTop = () => { scrolled += 1; };
+panel._loadEvidence = async () => {};
+panel._hass = {
+  callService: async (domain, service, data) => calls.push({ domain, service, data }),
+};
+panel.shadowRoot.querySelector = (selector) => {
+  if (selector === "#nilm_label_0") return { value: "Dishwasher" };
+  return null;
+};
+const signature = {
+  signature_id: "sig-1",
+  actions: {
+    assign: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "assign_nilm_signature",
+      data: { circuit_id: "mains", signature_id: "sig-1" },
+    },
+    label: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_signature",
+      data: { circuit_id: "mains", signature_id: "sig-1" },
+    },
+  },
+};
+panel._nilmWorkspace = { status: "ok", signatures: [signature] };
+const key = panel._nilmDecisionDraftKey(signature);
+panel._nilmDecisionDrafts.set(key, {
+  decision: "identify",
+  identifyMode: "assign",
+});
+
+await panel._applyNilmDecision(0);
+
+if (calls.length !== 1 || calls[0].service !== "assign_nilm_signature") {
+  throw new Error(`identify did not assign: ${JSON.stringify(calls)}`);
+}
+if (calls[0].data.label !== "Dishwasher") {
+  throw new Error(`identify lost its label: ${JSON.stringify(calls[0])}`);
+}
+if (scrolled !== 0) {
+  throw new Error(`identify scrolled to the page top ${scrolled} times`);
+}
+if (panel._nilmDecisionDrafts.has(key)) {
+  const remaining = JSON.stringify([...panel._nilmDecisionDrafts.entries()]);
+  throw new Error(
+    `successful decision draft was not cleared: ${remaining}`
+  );
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_decision_failure_keeps_draft_and_feedback_in_inspector() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let scrolled = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel._scrollToTop = () => { scrolled += 1; };
+panel._renderAndScrollToTop = () => { scrolled += 1; };
+panel._hass = {
+  callService: async () => { throw new Error("service failed"); },
+};
+panel.shadowRoot.querySelector = (selector) => {
+  if (selector === "#nilm_label_0") return { value: "Dishwasher" };
+  return null;
+};
+const signature = {
+  signature_id: "sig-1",
+  actions: {
+    label: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_signature",
+      data: { circuit_id: "mains", signature_id: "sig-1" },
+    },
+  },
+};
+panel._nilmWorkspace = { status: "ok", signatures: [signature] };
+const key = panel._nilmDecisionDraftKey(signature);
+const draft = { decision: "identify", identifyMode: "label" };
+panel._nilmDecisionDrafts.set(key, draft);
+
+await panel._applyNilmDecision(0);
+
+if (panel._nilmDecisionDrafts.get(key) !== draft) {
+  throw new Error("failed decision did not retain its draft");
+}
+if (panel._inlineFeedback.scope !== key || panel._inlineFeedback.kind !== "error") {
+  throw new Error(
+    `failure escaped inspector feedback: ${JSON.stringify(panel._inlineFeedback)}`
+  );
+}
+if (scrolled !== 0) {
+  throw new Error(`failed decision scrolled to the page top ${scrolled} times`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_decision_success_advances_and_keeps_graph_context() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const panel = new context.Panel();
+panel._render = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._scrollToTop = () => { throw new Error("decision scrolled to top"); };
+panel._hass = { callService: async () => {} };
+panel._nilmActiveLane = "needs_review";
+panel._nilmSelectedReviewKey = "signature:sig-1";
+panel._nilmFocusedSignature = "fingerprint-1";
+panel._nilmGraphWindow = { start: 1000, end: 2000, min: 0, max: 3000 };
+const first = {
+  signature_id: "sig-1",
+  feedback_fingerprint: "fingerprint-1",
+  actions: {
+    ignore: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "ignore_nilm_signature",
+      data: { signature_id: "sig-1" },
+    },
+  },
+};
+const second = {
+  signature_id: "sig-2",
+  feedback_fingerprint: "fingerprint-2",
+  actions: { ignore: {} },
+};
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [first, second],
+  assignments: [],
+  lanes: {
+    needs_review: { signature_ids: ["sig-1", "sig-2"], assignment_ids: [] },
+  },
+};
+const firstKey = panel._nilmDecisionDraftKey(first);
+const secondKey = panel._nilmDecisionDraftKey(second);
+panel._nilmDecisionDrafts.set(firstKey, { decision: "ignore", identifyMode: "assign" });
+panel._nilmDecisionDrafts.set(
+  secondKey,
+  { decision: "ignore", identifyMode: "assign" }
+);
+panel._loadNilmWorkspace = async () => {
+  panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-2"];
+};
+let focused = "";
+panel._focusNilmSignatureOnGraph = async (fingerprint, options) => {
+  focused = fingerprint;
+  if (options.scroll !== false || options.toggle !== false) {
+    throw new Error(`wrong focus options: ${JSON.stringify(options)}`);
+  }
+  panel._nilmFocusedSignature = fingerprint;
+};
+
+await panel._applyNilmDecision(0);
+
+if (panel._nilmActiveLane !== "needs_review") {
+  throw new Error(`decision changed lane: ${panel._nilmActiveLane}`);
+}
+if (panel._nilmSelectedReviewKey !== "signature:sig-2") {
+  throw new Error(`decision did not advance: ${panel._nilmSelectedReviewKey}`);
+}
+if (focused !== "fingerprint-2") {
+  throw new Error(`decision lost graph context: ${focused}`);
+}
+if (
+  panel._nilmDecisionDrafts.has(firstKey)
+  || !panel._nilmDecisionDrafts.has(secondKey)
+) {
+  const keys = JSON.stringify([...panel._nilmDecisionDrafts.keys()]);
+  throw new Error(`decision cleared unrelated drafts: ${keys}`);
+}
+if (
+  panel._inlineFeedback.scope !== secondKey
+  || panel._inlineFeedback.kind !== "success"
+) {
+  throw new Error(
+    `success feedback was not focused locally: ${JSON.stringify(panel._inlineFeedback)}`
+  );
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_signature_cards_carry_graph_focus_without_show_button() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const item = {
+  kind: "signature",
+  index: 0,
+  item: {
+    signature_id: "sig-1",
+    feedback_fingerprint: "fingerprint-1",
+    display_label: "Unknown load",
+  },
+};
+const card = panel._renderNilmReviewCard(item, [item], true);
+const inspector = panel._renderNilmSignatureReview(item.item, 0);
+if (!card.includes('data-nilm-signature-fingerprint="fingerprint-1"')) {
+  throw new Error(`signature card cannot focus graph sessions: ${card}`);
+}
+for (const duplicate of ["Show on Graph", "data-nilm-signature-focus"]) {
+  if (inspector.includes(duplicate)) {
+    throw new Error(`inspector kept separate graph action ${duplicate}: ${inspector}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_failed_interval_save_preserves_open_editor_and_draft() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const panel = new context.Panel();
+panel._render = () => {};
+panel._renderAndScrollToTop = () => {};
+panel._nilmIntervalEditorOpen = true;
+panel._nilmLabelIntervalDraft = {
+  start: "2026-06-24T18:12",
+  end: "2026-06-24T19:03",
+  label: "Dishwasher",
+  appliance_id: "dishwasher",
+  ground_truth_entity_id: "",
+};
+const draft = panel._nilmLabelIntervalDraft;
+panel._nilmWorkspace = {
+  actions: {
+    label_interval: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_interval",
+      data: {},
+    },
+  },
+  label_intervals: [],
+};
+panel._hass = {
+  callService: async () => { throw new Error("save failed"); },
+};
+
+await panel._callNilmLabelIntervalAction(-1, "save");
+
+if (!panel._nilmIntervalEditorOpen || panel._nilmLabelIntervalDraft !== draft) {
+  throw new Error("failed interval save discarded the open draft");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     )
 
@@ -2025,12 +2473,23 @@ panel._nilmWorkspace = {
   edges: [],
   validation: {}
 };
-const html = panel._renderNilmWorkspaceBody();
-for (const id of ['id="nilm_label_0"', 'id="nilm_merge_targets_0"']) {
-  const count = (html.match(new RegExp(id, "g")) || []).length;
-  if (count !== 1) {
-    throw new Error(`${id} rendered ${count} times: ${html}`);
-  }
+const signature = panel._nilmWorkspace.signatures[0];
+const key = panel._nilmDecisionDraftKey(signature);
+panel._nilmDecisionDrafts.set(key, { decision: "identify", identifyMode: "assign" });
+const identifyHtml = panel._renderNilmWorkspaceBody();
+if ((identifyHtml.match(/id="nilm_label_0"/g) || []).length !== 1) {
+  throw new Error(`identify label was duplicated: ${identifyHtml}`);
+}
+if (identifyHtml.includes('id="nilm_merge_targets_0"')) {
+  throw new Error(`identify rendered unrelated merge controls: ${identifyHtml}`);
+}
+panel._nilmDecisionDrafts.set(key, { decision: "merge", identifyMode: "assign" });
+const mergeHtml = panel._renderNilmWorkspaceBody();
+if ((mergeHtml.match(/id="nilm_merge_targets_0"/g) || []).length !== 1) {
+  throw new Error(`merge target was duplicated: ${mergeHtml}`);
+}
+if (mergeHtml.includes('id="nilm_label_0"')) {
+  throw new Error(`merge rendered unrelated identify controls: ${mergeHtml}`);
 }
 """
     )
@@ -2085,14 +2544,17 @@ for (const expected of [
   "Correct",
   "Wrong appliance",
   "Adjust Interval",
-  "Ignore Similar",
   'data-nilm-session-action="validate"',
   'data-nilm-session-action="reject"',
-  'data-nilm-session-interval-index="0"',
-  'data-nilm-action="ignore"'
+  'data-nilm-session-interval-index="0"'
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+for (const duplicate of ["Ignore Similar", 'data-nilm-action="ignore"']) {
+  if (html.includes(duplicate)) {
+    throw new Error(`session validation duplicated ${duplicate}: ${html}`);
   }
 }
 """
@@ -2165,12 +2627,10 @@ def test_nilm_session_validation_buttons_call_services_or_update_interval() -> N
 (async () => {
 const calls = [];
 const loads = [];
-let renderedAndScrolled = 0;
 const panel = new context.Panel();
 context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
 context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
 panel._render = () => {};
-panel._renderAndScrollToTop = () => { renderedAndScrolled += 1; };
 panel._scrollToTop = () => {};
 panel._hass = {
   callService: async (domain, service, data) => calls.push({ domain, service, data }),
@@ -2263,7 +2723,7 @@ if (
     `Adjust Interval range: ${JSON.stringify(panel._nilmLabelIntervalDraft)}`
   );
 }
-if (!renderedAndScrolled) {
+if (!panel._nilmIntervalEditorOpen) {
   throw new Error("Adjust Interval did not open the editable interval form");
 }
 
@@ -2528,7 +2988,7 @@ def test_nilm_session_validation_adjust_interval_loads_session_times() -> None:
         """
 const panel = new context.Panel();
 let rendered = false;
-panel._renderAndScrollToTop = () => { rendered = true; };
+panel._render = () => { rendered = true; };
 panel._nilmWorkspace = {
   sessions: [
     {
@@ -2555,6 +3015,9 @@ if (panel._lastActionMessage !== "Loaded NILM session interval.") {
 }
 if (!rendered) {
   throw new Error("adjust interval did not re-render");
+}
+if (!panel._nilmIntervalEditorOpen) {
+  throw new Error("adjust interval did not open the interval editor");
 }
 """
     )
