@@ -1289,11 +1289,11 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
         "_panelText(\"headers.nilm_workspace\")",
-        "_renderNilmReviewQueue(workspace)",
         "_renderNilmWorkspaceLanes(workspace)",
+        "_renderNilmReviewLayout(workspace)",
+        "_nilmLaneItems",
+        "_nilmSelectedReviewItem",
         "_nilmReviewItems",
-        "_panelText(\"nilm_workspace.needs_review_title\")",
-        "_panelText(\"nilm_workspace.next_to_review\")",
         "_panelText(\"nilm_workspace.review_lanes\")",
         "_panelText(\"nilm_workspace.known_load_overlays\")",
         "_panelText(\"nilm_workspace.solar_net_overlays\")",
@@ -1301,7 +1301,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_toggleNilmOverlaySeries",
         "_visibleNilmWorkspaceSeries",
         "_panelText(\"nilm_workspace.estimated_appliances_title\")",
-        "_panelText(\"nilm_workspace.assignments_title\")",
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
         "estimated_daily_energy",
@@ -1312,7 +1311,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
         "_panelText(\"nilm_workspace.sessions_title\")",
         "_panelText(\"nilm_workspace.manual_labels\")",
-        "_panelText(\"nilm_workspace.signatures_title\")",
         "_panelText(\"nilm_workspace.edges_title\")",
         "data-nilm-signature-focus",
         "_focusNilmSignatureOnGraph",
@@ -1537,24 +1535,16 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "available-nilm-actions" in PANEL_MODULE_VERSION
 
 
-def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
+def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
-    review = asset.index("_renderNilmReviewQueue(workspace)")
+    graph = asset.index("_renderNilmGraph(workspace, graphWindow, graphSessions)")
     lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
-    signatures = asset.index(
-        '_renderNilmWorkspaceList(this._panelText("nilm_workspace.signatures_title")'
-    )
-    overlays = asset.index("_renderNilmOverlayToggles(workspace)")
-    graph_controls = asset.index("_renderNilmGraphControls(graphWindow)")
-    prediction = asset.index("_renderNilmValidation(workspace.validation)")
-    edges = asset.index(
-        '_renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title")'
-    )
+    review = asset.index("_renderNilmReviewLayout(workspace)")
+    secondary = asset.index("_renderNilmSecondaryCollections(workspace)")
 
-    assert review < lanes < signatures < overlays < graph_controls < prediction < edges
-    assert 'this._panelText("nilm_workspace.needs_review_title")' in asset
-    assert 'this._panelText("nilm_workspace.next_to_review")' in asset
+    assert graph < lanes < review < secondary
+    assert "_renderNilmReviewQueue" not in asset
 
 
 def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
@@ -1622,7 +1612,11 @@ for (const expected of [
   "Ready to Publish",
   "Published",
   "Ignored / Expected",
-  "2 items"
+  'role="tablist"',
+  'role="tab"',
+  'data-nilm-lane="needs_review"',
+  'aria-selected="true"',
+  '<strong>2</strong>'
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
@@ -1632,7 +1626,7 @@ for (const expected of [
     )
 
 
-def test_nilm_workspace_review_queue_shows_next_review_item_actions() -> None:
+def test_nilm_lane_items_preserve_indexes_and_render_one_selected_inspector() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -1659,43 +1653,128 @@ panel._nilmWorkspace = {
         merge: { target_options: [] }
       }
     },
+    { signature_id: "sig-reviewed", user_label: "Dryer", review_state: "confirmed" },
     {
       signature_id: "sig-2",
-      user_label: "Dryer",
-      review_state: "confirmed",
-      actions: { label: {} }
+      display_label: "Unknown load 2",
+      confidence: 0.65,
+      typical_power_w: 1440,
+      actions: { ignore: {} }
     }
-  ]
+  ],
+  assignments: [
+    { assignment_id: "assignment-reviewed", display_name: "Washer" },
+    {
+      assignment_id: "assignment-2",
+      display_name: "Heat Pump",
+      estimated_power_w: 2400,
+      actions: { publish: {} }
+    }
+  ],
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: ["sig-1", "sig-2"],
+      assignment_ids: []
+    },
+    assigned: {
+      label: "Assigned",
+      signature_ids: [],
+      assignment_ids: ["assignment-2"]
+    },
+    published: {
+      label: "Published",
+      signature_ids: [],
+      assignment_ids: []
+    }
+  }
 };
-const html = panel._renderNilmReviewQueue(panel._nilmWorkspace);
+const items = panel._nilmLaneItems(panel._nilmWorkspace, "needs_review");
+if (items.length !== 2 || items[0].index !== 0 || items[1].index !== 2) {
+  throw new Error(`wrong lane items: ${JSON.stringify(items)}`);
+}
+panel._nilmSelectedReviewKey = panel._nilmReviewKey(items[1]);
+const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+if (!html.includes('aria-pressed="true"') || !html.includes("Unknown load 2")) {
+  throw new Error(`selection not reflected: ${html}`);
+}
+if (!html.includes('data-nilm-index="2"')) {
+  throw new Error(`signature lost original index: ${html}`);
+}
+if ((html.match(/data-nilm-review-inspector/g) || []).length !== 1) {
+  throw new Error(`expected one inspector: ${html}`);
+}
+const selectedCard = html.indexOf('data-nilm-review-item="signature:sig-2"');
+const inspector = html.indexOf(
+  '<div class="nilm-review-inspector" data-nilm-review-inspector'
+);
+const beforeInspector = html.slice(selectedCard, inspector).trimEnd();
+if (selectedCard < 0 || inspector < 0 || !beforeInspector.endsWith("</button>")) {
+  throw new Error(`inspector did not follow the selected card: ${html}`);
+}
+
+panel._nilmActiveLane = "assigned";
+panel._nilmSelectedReviewKey = "";
+const assignmentHtml = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+if (!assignmentHtml.includes('data-nilm-assignment-index="1"')) {
+  throw new Error(`assignment lost original index: ${assignmentHtml}`);
+}
+
+panel._nilmActiveLane = "published";
+const emptyHtml = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+if (!emptyHtml.includes("data-nilm-lane-empty")) {
+  throw new Error(`empty lane did not explain its state: ${emptyHtml}`);
+}
+"""
+    )
+
+
+def test_nilm_lane_tabs_change_selection_without_fetching() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+let rendered = 0;
+let fetched = 0;
+panel._render = () => { rendered += 1; };
+panel._loadEvidence = () => { fetched += 1; };
+panel._nilmSelectedReviewKey = "signature:sig-1";
+panel._nilmFocusedSignature = "fingerprint-1";
+
+panel._activateNilmLane("assigned");
+
+if (panel._nilmActiveLane !== "assigned") {
+  throw new Error(`lane did not change: ${panel._nilmActiveLane}`);
+}
+if (panel._nilmSelectedReviewKey || panel._nilmFocusedSignature) {
+  throw new Error("lane change did not clear stale selection state");
+}
+if (rendered !== 1 || fetched !== 0) {
+  throw new Error(`lane change rerender/fetch mismatch: ${rendered}/${fetched}`);
+}
+"""
+    )
+
+
+def test_nilm_workspace_graph_controls_use_accessible_icons() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderNilmGraphControls({
+  start: 0,
+  end: 3600000,
+  min: 0,
+  max: 7200000
+});
 for (const expected of [
-  "Needs review",
-  "1 signature needs labels or decisions.",
-  "Next to review",
-  "Unknown load 1",
-  "Typical power",
-  "720 W",
-  "Typical duration",
-  "25m",
-  "Seen count",
-  "4",
-  "Voltage class",
-  "120v",
-  "Dominant leg",
-  "a",
-  "Known-load overlap",
-  "No known-load overlap",
-  "Why grouped",
-  "Grouped by similar NILM on/off edges around 720 W.",
-  "Last seen",
-  "2026-06-06",
-  "Save Label",
-  "Assign Appliance",
-  "Ignore",
-  "Mark Expected"
+  'icon="mdi:magnify-plus-outline"',
+  'icon="mdi:magnify-minus-outline"',
+  'icon="mdi:chevron-left"',
+  'icon="mdi:chevron-right"',
+  'title="Zoom In"',
+  'aria-label="Zoom In"'
 ]) {
   if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
+    throw new Error(`missing graph control ${expected}: ${html}`);
   }
 }
 """

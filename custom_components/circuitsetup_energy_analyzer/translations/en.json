@@ -1344,6 +1344,7 @@
         "lane_ready_to_publish": "Ready to Publish",
         "lane_published": "Published",
         "lane_ignored_expected": "Ignored / Expected",
+        "lane_empty": "No review items from {lane} are available in the current workspace.",
         "item_count": "{count} {noun}",
         "session_validation": "Session Validation",
         "predicted": "Predicted {label}",
