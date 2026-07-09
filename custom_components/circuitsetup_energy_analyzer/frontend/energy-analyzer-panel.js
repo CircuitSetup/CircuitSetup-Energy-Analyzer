@@ -181,6 +181,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!options.force && routeKey === this._loadedRouteKey) {
       return;
     }
+    if (this._loadedRouteKey && routeKey !== this._loadedRouteKey) {
+      this._lastActionMessage = "";
+    }
     this._loadEvidence({ routeKey });
   }
 
@@ -724,6 +727,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       this._lastActionMessage = this._nilmWorkspaceActionMessage(actionKey, data, item);
       this._busyAction = "";
+      if (collectionKey === "sessions") {
+        await this._loadEvidence({ routeKey });
+        this._scrollToTop();
+        return;
+      }
       this._storeActionMessageForReload(this._lastActionMessage);
       window.location.assign(routeKey);
     } catch (error) {
@@ -1070,7 +1078,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
       : nilmWorkspaceRoute
       ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
-      : (alert && alert.message) || "Historical alert not found";
+      : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? "No current alert evidence is available for this circuit." : "Historical alert not found");
     const loadingText = setupHealthRoute ? this._setupHealthText("loading") : "Loading alert evidence...";
 
     this.shadowRoot.innerHTML = `
@@ -2966,7 +2974,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const lines = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
-      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"></circle>`).join("");
+      const unit = alert.y_axis_label ? ` ${alert.y_axis_label}` : "";
+      const circles = item.points.map((point) => {
+        const title = `${item.name}: ${this._formatNumber(point.value)}${unit} at ${this._formatDateTime(new Date(point.time))}`;
+        return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"><title>${this._escape(title)}</title></circle>`;
+      }).join("");
       return `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
@@ -3231,11 +3243,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (this._loading) {
       return "";
     }
+    const isCircuitFallback = this._payload && this._payload.status === "circuit_found_no_evidence";
+    const title = isCircuitFallback ? "No current alert evidence" : "Historical alert not found";
     const message = (this._payload && this._payload.message) || "The alert from this notification is no longer available.";
     const nextStep = (this._payload && this._payload.next_step) || "Open a newer notification or review the appliance summary sensors for current evidence.";
     return `
       <section class="panel">
-        <h2>Historical alert not found</h2>
+        <h2>${this._escape(title)}</h2>
         <p class="muted">${this._escape(message)} ${this._escape(nextStep)}</p>
       </section>
       ${this._renderFallbackActions()}
@@ -3320,8 +3334,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _nilmActionButton(index, actionKey, label, secondary = false, disabled = false) {
+    const signatures = this._nilmReviewSignatures();
+    const signature = signatures && signatures[index];
+    const action = signature && signature.actions && signature.actions[actionKey];
+    if (!action) {
+      return "";
+    }
     const busyKey = `nilm_${index}_${actionKey}`;
-    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : this._disabled(busyKey)}>${this._escape(label)}</button>`;
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    const isDisabled = disabled || this._busyAction === busyKey || action.enabled === false;
+    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${isDisabled ? "disabled" : ""}>${this._escape(label)}</button>`;
   }
 
   _recommendationActionButton(recommendation, index, actionKey, label, secondary = false) {

@@ -265,7 +265,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
     assert "await this._loadEvidence" not in body
 
 
-def test_panel_nilm_item_actions_reload_evidence_route() -> None:
+def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> None:
     panel_script = Path(
         "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
     ).read_text(encoding="utf-8")
@@ -278,9 +278,12 @@ def test_panel_nilm_item_actions_reload_evidence_route() -> None:
     assert body.index(route_key_line) < body.index(
         "await this._hass.callService"
     )
+    assert 'if (collectionKey === "sessions") {' in body
+    assert body.index("await this._loadEvidence({ routeKey });") < body.index(
+        "this._storeActionMessageForReload(this._lastActionMessage);"
+    )
     assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
     assert "window.location.assign(routeKey);" in body
-    assert "await this._loadEvidence({ routeKey });" not in body
 
 
 def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
