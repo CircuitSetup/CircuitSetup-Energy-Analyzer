@@ -2131,6 +2131,49 @@ if (html.includes("Historical alert not found")) {
     )
 
 
+def test_alert_evidence_panel_reads_fallback_text_from_panel_config() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._panel = {
+  config: {
+    text: {
+      fallbacks: {
+        current_circuit_heading: "Translated current evidence heading",
+        historical_message: "Translated stale message.",
+        historical_next_step: "Translated stale next step.",
+      },
+      actions: {
+        available_circuit_actions: "Translated circuit actions",
+      },
+    },
+  },
+};
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  actions: {
+    relearn_baseline: {
+      service: "relearn_baseline",
+      data: { circuit_id: "hvac" },
+    },
+  },
+};
+const html = panel._renderNotFound();
+for (const expected of [
+  "Translated current evidence heading",
+  "Translated stale message.",
+  "Translated stale next step.",
+  "Translated circuit actions",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing translated panel config text ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_chart_points_include_hover_titles_with_label_and_value() -> None:
     _run_panel_node_script(
         """

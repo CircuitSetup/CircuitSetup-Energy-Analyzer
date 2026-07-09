@@ -1078,8 +1078,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || "Appliance behavior summary."
       : nilmWorkspaceRoute
       ? `Mains NILM graph and review${circuit && circuit.name ? ` for ${circuit.name}` : ""}.`
-      : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? "No current alert evidence is available for this circuit." : "Historical alert not found");
-    const loadingText = setupHealthRoute ? this._setupHealthText("loading") : "Loading alert evidence...";
+      : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? this._evidenceText("fallbacks.current_circuit_message") : this._evidenceText("fallbacks.historical_heading"));
+    const loadingText = setupHealthRoute ? this._setupHealthText("loading") : this._evidenceText("loading");
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1562,6 +1562,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _setupHealthTextObject() {
     return (this._setupHealth && this._setupHealth.text) || {};
+  }
+
+  _evidenceText(path) {
+    const parts = path.split(".");
+    let value = this._evidenceTextObject();
+    for (const part of parts) {
+      if (!value || typeof value !== "object") {
+        return "";
+      }
+      value = value[part];
+    }
+    return typeof value === "string" ? value : "";
+  }
+
+  _evidenceTextObject() {
+    return (this._payload && this._payload.text) || (this._panel && this._panel.config && this._panel.config.text) || {};
   }
 
   _renderApplianceDetail() {
@@ -3244,9 +3260,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const isCircuitFallback = this._payload && this._payload.status === "circuit_found_no_evidence";
-    const title = isCircuitFallback ? "No current alert evidence" : "Historical alert not found";
-    const message = (this._payload && this._payload.message) || "The alert from this notification is no longer available.";
-    const nextStep = (this._payload && this._payload.next_step) || "Open a newer notification or review the appliance summary sensors for current evidence.";
+    const title = isCircuitFallback ? this._evidenceText("fallbacks.current_circuit_heading") : this._evidenceText("fallbacks.historical_heading");
+    const message = (this._payload && this._payload.message) || this._evidenceText("fallbacks.historical_message");
+    const nextStep = (this._payload && this._payload.next_step) || this._evidenceText("fallbacks.historical_next_step");
     return `
       <section class="panel">
         <h2>${this._escape(title)}</h2>
@@ -3267,7 +3283,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     return `
       <section class="panel">
-        <h2>Available Circuit Actions</h2>
+        <h2>${this._escape(this._evidenceText("actions.available_circuit_actions"))}</h2>
         ${this._renderActionGroup("Pause alerts for maintenance", "Use this when the appliance is being serviced or intentionally behaving differently.", [
           this._actionButton("pause_alerts", "Pause Alerts", true),
         ])}

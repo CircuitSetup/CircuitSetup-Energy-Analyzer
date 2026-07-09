@@ -20,6 +20,7 @@ from .entities.setup_health import (
     setup_health_panel_text,
     setup_health_value,
 )
+from .localized_text import translation_section
 from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
@@ -117,7 +118,8 @@ PANEL_MODULE_VERSION = (
     "interval-running-prompt-low-confidence-nilm-expanded-comparisons-"
     "nilm-ha-device-workflow-alert-action-copy-cost-currency-config-nav-"
     "refresh-route-stop-save-nilm-reload-setup-health-checklist-actions-"
-    "setup-health-translations-merge-action-feedback-tooltips-available-nilm-actions"
+    "setup-health-translations-merge-action-feedback-tooltips-available-nilm-actions-"
+    "panel-evidence-text"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
@@ -299,6 +301,7 @@ def alert_evidence_payload(
     requested_feature = str(feature or "").strip() or None
     requested_recommendation_id = str(recommendation_id or "").strip() or None
     coordinators = tuple(coordinators)
+    text = alert_evidence_panel_text()
 
     if requested_alert_id:
         for coordinator in coordinators:
@@ -363,6 +366,7 @@ def alert_evidence_payload(
                             requested_circuit_id,
                             include_all_nilm=include_all_nilm,
                         ),
+                        "text": text,
                     },
                     requested_feature,
                     requested_recommendation_id=requested_recommendation_id,
@@ -403,6 +407,7 @@ def alert_evidence_payload(
                     "Circuit Settings, or review the summary sensors for the "
                     "latest state."
                 ),
+                "text": text,
             },
             requested_feature,
             requested_recommendation_id=requested_recommendation_id,
@@ -422,10 +427,16 @@ def alert_evidence_payload(
             "next_step": (
                 "Open a newer notification or review the appliance summary sensors."
             ),
+            "text": text,
         },
         requested_feature,
         requested_recommendation_id=requested_recommendation_id,
     )
+
+
+def alert_evidence_panel_text() -> dict[str, Any]:
+    """Return English alert evidence panel text from Home Assistant translations."""
+    return dict(translation_section("panel", "evidence"))
 
 
 def appliance_detail_payload(
@@ -780,6 +791,7 @@ def _payload_for_alert(
                 alert.circuit_id,
                 include_all_nilm=include_all_nilm,
             ),
+            "text": alert_evidence_panel_text(),
         },
         requested_feature,
         requested_recommendation_id=requested_recommendation_id,
@@ -2980,6 +2992,7 @@ async def _async_register_panel(hass: Any) -> bool:
     config = {
         "api_path": EVIDENCE_API_PATH,
         "domain": DOMAIN,
+        "text": alert_evidence_panel_text(),
     }
     custom_panel_config = {
         "name": PANEL_ELEMENT_NAME,
