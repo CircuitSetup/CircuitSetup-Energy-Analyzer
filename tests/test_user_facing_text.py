@@ -14,6 +14,26 @@ PANEL_ASSET = INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js"
 
 
 def _run_panel_node_script(body: str) -> None:
+    translation_path = (
+        INTEGRATION_DIR / "translations" / "en.json"
+    )
+    panel_text_statement = (
+        "const __panelText = JSON.parse("
+        f"fs.readFileSync({json.dumps(str(translation_path))}, \"utf8\")"
+        ").config_panel.panel;\n"
+    )
+    panel_class_statement = json.dumps(
+        "this.Panel = class TestPanel extends CircuitSetupEnergyAnalyzerPanel "
+        "{ constructor() { super(); this.panel = { config: "
+        "{ text: __panelText } }; } };\n"
+    )
+    dashboard_class_statement = json.dumps(
+        "this.DashboardGraphs = class TestDashboardGraphs extends "
+        "CircuitSetupEnergyAnalyzerDashboardGraphs "
+        "{ constructor() { super(); this.setConfig({ text: __panelText }); } "
+        "setConfig(config) { super.setConfig(Object.assign("
+        "{ text: __panelText }, config || {})); } };"
+    )
     script = f"""
 const fs = require("fs");
 const vm = require("vm");
@@ -30,6 +50,7 @@ class BrowserDate extends Date {{
 const context = {{
   console,
   Date: BrowserDate,
+  fs,
   Intl,
   URL,
   URLSearchParams,
@@ -62,8 +83,9 @@ vm.createContext(context);
 const source = fs.readFileSync({json.dumps(str(PANEL_ASSET))}, "utf8");
 vm.runInContext(
   `${{source}}\\n`
-  + "this.Panel = CircuitSetupEnergyAnalyzerPanel;\\n"
-  + "this.DashboardGraphs = CircuitSetupEnergyAnalyzerDashboardGraphs;",
+  + {json.dumps(panel_text_statement)}
+  + {panel_class_statement}
+  + {dashboard_class_statement},
   context
 );
 {body}
@@ -75,6 +97,19 @@ def _translations() -> dict:
     return json.loads(
         (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
     )
+
+
+def _iter_translation_strings(value, path: tuple[str, ...] = ()):
+    if isinstance(value, str):
+        yield path, value
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from _iter_translation_strings(child, (*path, key))
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _iter_translation_strings(child, (*path, str(index)))
 
 
 EXPECTED_FLOW_LABELS = {
@@ -1217,14 +1252,9 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
 
 
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    assert asset_path.exists()
-    asset = asset_path.read_text(encoding="utf-8")
+    assert PANEL_ASSET.exists()
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    translated_text = json.dumps(_translations()["config_panel"]["panel"])
 
     for expected in (
         'customElements.get("circuitsetup-energy-analyzer-panel")',
@@ -1242,14 +1272,13 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody()",
         "_renderApplianceDetail",
         "_renderApplianceDetailBody",
-        "Appliance Detail",
-        "Today vs Normal",
-        "Recent Timeline",
+        "_panelText(\"headers.appliance_detail\")",
+        "_panelText(\"appliance_detail.today_vs_normal\")",
         "_renderApplianceTimeline",
         "detail.recent_timeline",
-        "Behavior Expectations",
-        "Source",
-        "Confidence",
+        "_panelText(\"appliance_detail.behavior_expectations\")",
+        "_panelText(\"common.source\")",
+        "_panelText(\"common.confidence\")",
         "NILM_WORKSPACE_CALL_API_PATH",
         "nilm_workspace",
         "NILM_WORKSPACE_QUERY_PARAM",
@@ -1259,68 +1288,40 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody()",
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
-        "NILM Workspace",
+        "_panelText(\"headers.nilm_workspace\")",
         "_renderNilmReviewQueue(workspace)",
         "_renderNilmWorkspaceLanes(workspace)",
         "_nilmReviewItems",
-        "Needs review",
-        "Next to review",
-        "signatures need labels or decisions.",
-        "Review mains load changes, labels, and assignments used by NILM.",
-        "Known Load Overlays",
-        "Known loads mark configured circuits so NILM can separate expected usage.",
-        "Solar/Net Overlays",
-        "Solar and net-flow overlays help explain import/export changes on mains.",
-        "Show known-load overlays",
-        "Show solar/net overlays",
+        "_panelText(\"nilm_workspace.needs_review_title\")",
+        "_panelText(\"nilm_workspace.next_to_review\")",
+        "_panelText(\"nilm_workspace.review_lanes\")",
+        "_panelText(\"nilm_workspace.known_load_overlays\")",
+        "_panelText(\"nilm_workspace.solar_net_overlays\")",
         "data-nilm-overlay-toggle",
         "_toggleNilmOverlaySeries",
         "_visibleNilmWorkspaceSeries",
-        "Estimated Appliances",
-        "Estimated appliances are NILM's current best grouped load guesses.",
-        "Appliance Assignments",
-        "Assignments save a signature as a named appliance. Validate it, "
-        "then create an estimated HA device when it is trustworthy.",
-        "Open Appliance Detail",
+        "_panelText(\"nilm_workspace.estimated_appliances_title\")",
+        "_panelText(\"nilm_workspace.assignments_title\")",
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
         "estimated_daily_energy",
         "model_status",
-        "Validation",
-        "False positives",
-        "False negatives",
-        "Median power error",
-        "Energy error",
-        "Prediction Preview",
-        "Preview compares saved labels with NILM's predicted sessions.",
-        "Ground Truth Sensor",
+        "_renderNilmValidation",
         "ground_truth_entity_id",
         "ground_truth_options",
         "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
-        "No ground-truth sensors are available from known-load circuits.",
-        "_renderNilmValidation",
-        "NILM Sessions",
-        "Sessions pair on/off edges into likely appliance runs.",
-        "Manual Labels",
-        "Manual labels teach NILM which appliance was running during a time range.",
-        "NILM Signatures",
-        "Signatures group similar sessions that may be the same appliance.",
-        "NILM Edges",
-        "Edges are detected power changes before they are paired into sessions.",
-        "Show on Graph",
+        "_panelText(\"nilm_workspace.sessions_title\")",
+        "_panelText(\"nilm_workspace.manual_labels\")",
+        "_panelText(\"nilm_workspace.signatures_title\")",
+        "_panelText(\"nilm_workspace.edges_title\")",
         "data-nilm-signature-focus",
         "_focusNilmSignatureOnGraph",
         "_focusNilmGraphWindowForSignature",
         "_nilmSignatureFingerprint",
-        "Zoom In",
-        "Zoom Out",
-        "Pan Earlier",
-        "Pan Later",
         "data-nilm-graph-zoom",
         "data-nilm-graph-pan",
         "data-nilm-workspace-graph",
         "data-nilm-graph-window",
-        "Showing NILM graph window",
         "_zoomNilmGraph",
         "_panNilmGraph",
         "_nilmWorkspaceGraphWindow",
@@ -1330,44 +1331,24 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_callNilmLabelIntervalAction",
         "data-nilm-label-interval-action",
         'data-nilm-label-interval-action="adjust"',
-        "Adjust Label",
         "interval_id",
         "data-nilm-session-action",
         "data-nilm-assignment-action",
         "data-nilm-assignment-merge-target",
         "profile_options",
         "<select id=\"nilm_assignment_profile_",
-        "<option value=\"\">Do not merge</option>",
         'collectionKey === "sessions"',
         "`#nilm_session_label_${index}`",
-        "Existing appliance",
         "data-nilm-existing-assignment",
         'actionKey === "assign" ? '
         "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
         "_renderNilmExistingAssignmentField",
-        "Assign Appliance",
-        "Create HA Device",
-        "Remove HA Device",
-        "Created an estimated HA appliance device.",
-        "Removed the estimated HA appliance device.",
-        "Remove Assignment",
-        "Save Assignment",
         "_saveNilmAssignmentChanges",
-        "No assignment changes to save.",
-        "Confirm Appliance",
-        "Wrong Appliance",
-        "Save Interval",
-        "Generate From Sensor",
-        "Estimated energy",
         "nilm_interval_energy_preview",
         "_nilmLabelIntervalEnergyPreview",
-        "Delete Label",
         "datetime-local",
-        "Saved interval label:",
-        "Deleted interval label.",
         "MAX_CHART_POINTS_PER_SERIES",
         "_boundedChartPoints",
-        "Could not load NILM workspace history",
         'callService("circuitsetup_energy_analyzer"',
         "acknowledge_alert",
         "mark_alert_expected",
@@ -1379,8 +1360,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'this._callAction("open_appliance_detail"))',
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
-        "Alert evidence chart",
-        "Graph times shown in",
+        "_panelText(\"chart.alert_evidence_label\")",
+        "_panelTextFormat(\"chart.graph_times\"",
         "_timeZone",
         "_chartTimeTicks",
         "_chartDateKey",
@@ -1394,7 +1375,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-edge-time",
         "data-nilm-edge-direction",
         "_selectNilmEdgeTime",
-        "Loaded NILM edge time.",
         "_snapNilmChartTimeToEdge",
         "NILM_EDGE_SNAP_MS",
         "nilm_sessions",
@@ -1403,37 +1383,21 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-session-label",
         "data-nilm-session-start",
         "data-nilm-session-confidence",
-        "confidence ${Math.round(confidenceValue * 100)}%",
         "_nilmSessionGraphLabel",
         "_selectNilmSessionInterval",
-        "Loaded NILM session interval.",
         "_startNilmChartSelection",
         "_chartEventTime",
         "pointerdown",
         "<svg",
-        "No history samples",
-        "Matched alert",
-        "Latest evidence for circuit",
-        "Circuit actions available",
-        "Historical alert not found",
-        "Observed",
-        "Baseline",
         "feature_name",
         "_friendlyFeature",
-        "Safety Notice",
         "alert.safety_notice",
-        "Default:",
-        "Expected effect:",
-        "Evidence:",
-        "Preview evidence",
         "recommendation.actions.preview",
         "nilm-label-field",
         "_renderNilmLabelField",
         "_renderNilmSignatureReview",
         "_nilmLabelDrafts",
         "_rememberNilmLabelDraft",
-        "Enter a label for this NILM signature before saving.",
-        "Save Label",
         "merge-target-chip",
         "_nilmMergeTargetChip",
         "_selectNilmMergeTarget",
@@ -1444,14 +1408,28 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "action-reason",
         "_actionDisabled",
         "_guardActionCall",
-        "Action unavailable",
-        "Home Assistant service calls are not available",
         "_friendlyEntityName",
         "friendly_name",
         "item.name",
         "_overlayEntitySummary",
     ):
         assert expected in asset
+
+    for text in (
+        "Appliance Detail",
+        "NILM Workspace",
+        "Respond to this alert",
+        "Known Load Overlays",
+        "Manual Labels",
+        "Save Assignment",
+        "Alert evidence chart",
+        "Matched alert",
+        "Expected effect:",
+        "Action unavailable",
+        "Home Assistant service calls are not available",
+    ):
+        assert text in translated_text
+        assert text not in asset
     assert '${this._metric("Feature", alert.feature)}' not in asset
     assert "iframe" not in asset
     assert "Graph entities" not in asset
@@ -1564,15 +1542,19 @@ def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
 
     review = asset.index("_renderNilmReviewQueue(workspace)")
     lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
-    signatures = asset.index('_renderNilmWorkspaceList("NILM Signatures"')
+    signatures = asset.index(
+        '_renderNilmWorkspaceList(this._panelText("nilm_workspace.signatures_title")'
+    )
     overlays = asset.index("_renderNilmOverlayToggles(workspace)")
     graph_controls = asset.index("_renderNilmGraphControls(graphWindow)")
     prediction = asset.index("_renderNilmValidation(workspace.validation)")
-    edges = asset.index('_renderNilmWorkspaceList("NILM Edges"')
+    edges = asset.index(
+        '_renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title")'
+    )
 
     assert review < lanes < signatures < overlays < graph_controls < prediction < edges
-    assert "Needs review" in asset
-    assert "Next to review" in asset
+    assert 'this._panelText("nilm_workspace.needs_review_title")' in asset
+    assert 'this._panelText("nilm_workspace.next_to_review")' in asset
 
 
 def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
@@ -2131,6 +2113,49 @@ if (html.includes("Historical alert not found")) {
     )
 
 
+def test_alert_evidence_panel_reads_fallback_text_from_panel_config() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._panel = {
+  config: {
+    text: {
+      fallbacks: {
+        current_circuit_heading: "Translated current evidence heading",
+        historical_message: "Translated stale message.",
+        historical_next_step: "Translated stale next step.",
+      },
+      actions: {
+        available_circuit_actions: "Translated circuit actions",
+      },
+    },
+  },
+};
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  actions: {
+    relearn_baseline: {
+      service: "relearn_baseline",
+      data: { circuit_id: "hvac" },
+    },
+  },
+};
+const html = panel._renderNotFound();
+for (const expected of [
+  "Translated current evidence heading",
+  "Translated stale message.",
+  "Translated stale next step.",
+  "Translated circuit actions",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing translated panel config text ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_chart_points_include_hover_titles_with_label_and_value() -> None:
     _run_panel_node_script(
         """
@@ -2355,9 +2380,9 @@ def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
         'customElements.get("circuitsetup-energy-analyzer-dashboard-graphs")',
         'customElements.define("circuitsetup-energy-analyzer-dashboard-graphs"',
         "CircuitSetupEnergyAnalyzerDashboardGraphs",
-        "Latest related notification",
-        "View notification detail",
-        "NILM mains power",
+        'this._panelText("dashboard_graphs.latest_notification")',
+        'this._panelText("dashboard_graphs.view_notification_detail")',
+        'this._panelText("dashboard_graphs.title")',
         "data-dashboard-alert-detail",
     ):
         assert expected in asset
@@ -2573,8 +2598,15 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
 
     assert "_recommendationsByStatus(recommendations)" in asset
     assert "_renderRecommendationSection(" in asset
-    assert '"Suggested Settings", grouped.pending' in asset
-    assert '"Applied Suggested Settings", grouped.applied' in asset
+    assert (
+        'this._panelText("recommendations.suggested_settings"), grouped.pending'
+        in asset
+    )
+    assert (
+        'this._panelText("recommendations.applied_suggested_settings"), '
+        "grouped.applied"
+        in asset
+    )
     assert 'status === "applied"' in asset
     assert "originalIndex" in asset
 
@@ -2802,6 +2834,94 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         assert text not in source_text
 
 
+def test_alert_evidence_panel_text_lives_in_translations() -> None:
+    translations = _translations()
+    evidence = translations["config_panel"]["panel"]["evidence"]
+    translated_text = json.dumps(evidence)
+
+    for text in (
+        "Loading alert evidence...",
+        "No current alert evidence",
+        "No current alert evidence is available for this circuit.",
+        "Historical alert not found",
+        "The alert from this notification is no longer available.",
+        (
+            "Open a newer notification or review the appliance summary sensors "
+            "for current evidence."
+        ),
+        "Available Circuit Actions",
+    ):
+        assert text in translated_text
+
+
+def test_config_panel_translations_do_not_have_edge_whitespace() -> None:
+    translations = _translations()["config_panel"]
+    for path, value in _iter_translation_strings(translations, ("config_panel",)):
+        assert value == value.strip(), ".".join(path)
+
+
+def test_dynamic_panel_static_text_lives_in_translations() -> None:
+    translations = _translations()
+    panel_text = translations["config_panel"]["panel"]
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            PANEL_ASSET,
+            INTEGRATION_DIR / "panel.py",
+        )
+    )
+    translated_text = json.dumps(panel_text)
+
+    for text in (
+        "Appliance Detail",
+        "NILM Workspace",
+        "Recommendation Evidence",
+        "Respond to this alert",
+        "Pause alerts for maintenance",
+        "Tune this circuit",
+        "Retry",
+        "Action complete.",
+        "Could not run {service}: {message}",
+        (
+            "Home Assistant service calls are not available in this panel "
+            "session. Reload Home Assistant and try again."
+        ),
+        "Today vs Normal",
+        "Behavior Expectations",
+        "What To Check First",
+        "Alerts and Evidence",
+        "No actions are available for this appliance right now.",
+        "NILM Signatures",
+        "Estimated Appliances",
+        "Appliance Assignments",
+        "Manual Labels",
+        "Session Validation",
+        "Prediction Preview",
+        "Known Load Overlays",
+        "Solar/Net Overlays",
+        "Show known-load overlays",
+        "Show solar/net overlays",
+        "Zoom In",
+        "Zoom Out",
+        "Pan Earlier",
+        "Pan Later",
+        "Graph times shown in {time_zone}.",
+        "Matched alert",
+        "Latest evidence for circuit",
+        "Circuit actions available",
+        "Direct meter",
+        "Estimated by NILM",
+        "Mixed circuit",
+        "Unknown",
+        "NILM mains power",
+        "Loading NILM graphs...",
+        "Latest related notification",
+        "View notification detail",
+    ):
+        assert text in translated_text
+        assert text not in source_text
+
+
 def test_notification_and_dashboard_text_live_in_translations() -> None:
     translations = _translations()
     notification_text = translations["config_panel"]["notifications"]
@@ -2851,8 +2971,8 @@ def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None
 
     assert "_renderSelectedRecommendationEvidence()" in asset
     assert "selected_recommendation" in asset
-    assert "Recommendation Evidence" in asset
-    assert "Previewing evidence for" in asset
+    assert 'this._panelText("recommendations.recommendation_evidence")' in asset
+    assert 'this._panelTextFormat("recommendations.previewing_evidence"' in asset
 
 
 def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
@@ -2860,23 +2980,23 @@ def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
 
     preview = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
-        '"preview", "Preview evidence", true)'
+        '"preview", this._panelText("actions.labels.preview_evidence"), true)'
     )
     apply = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
-        '"apply", "Apply")'
+        '"apply", this._panelText("actions.labels.apply"))'
     )
     dismiss = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
-        '"dismiss", "Dismiss", true)'
+        '"dismiss", this._panelText("actions.labels.dismiss"), true)'
     )
     undo = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
-        '"undo", "Undo", true)'
+        '"undo", this._panelText("actions.labels.undo"), true)'
     )
     reset = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
-        '"reset", "Reset default", true)'
+        '"reset", this._panelText("actions.labels.reset_default"), true)'
     )
 
     assert preview < apply < dismiss < undo < reset
@@ -2956,24 +3076,14 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
         "Date.parse(alert.graph_window_start)",
         "Date.parse(alert.graph_window_end)",
         "_alertActionMessage(actionKey)",
-        (
-            '_renderActionGroup("Respond to this alert", "Review the graph, '
-            'then choose how the analyzer should treat this alert."'
-        ),
-        (
-            '_renderActionGroup("Pause alerts for maintenance", "Use this '
-            "when the appliance is being serviced or intentionally behaving "
-            'differently."'
-        ),
-        (
-            '_renderActionGroup("Tune this circuit", "Use these when the '
-            'appliance summary looks wrong or the learned baseline is stale."'
-        ),
-        "Alert acknowledged.",
-        "Marked as expected behavior.",
-        "Marked as not helpful.",
-        "Saved label:",
-        "Review state:",
+        'this._panelText("actions.groups.respond_title")',
+        'this._panelText("actions.groups.pause_title")',
+        'this._panelText("actions.groups.tune_title")',
+        "messages.alert_acknowledged",
+        "messages.marked_expected",
+        "messages.marked_unhelpful",
+        "messages.saved_label",
+        "nilm_workspace.review_state",
     ):
         assert expected in asset
     assert "Retire" not in asset

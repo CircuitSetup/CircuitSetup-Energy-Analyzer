@@ -12,7 +12,7 @@ from .const import (
     DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
-from .localized_text import translation_text
+from .localized_text import translation_section, translation_text
 
 
 def _dashboard_text(*keys: str) -> str:
@@ -1148,6 +1148,7 @@ def _nilm_dashboard_graphs_card(
     return {
         "type": NILM_DASHBOARD_GRAPHS_CARD,
         "title": _dashboard_text("cards", "nilm_mains_power"),
+        "text": dict(translation_section("panel")),
         "entry_id": entry_id,
         "circuit_id": circuit_id,
         "detail_path": (

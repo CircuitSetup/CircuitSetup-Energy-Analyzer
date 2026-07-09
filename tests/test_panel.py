@@ -347,6 +347,7 @@ async def test_panel_registers_via_frontend_when_panel_custom_helper_missing(
         PANEL_MODULE_VERSION,
         PANEL_URL_PATH,
         STATIC_URL_PATH,
+        alert_evidence_panel_text,
     )
 
     class FakeFrontend:
@@ -375,6 +376,7 @@ async def test_panel_registers_via_frontend_when_panel_custom_helper_missing(
             "config": {
                 "api_path": "/api/circuitsetup_energy_analyzer/alert_evidence",
                 "domain": "circuitsetup_energy_analyzer",
+                "text": alert_evidence_panel_text(),
                 "_panel_custom": {
                     "name": PANEL_ELEMENT_NAME,
                     "embed_iframe": False,
@@ -2700,6 +2702,7 @@ async def test_alert_evidence_view_forwards_requested_feature_for_fallback(
 
 def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_panel_text,
         alert_evidence_payload,
     )
 
@@ -2720,6 +2723,7 @@ def test_alert_evidence_payload_reports_not_found_for_unknown_context() -> None:
         "next_step": (
             "Open a newer notification or review the appliance summary sensors."
         ),
+        "text": alert_evidence_panel_text(),
     }
 
 
@@ -2753,6 +2757,18 @@ def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
     assert "end_maintenance" not in payload["actions"]
     assert payload["actions"]["open_advanced_circuit_settings"]["path"].startswith(
         "/config/integrations/"
+    )
+
+
+def test_alert_evidence_payload_exposes_panel_text() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    payload = alert_evidence_payload([_coordinator()], circuit_id="hvac")
+
+    assert payload["text"]["evidence"]["fallbacks"]["current_circuit_heading"] == (
+        "No current alert evidence"
     )
 
 

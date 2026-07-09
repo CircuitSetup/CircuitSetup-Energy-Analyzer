@@ -30,6 +30,18 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 
 
+def _without_panel_text(value):
+    if isinstance(value, dict):
+        return {
+            key: _without_panel_text(child)
+            for key, child in value.items()
+            if key != "text"
+        }
+    if isinstance(value, list):
+        return [_without_panel_text(child) for child in value]
+    return value
+
+
 def _circuits() -> tuple[CircuitConfig, ...]:
     return (
         CircuitConfig(
@@ -572,14 +584,15 @@ def test_generated_dashboard_omits_dropdown_and_switch_controls() -> None:
         DASHBOARD_LAYOUT_EXPERT,
     )
     refs = _entity_refs(dashboard)
+    dashboard_without_panel_text = _without_panel_text(dashboard)
 
     assert not {
         entity_id
         for entity_id in refs
         if entity_id.startswith(("select.", "switch."))
     }
-    assert "Dashboard Controls" not in str(dashboard)
-    assert "Controls" not in str(dashboard)
+    assert "Dashboard Controls" not in str(dashboard_without_panel_text)
+    assert "Controls" not in str(dashboard_without_panel_text)
 
 
 def test_dashboard_uses_nilm_signature_count_key_for_signature_card() -> None:
@@ -661,7 +674,10 @@ def test_expert_dashboard_adds_nilm_review_card_without_defined_appliances() -> 
         if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
     )
 
-    assert custom_graph == {
+    custom_graph_without_text = dict(custom_graph)
+    text = custom_graph_without_text.pop("text")
+    assert text["headers"]["nilm_workspace"] == "NILM Workspace"
+    assert custom_graph_without_text == {
         "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
         "title": "NILM mains power",
         "entry_id": "entry-1",
@@ -726,7 +742,10 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
     )
     appliance_graph = _card_with_title(mains_section, "Defined NILM appliance power")
 
-    assert custom_graph == {
+    custom_graph_without_text = dict(custom_graph)
+    text = custom_graph_without_text.pop("text")
+    assert text["dashboard_graphs"]["title"] == "NILM mains power"
+    assert custom_graph_without_text == {
         "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
         "title": "NILM mains power",
         "entry_id": "entry-1",
