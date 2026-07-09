@@ -1556,6 +1556,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "low-confidence-nilm" in PANEL_MODULE_VERSION
     assert "nilm-ha-device-workflow" in PANEL_MODULE_VERSION
     assert "cost-currency" in PANEL_MODULE_VERSION
+    assert "available-nilm-actions" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_review_actions_before_diagnostics() -> None:
@@ -1713,6 +1714,44 @@ for (const expected of [
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_signature_review_hides_unavailable_action_buttons() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [
+    {
+      signature_id: "sig-ignore-only",
+      display_label: "Unknown load",
+      actions: {
+        ignore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "ignore_nilm_signature",
+          data: { circuit_id: "mains", signature_id: "sig-ignore-only" }
+        }
+      }
+    }
+  ]
+};
+const html = panel._renderNilmSignatureReview(panel._nilmWorkspace.signatures[0], 0);
+if (!html.includes('data-nilm-action="ignore"')) {
+  throw new Error(`expected available Ignore action button: ${html}`);
+}
+for (const unexpected of [
+  'data-nilm-action="label"',
+  'data-nilm-action="assign"',
+  'data-nilm-action="mark_expected"',
+  'data-nilm-action="merge"',
+]) {
+  if (html.includes(unexpected)) {
+    throw new Error(`rendered unavailable action button ${unexpected}: ${html}`);
   }
 }
 """
@@ -1911,6 +1950,129 @@ if (loads.length !== 1 || !loads[0].routeKey.includes("nilm_workspace=1")) {
 }
 if (panel._lastActionMessage !== "Confirmed Dishwasher.") {
   throw new Error(`expected confirmation message, got ${panel._lastActionMessage}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_session_validation_buttons_call_services_or_update_interval() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const calls = [];
+const loads = [];
+let renderedAndScrolled = 0;
+const panel = new context.Panel();
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+panel._render = () => {};
+panel._renderAndScrollToTop = () => { renderedAndScrolled += 1; };
+panel._scrollToTop = () => {};
+panel._hass = {
+  callService: async (domain, service, data) => calls.push({ domain, service, data }),
+};
+panel._loadEvidence = async (options) => loads.push(options);
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [
+    {
+      signature_id: "sig-dishwasher",
+      feedback_fingerprint: "dishwasher-fingerprint",
+      actions: {
+        ignore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "ignore_nilm_signature",
+          data: {
+            circuit_id: "mains",
+            signature_id: "sig-dishwasher",
+          },
+        },
+      },
+    },
+  ],
+  sessions: [
+    {
+      session_id: "session-dishwasher",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_name: "Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      signature_fingerprint: "dishwasher-fingerprint",
+      actions: {
+        validate: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "validate_nilm_session",
+          data: {
+            circuit_id: "mains",
+            session_id: "session-dishwasher",
+            assignment_id: "assignment-dishwasher",
+          },
+        },
+        reject: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "reject_nilm_session",
+          data: {
+            circuit_id: "mains",
+            session_id: "session-dishwasher",
+            assignment_id: "assignment-dishwasher",
+          },
+        },
+      },
+    },
+  ],
+};
+
+await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
+if (calls[calls.length - 1].service !== "validate_nilm_session") {
+  throw new Error(`Correct did not call validate service: ${JSON.stringify(calls)}`);
+}
+if (loads.length !== 1) {
+  throw new Error(`Correct did not reload NILM: ${JSON.stringify(loads)}`);
+}
+if (panel._lastActionMessage !== "Confirmed Dishwasher.") {
+  throw new Error(`Correct used wrong label: ${panel._lastActionMessage}`);
+}
+
+await panel._callNilmWorkspaceItemAction("sessions", 0, "reject");
+if (calls[calls.length - 1].service !== "reject_nilm_session") {
+  throw new Error(`Wrong appliance missed reject: ${JSON.stringify(calls)}`);
+}
+if (loads.length !== 2) {
+  throw new Error(`Wrong appliance did not reload NILM: ${JSON.stringify(loads)}`);
+}
+if (panel._lastActionMessage !== "Marked Dishwasher for review.") {
+  throw new Error(`Wrong appliance used wrong label: ${panel._lastActionMessage}`);
+}
+
+panel._selectNilmSessionIntervalByIndex(0);
+const expectedStart = panel._datetimeLocalFromMillis(
+  Date.parse("2026-06-24T18:12:00Z")
+);
+const expectedEnd = panel._datetimeLocalFromMillis(
+  Date.parse("2026-06-24T19:03:00Z")
+);
+if (
+  panel._nilmLabelIntervalDraft.start !== expectedStart
+  || panel._nilmLabelIntervalDraft.end !== expectedEnd
+) {
+  throw new Error(
+    `Adjust Interval range: ${JSON.stringify(panel._nilmLabelIntervalDraft)}`
+  );
+}
+if (!renderedAndScrolled) {
+  throw new Error("Adjust Interval did not open the editable interval form");
+}
+
+await panel._callNilmAction(0, "ignore");
+if (calls[calls.length - 1].service !== "ignore_nilm_signature") {
+  throw new Error(`Ignore Similar missed service: ${JSON.stringify(calls)}`);
+}
+if (panel._lastActionMessage !== "Ignored signature.") {
+  throw new Error(`Ignore Similar message: ${panel._lastActionMessage}`);
 }
 })().catch((error) => {
   console.error(error);

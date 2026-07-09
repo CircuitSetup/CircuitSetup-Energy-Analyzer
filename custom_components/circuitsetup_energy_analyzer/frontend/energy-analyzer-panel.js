@@ -3334,8 +3334,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _nilmActionButton(index, actionKey, label, secondary = false, disabled = false) {
+    const signatures = this._nilmReviewSignatures();
+    const signature = signatures && signatures[index];
+    const action = signature && signature.actions && signature.actions[actionKey];
+    if (!action) {
+      return "";
+    }
     const busyKey = `nilm_${index}_${actionKey}`;
-    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : this._disabled(busyKey)}>${this._escape(label)}</button>`;
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    const isDisabled = disabled || this._busyAction === busyKey || action.enabled === false;
+    return `<button data-nilm-index="${index}" data-nilm-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${isDisabled ? "disabled" : ""}>${this._escape(label)}</button>`;
   }
 
   _recommendationActionButton(recommendation, index, actionKey, label, secondary = false) {
