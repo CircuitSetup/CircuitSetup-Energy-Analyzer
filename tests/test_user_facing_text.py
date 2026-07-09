@@ -1860,6 +1860,145 @@ for (const expected of [
     )
 
 
+def test_nilm_session_validation_actions_reload_workspace_in_place() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const calls = [];
+const loads = [];
+let assigned = false;
+const panel = new context.Panel();
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+context.window.location.assign = () => { assigned = true; };
+panel._render = () => {};
+panel._scrollToTop = () => {};
+panel._hass = {
+  callService: async (domain, service, data) => calls.push({ domain, service, data }),
+};
+panel._loadEvidence = async (options) => loads.push(options);
+panel._nilmWorkspace = {
+  sessions: [
+    {
+      display_name: "Dishwasher",
+      actions: {
+        validate: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "validate_nilm_session",
+          data: {
+            circuit_id: "mains",
+            session_id: "session-1",
+            assignment_id: "assignment-dishwasher",
+          },
+        },
+      },
+    },
+  ],
+};
+
+await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
+
+if (assigned) {
+  throw new Error("session validation should not force a browser reload");
+}
+if (calls.length !== 1 || calls[0].service !== "validate_nilm_session") {
+  throw new Error(`expected validate service call, got ${JSON.stringify(calls)}`);
+}
+if (loads.length !== 1 || !loads[0].routeKey.includes("nilm_workspace=1")) {
+  throw new Error(
+    `expected in-place NILM reload, got ${JSON.stringify(loads)}`
+  );
+}
+if (panel._lastActionMessage !== "Confirmed Dishwasher.") {
+  throw new Error(`expected confirmation message, got ${panel._lastActionMessage}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_panel_action_message_clears_on_evidence_route_change() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const routes = [];
+panel._loadedRouteKey = "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge";
+panel._lastActionMessage = "Marked as not helpful.";
+panel._loadEvidence = (options) => routes.push(options.routeKey);
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?circuit_id=hvac";
+
+panel._loadEvidenceIfRouteChanged();
+
+if (panel._lastActionMessage) {
+  throw new Error(
+    `expected route change to clear message, got ${panel._lastActionMessage}`
+  );
+}
+if (routes[0] !== "/circuitsetup-energy-analyzer-evidence?circuit_id=hvac") {
+  throw new Error(`expected new evidence route load, got ${JSON.stringify(routes)}`);
+}
+"""
+    )
+
+
+def test_circuit_fallback_does_not_render_historical_alert_heading() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  message: "No current alert evidence is available for this circuit.",
+  next_step: "Use the available circuit actions below.",
+  actions: {},
+};
+const html = panel._renderNotFound();
+if (!html.includes("No current alert evidence")) {
+  throw new Error(`expected circuit fallback heading: ${html}`);
+}
+if (html.includes("Historical alert not found")) {
+  throw new Error(
+    `circuit fallback should not look stale: ${html}`
+  );
+}
+"""
+    )
+
+
+def test_chart_points_include_hover_titles_with_label_and_value() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    {
+      name: "Kitchen Fridge",
+      points: [
+        {
+          time: Date.parse("2026-06-24T18:12:00Z"),
+          value: 123.456,
+        },
+      ],
+    },
+  ],
+  {
+    graph_window_start: "2026-06-24T18:00:00Z",
+    graph_window_end: "2026-06-24T19:00:00Z",
+    y_axis_label: "W",
+  },
+);
+if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
+  throw new Error(`expected point hover title with label and value: ${html}`);
+}
+"""
+    )
+
+
 def test_nilm_workspace_hides_already_reviewed_session_validation_cards() -> None:
     _run_panel_node_script(
         """
