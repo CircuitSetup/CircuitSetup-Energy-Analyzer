@@ -1077,7 +1077,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
       : nilmWorkspaceRoute
-      ? this._panelTextFormat("headers.nilm_workspace_message", { circuit: circuit && circuit.name ? this._panelTextFormat("headers.nilm_workspace_circuit", { name: circuit.name }) : "" })
+      ? circuit && circuit.name
+        ? this._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: circuit.name })
+        : this._panelText("headers.nilm_workspace_message")
       : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? this._evidenceText("fallbacks.current_circuit_message") : this._evidenceText("fallbacks.historical_heading"));
     const loadingText = setupHealthRoute ? this._setupHealthText("loading") : this._evidenceText("loading");
 

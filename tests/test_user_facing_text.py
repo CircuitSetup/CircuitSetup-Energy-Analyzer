@@ -99,6 +99,19 @@ def _translations() -> dict:
     )
 
 
+def _iter_translation_strings(value, path: tuple[str, ...] = ()):
+    if isinstance(value, str):
+        yield path, value
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from _iter_translation_strings(child, (*path, key))
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _iter_translation_strings(child, (*path, str(index)))
+
+
 EXPECTED_FLOW_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
@@ -2839,6 +2852,12 @@ def test_alert_evidence_panel_text_lives_in_translations() -> None:
         "Available Circuit Actions",
     ):
         assert text in translated_text
+
+
+def test_config_panel_translations_do_not_have_edge_whitespace() -> None:
+    translations = _translations()["config_panel"]
+    for path, value in _iter_translation_strings(translations, ("config_panel",)):
+        assert value == value.strip(), ".".join(path)
 
 
 def test_dynamic_panel_static_text_lives_in_translations() -> None:

@@ -1107,8 +1107,8 @@
         "appliance_detail": "Appliance Detail",
         "appliance_detail_message": "Appliance behavior summary.",
         "nilm_workspace": "NILM Workspace",
-        "nilm_workspace_circuit": " for {name}",
-        "nilm_workspace_message": "Mains NILM graph and review{circuit}."
+        "nilm_workspace_message": "Mains NILM graph and review.",
+        "nilm_workspace_message_for_circuit": "Mains NILM graph and review for {name}."
       },
       "status": {
         "matched_alert": "Matched alert",
