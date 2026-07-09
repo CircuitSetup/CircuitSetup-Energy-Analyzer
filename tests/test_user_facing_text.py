@@ -2047,14 +2047,14 @@ panel._nilmWorkspace = {
   }],
   known_load_overlays: [],
   solar_overlays: [],
-  sessions: [{
-    session_id: "session-1",
+  sessions: Array.from({ length: 6 }, (_, index) => ({
+    session_id: `session-${index + 1}`,
     assignment_id: "assignment-1",
-    display_name: "Dishwasher",
-    start: "2026-06-24T18:12:00Z",
-    end: "2026-06-24T19:03:00Z",
+    display_name: `Dishwasher ${index + 1}`,
+    start: `2026-06-24T${String(10 + index).padStart(2, "0")}:00:00Z`,
+    end: `2026-06-24T${String(10 + index).padStart(2, "0")}:30:00Z`,
     actions: { assign: {}, validate: {}, reject: {} },
-  }],
+  })),
   edges: [],
   validation: {},
   actions: {},
@@ -2076,15 +2076,26 @@ const unique = [
   'data-nilm-assignment-index="0" data-nilm-assignment-action="publish"',
   'data-nilm-assignment-index="0" data-nilm-assignment-action="unpublish"',
   'data-nilm-assignment-index="0" data-nilm-assignment-action="retire"',
-  'id="nilm_session_label_0"',
-  'data-nilm-session-index="0" data-nilm-session-action="assign"',
-  'data-nilm-session-index="0" data-nilm-session-action="validate"',
-  'data-nilm-session-index="0" data-nilm-session-action="reject"',
 ];
 for (const marker of unique) {
   const count = html.split(marker).length - 1;
   if (count !== 1) {
     throw new Error(`expected one owner for ${marker}, got ${count}: ${html}`);
+  }
+}
+for (let index = 0; index < 6; index += 1) {
+  for (const marker of [
+    `id="nilm_session_label_${index}"`,
+    `data-nilm-session-index="${index}" data-nilm-session-action="assign"`,
+    `data-nilm-session-index="${index}" data-nilm-session-action="validate"`,
+    `data-nilm-session-index="${index}" data-nilm-session-action="reject"`,
+  ]) {
+    const count = html.split(marker).length - 1;
+    if (count !== 1) {
+      throw new Error(
+        `expected one owner for session ${index}: ${marker}, got ${count}`
+      );
+    }
   }
 }
 const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);

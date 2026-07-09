@@ -3286,7 +3286,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         && (!sessionId || !reviewedSessionIds.has(sessionId))
         && actions
         && (actions.validate || actions.reject);
-    }).slice(0, 5);
+    });
     if (!cards.length) {
       return "";
     }
