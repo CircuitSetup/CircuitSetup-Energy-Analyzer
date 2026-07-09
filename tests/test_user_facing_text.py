@@ -2012,6 +2012,100 @@ if (html.includes('data-nilm-decision')) {
     )
 
 
+def test_nilm_full_workspace_has_one_owner() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmActiveLane = "assigned";
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  signatures: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [{
+    assignment_id: "assignment-1",
+    appliance_id: "dishwasher",
+    display_name: "Dishwasher",
+    appliance_profile: "dishwasher",
+    lifecycle_state: "assigned",
+    confidence: 0.8,
+    appliance_detail_path: "/detail/dishwasher",
+    actions: {
+      rename: {},
+      change_profile: {
+        profile_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+      merge: {
+        target_options: [{ value: "assignment-2", label: "Washer" }],
+      },
+      validate_history: {},
+      publish: {},
+      unpublish: {},
+      retire: {},
+    },
+  }],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [{
+    session_id: "session-1",
+    assignment_id: "assignment-1",
+    display_name: "Dishwasher",
+    start: "2026-06-24T18:12:00Z",
+    end: "2026-06-24T19:03:00Z",
+    actions: { assign: {}, validate: {}, reject: {} },
+  }],
+  edges: [],
+  validation: {},
+  actions: {},
+  lanes: {
+    assigned: {
+      label: "Assigned",
+      signature_ids: [],
+      assignment_ids: ["assignment-1"],
+    },
+  },
+};
+const html = panel._renderNilmWorkspaceBody();
+const unique = [
+  'id="nilm_assignment_label_0"',
+  'id="nilm_assignment_profile_0"',
+  'id="nilm_assignment_merge_target_0"',
+  'data-nilm-assignment-index="0" data-nilm-assignment-action="save"',
+  'data-nilm-assignment-index="0" data-nilm-assignment-action="validate_history"',
+  'data-nilm-assignment-index="0" data-nilm-assignment-action="publish"',
+  'data-nilm-assignment-index="0" data-nilm-assignment-action="unpublish"',
+  'data-nilm-assignment-index="0" data-nilm-assignment-action="retire"',
+  'id="nilm_session_label_0"',
+  'data-nilm-session-index="0" data-nilm-session-action="assign"',
+  'data-nilm-session-index="0" data-nilm-session-action="validate"',
+  'data-nilm-session-index="0" data-nilm-session-action="reject"',
+];
+for (const marker of unique) {
+  const count = html.split(marker).length - 1;
+  if (count !== 1) {
+    throw new Error(`expected one owner for ${marker}, got ${count}: ${html}`);
+  }
+}
+const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
+for (const interactive of [
+  'id="nilm_assignment_label_0"',
+  'id="nilm_assignment_profile_0"',
+  'id="nilm_assignment_merge_target_0"',
+  'data-nilm-assignment-action',
+  'data-nilm-appliance-detail-path',
+]) {
+  if (secondary.includes(interactive)) {
+    throw new Error(`secondary assignment was not read-only: ${interactive}`);
+  }
+}
+if (!secondary.includes("Dishwasher") || !secondary.includes("Confidence 80%")) {
+  throw new Error(`secondary assignment summary disappeared: ${secondary}`);
+}
+"""
+    )
+
+
 def test_nilm_signature_review_hides_unavailable_decisions() -> None:
     _run_panel_node_script(
         """

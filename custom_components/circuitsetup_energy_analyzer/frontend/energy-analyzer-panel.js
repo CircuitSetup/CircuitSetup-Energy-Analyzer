@@ -3061,15 +3061,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="actions">${this._nilmApplianceDetailButton(item)}</div>
         </div>
       `, this._panelText("nilm_workspace.estimated_appliances_description"))}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.assignments_title"), workspace.assignments, this._panelText("nilm_workspace.assignments_empty"), (item, index) => `
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.assignments_title"), workspace.assignments, this._panelText("nilm_workspace.assignments_empty"), (item) => `
           <div class="metric">
             <span>${this._escape(item.lifecycle_state || this._panelText("common.assigned"))}</span>
             <strong>${this._escape(item.display_name || item.appliance_id || this._panelText("common.assigned_appliance"))}</strong>
             <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
             <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
             <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
-            ${this._renderNilmAssignmentEditFields(item, index)}
-            ${this._renderNilmAssignmentActions(item, index)}
           </div>
         `, this._panelText("nilm_workspace.assignments_description"))}
         ${this._renderNilmValidation(workspace.validation)}
@@ -3093,10 +3091,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <strong>${this._escape(this._panelTextFormat("nilm_workspace.session_summary", { power: this._formatMetricValue(item.median_power_w), confidence: Math.round(Number(item.confidence || 0) * 100) }))}</strong>
           <p class="muted">${this._escape(item.end ? this._panelTextFormat("nilm_workspace.session_end", { end: item.end }) : this._panelText("common.open_session"))}</p>
           ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, index) : ""}
-          ${item.actions ? `<div class="actions">
-            ${item.actions.assign ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>` : ""}
-            ${item.actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.confirm_appliance"))}</button>` : ""}
-            ${item.actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.wrong_appliance"))}</button>` : ""}
+          ${item.actions && item.actions.assign ? `<div class="actions">
+            <button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>
           </div>` : ""}
         </div>
       `, this._panelText("nilm_workspace.sessions_description"))}
