@@ -865,8 +865,8 @@
       },
       "settings_recommendations": {
         "title": "CircuitSetup Energy Analyzer suggested settings",
-        "singular_message": "There is 1 suggested Advanced Circuit Setting to review via CircuitSetup Energy Analyzer > Configure > Review Suggested Settings.",
-        "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review via CircuitSetup Energy Analyzer > Configure > Review Suggested Settings."
+        "singular_message": "There is 1 suggested Advanced Circuit Setting to review via CircuitSetup Energy Analyzer > Configure > [Review Suggested Settings]({settings_url}).",
+        "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review via CircuitSetup Energy Analyzer > Configure > [Review Suggested Settings]({settings_url})."
       }
     },
     "dashboard": {
