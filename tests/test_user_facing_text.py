@@ -1566,6 +1566,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "focused-history-ordering" in PANEL_MODULE_VERSION
     assert "local-interval-actions" in PANEL_MODULE_VERSION
     assert "compact-nilm-summary" in PANEL_MODULE_VERSION
+    assert "nilm-refresh-only-retry" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -2995,6 +2996,245 @@ for (const testCase of cases) {
       || panel._nilmLabelIntervalDraft !== intervalDraft) {
     throw new Error(`${testCase.actionKey} discarded an unrelated editor draft`);
   }
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_interval_refresh_invalidates_pending_focus_without_stuck_graph() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 9;
+panel._render = () => {};
+panel.shadowRoot.querySelector = () => null;
+const priorSeries = [[{
+  entity_id: "sensor.mains_power",
+  state: "420",
+  last_changed: "2026-07-09T18:00:00Z",
+}]];
+const staleFocusedSeries = [[{
+  entity_id: "sensor.mains_power",
+  state: "900",
+  last_changed: "2026-07-09T19:00:00Z",
+}]];
+const graphWindow = { start: 10, end: 20, min: 0, max: 30 };
+const action = {
+  domain: "circuitsetup_energy_analyzer",
+  service: "delete_nilm_label_interval",
+  data: { interval_id: "interval-1" },
+};
+const interval = {
+  interval_id: "interval-1",
+  label: "Dishwasher",
+  actions: { delete: action },
+};
+const workspace = {
+  status: "ok",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  history: {
+    start: "2026-07-09T17:00:00Z",
+    end: "2026-07-09T20:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=3",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=3",
+  },
+  label_intervals: [interval],
+  actions: {}, lanes: {}, lane_counts: {}, signatures: [], sessions: [],
+  edges: [], assignments: [], known_load_overlays: [], solar_overlays: [],
+  virtual_appliances: [], validation: {},
+};
+const refreshedWorkspace = Object.assign({}, workspace, { label_intervals: [] });
+panel._payload = {
+  circuit: workspace.circuit,
+  nilm: {
+    workspace_call_api_path:
+      "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+    workspace_api_path:
+      "/api/circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+  },
+};
+panel._nilmWorkspace = workspace;
+panel._nilmWorkspaceHistorySeries = priorSeries;
+panel._nilmGraphWindow = graphWindow;
+let resolveFocused;
+let requestCount = 0;
+panel._requestJson = (apiPath) => {
+  requestCount += 1;
+  if (apiPath.includes("nilm_workspace_history")) {
+    return new Promise((resolve) => { resolveFocused = resolve; });
+  }
+  return Promise.resolve(refreshedWorkspace);
+};
+let serviceCalls = 0;
+panel._hass = { callService: async () => { serviceCalls += 1; } };
+
+const focused = panel._loadNilmWorkspaceHistoryForWindow({
+  start: Date.parse("2026-07-09T18:30:00Z"),
+  end: Date.parse("2026-07-09T19:30:00Z"),
+});
+if (!panel._nilmWorkspaceHistoryLoading
+    || panel._nilmWorkspaceHistorySeries !== priorSeries) {
+  throw new Error("focused loading did not retain the visible graph series");
+}
+await panel._callNilmLabelIntervalAction(0, "delete");
+if (serviceCalls !== 1 || requestCount !== 2
+    || panel._nilmWorkspaceHistoryLoading
+    || panel._nilmWorkspaceHistorySeries !== priorSeries
+    || panel._nilmGraphWindow !== graphWindow
+    || panel._inlineFeedback.scope !== "nilm-interval"
+    || panel._inlineFeedback.kind !== "success") {
+  throw new Error("interval refresh did not settle pending focused history");
+}
+resolveFocused(staleFocusedSeries);
+await focused;
+if (panel._nilmWorkspaceHistoryLoading
+    || panel._nilmWorkspaceHistorySeries !== priorSeries
+    || panel._nilmGraphWindow !== graphWindow
+    || panel._nilmWorkspaceHistoryError
+    || panel._nilmWorkspaceHistoryFailedRequest !== null
+    || panel._inlineFeedback.kind !== "success") {
+  throw new Error("stale focused completion mutated the refreshed workspace");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_interval_refresh_failure_retries_only_workspace_request() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 11;
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  actions: {},
+  nilm: {
+    workspace_call_api_path:
+      "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+    workspace_api_path:
+      "/api/circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+  },
+};
+const action = {
+  domain: "circuitsetup_energy_analyzer",
+  service: "label_nilm_interval",
+  data: {},
+};
+const workspace = {
+  status: "ok",
+  circuit: panel._payload.circuit,
+  history: {},
+  actions: { label_interval: action },
+  label_intervals: [], lanes: {}, lane_counts: {}, signatures: [], sessions: [],
+  edges: [], assignments: [], known_load_overlays: [], solar_overlays: [],
+  virtual_appliances: [], validation: {},
+};
+const refreshedWorkspace = Object.assign({}, workspace, {
+  label_intervals: [{ interval_id: "saved", label: "Dishwasher" }],
+});
+panel._nilmWorkspace = workspace;
+panel._nilmWorkspaceHistorySeries = [[{
+  entity_id: "sensor.mains_power",
+  state: "420",
+  last_changed: "2026-07-09T18:00:00Z",
+}]];
+panel._nilmGraphWindow = { start: 10, end: 20, min: 0, max: 30 };
+panel._nilmActiveLane = "assigned";
+panel._nilmSelectedReviewKey = "assignment:assignment-1";
+panel._nilmDecisionDrafts.set("unrelated", { decision: "ignore" });
+const graphSeries = panel._nilmWorkspaceHistorySeries;
+const graphWindow = panel._nilmGraphWindow;
+const decisionDrafts = panel._nilmDecisionDrafts;
+panel._nilmIntervalEditorOpen = true;
+panel._nilmLabelIntervalDraft = {
+  start: "2026-07-09T18:00",
+  end: "2026-07-09T18:30",
+  label: "Dishwasher",
+  appliance_id: "dishwasher",
+  ground_truth_entity_id: "",
+};
+let serviceCalls = 0;
+let workspaceRequests = 0;
+panel._hass = { callService: async () => { serviceCalls += 1; } };
+panel._requestJson = async () => {
+  workspaceRequests += 1;
+  if (workspaceRequests === 1) throw new Error("refresh unavailable");
+  return refreshedWorkspace;
+};
+const listeners = {};
+const refreshRetry = {
+  addEventListener(type, callback) { listeners[type] = callback; },
+};
+const feedback = { focus() {} };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll() { return []; },
+  querySelector(selector) {
+    if (selector === "[data-nilm-interval-refresh-retry]"
+        && this.innerHTML.includes("data-nilm-interval-refresh-retry")) {
+      return refreshRetry;
+    }
+    if (selector === '[data-inline-feedback="nilm-interval"]'
+        && this.innerHTML.includes('data-inline-feedback="nilm-interval"')) {
+      return feedback;
+    }
+    return null;
+  },
+};
+
+await panel._callNilmLabelIntervalAction(-1, "save");
+if (serviceCalls !== 1 || workspaceRequests !== 1
+    || panel._inlineFeedback.scope !== "nilm-interval"
+    || panel._inlineFeedback.kind !== "error"
+    || !/completed/i.test(panel._inlineFeedback.message)
+    || !/refresh/i.test(panel._inlineFeedback.message)
+    || !panel._nilmIntervalRefreshSuccessMessage
+    || typeof listeners.click !== "function"
+    || panel.shadowRoot.innerHTML.includes('data-nilm-interval-retry="save"')) {
+  throw new Error(`refresh failure state invalid: ${JSON.stringify({
+    serviceCalls,
+    workspaceRequests,
+    feedback: panel._inlineFeedback,
+    refreshMessage: panel._nilmIntervalRefreshSuccessMessage,
+    retryBound: typeof listeners.click,
+    html: panel.shadowRoot.innerHTML.includes("data-nilm-interval-refresh-retry"),
+  })}`);
+}
+if (panel._nilmIntervalEditorOpen || panel._nilmLabelIntervalDraft.label) {
+  throw new Error("successful service kept its submitted editor draft");
+}
+await listeners.click();
+if (serviceCalls !== 1 || workspaceRequests !== 2
+    || panel._nilmWorkspace !== refreshedWorkspace
+    || panel._inlineFeedback.kind !== "success"
+    || !/Saved interval label: Dishwasher/i.test(panel._inlineFeedback.message)
+    || panel._nilmIntervalRefreshSuccessMessage
+    || panel._nilmWorkspaceHistorySeries !== graphSeries
+    || panel._nilmGraphWindow !== graphWindow
+    || panel._nilmActiveLane !== "assigned"
+    || panel._nilmSelectedReviewKey !== "assignment:assignment-1"
+    || panel._nilmDecisionDrafts !== decisionDrafts) {
+  throw new Error("refresh-only retry repeated action or discarded context");
 }
 })().catch((error) => {
   console.error(error);

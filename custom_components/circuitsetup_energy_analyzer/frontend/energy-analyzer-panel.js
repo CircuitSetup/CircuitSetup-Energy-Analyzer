@@ -145,6 +145,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._nilmIntervalFailedAction = "";
     this._nilmIntervalFailedIndex = -1;
+    this._nilmIntervalRefreshSuccessMessage = "";
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -232,6 +233,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
     this._nilmIntervalFailedAction = "";
     this._nilmIntervalFailedIndex = -1;
+    this._nilmIntervalRefreshSuccessMessage = "";
     this._render();
 
     const routeUrl = new URL(routeKey, window.location.origin);
@@ -513,6 +515,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return false;
       }
       this._invalidateNilmFocusedHistoryRequests();
+      this._nilmWorkspaceHistoryLoading = false;
+      this._nilmWorkspaceHistoryError = "";
+      this._nilmWorkspaceHistoryFailedRequest = null;
       this._nilmWorkspace = workspace;
       return true;
     } catch (_error) {
@@ -734,6 +739,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _clearNilmIntervalFeedback() {
     this._nilmIntervalFailedAction = "";
     this._nilmIntervalFailedIndex = -1;
+    this._nilmIntervalRefreshSuccessMessage = "";
     if (this._inlineFeedback.scope === "nilm-interval") {
       this._inlineFeedback = { scope: "", kind: "", message: "" };
     }
@@ -743,6 +749,53 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmIntervalFailedAction = retryAction;
     this._nilmIntervalFailedIndex = retryIndex;
     this._setInlineFeedback("nilm-interval", "error", message);
+  }
+
+  _setNilmIntervalRefreshError(successMessage) {
+    this._nilmIntervalFailedAction = "";
+    this._nilmIntervalFailedIndex = -1;
+    this._nilmIntervalRefreshSuccessMessage = successMessage;
+    this._setInlineFeedback(
+      "nilm-interval",
+      "error",
+      this._panelTextFormat("messages.nilm_interval_action_refresh_failed", {
+        message: successMessage,
+      }),
+    );
+  }
+
+  _restoreNilmIntervalScroll(scrollTop) {
+    if (!Number.isFinite(scrollTop) || typeof window.scrollTo !== "function") {
+      return;
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.scrollTo({ top: scrollTop, behavior: "auto" }));
+    });
+  }
+
+  async _retryNilmIntervalWorkspaceRefresh() {
+    const successMessage = this._nilmIntervalRefreshSuccessMessage;
+    if (!successMessage) {
+      return;
+    }
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._loadedRouteKey || this._routeKey();
+    const scrollTop = Number(window.scrollY);
+    this._busyAction = "nilm_interval_refresh";
+    this._render();
+    const refreshed = await this._refreshNilmWorkspaceData(requestId, routeKey);
+    this._busyAction = "";
+    if (!this._isCurrentRequest(requestId, routeKey)) {
+      return;
+    }
+    if (!refreshed) {
+      this._setNilmIntervalRefreshError(successMessage);
+      this._restoreNilmIntervalScroll(scrollTop);
+      return;
+    }
+    this._nilmIntervalRefreshSuccessMessage = "";
+    this._setInlineFeedback("nilm-interval", "success", successMessage);
+    this._restoreNilmIntervalScroll(scrollTop);
   }
 
   async _callNilmLabelIntervalAction(index, actionKey) {
@@ -857,14 +910,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._nilmIntervalEditorOpen = false;
       }
       this._busyAction = "";
-      await this._refreshNilmWorkspaceData(requestId, routeKey);
+      const refreshed = await this._refreshNilmWorkspaceData(requestId, routeKey);
       if (this._isCurrentRequest(requestId, routeKey)) {
-        this._setInlineFeedback("nilm-interval", "success", message);
-        if (Number.isFinite(scrollTop) && typeof window.scrollTo === "function") {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => window.scrollTo({ top: scrollTop, behavior: "auto" }));
-          });
+        if (refreshed) {
+          this._nilmIntervalRefreshSuccessMessage = "";
+          this._setInlineFeedback("nilm-interval", "success", message);
+        } else {
+          this._setNilmIntervalRefreshError(message);
         }
+        this._restoreNilmIntervalScroll(scrollTop);
       }
     } catch (error) {
       this._busyAction = "";
@@ -2185,6 +2239,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._callNilmLabelIntervalAction(index, button.dataset.nilmLabelIntervalAction);
       });
     }
+    this._listen(
+      "[data-nilm-interval-refresh-retry]",
+      () => this._retryNilmIntervalWorkspaceRefresh(),
+    );
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-interval-retry]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.getAttribute("data-nilm-interval-retry-index") || "-1", 10);
@@ -2959,7 +3017,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
-    this._nilmWorkspaceHistorySeries = [];
     this._nilmWorkspaceHistoryLoading = true;
     this._render();
     try {
@@ -3734,10 +3791,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmIntervalFeedback() {
     const feedback = this._renderInlineFeedback("nilm-interval");
-    const retry = this._nilmIntervalFailedAction
+    const refreshButton = this._nilmIntervalRefreshSuccessMessage
+      ? `<div class="actions"><button type="button" class="secondary" data-nilm-interval-refresh-retry ${this._busyAction === "nilm_interval_refresh" ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.retry_refresh"))}</button></div>`
+      : "";
+    const actionButton = !refreshButton && this._nilmIntervalFailedAction
       ? `<div class="actions"><button type="button" class="secondary" data-nilm-interval-retry="${this._escape(this._nilmIntervalFailedAction)}" data-nilm-interval-retry-index="${this._nilmIntervalFailedIndex}">${this._escape(this._panelText("common.retry"))}</button></div>`
       : "";
-    return `${feedback}${retry}`;
+    return `${feedback}${refreshButton}${actionButton}`;
   }
 
   _renderNilmLabelIntervalEditor(workspace) {
