@@ -1695,6 +1695,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: grid;
           gap: 6px;
         }
+        [data-evidence-graph],
+        .nilm-graph-section,
+        .evidence-explanation section,
+        .legend {
+          background: var(--card-background-color, #fff);
+          padding: 16px;
+        }
         .comparison-scale {
           min-height: 160px;
           margin: 4px 64px 0;

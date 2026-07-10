@@ -4456,6 +4456,26 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
     global_style = asset[global_start : asset.index("}", global_start)]
     assert "border: 1px solid" in global_style
     assert "background: var(--secondary-background-color" in global_style
+
+
+def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    surface_rule = re.search(
+        r"\[data-evidence-graph\],\s*"
+        r"\.nilm-graph-section,\s*"
+        r"\.evidence-explanation section,\s*"
+        r"\.legend\s*\{(?P<body>.*?)\}",
+        asset,
+        re.DOTALL,
+    )
+
+    assert surface_rule is not None
+    assert "background: var(--card-background-color, #fff);" in surface_rule.group("body")
+    assert "padding: 16px;" in surface_rule.group("body")
+    assert "border:" not in surface_rule.group("body")
+    assert "box-shadow:" not in surface_rule.group("body")
+
+
 def test_nilm_interval_action_contracts() -> None:
     _run_panel_node_script(
         """
