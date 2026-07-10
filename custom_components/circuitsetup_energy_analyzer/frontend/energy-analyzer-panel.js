@@ -204,7 +204,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   async _loadEvidence(options = {}) {
     const routeKey = options.routeKey || this._routeKey();
-    const routeChanged = Boolean(this._loadedRouteKey && routeKey !== this._loadedRouteKey);
+    const routeChanged = options.routeChanged
+      ?? Boolean(this._loadedRouteKey && routeKey !== this._loadedRouteKey);
     const requestId = this._evidenceRequestId + 1;
     this._evidenceRequestId = requestId;
     this._invalidateNilmFocusedHistoryRequests();
@@ -464,12 +465,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const message = this._alertActionMessage(actionKey);
       this._busyAction = "";
       const routeKey = this._actionRefreshRouteKey(actionKey);
-      if (routeKey !== this._routeKey()) {
+      const routeChanged = routeKey !== this._routeKey();
+      if (routeChanged) {
         // Prevent the route dispatcher from starting a duplicate refresh.
         this._loadedRouteKey = routeKey;
         history.replaceState(history.state, "", routeKey);
       }
-      await this._loadEvidence({ routeKey });
+      await this._loadEvidence({ routeKey, routeChanged });
       if (options.feedbackScope) {
         this._alertDecision = "";
         this._setInlineFeedback(options.feedbackScope, "success", message);

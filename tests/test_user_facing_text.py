@@ -5284,6 +5284,7 @@ panel._payload = {
 };
 panel._loadedRouteKey = panel._routeKey();
 panel._loading = false;
+panel._historyLoading = true;
 panel._requestJson = async (apiPath, fetchPath) => {
   requests.push({ apiPath, fetchPath });
   return {
@@ -5315,6 +5316,9 @@ if (replacedPaths.length !== 1
 if (panel._loading || panel._payload.alert
     || panel._payload.status !== "circuit_found_no_evidence") {
   throw new Error(`fallback payload was discarded: ${panel._loading}`);
+}
+if (panel._historyLoading) {
+  throw new Error("alert-id route replacement kept stale history loading");
 }
 if (scrolls !== 0) throw new Error(`acknowledgement scrolled ${scrolls} times`);
 if (focused !== 1) throw new Error(`feedback focus count was ${focused}`);
