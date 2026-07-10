@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -8,7 +9,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.const import (
+    DATA_RELOAD_COUNT,
+    DOMAIN,
+)
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
@@ -3079,6 +3083,10 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
         http=http,
         components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
         config_entries=FakeConfigEntries(),
+        services=SimpleNamespace(
+            async_register=lambda *args, **kwargs: None,
+            async_remove=lambda *args, **kwargs: None,
+        ),
     )
     entry = SimpleNamespace(entry_id="entry-1", data={})
 
@@ -3088,13 +3096,22 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
     assert len(http.static_paths) == 1
     assert len(http.views) == 5
 
+    hass.data[DOMAIN][DATA_RELOAD_COUNT] = 1
+    assert await async_unload_entry(hass, entry) is True
+    assert frontend.removed == [PANEL_URL_PATH]
+    assert "_services_setup" in hass.data[DOMAIN]
+
+    hass.data[DOMAIN].pop(DATA_RELOAD_COUNT)
+    assert await async_setup_entry(hass, entry) is True
+    assert len(panel_custom.panels) == 1
     assert await async_unload_entry(hass, entry) is True
 
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
+    assert "_services_setup" not in hass.data[DOMAIN]
 
 
 @pytest.mark.asyncio
-async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> None:
+async def test_active_reload_preserves_surfaces_during_other_entry_unload() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         async_setup_entry,
         async_unload_entry,
@@ -3102,10 +3119,17 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     from custom_components.circuitsetup_energy_analyzer.panel import PANEL_URL_PATH
 
     class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.unload_gate: tuple[asyncio.Event, asyncio.Event] | None = None
+
         async def async_forward_entry_setups(self, entry, platforms) -> None:
             return None
 
         async def async_unload_platforms(self, entry, platforms) -> bool:
+            if self.unload_gate is not None:
+                started, release = self.unload_gate
+                started.set()
+                await release.wait()
             return True
 
     class FakeHttp:
@@ -3131,14 +3155,37 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
 
     panel_custom = FakePanelCustom()
     frontend = FakeFrontend()
+    config_entries = FakeConfigEntries()
     hass = SimpleNamespace(
         data={},
         http=FakeHttp(),
         components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
-        config_entries=FakeConfigEntries(),
+        config_entries=config_entries,
+        services=SimpleNamespace(
+            async_register=lambda *args, **kwargs: None,
+            async_remove=lambda *args, **kwargs: None,
+        ),
     )
     first = SimpleNamespace(entry_id="entry-1", data={})
     second = SimpleNamespace(entry_id="entry-2", data={})
+
+    async def _unload_after_counter_change(initial: int, current: int) -> None:
+        if initial:
+            hass.data[DOMAIN][DATA_RELOAD_COUNT] = initial
+        else:
+            hass.data[DOMAIN].pop(DATA_RELOAD_COUNT, None)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        config_entries.unload_gate = (started, release)
+        task = asyncio.create_task(async_unload_entry(hass, second))
+        await started.wait()
+        if current:
+            hass.data[DOMAIN][DATA_RELOAD_COUNT] = current
+        else:
+            hass.data[DOMAIN].pop(DATA_RELOAD_COUNT, None)
+        release.set()
+        assert await task is True
+        config_entries.unload_gate = None
 
     assert await async_setup_entry(hass, first) is True
     assert await async_setup_entry(hass, second) is True
@@ -3150,8 +3197,17 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     assert await async_unload_entry(hass, first) is True
     assert frontend.removed == [PANEL_URL_PATH]
 
-    assert await async_unload_entry(hass, second) is True
+    await _unload_after_counter_change(0, 1)
+    assert frontend.removed == [PANEL_URL_PATH]
+    assert "_services_setup" in hass.data[DOMAIN]
+
+    hass.data[DOMAIN].pop(DATA_RELOAD_COUNT)
+    assert await async_setup_entry(hass, second) is True
+    assert len(panel_custom.panels) == 1
+
+    await _unload_after_counter_change(1, 0)
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
+    assert "_services_setup" not in hass.data[DOMAIN]
 
 
 @pytest.mark.asyncio

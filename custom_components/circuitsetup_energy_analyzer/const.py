@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 
 DOMAIN = "circuitsetup_energy_analyzer"
+DATA_RELOAD_COUNT = "_reload_count"
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
