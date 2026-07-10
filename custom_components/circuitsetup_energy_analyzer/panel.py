@@ -120,7 +120,8 @@ PANEL_MODULE_VERSION = (
     "refresh-route-stop-save-nilm-reload-setup-health-checklist-actions-"
     "setup-health-translations-merge-action-feedback-tooltips-available-nilm-actions-"
     "panel-evidence-text-panel-user-text-translations-visual-hierarchy-review-"
-    "scoped-retries-focused-history-retry"
+    "scoped-retries-focused-history-retry-focused-history-ordering-"
+    "local-interval-actions-compact-nilm-summary"
 )
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"

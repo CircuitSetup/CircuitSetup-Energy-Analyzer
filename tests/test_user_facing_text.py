@@ -1563,6 +1563,9 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "visual-hierarchy-review" in PANEL_MODULE_VERSION
     assert "scoped-retries" in PANEL_MODULE_VERSION
     assert "focused-history-retry" in PANEL_MODULE_VERSION
+    assert "focused-history-ordering" in PANEL_MODULE_VERSION
+    assert "local-interval-actions" in PANEL_MODULE_VERSION
+    assert "compact-nilm-summary" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -1577,24 +1580,84 @@ def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
     assert "_renderNilmReviewQueue" not in asset
 
 
-def test_nilm_workspace_summary_shows_review_progress_before_graph() -> None:
+def test_nilm_workspace_summary_is_compact_and_lanes_have_one_inventory() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
-const html = panel._renderNilmWorkspaceSummary({
+const workspace = {
+  status: "ok",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  history: {},
+  signatures: [],
+  sessions: [],
+  edges: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  validation: {},
+  actions: {},
   lanes: {
     needs_review: {
-      label: "Needs Review", signature_ids: ["sig-1"], assignment_ids: [],
+      label: "Needs Review", signature_ids: ["sig-1", "sig-2"], assignment_ids: [],
     },
     assigned: {
       label: "Assigned", signature_ids: [], assignment_ids: ["assignment-1"],
     },
   },
-  lane_counts: { needs_review: 1, assigned: 1 },
-});
-if (!html.includes("Review lanes") || !html.includes("Needs Review")
-    || !html.includes("1 item")) {
-  throw new Error(`missing workspace review progress: ${html}`);
+  lane_counts: {
+    needs_review: 2,
+    assigned: 1,
+    needs_validation: 2,
+    ready_to_publish: 1,
+    published: 2,
+    ignored_expected: 1,
+  },
+};
+const summary = panel._renderNilmWorkspaceSummary(workspace);
+if (!summary.includes("Whole Home Main")
+    || !summary.includes('data-nilm-review-progress')
+    || !summary.includes('value="7"')
+    || !summary.includes('max="9"')
+    || (summary.match(/<progress/g) || []).length !== 1) {
+  throw new Error(`missing compact workspace progress: ${summary}`);
+}
+for (const duplicate of [
+  'class="metric"',
+  'data-nilm-lane=',
+  "Assigned",
+  "Needs Validation",
+  "Ready to Publish",
+  "Published",
+  "Ignored / Expected",
+]) {
+  if (summary.includes(duplicate)) {
+    throw new Error(`summary duplicated lane inventory ${duplicate}: ${summary}`);
+  }
+}
+const lanes = panel._renderNilmWorkspaceLanes(workspace);
+if ((lanes.match(/data-nilm-lane=/g) || []).length !== 6) {
+  throw new Error(`lane tabs are not the single six-lane inventory: ${lanes}`);
+}
+const laneRenderer = context.Panel.prototype._renderNilmWorkspaceLanes.toString();
+if (laneRenderer.includes("summaryOnly")) {
+  throw new Error("a second six-lane summary inventory is still implemented");
+}
+panel._loading = false;
+panel._nilmWorkspaceLoading = false;
+panel._nilmWorkspace = workspace;
+const body = panel._renderNilmWorkspaceContent();
+const framedWorkspace = '<section class="panel"><section class="workspace-section '
+  + 'workspace-summary"';
+if (!body.includes('class="nilm-workspace"')
+    || body.includes(framedWorkspace)) {
+  throw new Error(`workspace retained its outer frame: ${body}`);
+}
+const graph = body.indexOf('class="workspace-section nilm-graph-section"');
+const tablist = body.indexOf('class="nilm-lanes"');
+if (!(graph >= 0 && graph < tablist)) {
+  throw new Error(`graph no longer leads the review inventory: ${body}`);
 }
 """
     )
@@ -2707,10 +2770,10 @@ if (panel._inlineFeedback.scope !== "nilm-interval"
   });
   throw new Error(`failed interval save was not locally retryable: ${state}`);
 }
-const html = panel._renderNilmLabelIntervalEditor(panel._nilmWorkspace);
+const html = panel._renderNilmIntervalFeedback();
 if (!html.includes('data-nilm-interval-retry="save"')
     || !html.includes("save failed")) {
-  throw new Error(`interval editor hid retry feedback: ${html}`);
+  throw new Error(`interval workflow hid retry feedback: ${html}`);
 }
 })().catch((error) => {
   console.error(error);
@@ -2760,6 +2823,178 @@ if (panel._inlineFeedback.scope !== "nilm-interval"
     || panel._inlineFeedback.kind !== "error") {
   const feedback = JSON.stringify(panel._inlineFeedback);
   throw new Error(`interval validation was not local: ${feedback}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_interval_success_refreshes_workspace_and_keeps_local_context() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const cases = [
+  { actionKey: "save", clearsEditor: true },
+  { actionKey: "generate_sensor", clearsEditor: true },
+  { actionKey: "assign", clearsEditor: false },
+  { actionKey: "delete", clearsEditor: false },
+];
+for (const testCase of cases) {
+  const panel = new context.Panel();
+  let scrolls = 0;
+  let evidenceLoads = 0;
+  let workspaceLoads = 0;
+  let focuses = 0;
+  let focusOptions = null;
+  context.window.scrollY = 640;
+  context.window.scrollTo = (options) => {
+    context.window.scrollY = typeof options === "number" ? options : options.top;
+  };
+  panel._render = () => {
+    if (panel._inlineFeedback.kind === "success") {
+      context.window.scrollY = 502;
+    }
+  };
+  panel._scrollToTop = () => { scrolls += 1; };
+  panel._renderAndScrollToTop = () => { scrolls += 1; };
+  panel._loadEvidence = async () => { evidenceLoads += 1; };
+  panel.shadowRoot = {
+    querySelector(selector) {
+      if (selector === '[data-inline-feedback="nilm-interval"]') {
+        return { focus(options) { focuses += 1; focusOptions = options; } };
+      }
+      return null;
+    },
+    querySelectorAll() { return []; },
+  };
+  panel._loadedRouteKey = panel._routeKey();
+  panel._evidenceRequestId = 7;
+  panel._payload = {
+    circuit: { circuit_id: "mains", name: "Whole Home Main" },
+    nilm: {
+      workspace_call_api_path:
+        "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+      workspace_api_path:
+        "/api/circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+    },
+  };
+  const action = (service) => ({
+    domain: "circuitsetup_energy_analyzer", service, data: {},
+  });
+  const interval = {
+    interval_id: "interval-1",
+    start: "2026-06-24T18:12:00Z",
+    end: "2026-06-24T19:03:00Z",
+    label: "Dishwasher",
+    appliance_id: "dishwasher",
+    actions: {
+      assign: action("assign_interval_to_appliance"),
+      delete: action("delete_nilm_label_interval"),
+    },
+  };
+  const workspace = {
+    status: "ok",
+    circuit: panel._payload.circuit,
+    history: {},
+    actions: {
+      label_interval: action("label_nilm_interval"),
+      sensor_label_interval: action("generate_nilm_sensor_label_intervals"),
+    },
+    label_intervals: [interval],
+    lanes: { needs_review: { signature_ids: [], assignment_ids: [] } },
+    lane_counts: { needs_review: 0 },
+    signatures: [], sessions: [], edges: [], assignments: [],
+    known_load_overlays: [], solar_overlays: [], virtual_appliances: [],
+    validation: {},
+  };
+  const refreshedWorkspace = Object.assign({}, workspace, {
+    label_intervals: testCase.actionKey === "delete" ? [] : [interval],
+  });
+  panel._nilmWorkspace = workspace;
+  const graphSeries = [[{
+    entity_id: "sensor.mains_power",
+    state: "700",
+    last_changed: "2026-06-24T18:30:00Z",
+  }]];
+  const graphWindow = { start: 10, end: 20, min: 0, max: 30 };
+  panel._nilmWorkspaceHistorySeries = graphSeries;
+  panel._nilmGraphWindow = graphWindow;
+  panel._nilmFocusedSignature = "signature-2";
+  panel._nilmActiveLane = "assigned";
+  panel._nilmSelectedReviewKey = "assignment:assignment-2";
+  panel._nilmDecisionDrafts.set("unrelated-decision", { decision: "ignore" });
+  panel._nilmAssignmentDrafts.set("unrelated-assignment", "Heat pump");
+  const decisionDrafts = panel._nilmDecisionDrafts;
+  const assignmentDrafts = panel._nilmAssignmentDrafts;
+  panel._nilmIntervalEditorOpen = true;
+  panel._nilmLabelIntervalDraft = {
+    start: "2026-06-24T18:12",
+    end: "2026-06-24T19:03",
+    label: "Dishwasher",
+    appliance_id: "dishwasher",
+    ground_truth_entity_id: testCase.actionKey === "generate_sensor"
+      ? "binary_sensor.dishwasher_running"
+      : "",
+  };
+  const intervalDraft = panel._nilmLabelIntervalDraft;
+  panel._hass = { callService: async () => {} };
+  panel._requestJson = async (apiPath) => {
+    workspaceLoads += 1;
+    if (!apiPath.includes("nilm_workspace")) {
+      throw new Error(`unexpected refresh path ${apiPath}`);
+    }
+    return refreshedWorkspace;
+  };
+
+  await panel._callNilmLabelIntervalAction(
+    testCase.actionKey === "save" || testCase.actionKey === "generate_sensor" ? -1 : 0,
+    testCase.actionKey,
+  );
+
+  if (evidenceLoads !== 0 || scrolls !== 0 || workspaceLoads !== 1
+      || context.window.scrollY !== 640) {
+    throw new Error(`${testCase.actionKey} reloaded or scrolled: ${JSON.stringify({
+      evidenceLoads, scrolls, workspaceLoads, scrollY: context.window.scrollY,
+    })}`);
+  }
+  if (panel._nilmWorkspace !== refreshedWorkspace
+      || panel._nilmWorkspaceHistorySeries !== graphSeries
+      || panel._nilmGraphWindow !== graphWindow
+      || panel._nilmFocusedSignature !== "signature-2"
+      || panel._nilmActiveLane !== "assigned"
+      || panel._nilmSelectedReviewKey !== "assignment:assignment-2"
+      || panel._nilmDecisionDrafts !== decisionDrafts
+      || panel._nilmAssignmentDrafts !== assignmentDrafts) {
+    throw new Error(`${testCase.actionKey} discarded NILM review context`);
+  }
+  if (panel._inlineFeedback.scope !== "nilm-interval"
+      || panel._inlineFeedback.kind !== "success"
+      || !panel._inlineFeedback.message
+      || focuses !== 1
+      || !focusOptions
+      || focusOptions.preventScroll !== true) {
+    const state = JSON.stringify({
+      feedback: panel._inlineFeedback, focuses, focusOptions,
+    });
+    throw new Error(`${testCase.actionKey} did not focus local feedback: ${state}`);
+  }
+  if (testCase.clearsEditor) {
+    if (panel._nilmIntervalEditorOpen
+        || panel._nilmLabelIntervalDraft === intervalDraft
+        || panel._nilmLabelIntervalDraft.label) {
+      throw new Error(
+        `${testCase.actionKey} kept its successfully submitted editor draft`,
+      );
+    }
+  } else if (!panel._nilmIntervalEditorOpen
+      || panel._nilmLabelIntervalDraft !== intervalDraft) {
+    throw new Error(`${testCase.actionKey} discarded an unrelated editor draft`);
+  }
 }
 })().catch((error) => {
   console.error(error);
@@ -3457,6 +3692,7 @@ reviewOnly._loading = false;
 reviewOnly._nilmWorkspaceLoading = false;
 reviewOnly._nilmWorkspace = {
   status: "ok",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
   assignment_count: 0,
   virtual_appliance_count: 0,
   assignments: [],
@@ -3475,8 +3711,10 @@ reviewOnly._nilmWorkspace = {
   lane_counts: { needs_review: 1 }
 };
 reviewOnly._render();
-if (!reviewOnly.shadowRoot.innerHTML.includes("Review lanes")) {
-  throw new Error("dashboard graph card should show live NILM review lanes");
+if (!reviewOnly.shadowRoot.innerHTML.includes("Whole Home Main")
+    || !reviewOnly.shadowRoot.innerHTML.includes("data-nilm-review-progress")
+    || reviewOnly.shadowRoot.innerHTML.includes("Review lanes")) {
+  throw new Error("dashboard graph card should show compact live NILM review progress");
 }
 
 const card = new context.DashboardGraphs();
@@ -3523,6 +3761,7 @@ card._historySeries = [[
 ]];
 card._nilmWorkspace = {
   status: "ok",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
   assignment_count: 1,
   virtual_appliance_count: 1,
   assignments: [{ assignment_id: "pool_pump" }],
@@ -3597,9 +3836,9 @@ for (const expected of [
   "data-dashboard-alert-detail",
   "View notification detail",
   "NILM mains power",
-  "Review lanes",
-  "Ready to Publish",
-  "2 items",
+  "Whole Home Main",
+  "Review progress",
+  "6 of 7 reviewed",
   "Pool Pump",
   "axis-label",
   ">W<",
@@ -5240,6 +5479,164 @@ if (
   || !panel._nilmIntervalEditorOpen
 ) {
   throw new Error("focused history retry discarded review context");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_focused_nilm_history_keeps_latest_signature_when_requests_finish_out_of_order(
+) -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 4;
+let renderCount = 0;
+panel._render = () => { renderCount += 1; };
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-06T00:00:00Z",
+    end: "2026-06-06T08:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=8",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=8",
+  },
+  sessions: [
+    {
+      signature_fingerprint: "signature-a",
+      start: "2026-06-06T01:00:00Z",
+      end: "2026-06-06T01:30:00Z",
+    },
+    {
+      signature_fingerprint: "signature-b",
+      start: "2026-06-06T06:00:00Z",
+      end: "2026-06-06T06:30:00Z",
+    },
+  ],
+};
+const pending = [];
+panel._requestJson = () => new Promise((resolve, reject) => {
+  pending.push({ resolve, reject });
+});
+const seriesA = [[{
+  entity_id: "sensor.mains_power", state: "100",
+  last_changed: "2026-06-06T01:15:00Z",
+}]];
+const seriesB = [[{
+  entity_id: "sensor.mains_power", state: "600",
+  last_changed: "2026-06-06T06:15:00Z",
+}]];
+
+const focusA = panel._focusNilmSignatureOnGraph(
+  "signature-a", { scroll: false, toggle: false },
+);
+const focusB = panel._focusNilmSignatureOnGraph(
+  "signature-b", { scroll: false, toggle: false },
+);
+if (pending.length !== 2 || !panel._nilmWorkspaceHistoryLoading) {
+  throw new Error("focused requests were not started independently");
+}
+pending[1].resolve(seriesB);
+await focusB;
+const graphWindowB = panel._nilmGraphWindow;
+const historyStartB = panel._nilmWorkspace.history.start;
+const rendersAfterB = renderCount;
+if (panel._nilmWorkspaceHistorySeries !== seriesB
+    || panel._nilmFocusedSignature !== "signature-b"
+    || panel._nilmWorkspaceHistoryLoading
+    || !graphWindowB) {
+  throw new Error("newest focused history did not establish signature B state");
+}
+
+pending[0].resolve(seriesA);
+await focusA;
+if (panel._nilmWorkspaceHistorySeries !== seriesB
+    || panel._nilmFocusedSignature !== "signature-b"
+    || panel._nilmGraphWindow !== graphWindowB
+    || panel._nilmWorkspace.history.start !== historyStartB
+    || panel._nilmWorkspaceHistoryLoading
+    || renderCount !== rendersAfterB) {
+  throw new Error("late signature A request overwrote signature B state");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_focused_nilm_history_cannot_mutate_after_navigation() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 2;
+let renderCount = 0;
+panel._render = () => { renderCount += 1; };
+panel._payload = { circuit: { circuit_id: "mains" }, actions: {} };
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-06T00:00:00Z",
+    end: "2026-06-06T08:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=8",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=8",
+  },
+  sessions: [{
+    signature_fingerprint: "signature-a",
+    start: "2026-06-06T01:00:00Z",
+    end: "2026-06-06T01:30:00Z",
+  }],
+};
+let resolveFocused;
+panel._requestJson = (apiPath) => {
+  if (apiPath.includes("nilm_workspace_history")) {
+    return new Promise((resolve) => { resolveFocused = resolve; });
+  }
+  return Promise.resolve({ status: "no_evidence", actions: {} });
+};
+
+const focus = panel._focusNilmSignatureOnGraph(
+  "signature-a", { scroll: false, toggle: false },
+);
+context.window.location.search = "?circuit_id=kitchen";
+const nextRoute = panel._routeKey();
+await panel._loadEvidence({ routeKey: nextRoute });
+const rendersAfterNavigation = renderCount;
+resolveFocused([[{
+  entity_id: "sensor.mains_power", state: "100",
+  last_changed: "2026-06-06T01:15:00Z",
+}]]);
+await focus;
+
+if (panel._loadedRouteKey !== nextRoute
+    || panel._nilmWorkspace !== null
+    || panel._nilmWorkspaceHistorySeries.length
+    || panel._nilmWorkspaceHistoryError
+    || panel._nilmWorkspaceHistoryFailedRequest !== null
+    || panel._nilmWorkspaceHistoryLoading
+    || panel._nilmFocusedSignature
+    || panel._nilmGraphWindow
+    || panel._lastActionMessage
+    || renderCount !== rendersAfterNavigation) {
+  throw new Error("focused history mutated the route loaded after navigation");
 }
 })().catch((error) => {
   console.error(error);

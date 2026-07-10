@@ -662,7 +662,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges into likely sessions, show known-load overlays, and keep manual interval labels for review.
 
-On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector with one **Apply** action.
+On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace. The compact summary shows the circuit, needs-review count, and review progress without repeating the lane inventory. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector with one **Apply** action. Successful interval actions refresh beside the graph without moving you away from the current graph window or review lane.
 
 ![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
 
