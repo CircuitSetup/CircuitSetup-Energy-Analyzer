@@ -4764,6 +4764,124 @@ def test_nilm_decision_action_contracts() -> None:
       assert.match(inspector, /data-nilm-review-inspector/);
       assert.match(inspector, /data-nilm-assignment-index="0"/);
     }
+
+    const sessionAssign = makeAction("assign_session", { session_id: "session-new" });
+    sessionAssign.requires = ["label"];
+    const newSession = { session_id: "session-new", display_name: "Dryer",
+      actions: { assign: sessionAssign } };
+    const source = { assignment_id: "assignment-source", display_name: "Dryer",
+      actions: { merge: makeAction("merge_assignments") } };
+    const mergeTarget = { assignment_id: "assignment-target", display_name: "Laundry",
+      actions: { publish: {} } };
+    for (const row of [
+      {
+        name: "test_new_session_assignment_selects_refreshed_assignment_inspector",
+        kind: "session", lane: "assigned", id: "assignment-new",
+        sessions: [newSession], assignments: [],
+        result: { assignment_id: "assignment-new", display_name: "Dryer",
+          session_ids: ["session-new"], actions: { publish: {} } },
+      },
+      {
+        name: "test_save_with_merge_selects_surviving_target_inspector",
+        kind: "merge", lane: "published", id: "assignment-target",
+        sessions: [], assignments: [source, mergeTarget], result: mergeTarget,
+      },
+    ]) {
+      name = row.name;
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      const calls = [];
+      let focused = 0;
+      const refreshed = makeWorkspace({ assignments: [row.result], sessions: row.sessions });
+      refreshed.lanes[row.lane].assignment_ids = [row.id];
+      const panel = makePanel({
+        _evidenceRequestId: 9,
+        _payload: { circuit: { circuit_id: "mains" }, actions: {} },
+        _nilmWorkspace: makeWorkspace({
+          assignments: row.assignments,
+          sessions: row.sessions,
+        }),
+      });
+      panel._loadedRouteKey = panel._routeKey();
+      panel._render = () => {};
+      panel._hass = { callService: async (_domain, _service, data) => calls.push(data) };
+      panel.shadowRoot.querySelector = (selector) => {
+        if (selector === "#nilm_session_label_0") return { value: "Dryer" };
+        if (selector === "#nilm_assignment_merge_target_0") {
+          return { value: "assignment-target" };
+        }
+        if (selector === `[data-inline-feedback="assignment:${row.id}"]`) {
+          return { focus() { focused += 1; } };
+        }
+        return null;
+      };
+      panel._refreshNilmWorkspaceData = async () => {
+        panel._nilmWorkspace = refreshed;
+        return true;
+      };
+      if (row.kind === "session") {
+        await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");
+      } else {
+        await panel._saveNilmAssignmentChanges(0);
+      }
+      assert.equal(
+        calls[0][row.kind === "merge" ? "target_assignment_id" : "assignment_id"],
+        row.kind === "merge" ? row.id : undefined,
+      );
+      assert.deepEqual(
+        [panel._nilmActiveLane, panel._nilmSelectedReviewKey,
+          panel._inlineFeedback.scope, panel._inlineFeedback.kind, focused],
+        [row.lane, `assignment:${row.id}`, `assignment:${row.id}`, "success", 1],
+      );
+      const inspector = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+      assert.equal((inspector.match(/data-nilm-review-inspector/g) || []).length, 1);
+      assert.match(inspector, /data-nilm-assignment-index="0"/);
+    }
+
+    name = "test_overlapping_workspace_refreshes_keep_newest_assignment_state";
+    {
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      const pending = [];
+      let focused = 0;
+      const assignments = ["older", "newer"].map((suffix) => ({
+        assignment_id: `assignment-${suffix}`,
+        display_name: suffix,
+        actions: { publish: makeAction(`publish_${suffix}`) },
+      }));
+      const panel = makePanel({
+        _evidenceRequestId: 11,
+        _payload: { circuit: { circuit_id: "mains" }, actions: {} },
+        _nilmWorkspace: makeWorkspace({ assignments }),
+      });
+      panel._nilmWorkspace.lanes.assigned.assignment_ids = assignments.map(
+        (assignment) => assignment.assignment_id,
+      );
+      panel._loadedRouteKey = panel._routeKey();
+      panel._render = () => {};
+      panel._hass = { callService: async () => {} };
+      panel._requestJson = () => new Promise((resolve) => pending.push(resolve));
+      panel.shadowRoot.querySelector = (selector) =>
+        selector === '[data-inline-feedback="assignment:assignment-newer"]' ?
+          { focus() { focused += 1; } } : null;
+      const older = panel._callNilmWorkspaceItemAction("assignments", 0, "publish");
+      await new Promise((resolve) => setImmediate(resolve));
+      const newer = panel._callNilmWorkspaceItemAction("assignments", 1, "publish");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(pending.length, 2);
+      const newerWorkspace = makeWorkspace({ assignments: [assignments[1]] });
+      newerWorkspace.lanes.published.assignment_ids = ["assignment-newer"];
+      pending[1](newerWorkspace);
+      await newer;
+      const newestFeedback = panel._inlineFeedback;
+      const olderWorkspace = makeWorkspace({ assignments: [assignments[0]] });
+      olderWorkspace.lanes.published.assignment_ids = ["assignment-older"];
+      pending[0](olderWorkspace);
+      await older;
+      assert.deepEqual(
+        [panel._nilmWorkspace, panel._nilmActiveLane, panel._nilmSelectedReviewKey,
+          panel._inlineFeedback, focused],
+        [newerWorkspace, "published", "assignment:assignment-newer", newestFeedback, 1],
+      );
+    }
   } catch (error) {
     console.error(name, error);
     throw error;

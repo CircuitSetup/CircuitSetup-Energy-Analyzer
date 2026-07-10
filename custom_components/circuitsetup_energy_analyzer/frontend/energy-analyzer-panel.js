@@ -130,6 +130,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._inlineFeedback = { scope: "", kind: "", message: "" };
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
+    this._nilmWorkspaceMutationId = 0;
     this._nilmFocusedHistoryToken = 0;
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
@@ -522,6 +523,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   async _refreshNilmWorkspaceData(
     requestId = this._evidenceRequestId,
     routeKey = this._loadedRouteKey || this._routeKey(),
+    mutationId = null,
   ) {
     if (!this._routeRequestsNilmWorkspace(routeKey)) {
       return false;
@@ -532,7 +534,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     try {
       const workspace = await this._requestJson(apiPath, fetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!this._isCurrentRequest(requestId, routeKey)
+          || (mutationId !== null && mutationId !== this._nilmWorkspaceMutationId)) {
         return false;
       }
       this._invalidateNilmFocusedHistoryRequests();
@@ -1034,7 +1037,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.target_assignment_id = target;
     }
-    const actionContext = this._actionContext();
+    const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
     const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
     this._busyAction = busyKey;
@@ -1053,23 +1056,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const refreshed = await this._refreshNilmWorkspaceData(
         actionContext.requestId,
         actionContext.routeKey,
+        actionContext.mutationId,
       );
       if (!actionContext.isCurrent()) {
         return;
       }
-      const assignmentId = item.assignment_id || data.assignment_id || "";
-      let feedbackScope = "nilm-review";
-      if (refreshed && assignmentId) {
-        const lane = Object.entries(this._nilmWorkspace.lanes).find(([, value]) => (
-          Array.isArray(value.assignment_ids) && value.assignment_ids.includes(assignmentId)
-        ));
-        if (lane) {
-          this._nilmActiveLane = lane[0];
-          this._nilmSelectedReviewKey = `assignment:${assignmentId}`;
-          this._nilmFocusedSignature = "";
-          feedbackScope = this._nilmSelectedReviewKey;
-        }
-      }
+      const feedbackScope = refreshed
+        ? this._selectRefreshedNilmAssignment(item, data)
+        : "nilm-review";
       this._setInlineFeedback(
         feedbackScope,
         refreshed ? "success" : "error",
@@ -1125,7 +1119,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._renderAndScrollToTop();
       return;
     }
-    const actionContext = this._actionContext();
+    const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
     this._busyAction = `nilm_assignments_${index}_save`;
     this._render();
@@ -1148,23 +1142,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const refreshed = await this._refreshNilmWorkspaceData(
         actionContext.requestId,
         actionContext.routeKey,
+        actionContext.mutationId,
       );
       if (!actionContext.isCurrent()) {
         return;
       }
-      let feedbackScope = "nilm-review";
-      if (refreshed && item.assignment_id) {
-        const lane = Object.entries(this._nilmWorkspace.lanes).find(([, value]) => (
-          Array.isArray(value.assignment_ids)
-            && value.assignment_ids.includes(item.assignment_id)
-        ));
-        if (lane) {
-          this._nilmActiveLane = lane[0];
-          this._nilmSelectedReviewKey = `assignment:${item.assignment_id}`;
-          this._nilmFocusedSignature = "";
-          feedbackScope = this._nilmSelectedReviewKey;
-        }
-      }
+      const merge = calls.find((call) => call.actionKey === "merge");
+      const feedbackScope = refreshed
+        ? this._selectRefreshedNilmAssignment(
+          item,
+          {},
+          merge && merge.data.target_assignment_id,
+        )
+        : "nilm-review";
       this._setInlineFeedback(
         feedbackScope,
         refreshed ? "success" : "error",
@@ -1454,6 +1444,50 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       routeKey,
       isCurrent: () => this._isCurrentRequest(requestId, routeKey),
     };
+  }
+
+  _nilmWorkspaceActionContext() {
+    const actionContext = this._actionContext();
+    const mutationId = this._nilmWorkspaceMutationId + 1;
+    this._nilmWorkspaceMutationId = mutationId;
+    return {
+      requestId: actionContext.requestId,
+      routeKey: actionContext.routeKey,
+      mutationId,
+      isCurrent: () => actionContext.isCurrent()
+        && mutationId === this._nilmWorkspaceMutationId,
+    };
+  }
+
+  _selectRefreshedNilmAssignment(item, data = {}, preferredAssignmentId = "") {
+    const workspace = this._nilmWorkspace || {};
+    const assignments = Array.isArray(workspace.assignments) ? workspace.assignments : [];
+    const candidateIds = [
+      preferredAssignmentId,
+      data.target_assignment_id,
+      item && item.assignment_id,
+      data.assignment_id,
+    ].filter(Boolean);
+    const sessionId = (item && item.session_id) || data.session_id || "";
+    const assignment = candidateIds
+      .map((assignmentId) => assignments.find((entry) => (
+        entry.assignment_id === assignmentId
+      )))
+      .find(Boolean)
+      || assignments.find((entry) => (
+        sessionId && Array.isArray(entry.session_ids) && entry.session_ids.includes(sessionId)
+      ));
+    const assignmentId = assignment && assignment.assignment_id;
+    const lane = assignmentId && Object.entries(workspace.lanes || {}).find(([, value]) => (
+      Array.isArray(value.assignment_ids) && value.assignment_ids.includes(assignmentId)
+    ));
+    if (!lane) {
+      return "nilm-review";
+    }
+    this._nilmActiveLane = lane[0];
+    this._nilmSelectedReviewKey = `assignment:${assignmentId}`;
+    this._nilmFocusedSignature = "";
+    return this._nilmSelectedReviewKey;
   }
 
   _invalidateNilmFocusedHistoryRequests() {
