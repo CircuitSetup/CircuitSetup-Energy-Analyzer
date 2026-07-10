@@ -2653,7 +2653,7 @@ if (
   throw new Error(`decision cleared unrelated drafts: ${keys}`);
 }
 if (
-  panel._inlineFeedback.scope !== secondKey
+  panel._inlineFeedback.scope !== "nilm-review"
   || panel._inlineFeedback.kind !== "success"
 ) {
   throw new Error(
@@ -5039,7 +5039,7 @@ const withThreshold = panel._renderAlertComparison({
   threshold: 5,
 });
 if (!withThreshold.includes(
-  'aria-label="Observed 6.2; expected 3.8; threshold 5."'
+  'aria-label="Observed 6.2; expected 3.8; threshold 5; change +63.16%."'
 )) {
   throw new Error(`threshold missing from accessible name: ${withThreshold}`);
 }
@@ -5049,7 +5049,7 @@ const withoutThreshold = panel._renderAlertComparison({
   expected_value: 3.8,
 });
 if (!withoutThreshold.includes(
-  'aria-label="Observed 6.2; expected 3.8."'
+  'aria-label="Observed 6.2; expected 3.8; change +63.16%."'
 )) {
   throw new Error(`two-value accessible name changed: ${withoutThreshold}`);
 }
@@ -6642,3 +6642,375 @@ def _png_dimensions(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{path} is not a PNG"
     return struct.unpack(">II", data[16:24])
+
+
+def test_nilm_action_completion_cannot_mutate_a_replacement_route() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let finishService;
+let workspaceLoads = 0;
+let graphFocus = 0;
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains-a";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 4;
+panel._render = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._hass = {
+  callService: () => new Promise((resolve) => { finishService = resolve; }),
+};
+const signature = {
+  signature_id: "sig-a",
+  feedback_fingerprint: "fingerprint-a",
+  actions: {
+    ignore: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "ignore_nilm_signature",
+      data: { circuit_id: "mains-a", signature_id: "sig-a" },
+    },
+  },
+};
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [signature],
+  assignments: [],
+  lanes: { needs_review: { signature_ids: ["sig-a"], assignment_ids: [] } },
+};
+panel._nilmSelectedReviewKey = "signature:sig-a";
+panel._loadNilmWorkspace = async () => { workspaceLoads += 1; };
+panel._focusNilmSignatureOnGraph = async () => { graphFocus += 1; };
+
+const action = panel._callNilmAction(0, "ignore", {
+  feedbackScope: panel._nilmDecisionDraftKey(signature),
+});
+await Promise.resolve();
+if (!panel._busyAction) throw new Error("NILM action never entered its busy state");
+
+context.window.location.search = "?circuit_id=mains-b";
+panel._requestJson = async () => ({
+  status: "circuit_found_no_evidence",
+  circuit: { circuit_id: "mains-b", name: "Mains B" },
+  actions: {},
+});
+await panel._loadEvidence({ routeKey: panel._routeKey() });
+finishService();
+await action;
+
+if (workspaceLoads || graphFocus) {
+  throw new Error(
+    `stale action touched the replacement route: ${workspaceLoads}/${graphFocus}`
+  );
+}
+if (panel._busyAction || panel._lastActionMessage || panel._inlineFeedback.message) {
+  throw new Error(`stale action left UI state: ${JSON.stringify({
+    busy: panel._busyAction,
+    message: panel._lastActionMessage,
+    feedback: panel._inlineFeedback,
+  })}`);
+}
+if (panel._payload.circuit.circuit_id !== "mains-b") {
+  throw new Error("stale action replaced the new circuit payload");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_label_success_is_announced_when_signature_remains_in_lane() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 2;
+panel._render = () => {};
+panel._hass = { callService: async () => {} };
+panel.shadowRoot.querySelector = (selector) => (
+  selector === "#nilm_label_0" ? { value: "Dishwasher" } : null
+);
+const signature = {
+  signature_id: "sig-1",
+  feedback_fingerprint: "fingerprint-1",
+  actions: {
+    label: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_signature",
+      data: { circuit_id: "mains", signature_id: "sig-1" },
+    },
+  },
+};
+panel._nilmWorkspace = {
+  status: "ok",
+  signatures: [signature],
+  assignments: [],
+  lanes: {
+    needs_review: {
+      label: "Needs Review", signature_ids: ["sig-1"], assignment_ids: [],
+    },
+  },
+};
+panel._loadNilmWorkspace = async () => {
+  signature.user_label = "Dishwasher";
+  panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-1"];
+};
+
+await panel._callNilmAction(0, "label", {
+  feedbackScope: panel._nilmDecisionDraftKey(signature),
+});
+
+const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
+for (const expected of [
+  'data-inline-feedback="nilm-review"',
+  'tabindex="-1"',
+  'role="status"',
+  "Saved label: Dishwasher.",
+  'data-nilm-review-item="signature:sig-1"',
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`refreshed lane hid label success ${expected}: ${html}`);
+  }
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_route_replacement_settles_transient_panel_state() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains-a";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 7;
+panel._busyAction = "nilm_label_interval_save";
+panel._historyLoading = true;
+panel._nilmActiveLane = "published";
+panel._nilmSelectedReviewKey = "assignment:a";
+panel._render = () => {};
+context.window.location.search = "?circuit_id=mains-b";
+panel._requestJson = async () => ({
+  status: "circuit_found_no_evidence",
+  circuit: { circuit_id: "mains-b" },
+  actions: {},
+});
+
+await panel._loadEvidence({ routeKey: panel._routeKey() });
+
+if (panel._busyAction || panel._historyLoading) {
+  throw new Error(
+    `route left stale loading state: ${panel._busyAction}/${panel._historyLoading}`
+  );
+}
+if (panel._nilmActiveLane !== "needs_review" || panel._nilmSelectedReviewKey) {
+  throw new Error(
+    "route leaked NILM selection: "
+      + `${panel._nilmActiveLane}/${panel._nilmSelectedReviewKey}`
+  );
+}
+if (panel._renderChart({}).includes("data-loading-skeleton")) {
+  throw new Error("new no-history alert inherited the old history skeleton");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_same_route_workspace_refresh_preserves_nilm_lane_selection() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._loadedRouteKey = panel._routeKey();
+panel._nilmActiveLane = "assigned";
+panel._nilmSelectedReviewKey = "assignment:one";
+panel._render = () => {};
+panel._requestJson = async (apiPath) => (
+  apiPath.includes("nilm_workspace")
+    ? { status: "ok", signatures: [], assignments: [], lanes: {} }
+    : {
+      status: "circuit_found_no_evidence",
+      circuit: { circuit_id: "mains" },
+      nilm: {
+        workspace_call_api_path:
+          "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+      },
+      actions: {},
+    }
+);
+
+await panel._loadEvidence({ routeKey: panel._routeKey() });
+
+if (panel._nilmActiveLane !== "assigned"
+    || panel._nilmSelectedReviewKey !== "assignment:one") {
+  throw new Error(
+    "same-route refresh lost selection: "
+      + `${panel._nilmActiveLane}/${panel._nilmSelectedReviewKey}`
+  );
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_comparison_shows_and_announces_percent_change() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const increased = panel._renderAlertComparison({
+  observed_value: 150,
+  expected_value: 100,
+  threshold: 125,
+});
+for (const expected of [
+  'data-comparison-change="50"',
+  "Change",
+  "+50%",
+  "change +50%",
+]) {
+  if (!increased.includes(expected)) {
+    throw new Error(`percent change missing ${expected}: ${increased}`);
+  }
+}
+
+for (const alert of [
+  { observed_value: 10, expected_value: 0 },
+  { observed_value: "not-a-number", expected_value: 5 },
+]) {
+  const fallback = panel._renderAlertComparison(alert);
+  if (!fallback.includes('data-comparison-change="unavailable"')
+      || !fallback.includes("Change")
+      || !fallback.includes("Unavailable")) {
+    throw new Error(`non-finite change had no fallback: ${fallback}`);
+  }
+  if (/NaN%|Infinity%/.test(fallback)) {
+    throw new Error(`non-finite change leaked into UI: ${fallback}`);
+  }
+}
+"""
+    )
+
+
+def test_nilm_state_rerenders_restore_deep_keyboard_focus() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const cases = [
+  {
+    name: "decision radio",
+    selector: "[data-nilm-decision]",
+    event: "change",
+    dataset: { nilmDecision: "", nilmDecisionKey: "fingerprint-1" },
+    value: "identify",
+  },
+  {
+    name: "identify mode",
+    selector: "[data-nilm-identify-mode]",
+    event: "change",
+    dataset: { nilmIdentifyMode: "", nilmDecisionKey: "fingerprint-1" },
+    value: "label",
+  },
+  {
+    name: "lane tab",
+    selector: "[data-nilm-lane]",
+    event: "click",
+    dataset: { nilmLane: "assigned" },
+    value: "",
+  },
+  {
+    name: "review card through graph loading",
+    selector: "[data-nilm-review-item]",
+    event: "click",
+    dataset: {
+      nilmReviewItem: "signature:sig-1",
+      nilmSignatureFingerprint: "fingerprint-1",
+    },
+    value: "",
+  },
+];
+
+for (const item of cases) {
+  const panel = new context.Panel();
+  panel._payload = {
+    status: "circuit_found_no_evidence",
+    circuit: { circuit_id: "mains", name: "Mains" },
+    actions: {},
+  };
+  panel._nilmWorkspace = null;
+  let current = null;
+  const shadow = {
+    activeElement: null,
+    _html: "",
+    set innerHTML(value) {
+      this._html = value;
+      this.activeElement = null;
+      current = {
+        dataset: Object.assign({}, item.dataset),
+        value: item.value,
+        listeners: {},
+        addEventListener(type, callback) { this.listeners[type] = callback; },
+        focus() { shadow.activeElement = this; },
+      };
+    },
+    get innerHTML() { return this._html; },
+    querySelector() { return null; },
+    querySelectorAll(selector) { return selector === item.selector ? [current] : []; },
+  };
+  panel.shadowRoot = shadow;
+  if (item.name.includes("graph loading")) {
+    panel._focusNilmSignatureOnGraph = async () => {
+      panel._render();
+      await Promise.resolve();
+      panel._render();
+    };
+  }
+
+  panel._render();
+  const before = current;
+  shadow.activeElement = before;
+  const listener = before.listeners[item.event];
+  if (typeof listener !== "function") {
+    throw new Error(`${item.name} listener was not registered`);
+  }
+  listener({ preventDefault() {}, stopPropagation() {} });
+  await Promise.resolve();
+  await Promise.resolve();
+  if (!shadow.activeElement || shadow.activeElement === before) {
+    throw new Error(`${item.name} lost deep shadow-root focus after rerender`);
+  }
+  for (const [key, value] of Object.entries(item.dataset)) {
+    if (shadow.activeElement.dataset[key] !== value) {
+      throw new Error(`${item.name} restored focus to the wrong control`);
+    }
+  }
+  if (item.value && shadow.activeElement.value !== item.value) {
+    throw new Error(`${item.name} restored focus to the wrong value`);
+  }
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )

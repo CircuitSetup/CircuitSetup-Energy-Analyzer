@@ -204,9 +204,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   async _loadEvidence(options = {}) {
     const routeKey = options.routeKey || this._routeKey();
+    const routeChanged = Boolean(this._loadedRouteKey && routeKey !== this._loadedRouteKey);
     const requestId = this._evidenceRequestId + 1;
     this._evidenceRequestId = requestId;
     this._invalidateNilmFocusedHistoryRequests();
+    if (routeChanged) {
+      this._busyAction = "";
+      this._historyLoading = false;
+      this._nilmActiveLane = "needs_review";
+      this._nilmSelectedReviewKey = "";
+    }
     this._loadedRouteKey = routeKey;
     this._loading = true;
     this._error = "";
@@ -683,6 +690,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.target_signature_id = target;
     }
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._routeKey();
+    const isCurrent = () => this._isCurrentRequest(requestId, routeKey);
     const busyKey = `nilm_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -691,6 +701,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._hass.callService(action.domain, action.service, data);
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
+      }
+      if (!isCurrent()) {
+        return;
       }
       if (actionKey === "label" || actionKey === "assign") {
         this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
@@ -703,7 +716,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         const previousIndex = Math.max(0, previousItems.findIndex((item) => this._nilmReviewKey(item) === previousKey));
         const graphHistory = this._nilmWorkspaceHistorySeries;
         const preserveGraphHistory = Boolean(this._nilmFocusedSignature || this._nilmGraphWindow);
-        await this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey());
+        await this._loadNilmWorkspace(requestId, routeKey);
+        if (!isCurrent()) {
+          return;
+        }
         if (preserveGraphHistory) {
           this._nilmWorkspaceHistorySeries = graphHistory;
         }
@@ -716,20 +732,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           const fingerprint = this._nilmSignatureFingerprint(nextItem.item);
           if (fingerprint) {
             await this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
+            if (!isCurrent()) {
+              return;
+            }
           }
         }
-        const nextScope = nextItem
-          ? nextItem.kind === "signature"
-            ? this._nilmDecisionDraftKey(nextItem.item)
-            : this._nilmReviewKey(nextItem)
-          : "nilm-review";
-        this._setInlineFeedback(nextScope, "success", message);
+        this._setInlineFeedback("nilm-review", "success", message);
       } else {
         this._lastActionMessage = message;
         await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
         this._scrollToTop();
       }
     } catch (error) {
+      if (!isCurrent()) {
+        return;
+      }
       const message = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       reject(message);
@@ -1333,7 +1350,42 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       && this._isCurrentRequest(requestId, routeKey);
   }
 
+  _nilmFocusState(element = this.shadowRoot && this.shadowRoot.activeElement) {
+    const dataset = element && element.dataset;
+    if (!dataset) {
+      return null;
+    }
+    const controls = [
+      ["nilmDecision", "[data-nilm-decision]", "nilmDecisionKey"],
+      ["nilmIdentifyMode", "[data-nilm-identify-mode]", "nilmDecisionKey"],
+      ["nilmLane", "[data-nilm-lane]", "nilmLane"],
+      ["nilmReviewItem", "[data-nilm-review-item]", "nilmReviewItem"],
+    ];
+    const control = controls.find(([flag]) => Object.prototype.hasOwnProperty.call(dataset, flag));
+    return control ? {
+      selector: control[1],
+      dataKey: control[2],
+      key: dataset[control[2]],
+      value: element.value,
+    } : null;
+  }
+
+  _restoreNilmFocus(state) {
+    if (!state) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      const target = Array.from(this.shadowRoot.querySelectorAll(state.selector)).find((element) => (
+        element.dataset[state.dataKey] === state.key && element.value === state.value
+      ));
+      if (target && typeof target.focus === "function") {
+        target.focus({ preventScroll: true });
+      }
+    });
+  }
+
   _render() {
+    const nilmFocus = this._nilmFocusState();
     const payload = this._payload;
     const alert = payload && payload.alert;
     const circuit = payload && payload.circuit;
@@ -2274,6 +2326,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._navigate(link.getAttribute("href"));
       });
     }
+    this._restoreNilmFocus(nilmFocus);
   }
 
   _renderApplianceDetailBody() {
@@ -3615,10 +3668,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const selectedItem = reviewItems.length ? this._nilmSelectedReviewItem(workspace) : null;
     const selectedKey = selectedItem ? this._nilmReviewKey(selectedItem) : "";
     return `<div class="nilm-review-layout" id="nilm_review_lane_panel" role="tabpanel" aria-labelledby="nilm_lane_${this._escape(this._nilmActiveLane)}">
+      ${this._renderInlineFeedback("nilm-review")}
       ${reviewItems.length ? reviewItems.map((reviewItem, index) => {
         const selected = this._nilmReviewKey(reviewItem) === selectedKey;
         return `${this._renderNilmReviewCard(reviewItem, reviewItems, selected)}${selected ? this._renderNilmReviewInspector(reviewItem, index + 1) : ""}`;
-      }).join("") : `${this._renderInlineFeedback("nilm-review")}<p class="muted nilm-lane-empty" data-nilm-lane-empty role="status">${this._escape(this._panelTextFormat("nilm_workspace.lane_empty", { lane: laneLabel }))}</p>`}
+      }).join("") : `<p class="muted nilm-lane-empty" data-nilm-lane-empty role="status">${this._escape(this._panelTextFormat("nilm_workspace.lane_empty", { lane: laneLabel }))}</p>`}
     </div>`;
   }
 
@@ -4496,6 +4550,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       observed,
       expected,
       threshold,
+      percentChange: expected === 0 ? null : ((observed - expected) / Math.abs(expected)) * 100,
       markers: [
         { key: "expected", value: expected, position: position(expected) },
         ...(threshold === null ? [] : [{ key: "threshold", value: threshold, position: position(threshold) }]),
@@ -4506,6 +4561,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderAlertComparison(alert) {
     const scale = this._alertComparisonScale(alert);
+    const percentChange = scale && Number.isFinite(scale.percentChange) ? scale.percentChange : null;
+    const change = percentChange === null
+      ? this._panelText("evidence.change_unavailable")
+      : `${percentChange > 0 ? "+" : ""}${this._formatNumber(percentChange)}%`;
+    const changeAttribute = percentChange === null ? "unavailable" : this._formatNumber(percentChange);
     if (!scale) {
       return `<section class="evidence-section" data-evidence-comparison="fallback">
         <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
@@ -4513,11 +4573,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${this._metric(this._panelText("evidence.labels.observed"), alert && alert.observed_value)}
           ${this._metric(this._panelText("common.expected"), alert && (alert.expected_value ?? alert.baseline_value))}
         </div>
+        <p class="comparison-change" data-comparison-change="${changeAttribute}"><strong>${this._escape(this._panelText("evidence.labels.change"))}:</strong> ${this._escape(change)}</p>
       </section>`;
     }
     const summaryValues = {
       observed: this._formatMetricValue(scale.observed),
       expected: this._formatMetricValue(scale.expected),
+      change,
     };
     const summary = scale.threshold === null
       ? this._panelTextFormat("evidence.comparison_summary", summaryValues)
@@ -4527,6 +4589,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       });
     return `<section class="evidence-section comparison" data-evidence-comparison="visual">
       <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
+      <p class="comparison-change" data-comparison-change="${changeAttribute}"><strong>${this._escape(this._panelText("evidence.labels.change"))}:</strong> ${this._escape(change)}</p>
       <div class="comparison-scale" role="img" aria-label="${this._escape(summary)}">
         <div class="comparison-track"></div>
         ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatMetricValue(marker.value))}</strong></span>`).join("")}
