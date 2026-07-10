@@ -3517,15 +3517,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <div class="actions">${this._nilmApplianceDetailButton(item)}</div>
         </div>
       `, this._panelText("nilm_workspace.estimated_appliances_description"))}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.assignments_title"), workspace.assignments, this._panelText("nilm_workspace.assignments_empty"), (item) => `
-          <div class="metric">
-            <span>${this._escape(item.lifecycle_state || this._panelText("common.assigned"))}</span>
-            <strong>${this._escape(item.display_name || item.appliance_id || this._panelText("common.assigned_appliance"))}</strong>
-            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
-            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
-            <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
-          </div>
-        `, this._panelText("nilm_workspace.assignments_description"))}
         ${this._renderNilmValidation(workspace.validation)}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
         <div class="metric">
@@ -3563,21 +3554,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     </details>`;
   }
 
-  _nilmReviewItems(workspace) {
-    const signatures = Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [];
-    const doneStates = new Set(["expected", "ignored", "confirmed"]);
-    return signatures.map((signature, index) => ({ signature, index })).filter(({ signature }) => {
-      const state = String((signature && signature.review_state) || "").toLowerCase();
-      return !(signature && signature.user_label) && !doneStates.has(state);
-    });
-  }
-
   _nilmLaneItems(workspace, laneKey = this._nilmActiveLane) {
-    const lanes = workspace && workspace.lanes && typeof workspace.lanes === "object"
-      ? workspace.lanes
-      : null;
-    const hasLane = Boolean(lanes && Object.prototype.hasOwnProperty.call(lanes, laneKey));
-    const lane = hasLane ? lanes[laneKey] || {} : {};
+    const lane = workspace.lanes[laneKey];
     const signatureIds = new Set(Array.isArray(lane.signature_ids) ? lane.signature_ids : []);
     const assignmentIds = new Set(Array.isArray(lane.assignment_ids) ? lane.assignment_ids : []);
     const signatures = (Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [])
@@ -3586,13 +3564,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const assignments = (Array.isArray(workspace && workspace.assignments) ? workspace.assignments : [])
       .map((item, index) => ({ kind: "assignment", item, index }))
       .filter(({ item }) => assignmentIds.has(item.assignment_id));
-    if (hasLane) {
-      return [...signatures, ...assignments];
-    }
-    if (laneKey === "needs_review") {
-      return this._nilmReviewItems(workspace).map(({ signature, index }) => ({ kind: "signature", item: signature, index }));
-    }
-    return [];
+    return [...signatures, ...assignments];
   }
 
   _nilmReviewKey(reviewItem) {
