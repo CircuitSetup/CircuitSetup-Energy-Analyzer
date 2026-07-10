@@ -10,6 +10,7 @@ from .const import (
     CONF_RAIN_SENSOR_ENTITY,
     CONF_SOURCE_ENTITIES,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
+    DATA_RELOAD_COUNT,
     DOMAIN,
     ENTITY_MODEL_LEGACY,
     PLATFORMS,
@@ -103,14 +104,16 @@ async def async_unload_entry(
     entry: CircuitSetupEnergyAnalyzerConfigEntry,
 ) -> bool:
     """Unload CircuitSetup Energy Analyzer."""
+    domain_data = hass.data.get(DOMAIN, {})
+    entry_id = getattr(entry, "entry_id", "default")
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator = hass.data.get(DOMAIN, {}).pop(
-            getattr(entry, "entry_id", "default"), None
-        )
+        coordinator = domain_data.pop(entry_id, None)
         if coordinator is not None:
             await coordinator.async_stop()
-        if not _has_config_entries(hass.data.get(DOMAIN, {})):
+        if not _has_config_entries(domain_data) and not domain_data.get(
+            DATA_RELOAD_COUNT, 0
+        ):
             await async_unload_panel(hass)
             await async_unload_services(hass)
     return unload_ok

@@ -456,7 +456,7 @@ def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
                 real_power=4400.0,
                 reactive_power=900.0,
                 apparent_power=4492.0,
-                power_factor=0.88,
+                power_factor=0.96,
             )
         ),
         {
@@ -475,6 +475,7 @@ def test_select_evidence_flags_resistive_load_that_became_reactive() -> None:
 
     assert evidence is not None
     assert evidence.feature == "resistive_load_became_reactive"
+    assert evidence.metric == "reactive_to_real_ratio"
     assert "resistive" in evidence.message
 
 

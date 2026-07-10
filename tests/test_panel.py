@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -8,7 +9,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.const import (
+    DATA_RELOAD_COUNT,
+    DOMAIN,
+)
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
@@ -256,12 +260,20 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
         "  async _saveNilmAssignmentChanges(index) {",
         1,
     )[1].split("\n  async _callRecommendationAction", 1)[0]
-    route_key_line = 'this._actionRefreshRouteKey("nilm_save_assignment")'
-    assert body.index(route_key_line) < body.index(
+    context_line = "const actionContext = this._nilmWorkspaceActionContext();"
+    assert body.index(context_line) < body.index(
         "await this._hass.callService"
     )
-    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
-    assert "window.location.assign(routeKey);" in body
+    assert body.index("await this._hass.callService") < body.index(
+        "await this._refreshNilmWorkspaceData"
+    )
+    assert "if (!actionContext.isCurrent())" in body
+    assert "if (!actionContext.isRouteCurrent())" in body
+    assert "this._busyAction === busyKey" in body
+    assert "merge.data.target_assignment_id" not in body
+    assert "this._selectRefreshedNilmAssignment" in body
+    assert "this._storeActionMessageForReload" not in body
+    assert "window.location.assign" not in body
     assert "await this._loadEvidence" not in body
 
 
@@ -274,16 +286,20 @@ def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> No
         "  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {",
         1,
     )[1].split("\n  async _saveNilmAssignmentChanges", 1)[0]
-    route_key_line = "const routeKey = this._actionRefreshRouteKey(`nilm_${actionKey}`)"
-    assert body.index(route_key_line) < body.index(
+    context_line = "const actionContext = this._nilmWorkspaceActionContext();"
+    assert body.index(context_line) < body.index(
         "await this._hass.callService"
     )
-    assert 'if (collectionKey === "sessions") {' in body
-    assert body.index("await this._loadEvidence({ routeKey });") < body.index(
-        "this._storeActionMessageForReload(this._lastActionMessage);"
+    assert body.index("await this._hass.callService") < body.index(
+        "await this._refreshNilmWorkspaceData"
     )
-    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
-    assert "window.location.assign(routeKey);" in body
+    assert "if (!actionContext.isCurrent())" in body
+    assert "if (!actionContext.isRouteCurrent())" in body
+    assert "this._busyAction === busyKey" in body
+    assert "this._selectRefreshedNilmAssignment(item, data)" in body
+    assert "this._storeActionMessageForReload" not in body
+    assert "window.location.assign" not in body
+    assert "await this._loadEvidence" not in body
 
 
 def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(
@@ -1437,27 +1453,23 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["virtual_appliances"][0]["confidence"] == 0.9
     assert payload["virtual_appliances"][0]["model_status"] == "assigned"
     assert payload["virtual_appliances"][0]["active_session_id"] is None
-    assert payload["actions"]["label_interval"] == {
-        "domain": DOMAIN,
-        "service": "label_nilm_interval",
-        "data": {
-            "circuit_id": "mains",
-            "mains_entity_id": "sensor.mains_power",
-        },
-        "requires": ["start", "end", "label"],
+    label_action = payload["actions"]["label_interval"]
+    assert label_action["domain"] == DOMAIN
+    assert label_action["service"] == "label_nilm_interval"
+    assert label_action["data"] == {
+        "circuit_id": "mains",
+        "mains_entity_id": "sensor.mains_power",
     }
-    assert payload["actions"]["sensor_label_interval"] == {
-        "domain": DOMAIN,
-        "service": "generate_nilm_sensor_label_intervals",
-        "data": {
-            "circuit_id": "mains",
-            "mains_entity_id": "sensor.mains_power",
-        },
-        "requires": ["start", "end", "label", "ground_truth_entity_id"],
-        "ground_truth_options": [
-            {"value": "sensor.pool_pump_power", "label": "Pool Pump"}
-        ],
-    }
+    assert label_action["requires"] == [
+        "start",
+        "end",
+        "label",
+        "appliance_profile",
+    ]
+    assert {"value": "washer", "label": "Washer"} in label_action[
+        "profile_options"
+    ]
+    assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"
     assert payload["sessions"][0]["actions"]["assign"] == {
@@ -1589,21 +1601,19 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
 
     assert payload["lanes"]["needs_review"]["signature_ids"] == ["sig-new"]
     assert payload["lanes"]["assigned"]["assignment_ids"] == ["assignment-assigned"]
-    assert payload["lanes"]["needs_validation"]["assignment_ids"] == [
+    assert payload["lanes"]["needs_review"]["assignment_ids"] == [
         "assignment-zero-confidence",
-        "assignment-validation"
-    ]
-    assert payload["lanes"]["ready_to_publish"]["assignment_ids"] == [
-        "assignment-ready"
+        "assignment-ready",
     ]
     assert payload["lanes"]["published"]["assignment_ids"] == [
-        "assignment-published"
+        "assignment-validation",
+        "assignment-published",
     ]
     assert payload["lanes"]["ignored_expected"]["assignment_ids"] == [
         "assignment-ignored"
     ]
     assert payload["lanes"]["ignored_expected"]["signature_ids"] == ["sig-ignored"]
-    assert payload["lane_counts"]["needs_review"] == 1
+    assert payload["lane_counts"]["needs_review"] == 3
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
     )
@@ -1618,7 +1628,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "show_likely_paired_off_edge": True,
         "preview_interval_kwh": True,
         "show_known_load_overlap": True,
-        "question": "Was this appliance running here?",
     }
     virtual = payload["virtual_appliances"][0]
     assert virtual["source_type"] == "nilm_estimate"
@@ -1631,6 +1640,90 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
+
+
+def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_lanes,
+        _nilm_workspace_session_specs,
+    )
+
+    signatures = [
+        {"signature_id": "sig-retired", "review_state": "assigned"},
+        {"signature_id": "sig-new", "review_state": "new"},
+        {"signature_id": "sig-ignored", "review_state": "ignored"},
+    ]
+    assignments = [
+        {
+            "assignment_id": "assignment-retired",
+            "signature_fingerprints": ["sig-retired"],
+            "label_interval_ids": ["interval-retired"],
+            "lifecycle_state": "retired",
+        }
+    ]
+    intervals = [
+        {"interval_id": "interval-retired", "label": "Dishwasher"},
+        {"interval_id": "interval-new", "label": "Dryer"},
+    ]
+
+    assert _nilm_workspace_session_specs(signatures, assignments) == [
+        ("sig-new", None)
+    ]
+    lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
+    assert set(lanes) == {
+        "needs_review",
+        "assigned",
+        "published",
+        "ignored_expected",
+    }
+    assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
+    assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
+    assert lanes["ignored_expected"]["assignment_ids"] == [
+        "assignment-retired"
+    ]
+
+
+def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    sessions = [{"session_id": "session-unassigned"}]
+
+    assert _nilm_workspace_visible_sessions(
+        sessions,
+        [{"ignored": True}],
+        [{"lifecycle_state": "retired"}],
+    ) == sessions
+
+
+def test_nilm_workspace_keeps_merged_signature_sessions_on_visible_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    session = {
+        "session_id": "session-merged",
+        "assignment_id": "assignment-dishwasher",
+        "signature_fingerprint": "merged-fingerprint",
+    }
+
+    assert _nilm_workspace_visible_sessions(
+        [session],
+        [
+            {
+                "review_state": "merged",
+                "feedback_fingerprint": "merged-fingerprint",
+            }
+        ],
+        [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["merged-fingerprint"],
+            }
+        ],
+    ) == [session]
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
@@ -3067,6 +3160,10 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
         http=http,
         components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
         config_entries=FakeConfigEntries(),
+        services=SimpleNamespace(
+            async_register=lambda *args, **kwargs: None,
+            async_remove=lambda *args, **kwargs: None,
+        ),
     )
     entry = SimpleNamespace(entry_id="entry-1", data={})
 
@@ -3076,13 +3173,22 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
     assert len(http.static_paths) == 1
     assert len(http.views) == 5
 
+    hass.data[DOMAIN][DATA_RELOAD_COUNT] = 1
+    assert await async_unload_entry(hass, entry) is True
+    assert frontend.removed == [PANEL_URL_PATH]
+    assert "_services_setup" in hass.data[DOMAIN]
+
+    hass.data[DOMAIN].pop(DATA_RELOAD_COUNT)
+    assert await async_setup_entry(hass, entry) is True
+    assert len(panel_custom.panels) == 1
     assert await async_unload_entry(hass, entry) is True
 
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
+    assert "_services_setup" not in hass.data[DOMAIN]
 
 
 @pytest.mark.asyncio
-async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> None:
+async def test_active_reload_preserves_surfaces_during_other_entry_unload() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         async_setup_entry,
         async_unload_entry,
@@ -3090,10 +3196,17 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     from custom_components.circuitsetup_energy_analyzer.panel import PANEL_URL_PATH
 
     class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.unload_gate: tuple[asyncio.Event, asyncio.Event] | None = None
+
         async def async_forward_entry_setups(self, entry, platforms) -> None:
             return None
 
         async def async_unload_platforms(self, entry, platforms) -> bool:
+            if self.unload_gate is not None:
+                started, release = self.unload_gate
+                started.set()
+                await release.wait()
             return True
 
     class FakeHttp:
@@ -3119,14 +3232,37 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
 
     panel_custom = FakePanelCustom()
     frontend = FakeFrontend()
+    config_entries = FakeConfigEntries()
     hass = SimpleNamespace(
         data={},
         http=FakeHttp(),
         components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
-        config_entries=FakeConfigEntries(),
+        config_entries=config_entries,
+        services=SimpleNamespace(
+            async_register=lambda *args, **kwargs: None,
+            async_remove=lambda *args, **kwargs: None,
+        ),
     )
     first = SimpleNamespace(entry_id="entry-1", data={})
     second = SimpleNamespace(entry_id="entry-2", data={})
+
+    async def _unload_after_counter_change(initial: int, current: int) -> None:
+        if initial:
+            hass.data[DOMAIN][DATA_RELOAD_COUNT] = initial
+        else:
+            hass.data[DOMAIN].pop(DATA_RELOAD_COUNT, None)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        config_entries.unload_gate = (started, release)
+        task = asyncio.create_task(async_unload_entry(hass, second))
+        await started.wait()
+        if current:
+            hass.data[DOMAIN][DATA_RELOAD_COUNT] = current
+        else:
+            hass.data[DOMAIN].pop(DATA_RELOAD_COUNT, None)
+        release.set()
+        assert await task is True
+        config_entries.unload_gate = None
 
     assert await async_setup_entry(hass, first) is True
     assert await async_setup_entry(hass, second) is True
@@ -3138,8 +3274,17 @@ async def test_setup_entry_registers_panel_once_until_last_entry_unloads() -> No
     assert await async_unload_entry(hass, first) is True
     assert frontend.removed == [PANEL_URL_PATH]
 
-    assert await async_unload_entry(hass, second) is True
+    await _unload_after_counter_change(0, 1)
+    assert frontend.removed == [PANEL_URL_PATH]
+    assert "_services_setup" in hass.data[DOMAIN]
+
+    hass.data[DOMAIN].pop(DATA_RELOAD_COUNT)
+    assert await async_setup_entry(hass, second) is True
+    assert len(panel_custom.panels) == 1
+
+    await _unload_after_counter_change(1, 0)
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
+    assert "_services_setup" not in hass.data[DOMAIN]
 
 
 @pytest.mark.asyncio

@@ -216,6 +216,7 @@ class AlertEvidence:
     event_type: EventType | None = None
     features: Mapping[str, Any] = field(default_factory=dict)
     feature: str = ""
+    value_metric: str = ""
     observed_value: float = 0.0
     baseline_value: float = 0.0
     change_ratio: float = 0.0

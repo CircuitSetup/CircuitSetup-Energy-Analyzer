@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from inspect import isawaitable
 from typing import Any
 
+from ..const import DATA_RELOAD_COUNT, DOMAIN
 from ..ux import mutable_config_copy
 
 
@@ -55,9 +56,27 @@ class ConfigEntryController:
         if reload_entry is None:
             return
 
-        result = reload_entry(coordinator.entry_id)
-        if isawaitable(result):
-            await result
+        hass = coordinator.hass
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        domain_data[DATA_RELOAD_COUNT] = domain_data.get(DATA_RELOAD_COUNT, 0) + 1
+        try:
+            result = reload_entry(coordinator.entry_id)
+            if isawaitable(result):
+                await result
+        finally:
+            remaining = domain_data.get(DATA_RELOAD_COUNT, 1) - 1
+            if remaining > 0:
+                domain_data[DATA_RELOAD_COUNT] = remaining
+            else:
+                domain_data.pop(DATA_RELOAD_COUNT, None)
+                if not any(
+                    not str(key).startswith("_") for key in domain_data
+                ):
+                    from ..panel import async_unload_panel
+                    from ..services import async_unload_services
+
+                    await async_unload_panel(hass)
+                    await async_unload_services(hass)
 
     def _config_entry_method(self, method_name: str) -> Any | None:
         config_entries = getattr(self._coordinator.hass, "config_entries", None)

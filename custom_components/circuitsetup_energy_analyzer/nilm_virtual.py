@@ -104,8 +104,10 @@ def nilm_virtual_device_info(
         "name": state.display_name,
         "manufacturer": "CircuitSetup",
         "model": "NILM Estimated Appliance",
-        "via_device": (DOMAIN, f"{entry_id}_{state.mains_circuit_id}"),
     }
+    via_device = (DOMAIN, f"{entry_id}_{state.mains_circuit_id}")
+    if hass is None or _device_identifier_exists(hass, via_device):
+        device_info["via_device"] = via_device
     suggested_area = suggested_area_for_profile(
         state.appliance_profile,
         existing_area_names_for_hass(hass),
@@ -113,6 +115,16 @@ def nilm_virtual_device_info(
     if suggested_area:
         device_info["suggested_area"] = suggested_area
     return device_info
+
+
+def _device_identifier_exists(hass: Any, identifier: tuple[str, str]) -> bool:
+    try:
+        from homeassistant.helpers import device_registry as dr
+
+        registry = dr.async_get(hass)
+    except (AttributeError, ImportError, KeyError, TypeError):
+        return True
+    return registry.async_get_device(identifiers={identifier}) is not None
 
 
 def nilm_virtual_appliance_alerts(

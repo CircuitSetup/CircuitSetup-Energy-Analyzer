@@ -43,16 +43,13 @@ def alert_notification_message(
     """Return Markdown body text for an alert persistent notification."""
     from .alert_links import alert_evidence_path
 
-    lines = []
-    if config is not None and config.name:
-        lines.extend([f"**{config.name}**", ""])
-    lines.append(alert.message)
+    display_name = (
+        config.name if config is not None and config.name else alert.circuit_id
+    )
+    lines = [f"**{display_name}**", "", alert.message]
     lines.extend(_nilm_source_lines(alert))
     lines.extend(
         [
-            "",
-            f"[{_notification_text('alert', 'open_evidence_graph')}]"
-            f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
             "",
             f"- {_notification_text('alert', 'observed_value')}: "
             f"{alert.observed_value}",
@@ -69,6 +66,13 @@ def alert_notification_message(
                 f"{ELECTRICAL_SAFETY_NOTICE}",
             )
         )
+    lines.extend(
+        [
+            "",
+            f"[{_notification_text('alert', 'open_evidence')}]"
+            f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+        ]
+    )
     return "\n".join(lines)
 
 

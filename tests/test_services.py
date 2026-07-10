@@ -110,7 +110,10 @@ def test_notification_id_for_alert_uses_nilm_notification_key() -> None:
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
 
 
-def test_alert_notification_message_includes_evidence_link_and_graph_entities() -> None:
+def test_alert_notification_message_ends_with_one_evidence_link() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_evidence_path,
+    )
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
     )
@@ -141,15 +144,20 @@ def test_alert_notification_message_includes_evidence_link_and_graph_entities() 
 
     message = alert_notification_message(alert, config=config)
 
-    assert "Possible issue: HVAC leg imbalance" in message
-    assert message.startswith("**HVAC**\n\nPossible issue: HVAC leg imbalance")
-    assert "## HVAC" not in message
-    assert (
-        "[Open evidence graph](/circuitsetup-energy-analyzer-evidence?"
-        in message
+    expected_order = (
+        "**HVAC**",
+        "Possible issue: HVAC leg imbalance",
+        "Observed value: 62.0",
+        "Baseline value: 20.0",
+        "Repeated observations: 3",
+        "[Open evidence](/circuitsetup-energy-analyzer-evidence?",
     )
-    assert "Observed value: 62.0" in message
-    assert "Baseline value: 20.0" in message
+    offsets = [message.index(value) for value in expected_order]
+    assert offsets == sorted(offsets)
+    expected_link = f"[Open evidence]({alert_evidence_path(alert)})"
+    assert message.count("[Open evidence](") == 1
+    assert message.splitlines()[-1] == expected_link
+    assert "Open evidence graph" not in message
     assert "Graph entities" not in message
     assert "sensor.hvac_l1_watts" not in message
     assert "sensor.hvac_l2_current" not in message
@@ -188,6 +196,7 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     message = alert_notification_message(alert)
     direct_message = alert_notification_message(direct_alert)
 
+    assert message.startswith("**mains**\n\n")
     assert "Estimated from mains power by NILM." in message
     assert "Confidence: 82%." in message
     assert "Estimated from mains power by NILM." not in direct_message
@@ -2207,6 +2216,8 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
             start,
             end,
             appliance_id: str | None = None,
+            appliance_profile: str | None = None,
+            assignment_id: str | None = None,
             mains_entity_id: str | None = None,
             ground_truth_entity_id: str | None = None,
             interval_id: str | None = None,
@@ -2222,6 +2233,8 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                         start,
                         end,
                         appliance_id,
+                        appliance_profile,
+                        assignment_id,
                         mains_entity_id,
                         ground_truth_entity_id,
                         interval_id,
@@ -2256,6 +2269,8 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                 "start": "2026-06-02T12:00:00+00:00",
                 "end": "2026-06-02T12:45:00+00:00",
                 "appliance_id": "dishwasher",
+                "appliance_profile": "washer",
+                "assignment_id": "assignment-dishwasher",
                 "mains_entity_id": "sensor.mains_power",
                 "ground_truth_entity_id": "sensor.dishwasher_power",
             }
@@ -2274,6 +2289,8 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                 "2026-06-02T12:00:00+00:00",
                 "2026-06-02T12:45:00+00:00",
                 "dishwasher",
+                "washer",
+                "assignment-dishwasher",
                 "sensor.mains_power",
                 "sensor.dishwasher_power",
                 None,

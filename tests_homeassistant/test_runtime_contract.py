@@ -212,3 +212,9 @@ async def test_platform_setup_restores_published_nilm_virtual_entities(
     )
     assert estimated_power.extra_state_attributes["estimated"] is True
     assert estimated_power.device_info["model"] == "NILM Estimated Appliance"
+    assert "via_device" not in estimated_power.device_info
+    assert estimated_power.device_class is None
+    assert estimated_power.options is None
+    assert estimated_power.last_reset is None
+    assert estimated_power.suggested_display_precision is None
+    assert estimated_power.suggested_unit_of_measurement is None

@@ -131,6 +131,7 @@ class PowerQualityProcessor:
                 observed_at=context.now,
                 observed_value=evidence.observed_value,
                 baseline_value=evidence.baseline_value,
+                value_metric=evidence.metric,
                 message=evidence.message,
                 features=evidence.features,
             )
@@ -153,6 +154,7 @@ def real_power_fallback_evidence(
         ):
             return PowerQualityEvidence(
                 feature="real_power",
+                metric=score.feature,
                 message="",
                 observed_value=score.observed_value,
                 baseline_value=score.baseline_value,

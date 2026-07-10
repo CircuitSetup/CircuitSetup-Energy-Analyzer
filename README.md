@@ -119,7 +119,7 @@ Use the integration in this order:
 - **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
 - **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
-- **When an alert appears**: read the notification, open the evidence graph if available, check `status_explanation`, and verify source data before treating it as an appliance problem.
+- **When an alert appears**: read the notification, open the evidence view, compare observed and expected values, and verify source data before treating it as an appliance problem.
 - **Common setup states**: learning, waiting for energy change, missing metrics, not dual phase, missing mains, and unconfigured optional checks usually mean the analyzer needs more data or a better assignment.
 
 You do not need to enable every diagnostic entity. For behavior alerts, let the analyzer learn for at least 7 days or enough appliance cycles before tuning thresholds.
@@ -148,8 +148,13 @@ questions instead of raw diagnostic entity lists:
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
   and reset/apply/dismiss actions.
+- **Alert Evidence** starts with a visual comparison, then keeps graph-first
+  evidence beside the plain-language explanation and moves technical details
+  into a disclosure for deeper review.
 
 ![Appliance detail panel showing refrigerator health, activity, energy, and recent evidence](docs/images/readme/appliance-detail.png)
+
+![Alert Evidence panel showing the observed, expected, and threshold comparison above the evidence graph](docs/images/readme/alert-evidence.png)
 
 ## First-time setup checklist
 
@@ -259,7 +264,7 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available from the Expert Developer Diagnostics group or by enabling the entity. |
 
-Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page explains what happened, why it matters, observed versus expected values, sample count, first/last seen times, and what to check first. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
+Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page leads with a visual observed-versus-expected comparison and graph-first evidence, then explains what happened, why it matters, sample count, first/last seen times, and what to check first. Power-quality comparisons name the measured metric and show W, VAR, VA, power factor, or a percentage as appropriate. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
 
 For power-meter interpretation:
 
@@ -288,7 +293,7 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes summarize Needs Review, Assigned, Needs Validation, Ready to Publish, Published, and Ignored / Expected work in the workspace; the dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes use tabs to summarize Needs Review, Assigned, Published, and Ignored / Expected work; selecting a review card opens its focused inspector without repeating controls, and each decision is committed with a single **Apply** action. The dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
 
 For manual dashboards, start with one simple card per important appliance:
 
@@ -655,9 +660,9 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 ### Experimental NILM
 
-Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges into likely sessions, show known-load overlays, and keep manual interval labels for review.
+Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges, show known-load overlays, and turn graph interval selections directly into appliance assignments for review.
 
-On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace graph and review actions.
+On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace. The compact summary shows the circuit, needs-review count, and review progress without repeating the lane inventory. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
 ![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
 
@@ -675,7 +680,7 @@ Unknown load estimates may include:
 
 These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
 
-Use the NILM workspace from the evidence panel to label signatures, save graph intervals, merge duplicate signatures, assign a signature/session/interval to an appliance, and create an estimated Home Assistant device for a confirmed assignment. Use **Adjust Label** to correct saved intervals and **Validate History** after adding manual or sensor labels; assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace passes NILM IDs internally, offers appliance-profile choices, and uses known-load sensors as selectable ground-truth sources when they are available. The workspace groups work into lanes: Needs Review, Assigned, Needs Validation, Ready to Publish, Published, and Ignored / Expected; the dynamic dashboard NILM card can show the same lane counts when it is available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Remove HA Device** or **Retire** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
+Open the separate NILM workspace route from the evidence panel to label signatures, drag across the graph to select one or more appliance intervals, merge duplicate signatures, and create an estimated Home Assistant device for a confirmed assignment. **Label appliance interval** collects the appliance name and type, highlights the active graph selection and matching time fields, and sends the saved evidence directly to Needs Review. Assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace groups work into four lanes: Needs Review, Assigned, Published, and Ignored / Expected. Lane tabs keep the queue scannable while the selected review card's focused inspector owns its choices and single **Apply** decision. The dynamic dashboard NILM card can show the same lane counts when it is available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Remove HA Device** or **Retire** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
 
 ## Suggested settings
 
@@ -711,7 +716,7 @@ When an alert appears:
 1. Read the notification and related summary entity first.
 2. Open the entity details.
 3. Review `status_explanation`, observed values, thresholds, sample counts, source entities, and timestamps.
-4. Use the **Open evidence graph** link when available.
+4. Use the **Open evidence** link to review the visual comparison, evidence graph, explanation, and response choices.
 5. Check easy setup causes before appliance causes:
    - CT direction
    - Phase pairing
@@ -724,17 +729,19 @@ When an alert appears:
 6. Use Repairs for configuration and data-quality problems.
 7. If work is planned on an appliance or circuit, use maintenance or pause-alert actions before service begins.
 
-Persistent notifications include a Markdown link to **Open evidence graph** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`.
+Persistent notifications include one final Markdown link to **Open evidence** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`.
 
-The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. Companion App notifications can use the same target through `clickAction`.
+The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. It presents a visual comparison before graph-first evidence and the explanation, then keeps the three response choices together behind one **Apply** action. Companion App notifications can use the same target through `clickAction`.
 
 The analyzer can also notify when suggested Advanced Circuit Settings are ready for review. Those notifications link directly to **Configure > Review Suggested Settings**.
 
 For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
 
-![Home Assistant notification drawer showing CircuitSetup Energy Analyzer suggested settings](docs/images/readme/notifications-panel.png)
+![Home Assistant notification drawer showing an appliance-first Energy Analyzer alert with one final evidence link](docs/images/readme/notifications-panel.png)
 
-![Dynamic Energy Analyzer evidence graph opened from a notification link](docs/images/readme/notifications-repairs.png)
+![Dynamic Energy Analyzer alert evidence opened from a notification link](docs/images/readme/alert-evidence.png)
+
+![Alert evidence panel showing observed and expected metrics with investigation context](docs/images/readme/notifications-repairs.png)
 
 ## Alert automation blueprint
 

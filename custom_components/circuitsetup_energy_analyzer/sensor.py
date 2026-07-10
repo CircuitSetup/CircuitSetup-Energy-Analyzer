@@ -3058,9 +3058,24 @@ class NilmVirtualSensorDescription:
     key: str
     name_suffix: str
     value_fn: Callable[[NilmVirtualApplianceState], Any]
+    device_class: str | None = None
+    entity_category: Any | None = None
+    entity_registry_enabled_default: bool = True
+    entity_registry_visible_default: bool = True
+    entity_picture: str | None = None
+    force_update: bool = False
+    has_entity_name: bool = False
     native_unit_of_measurement: str | None = None
     icon: str | None = None
+    last_reset: Any | None = None
+    name: str | None = None
+    options: list[str] | None = None
     state_class: str | None = None
+    suggested_display_precision: int | None = None
+    suggested_unit_of_measurement: str | None = None
+    translation_key: str | None = None
+    translation_placeholders: Mapping[str, str] | None = None
+    unit_of_measurement: None = None
 
 
 NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
@@ -3106,10 +3121,15 @@ NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
 class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
     """Sensor for an explicitly published estimated NILM appliance."""
 
+    _attr_device_class = None
     _attr_entity_category = None
     _attr_entity_registry_enabled_default = True
     _attr_entity_registry_visible_default = True
     _attr_has_entity_name = False
+    _attr_last_reset = None
+    _attr_options = None
+    _attr_suggested_display_precision = None
+    _attr_suggested_unit_of_measurement = None
 
     def __init__(
         self,

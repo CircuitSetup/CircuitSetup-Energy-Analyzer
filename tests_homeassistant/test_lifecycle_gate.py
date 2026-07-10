@@ -387,8 +387,6 @@ def _assert_appliance_workflow_payloads(
     assert set(nilm_workspace["lanes"]) == {
         "needs_review",
         "assigned",
-        "needs_validation",
-        "ready_to_publish",
         "published",
         "ignored_expected",
     }
@@ -463,8 +461,6 @@ async def _assert_appliance_workflow_panel_views(
     assert set(nilm_workspace["lanes"]) == {
         "needs_review",
         "assigned",
-        "needs_validation",
-        "ready_to_publish",
         "published",
         "ignored_expected",
     }
@@ -627,6 +623,138 @@ async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
     assert entry.entry_id not in hass.data[DOMAIN]
     assert _unexpected_lifecycle_log_messages(caplog.records) == []
     assert _unexpected_lifecycle_warning_messages(recwarn) == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+@pytest.mark.asyncio
+async def test_config_entry_setup_registers_published_nilm_device(
+    hass: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore published NILM assignments as real HA entities and a device."""
+
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStore
+
+    _point_custom_components_at_worktree(monkeypatch)
+    entry_id = "published-nilm-entry"
+    mains_entities = ["sensor.published_mains_l1", "sensor.published_mains_l2"]
+    for entity_id in mains_entities:
+        _set_source_state(hass, entity_id, "1800", "W", "power")
+
+    store = FeatureStore(hass, entry_id)
+    store.data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-washer",
+                "appliance_id": "washer",
+                "display_name": "Washer",
+                "appliance_profile": "washer",
+                "mains_circuit_id": "mains",
+                "signature_fingerprints": [],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "lifecycle_state": "published",
+                "confidence": 0.9,
+                "created_device": True,
+                "publish_entities": True,
+            }
+        ]
+    }
+    await store.async_save()
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id=entry_id,
+        title="Published NILM Gate",
+        data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: mains_entities,
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    entity_registry = er.async_get(hass)
+    registry_entry = next(
+        item
+        for item in er.async_entries_for_config_entry(entity_registry, entry_id)
+        if item.unique_id
+        == f"{entry_id}_nilm_assignment-washer_estimated_power"
+    )
+    assert registry_entry.config_entry_id == entry_id
+    state = hass.states.get(registry_entry.entity_id)
+    assert state is not None
+    assert state.attributes["assignment_id"] == "assignment-washer"
+    assert dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
+    ) is not None
+
+    coordinator = hass.data[DOMAIN][entry_id]
+    expected_unique_ids = {
+        f"{entry_id}_nilm_assignment-washer_{key}"
+        for key in (
+            "health_summary",
+            "activity_summary",
+            "energy_summary",
+            "estimated_power",
+            "estimated_daily_energy",
+            "estimated_running",
+        )
+    }
+    assignment_entries = {
+        item.unique_id: item
+        for item in er.async_entries_for_config_entry(entity_registry, entry_id)
+        if item.unique_id.startswith(f"{entry_id}_nilm_assignment-washer_")
+    }
+    assert set(assignment_entries) == expected_unique_ids
+    entity_registry.async_remove(
+        assignment_entries[
+            f"{entry_id}_nilm_assignment-washer_health_summary"
+        ].entity_id
+    )
+    assert (
+        coordinator.nilm_controller._assignment_entities_present(
+            "assignment-washer",
+            expected=True,
+        )
+        is False
+    )
+
+    unpublished = await coordinator.async_unpublish_nilm_appliance_assignment(
+        "mains",
+        "assignment-washer",
+    )
+    await hass.async_block_till_done()
+    assert unpublished["lifecycle_state"] == "validated"
+    assert hass.states.get(registry_entry.entity_id) is None
+    assert not any(
+        item.unique_id.startswith(f"{entry_id}_nilm_assignment-washer_")
+        for item in er.async_entries_for_config_entry(entity_registry, entry_id)
+    )
+    assert dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
+    ) is None
+
+    reloaded_coordinator = hass.data[DOMAIN][entry_id]
+    published = await reloaded_coordinator.async_publish_nilm_appliance_assignment(
+        "mains",
+        "assignment-washer",
+    )
+    await hass.async_block_till_done()
+    assert published["lifecycle_state"] == "published"
+    assert any(
+        item.unique_id
+        == f"{entry_id}_nilm_assignment-washer_estimated_power"
+        for item in er.async_entries_for_config_entry(entity_registry, entry_id)
+    )
+    assert dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
+    ) is not None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")

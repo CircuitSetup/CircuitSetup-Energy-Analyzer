@@ -58,6 +58,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         message="Possible issue",
         event_type=EventType.STEADY_WINDOW,
         feature="reactive_to_real_ratio",
+        value_metric="reactive_to_real_ratio",
         observed_value=0.42,
         baseline_value=0.24,
         change_ratio=0.75,
@@ -84,11 +85,15 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     assert detail["circuit_id"] == "fridge"
     assert detail["feature"] == "reactive_to_real_ratio"
     assert detail["feature_name"] == "Reactive To Real Ratio"
+    assert detail["value_metric"] == "reactive_to_real_ratio"
+    assert detail["value_label"] == "Reactive-to-real power ratio"
+    assert detail["value_unit"] == "%"
+    assert detail["value_format"] == "percentage"
     assert detail["severity"] == "warning"
     assert detail["message"] == "Possible issue"
     assert detail["what_happened"] == (
-        "Reactive To Real Ratio changed from the learned or configured expectation. "
-        "Observed 0.42 compared with 0.24."
+        "Reactive-to-real power ratio changed from the learned or configured "
+        "expectation. Observed 42.000% compared with baseline 24.000%."
     )
     assert "VAR" in detail["why_it_matters"]
     assert "watts, VAR, VA" in detail["what_to_check_first"]
@@ -132,6 +137,10 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "circuit_id": "fridge",
         "feature": "reactive_to_real_ratio",
         "feature_name": "Reactive To Real Ratio",
+        "value_metric": "reactive_to_real_ratio",
+        "value_label": "Reactive-to-real power ratio",
+        "value_unit": "%",
+        "value_format": "percentage",
         "severity": "warning",
         "message": "Possible issue",
         "what_happened": detail["what_happened"],
@@ -171,6 +180,64 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "graph_window_start": "2026-06-02T08:00:00+00:00",
         "graph_window_end": "2026-06-02T14:30:00+00:00",
     }
+
+
+def test_alert_evidence_detail_labels_known_and_fallback_metrics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        alert_evidence_detail,
+    )
+
+    expected = {
+        "real_power": ("Real power", "W", "number"),
+        "reactive_power": ("Reactive power", "VAR", "number"),
+        "apparent_power": ("Apparent power", "VA", "number"),
+        "power_factor": ("Power factor", "", "decimal"),
+        "unknown_metric": ("Unknown Metric", "", "number"),
+    }
+    for metric, metadata in expected.items():
+        alert = AlertEvidence(
+            timestamp=datetime(2026, 6, 2, 12, 30, tzinfo=UTC),
+            circuit_id="panel",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="relationship_changed",
+            value_metric=metric,
+        )
+
+        detail = alert_evidence_detail(alert)
+
+        assert (
+            detail["value_label"],
+            detail["value_unit"],
+            detail["value_format"],
+        ) == metadata
+
+
+def test_alert_evidence_detail_recovers_legacy_power_quality_metric() -> None:
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        alert_evidence_detail,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 10, tzinfo=UTC),
+        circuit_id="oven",
+        severity=Severity.WARNING,
+        message="Reactive behavior changed.",
+        feature="resistive_load_became_reactive",
+        features={
+            "reactive_power": 12.5,
+            "reactive_to_real_ratio": 13.0,
+            "power_factor": 0.0,
+        },
+        observed_value=0.14248837235748318,
+        baseline_value=0.10285714285714286,
+    )
+
+    detail = alert_evidence_detail(alert)
+
+    assert detail["value_metric"] == "reactive_to_real_ratio"
+    assert detail["value_label"] == "Reactive-to-real power ratio"
+    assert detail["value_format"] == "percentage"
 
 
 def test_alert_evidence_detail_bounds_large_contributing_metric_attributes() -> None:
