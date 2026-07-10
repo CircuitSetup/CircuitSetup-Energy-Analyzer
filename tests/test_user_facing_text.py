@@ -1572,7 +1572,7 @@ def test_panel_module_version_is_current_cache_token() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260709-2"
+    assert PANEL_MODULE_VERSION == "20260709-3"
 
 
 def test_nilm_lane_rendering_contracts() -> None:
@@ -1781,7 +1781,33 @@ if(item.value&&shadow.activeElement.value!==item.value){
 assert.fail(`${item.name} restored focus to the wrong value`)}}
 })().catch(error=>{
 console.error("test_nilm_state_rerenders_restore_deep_keyboard_focus",error)
-;process.exit(1)})}})().catch(error=>{
+;process.exit(1)})}{
+// case: lane tabs use roving focus and keyboard activation
+const panel=makePanel();panel._nilmActiveLane="needs_review"
+;const workspace=makeWorkspace();const html=panel._renderNilmWorkspaceLanes(workspace)
+;assert.equal((html.match(/tabindex="0"/g)||[]).length,1,
+"lane tabs need one roving tab stop")
+;assert.equal((html.match(/tabindex="-1"/g)||[]).length,5,
+"inactive lane tabs must leave the Tab sequence")
+;const laneKeys=["needs_review","assigned","needs_validation",
+"ready_to_publish","published","ignored_expected"];let buttons=[]
+;const shadow={activeElement:null,_html:"",set innerHTML(value){this._html=value
+;this.activeElement=null;buttons=laneKeys.map(key=>({dataset:{nilmLane:key},
+value:"",listeners:{},addEventListener(type,callback){this.listeners[type]=callback},
+focus(){shadow.activeElement=this}}))},get innerHTML(){return this._html},
+querySelector(){return null},querySelectorAll(selector){return selector===
+"[data-nilm-lane]"?buttons:[]}};panel.shadowRoot=shadow;panel._payload={
+status:"circuit_found_no_evidence",circuit:{circuit_id:"mains"},actions:{}}
+;panel._render();let active=buttons[0];shadow.activeElement=active
+;const press=key=>{let prevented=0;active.listeners.keydown({key:key,
+preventDefault(){prevented+=1}});active=shadow.activeElement
+;assert.equal(prevented,1,`${key} did not prevent page scrolling`)}
+;press("ArrowRight");assert.equal(panel._nilmActiveLane,"assigned")
+;assert.equal(active.dataset.nilmLane,"assigned")
+;press("End");assert.equal(panel._nilmActiveLane,"ignored_expected")
+;press("Home");assert.equal(panel._nilmActiveLane,"needs_review")
+;press("ArrowLeft");assert.equal(panel._nilmActiveLane,"ignored_expected")
+}})().catch(error=>{
 console.error("test_nilm_lane_rendering_contracts",error);process.exit(1)});
 """
     )
@@ -2120,7 +2146,102 @@ if(!html.includes(expected)){
 assert.fail(`refreshed lane hid label success ${expected}: ${html}`)}}
 })().catch(error=>{
 console.error("test_nilm_label_success_is_announced_when_signature_remains_in_lane",error)
-;process.exit(1)})}})().catch(error=>{
+;process.exit(1)})}{
+// case: assignment and session completions cannot hijack a replacement route
+for(const kind of["publish","save","session"]){for(const outcome of[
+"resolve","reject"]){await(async()=>{
+context.window.location.pathname="/circuitsetup-energy-analyzer-evidence"
+;context.window.location.search="?nilm_workspace=1&circuit_id=a";let settle
+;let assigns=0;let refreshes=0;let renders=0;let scrolls=0;const requests=[]
+;const panel=makePanel();panel._loadedRouteKey=panel._routeKey()
+;panel._evidenceRequestId=5;panel._payload={circuit:{circuit_id:"a"},actions:{}}
+;panel._render=()=>{renders+=1};panel._scrollToTop=()=>{scrolls+=1}
+;context.window.location.assign=()=>{assigns+=1};const action={
+domain:"circuitsetup_energy_analyzer",service:`${kind}_service`,data:{
+circuit_id:"a",assignment_id:"assignment-1"}}
+;const assignment={assignment_id:"assignment-1",display_name:"Dishwasher",
+appliance_profile:"washer",actions:kind==="save"?{rename:action}:{publish:action}}
+;const session={session_id:"session-1",assignment_id:"assignment-1",
+display_name:"Dishwasher",actions:{validate:action}}
+;panel._nilmWorkspace=makeWorkspace({assignments:[assignment],sessions:[session]})
+;panel._nilmWorkspace.lanes.assigned.assignment_ids=["assignment-1"]
+;panel.shadowRoot.querySelector=selector=>selector==="#nilm_assignment_label_0"?{
+value:"Dishwasher Updated"}:null;panel._hass={callService:()=>new Promise((
+resolve,reject)=>{settle={resolve:resolve,reject:reject}})}
+;panel._refreshNilmWorkspaceData=async()=>{refreshes+=1;return true}
+;let operation;if(kind==="save")operation=panel._saveNilmAssignmentChanges(0)
+;else if(kind==="session")operation=panel._callNilmWorkspaceItemAction(
+"sessions",0,"validate");else operation=panel._callNilmWorkspaceItemAction(
+"assignments",0,"publish");await Promise.resolve()
+;context.window.location.search="?circuit_id=b";const payloadB={
+status:"circuit_found_no_evidence",circuit:{circuit_id:"b"},actions:{}}
+;panel._requestJson=async(apiPath,fetchPath)=>{requests.push({apiPath:apiPath,
+fetchPath:fetchPath});return payloadB};await panel._loadEvidence({
+routeKey:panel._routeKey()});const rendersAtB=renders
+;if(outcome==="resolve")settle.resolve();else settle.reject(new Error("late failure"))
+;await operation;assert.equal(panel._payload,payloadB,`${kind} ${outcome} replaced B`)
+;assert.equal(requests.length,1,`${kind} ${outcome} loaded over B`)
+;assert.equal(refreshes,0,`${kind} ${outcome} refreshed workspace B`)
+;assert.equal(assigns,0,`${kind} ${outcome} navigated back to A`)
+;assert.equal(renders,rendersAtB,`${kind} ${outcome} rerendered B`)
+;assert.equal(scrolls,0,`${kind} ${outcome} scrolled B`)
+;assert.equal(panel._lastActionMessage,"",`${kind} ${outcome} messaged B`)
+;assert.equal(panel._error,"",`${kind} ${outcome} errored B`)
+})().catch(error=>{console.error(`stale ${kind} ${outcome}`,error)
+;process.exit(1)})}}}{
+// case: assignment and session success stays in the sole lane inspector
+for(const kind of["publish","save","session"]){await(async()=>{
+context.window.location.pathname="/circuitsetup-energy-analyzer-evidence"
+;context.window.location.search="?nilm_workspace=1&circuit_id=mains"
+;let assigns=0;let refreshes=0;let feedbackFocus=0;let restoredScroll=null
+;const panel=makePanel();panel._loadedRouteKey=panel._routeKey()
+;panel._evidenceRequestId=8;panel._payload={circuit:{circuit_id:"mains"},
+nilm:{workspace_call_api_path:"workspace"},actions:{}};panel._render=()=>{}
+;panel._scrollToTop=()=>{assert.fail(`${kind} scrolled to top`)}
+;context.window.scrollY=420;context.window.scrollTo=options=>{
+restoredScroll=options.top};context.window.location.assign=()=>{assigns+=1}
+;const action={domain:"circuitsetup_energy_analyzer",
+service:`${kind}_service`,data:{circuit_id:"mains",
+assignment_id:"assignment-1"}};const assignment={assignment_id:"assignment-1",
+display_name:"Dishwasher",appliance_profile:"washer",confidence:.8,
+actions:kind==="save"?{rename:action}:{publish:action}};const session={
+session_id:"session-1",assignment_id:"assignment-1",display_name:"Dishwasher",
+actions:{validate:action}};panel._nilmWorkspace=makeWorkspace({
+assignments:[assignment],sessions:[session]})
+;panel._nilmWorkspace.lanes.assigned.assignment_ids=["assignment-1"]
+;panel._nilmActiveLane="assigned"
+;panel._nilmSelectedReviewKey="assignment:assignment-1"
+;panel.shadowRoot.querySelector=selector=>{
+if(selector==="#nilm_assignment_label_0")return{value:"Dishwasher Updated"}
+;if(selector==='[data-inline-feedback="assignment:assignment-1"]')return{
+focus(){feedbackFocus+=1}};return null};panel._hass={callService:async()=>{}}
+;panel._refreshNilmWorkspaceData=async()=>{refreshes+=1
+;for(const lane of Object.values(panel._nilmWorkspace.lanes)){
+lane.assignment_ids=[]}const target=kind==="publish"?"published":
+kind==="session"?"ready_to_publish":"assigned"
+;panel._nilmWorkspace.lanes[target].assignment_ids=["assignment-1"]
+;if(kind==="save")assignment.display_name="Dishwasher Updated";return true}
+;if(kind==="save")await panel._saveNilmAssignmentChanges(0)
+;else if(kind==="session")await panel._callNilmWorkspaceItemAction(
+"sessions",0,"validate");else await panel._callNilmWorkspaceItemAction(
+"assignments",0,"publish")
+;const expectedLane=kind==="publish"?"published":
+kind==="session"?"ready_to_publish":"assigned"
+;assert.equal(refreshes,1,`${kind} did not refresh in place`)
+;assert.equal(assigns,0,`${kind} forced browser navigation`)
+;assert.equal(panel._nilmActiveLane,expectedLane,`${kind} lost resulting lane`)
+;assert.equal(panel._nilmSelectedReviewKey,"assignment:assignment-1",
+`${kind} lost assignment selection`)
+;assert.equal(panel._inlineFeedback.scope,"assignment:assignment-1",
+`${kind} feedback was not local`);assert.equal(panel._inlineFeedback.kind,"success")
+;assert.equal(feedbackFocus,1,`${kind} did not focus local feedback`)
+;assert.equal(restoredScroll,420,`${kind} did not restore scroll`)
+;const inspector=panel._renderNilmReviewLayout(panel._nilmWorkspace)
+;assert.match(inspector,/data-nilm-review-inspector/)
+;assert.match(inspector,/data-nilm-assignment-index="0"/)
+})().catch(error=>{console.error(`local ${kind} success`,error)
+;process.exit(1)})}}
+})().catch(error=>{
 console.error("test_nilm_decision_action_contracts",error);process.exit(1)});
 """
     )
@@ -2727,6 +2848,9 @@ def test_alert_decision_action_contracts() -> None:
 // case: test_alert_decision_success_stays_local_after_refresh
 await(async()=>{const calls=[];const loads=[];let scrolls=0
 ;const panel=makePanel();context.window.location.search="?alert_id=alert-1"
+;context.history.replaceState=(_state,_title,path)=>{const route=new URL(path,
+context.window.location.origin);context.window.location.pathname=route.pathname
+;context.window.location.search=route.search}
 ;panel._render=()=>{};panel._scrollToTop=()=>{scrolls+=1}
 ;panel.shadowRoot.querySelector=()=>null;panel._hass={
 callService:async(domain,service,data)=>calls.push({domain:domain,
@@ -2832,7 +2956,45 @@ unavailable_label:"Expected feedback is temporarily unavailable."}}}
 const feedback=JSON.stringify(panel._inlineFeedback)
 ;assert.fail(`missing local guard failure: ${feedback}`)}})().catch(error=>{
 console.error("test_alert_decision_guard_failure_stays_local",error)
-;process.exit(1)})}})().catch(error=>{
+;process.exit(1)})}{
+// case: shared service completions cannot mutate a replacement route
+for(const kind of["alert","appliance","recommendation"]){
+for(const outcome of["resolve","reject"]){await(async()=>{
+context.window.location.pathname="/circuitsetup-energy-analyzer-evidence"
+;context.window.location.search="?circuit_id=a";let settle;let renders=0
+;let scrolls=0;let replaces=0;const requests=[];const panel=makePanel()
+;panel._loadedRouteKey=panel._routeKey();panel._evidenceRequestId=3
+;panel._render=()=>{renders+=1};panel._scrollToTop=()=>{scrolls+=1}
+;panel.shadowRoot.querySelector=()=>null;context.history.replaceState=()=>{
+replaces+=1};panel._hass={callService:()=>new Promise((resolve,reject)=>{
+settle={resolve:resolve,reject:reject}})};const action={
+domain:"circuitsetup_energy_analyzer",service:`${kind}_service`,data:{id:"a"}}
+;let operation;if(kind==="alert"){panel._payload={alert:{alert_id:"alert-a",
+circuit_id:"a",feature:"daily_energy"},actions:{mark_expected:action}}
+;operation=panel._callAction("mark_expected",{feedbackScope:"alert-response"})
+}else if(kind==="appliance"){panel._payload={circuit:{circuit_id:"a"},actions:{}}
+;panel._applianceDetail={actions:{pause_alerts:action}}
+;operation=panel._callApplianceDetailAction("pause_alerts")
+}else{panel._payload={circuit:{circuit_id:"a"},actions:{},
+setting_recommendations:[{actions:{apply:action}}]}
+;operation=panel._callRecommendationAction(0,"apply")}await Promise.resolve()
+;context.window.location.search="?circuit_id=b";const payloadB={
+status:"circuit_found_no_evidence",circuit:{circuit_id:"b"},actions:{}}
+;panel._requestJson=async(apiPath,fetchPath)=>{requests.push({apiPath:apiPath,
+fetchPath:fetchPath});return payloadB};await panel._loadEvidence({
+routeKey:panel._routeKey()});const rendersAtB=renders
+;if(outcome==="resolve")settle.resolve();else settle.reject(new Error("late failure"))
+;await operation;assert.equal(panel._payload,payloadB,`${kind} ${outcome} replaced B`)
+;assert.equal(requests.length,1,`${kind} ${outcome} refreshed B`)
+;assert.equal(renders,rendersAtB,`${kind} ${outcome} rerendered B`)
+;assert.equal(scrolls,0,`${kind} ${outcome} scrolled B`)
+;assert.equal(replaces,0,`${kind} ${outcome} rewrote B`)
+;assert.equal(panel._lastActionMessage,"",`${kind} ${outcome} messaged B`)
+;assert.equal(panel._error,"",`${kind} ${outcome} errored B`)
+;assert.equal(panel._inlineFeedback.message,"",`${kind} ${outcome} fed back on B`)
+})().catch(error=>{console.error(`stale ${kind} ${outcome}`,error)
+;process.exit(1)})}}
+}})().catch(error=>{
 console.error("test_alert_decision_action_contracts",error);process.exit(1)});
 """
     )
@@ -3251,7 +3413,7 @@ def test_nilm_session_validation_actions_reload_workspace_in_place() -> None:
         """
 (async () => {
 const calls = [];
-const loads = [];
+const refreshes = [];
 let assigned = false;
 const panel = new context.Panel();
 context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
@@ -3262,8 +3424,14 @@ panel._scrollToTop = () => {};
 panel._hass = {
   callService: async (domain, service, data) => calls.push({ domain, service, data }),
 };
-panel._loadEvidence = async (options) => loads.push(options);
-panel._nilmWorkspace = {
+panel._refreshNilmWorkspaceData = async (requestId, routeKey) => {
+  refreshes.push({ requestId, routeKey });
+  panel._nilmWorkspace.lanes.ready_to_publish.assignment_ids = [
+    "assignment-dishwasher",
+  ];
+  return true;
+};
+panel._nilmWorkspace = makeWorkspace({
   sessions: [
     {
       display_name: "Dishwasher",
@@ -3280,7 +3448,7 @@ panel._nilmWorkspace = {
       },
     },
   ],
-};
+});
 
 await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
 
@@ -3290,13 +3458,13 @@ if (assigned) {
 if (calls.length !== 1 || calls[0].service !== "validate_nilm_session") {
   throw new Error(`expected validate service call, got ${JSON.stringify(calls)}`);
 }
-if (loads.length !== 1 || !loads[0].routeKey.includes("nilm_workspace=1")) {
+if (refreshes.length !== 1 || !refreshes[0].routeKey.includes("nilm_workspace=1")) {
   throw new Error(
-    `expected in-place NILM reload, got ${JSON.stringify(loads)}`
+    `expected in-place NILM refresh, got ${JSON.stringify(refreshes)}`
   );
 }
-if (panel._lastActionMessage !== "Confirmed Dishwasher.") {
-  throw new Error(`expected confirmation message, got ${panel._lastActionMessage}`);
+if (panel._inlineFeedback.message !== "Confirmed Dishwasher.") {
+  throw new Error(`expected local confirmation, got ${panel._inlineFeedback.message}`);
 }
 })().catch((error) => {
   console.error(error);
@@ -3311,7 +3479,7 @@ def test_nilm_session_validation_buttons_call_services_or_update_interval() -> N
         """
 (async () => {
 const calls = [];
-const loads = [];
+const refreshes = [];
 const panel = new context.Panel();
 context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
 context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
@@ -3320,8 +3488,14 @@ panel._scrollToTop = () => {};
 panel._hass = {
   callService: async (domain, service, data) => calls.push({ domain, service, data }),
 };
-panel._loadEvidence = async (options) => loads.push(options);
-panel._nilmWorkspace = {
+panel._refreshNilmWorkspaceData = async (requestId, routeKey) => {
+  refreshes.push({ requestId, routeKey });
+  panel._nilmWorkspace.lanes.ready_to_publish.assignment_ids = [
+    "assignment-dishwasher",
+  ];
+  return true;
+};
+panel._nilmWorkspace = makeWorkspace({
   status: "ok",
   signatures: [
     {
@@ -3369,28 +3543,28 @@ panel._nilmWorkspace = {
       },
     },
   ],
-};
+});
 
 await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
 if (calls[calls.length - 1].service !== "validate_nilm_session") {
   throw new Error(`Correct did not call validate service: ${JSON.stringify(calls)}`);
 }
-if (loads.length !== 1) {
-  throw new Error(`Correct did not reload NILM: ${JSON.stringify(loads)}`);
+if (refreshes.length !== 1) {
+  throw new Error(`Correct did not refresh NILM: ${JSON.stringify(refreshes)}`);
 }
-if (panel._lastActionMessage !== "Confirmed Dishwasher.") {
-  throw new Error(`Correct used wrong label: ${panel._lastActionMessage}`);
+if (panel._inlineFeedback.message !== "Confirmed Dishwasher.") {
+  throw new Error(`Correct used wrong label: ${panel._inlineFeedback.message}`);
 }
 
 await panel._callNilmWorkspaceItemAction("sessions", 0, "reject");
 if (calls[calls.length - 1].service !== "reject_nilm_session") {
   throw new Error(`Wrong appliance missed reject: ${JSON.stringify(calls)}`);
 }
-if (loads.length !== 2) {
-  throw new Error(`Wrong appliance did not reload NILM: ${JSON.stringify(loads)}`);
+if (refreshes.length !== 2) {
+  throw new Error(`Wrong appliance did not refresh NILM: ${JSON.stringify(refreshes)}`);
 }
-if (panel._lastActionMessage !== "Marked Dishwasher for review.") {
-  throw new Error(`Wrong appliance used wrong label: ${panel._lastActionMessage}`);
+if (panel._inlineFeedback.message !== "Marked Dishwasher for review.") {
+  throw new Error(`Wrong appliance used wrong label: ${panel._inlineFeedback.message}`);
 }
 
 panel._selectNilmSessionIntervalByIndex(0);

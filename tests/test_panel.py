@@ -256,12 +256,16 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
         "  async _saveNilmAssignmentChanges(index) {",
         1,
     )[1].split("\n  async _callRecommendationAction", 1)[0]
-    route_key_line = 'this._actionRefreshRouteKey("nilm_save_assignment")'
-    assert body.index(route_key_line) < body.index(
+    context_line = "const actionContext = this._actionContext();"
+    assert body.index(context_line) < body.index(
         "await this._hass.callService"
     )
-    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
-    assert "window.location.assign(routeKey);" in body
+    assert body.index("await this._hass.callService") < body.index(
+        "await this._refreshNilmWorkspaceData"
+    )
+    assert "if (!actionContext.isCurrent())" in body
+    assert "this._storeActionMessageForReload" not in body
+    assert "window.location.assign" not in body
     assert "await this._loadEvidence" not in body
 
 
@@ -274,16 +278,17 @@ def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> No
         "  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {",
         1,
     )[1].split("\n  async _saveNilmAssignmentChanges", 1)[0]
-    route_key_line = "const routeKey = this._actionRefreshRouteKey(`nilm_${actionKey}`)"
-    assert body.index(route_key_line) < body.index(
+    context_line = "const actionContext = this._actionContext();"
+    assert body.index(context_line) < body.index(
         "await this._hass.callService"
     )
-    assert 'if (collectionKey === "sessions") {' in body
-    assert body.index("await this._loadEvidence({ routeKey });") < body.index(
-        "this._storeActionMessageForReload(this._lastActionMessage);"
+    assert body.index("await this._hass.callService") < body.index(
+        "await this._refreshNilmWorkspaceData"
     )
-    assert "this._storeActionMessageForReload(this._lastActionMessage);" in body
-    assert "window.location.assign(routeKey);" in body
+    assert "if (!actionContext.isCurrent())" in body
+    assert "this._storeActionMessageForReload" not in body
+    assert "window.location.assign" not in body
+    assert "await this._loadEvidence" not in body
 
 
 def test_panel_custom_component_falls_back_when_proxy_lacks_register_helper(

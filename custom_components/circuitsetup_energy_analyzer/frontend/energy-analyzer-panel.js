@@ -451,6 +451,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._navigate(action.path);
       return;
     }
+    const actionContext = this._actionContext();
     this._busyAction = actionKey;
     if (options.feedbackScope && this._inlineFeedback.scope === options.feedbackScope) {
       this._inlineFeedback = { scope: "", kind: "", message: "" };
@@ -462,6 +463,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       const message = this._alertActionMessage(actionKey);
       this._busyAction = "";
       const routeKey = this._actionRefreshRouteKey(actionKey);
@@ -471,7 +475,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._loadedRouteKey = routeKey;
         history.replaceState(history.state, "", routeKey);
       }
-      await this._loadEvidence({ routeKey, routeChanged });
+      const refresh = this._loadEvidence({ routeKey, routeChanged });
+      const refreshRequestId = this._evidenceRequestId;
+      await refresh;
+      if (!this._isCurrentRequest(refreshRequestId, routeKey)) {
+        return;
+      }
       if (options.feedbackScope) {
         this._alertDecision = "";
         this._setInlineFeedback(options.feedbackScope, "success", message);
@@ -481,6 +490,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._scrollToTop();
       }
     } catch (error) {
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       const message = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       if (options.feedbackScope) {
@@ -612,6 +624,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._navigate(action.path);
       return;
     }
+    const actionContext = this._actionContext();
     const busyKey = `appliance_detail_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -621,11 +634,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      this._lastActionMessage = this._applianceDetailActionMessage(actionKey);
+      if (!actionContext.isCurrent()) {
+        return;
+      }
+      const message = this._applianceDetailActionMessage(actionKey);
       this._busyAction = "";
-      await this._loadEvidence({ routeKey: this._routeKey() });
+      const routeKey = this._routeKey();
+      const refresh = this._loadEvidence({ routeKey });
+      const refreshRequestId = this._evidenceRequestId;
+      await refresh;
+      if (!this._isCurrentRequest(refreshRequestId, routeKey)) {
+        return;
+      }
+      this._lastActionMessage = message;
+      this._render();
       this._scrollToTop();
     } catch (error) {
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
@@ -1007,7 +1034,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.target_assignment_id = target;
     }
-    const routeKey = this._actionRefreshRouteKey(`nilm_${actionKey}`);
+    const actionContext = this._actionContext();
+    const scrollTop = Number(window.scrollY);
     const busyKey = `nilm_${collectionKey}_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -1017,16 +1045,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
-      this._lastActionMessage = this._nilmWorkspaceActionMessage(actionKey, data, item);
-      this._busyAction = "";
-      if (collectionKey === "sessions") {
-        await this._loadEvidence({ routeKey });
-        this._scrollToTop();
+      if (!actionContext.isCurrent()) {
         return;
       }
-      this._storeActionMessageForReload(this._lastActionMessage);
-      window.location.assign(routeKey);
+      const message = this._nilmWorkspaceActionMessage(actionKey, data, item);
+      this._busyAction = "";
+      const refreshed = await this._refreshNilmWorkspaceData(
+        actionContext.requestId,
+        actionContext.routeKey,
+      );
+      if (!actionContext.isCurrent()) {
+        return;
+      }
+      const assignmentId = item.assignment_id || data.assignment_id || "";
+      let feedbackScope = "nilm-review";
+      if (refreshed && assignmentId) {
+        const lane = Object.entries(this._nilmWorkspace.lanes).find(([, value]) => (
+          Array.isArray(value.assignment_ids) && value.assignment_ids.includes(assignmentId)
+        ));
+        if (lane) {
+          this._nilmActiveLane = lane[0];
+          this._nilmSelectedReviewKey = `assignment:${assignmentId}`;
+          this._nilmFocusedSignature = "";
+          feedbackScope = this._nilmSelectedReviewKey;
+        }
+      }
+      this._setInlineFeedback(
+        feedbackScope,
+        refreshed ? "success" : "error",
+        refreshed
+          ? message
+          : this._panelTextFormat("messages.nilm_interval_action_refresh_failed", { message }),
+      );
+      this._restoreNilmIntervalScroll(scrollTop);
     } catch (error) {
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
@@ -1070,7 +1125,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._renderAndScrollToTop();
       return;
     }
-    const routeKey = this._actionRefreshRouteKey("nilm_save_assignment");
+    const actionContext = this._actionContext();
+    const scrollTop = Number(window.scrollY);
     this._busyAction = `nilm_assignments_${index}_save`;
     this._render();
     try {
@@ -1080,15 +1136,47 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         } else {
           await this._hass.callService("circuitsetup_energy_analyzer", call.action.service, call.data);
         }
+        if (!actionContext.isCurrent()) {
+          return;
+        }
       }
       const draftKey = this._nilmAssignmentDraftKey(item);
       this._nilmAssignmentDrafts.delete(`${draftKey}:label`);
       this._nilmAssignmentDrafts.delete(`${draftKey}:appliance_profile`);
-      this._lastActionMessage = this._nilmWorkspaceActionMessage("save", {}, item);
+      const message = this._nilmWorkspaceActionMessage("save", {}, item);
       this._busyAction = "";
-      this._storeActionMessageForReload(this._lastActionMessage);
-      window.location.assign(routeKey);
+      const refreshed = await this._refreshNilmWorkspaceData(
+        actionContext.requestId,
+        actionContext.routeKey,
+      );
+      if (!actionContext.isCurrent()) {
+        return;
+      }
+      let feedbackScope = "nilm-review";
+      if (refreshed && item.assignment_id) {
+        const lane = Object.entries(this._nilmWorkspace.lanes).find(([, value]) => (
+          Array.isArray(value.assignment_ids)
+            && value.assignment_ids.includes(item.assignment_id)
+        ));
+        if (lane) {
+          this._nilmActiveLane = lane[0];
+          this._nilmSelectedReviewKey = `assignment:${item.assignment_id}`;
+          this._nilmFocusedSignature = "";
+          feedbackScope = this._nilmSelectedReviewKey;
+        }
+      }
+      this._setInlineFeedback(
+        feedbackScope,
+        refreshed ? "success" : "error",
+        refreshed
+          ? message
+          : this._panelTextFormat("messages.nilm_interval_action_refresh_failed", { message }),
+      );
+      this._restoreNilmIntervalScroll(scrollTop);
     } catch (error) {
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       this._error = this._panelTextFormat("errors.save_assignment", { message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
@@ -1106,6 +1194,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._navigate(action.path);
       return;
     }
+    const actionContext = this._actionContext();
     const busyKey = `recommendation_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -1115,11 +1204,25 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
-      this._lastActionMessage = this._recommendationActionMessage(actionKey);
+      if (!actionContext.isCurrent()) {
+        return;
+      }
+      const message = this._recommendationActionMessage(actionKey);
       this._busyAction = "";
-      await this._loadEvidence({ routeKey: this._routeKey() });
+      const routeKey = this._routeKey();
+      const refresh = this._loadEvidence({ routeKey });
+      const refreshRequestId = this._evidenceRequestId;
+      await refresh;
+      if (!this._isCurrentRequest(refreshRequestId, routeKey)) {
+        return;
+      }
+      this._lastActionMessage = message;
+      this._render();
       this._scrollToTop();
     } catch (error) {
+      if (!actionContext.isCurrent()) {
+        return;
+      }
       this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
       this._renderAndScrollToTop();
@@ -1341,6 +1444,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _isCurrentRequest(requestId, routeKey) {
     return requestId === this._evidenceRequestId && routeKey === this._routeKey();
+  }
+
+  _actionContext() {
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._routeKey();
+    return {
+      requestId,
+      routeKey,
+      isCurrent: () => this._isCurrentRequest(requestId, routeKey),
+    };
   }
 
   _invalidateNilmFocusedHistoryRequests() {
@@ -2223,6 +2336,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-lane]")) {
       button.addEventListener("click", () => this._activateNilmLane(button.dataset.nilmLane));
+      button.addEventListener("keydown", (event) => this._handleNilmLaneKeydown(event, button));
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-review-item]")) {
       button.addEventListener("click", () => {
@@ -3657,6 +3771,35 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._render();
   }
 
+  _handleNilmLaneKeydown(event, button) {
+    const tabs = Array.from(this.shadowRoot.querySelectorAll("[data-nilm-lane]"));
+    const index = tabs.indexOf(button);
+    if (index < 0 || !tabs.length) {
+      return;
+    }
+    const targetIndex = event.key === "ArrowRight"
+      ? (index + 1) % tabs.length
+      : event.key === "ArrowLeft"
+      ? (index - 1 + tabs.length) % tabs.length
+      : event.key === "Home"
+      ? 0
+      : event.key === "End"
+      ? tabs.length - 1
+      : -1;
+    if (targetIndex < 0) {
+      return;
+    }
+    event.preventDefault();
+    const target = tabs[targetIndex];
+    this._activateNilmLane(target.dataset.nilmLane);
+    this._restoreNilmFocus({
+      selector: "[data-nilm-lane]",
+      dataKey: "nilmLane",
+      key: target.dataset.nilmLane,
+      value: target.value,
+    });
+  }
+
   _nilmLaneCount(lane, countValue) {
     const count = Number(countValue);
     return Number.isFinite(count)
@@ -3688,7 +3831,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${laneOrder.map(([key, fallbackLabel]) => {
           const lane = lanes[key] || {};
           const count = this._nilmLaneCount(lane, laneCounts[key]);
-          return `<button type="button" role="tab" class="nilm-lane" id="nilm_lane_${key}" data-nilm-lane="${key}" aria-controls="nilm_review_lane_panel" aria-selected="${this._nilmActiveLane === key}"><span>${this._escape(lane.label || fallbackLabel)}</span><strong>${count}</strong></button>`;
+          const selected = this._nilmActiveLane === key;
+          return `<button type="button" role="tab" class="nilm-lane" id="nilm_lane_${key}" data-nilm-lane="${key}" aria-controls="nilm_review_lane_panel" aria-selected="${selected}" tabindex="${selected ? "0" : "-1"}"><span>${this._escape(lane.label || fallbackLabel)}</span><strong>${count}</strong></button>`;
         }).join("")}
       </div>
     `;
