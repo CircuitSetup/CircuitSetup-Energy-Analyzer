@@ -262,6 +262,7 @@ def test_policy_preserves_custom_power_quality_evidence() -> None:
                 observed_at=now + timedelta(minutes=index),
                 observed_value=0.44,
                 baseline_value=0.16,
+                value_metric="reactive_to_real_ratio",
                 message=message,
                 features=features,
             )
@@ -276,6 +277,7 @@ def test_policy_preserves_custom_power_quality_evidence() -> None:
             observed_at=now + timedelta(minutes=2),
             observed_value=0.45,
             baseline_value=0.16,
+            value_metric="reactive_to_real_ratio",
             message=message,
             features=features,
         )
@@ -284,6 +286,7 @@ def test_policy_preserves_custom_power_quality_evidence() -> None:
     assert alert is not None
     assert alert.message == message
     assert alert.feature == "reactive_shift_under_stable_real_power"
+    assert alert.value_metric == "reactive_to_real_ratio"
     assert alert.features["reactive_power"] == 4.2
     assert alert.features["relationship_rms"] == 3.4
 

@@ -1681,7 +1681,7 @@ def test_scoped_load_error_contracts() -> None:
       panel._render();
       const html = panel.shadowRoot.innerHTML;
       assert.ok(html.includes("data-nilm-history-error"));
-      assert.ok(html.includes('class="workspace-section nilm-graph-section"'));
+      assert.ok(html.includes("nilm-graph-section"));
       assert.ok(!html.includes("No graph history is available yet."));
       assert.equal(typeof listeners.click, "function");
       await listeners.click();
@@ -2358,7 +2358,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       assert.ok(body.includes('class="nilm-workspace"'));
       assert.ok(!body.includes('<section class="panel"><section class="workspace-section workspace-summary"'));
       assert.ok(
-        body.indexOf('class="workspace-section nilm-graph-section"') <
+        body.indexOf("nilm-graph-section") <
           body.indexOf('class="nilm-lanes"'),
       );
     }
@@ -2403,10 +2403,10 @@ def test_nilm_lane_rendering_contracts() -> None:
       }
       assert.equal((html.match(/data-nilm-review-inspector/g) || []).length, 1);
       const selectedCard = html.indexOf('data-nilm-review-item="signature:sig-2"');
-      const inspector = html.indexOf('<div class="nilm-review-inspector"');
+      const inspector = html.indexOf('<div class="nilm-review-inspector');
       assert.ok(selectedCard >= 0 && inspector > selectedCard);
       assert.ok(html.slice(selectedCard, inspector).includes("</button>"));
-      assert.ok(html.indexOf('class="nilm-review-list"') < inspector);
+      assert.ok(html.indexOf('class="nilm-review-list') < inspector);
       panel._nilmActiveLane = "assigned";
       panel._nilmSelectedReviewKey = "";
       assert.ok(
@@ -2706,8 +2706,8 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const selected = panel._renderNilmWorkspaceBody();
       assert.ok(panel._nilmIntervalEditorOpen);
       assert.ok(selected.includes('class="nilm-interval-form"'));
-      const graph = selected.indexOf('class="workspace-section nilm-graph-section"');
-      const editor = selected.indexOf('class="workspace-section nilm-interval-editor-section"');
+      const graph = selected.indexOf("nilm-graph-section");
+      const editor = selected.indexOf("nilm-interval-editor-section");
       const lanes = selected.indexOf('role="tablist"');
       assert.ok(graph >= 0 && graph < editor && editor < lanes);
       const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
@@ -4443,9 +4443,6 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
 def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
     surface_rule = re.search(
-        r"\[data-evidence-graph\],\s*"
-        r"\.nilm-graph-section,\s*"
-        r"\.evidence-explanation section,\s*"
         r"\.legend\s*\{(?P<body>.*?)\}",
         asset,
         re.DOTALL,
@@ -4453,7 +4450,7 @@ def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
 
     assert surface_rule is not None
     assert "background: var(--card-background-color, #fff);" in surface_rule.group("body")
-    assert "padding: 16px;" in surface_rule.group("body")
+    assert "padding: 16px 0 0;" in surface_rule.group("body")
     assert "border:" not in surface_rule.group("body")
     assert "box-shadow:" not in surface_rule.group("body")
 
@@ -5011,6 +5008,42 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
         "padding: 12px 0;",
     ):
         assert declaration in summary_style
+
+
+def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    surface_rule = re.search(
+        r"\.section-surface\s*\{(?P<body>.*?)\}",
+        asset,
+        re.DOTALL,
+    )
+
+    assert surface_rule is not None
+    for declaration in (
+        "background: var(--card-background-color, #fff);",
+        "border: 1px solid var(--divider-color, #d8dde6);",
+        "border-radius: 8px;",
+        "padding: 16px;",
+    ):
+        assert declaration in surface_rule.group("body")
+    for marker in (
+        'class="evidence-section evidence-meta summary section-surface"',
+        'class="evidence-section comparison section-surface"',
+        'class="section-surface" data-evidence-graph',
+        'class="evidence-section response-section section-surface"',
+        'class="evidence-section disclosure section-surface" data-evidence-technical',
+        'class="workspace-summary section-surface"',
+        'class="workspace-section nilm-graph-section section-surface"',
+        'class="workspace-section nilm-interval-editor-section section-surface"',
+        'class="nilm-review-list section-surface"',
+        'class="nilm-review-inspector section-surface"',
+        'class="disclosure section-surface" data-nilm-secondary-details',
+    ):
+        assert marker in asset
+    assert 'class="evidence-section evidence-investigation section-surface"' not in asset
+    assert 'class="nilm-review-layout section-surface"' not in asset
+
+
 def test_alert_evidence_render_contracts() -> None:
     _run_panel_node_script(
         """
@@ -5088,7 +5121,7 @@ def test_alert_evidence_render_contracts() -> None:
         assert.ok(!html.includes(forbidden), forbidden);
       }
       const explanation = html.indexOf("data-evidence-explanation");
-      const response = html.indexOf('class="evidence-section response-section"');
+      const response = html.indexOf("response-section");
       const technical = html.indexOf("data-evidence-technical");
       assert.ok(explanation >= 0 && explanation < response && response < technical);
     }
@@ -5132,6 +5165,41 @@ def test_alert_evidence_render_contracts() -> None:
       const html = makePanel()._renderAlertComparison({ observed_value: 620 });
       assert.ok(html.includes('data-evidence-comparison="fallback"'));
       assert.ok(!html.includes('role="img"'));
+    }
+
+    name = "test_alert_evidence_labels_and_formats_metric_values";
+    {
+      const panel = makePanel({ _payload: { actions: {} } });
+      const ratioAlert = {
+        circuit_id: "oven",
+        feature: "resistive_load_became_reactive",
+        value_label: "Reactive-to-real power ratio",
+        value_unit: "%",
+        value_format: "percentage",
+        observed_value: 0.14248837235748318,
+        baseline_value: 0.10285714285714286,
+        expected_value: 0.10285714285714286,
+        graph_entities: [],
+      };
+      const comparison = panel._renderAlertComparison(ratioAlert);
+      for (const expected of [
+        '<p class="comparison-metric">Reactive-to-real power ratio</p>',
+        "<span>Observed</span>",
+        "14.249%",
+        "<span>Expected</span>",
+        "10.286%",
+      ]) assert.ok(comparison.includes(expected), expected);
+
+      const content = panel._renderAlertContent(ratioAlert, { name: "Oven" });
+      assert.ok(content.includes("Baseline Reactive-to-real power ratio"));
+      assert.ok(content.includes("10.286%"));
+
+      for (const [alert, value, expected] of [
+        [{ value_format: "decimal", value_unit: "" }, 0.9874, "0.987"],
+        [{ value_format: "number", value_unit: "W" }, 120, "120 W"],
+        [{ value_format: "number", value_unit: "VAR" }, 42, "42 VAR"],
+        [{ value_format: "number", value_unit: "VA" }, 128, "128 VA"],
+      ]) assert.equal(panel._formatAlertMetricValue(alert, value), expected);
     }
 
     name = "test_alert_evidence_comparison_accessible_name_includes_threshold";

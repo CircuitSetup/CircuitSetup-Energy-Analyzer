@@ -77,6 +77,7 @@ class PowerQualityEvidence:
     """Selected relationship evidence for one circuit observation."""
 
     feature: str
+    metric: str
     message: str
     observed_value: float
     baseline_value: float
@@ -369,6 +370,7 @@ def _evidence(
         confidence_values.append(selected.baseline_confidence)
     return PowerQualityEvidence(
         feature=feature,
+        metric=selected.feature,
         message=message,
         observed_value=selected.observed_value,
         baseline_value=selected.baseline_value,
@@ -390,6 +392,7 @@ def _real_power_fallback(
         return None
     return PowerQualityEvidence(
         feature="real_power",
+        metric=real_score.feature,
         message="",
         observed_value=real_score.observed_value,
         baseline_value=real_score.baseline_value,

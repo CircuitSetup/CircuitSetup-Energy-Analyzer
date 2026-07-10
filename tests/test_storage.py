@@ -840,6 +840,7 @@ def test_baseline_and_alert_serialization_are_json_safe() -> None:
         event_type=EventType.STEADY_WINDOW,
         features={"cycle_duration_s": 2.4},
         feature="cycle_duration_s",
+        value_metric="reactive_to_real_ratio",
         observed_value=420.0,
         baseline_value=360.0,
         change_ratio=0.1667,
@@ -853,6 +854,7 @@ def test_baseline_and_alert_serialization_are_json_safe() -> None:
 
     assert baseline_from_dict(baseline_raw) == baseline
     assert alert_from_dict(alert_raw) == alert
+    assert alert_raw["value_metric"] == "reactive_to_real_ratio"
     assert alert_raw["features"] == {"cycle_duration_s": 2.4}
     assert isinstance(alert_raw["features"], dict)
 

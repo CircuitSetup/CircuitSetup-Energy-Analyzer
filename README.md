@@ -264,7 +264,7 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available from the Expert Developer Diagnostics group or by enabling the entity. |
 
-Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page leads with a visual observed-versus-expected comparison and graph-first evidence, then explains what happened, why it matters, sample count, first/last seen times, and what to check first. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
+Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page leads with a visual observed-versus-expected comparison and graph-first evidence, then explains what happened, why it matters, sample count, first/last seen times, and what to check first. Power-quality comparisons name the measured metric and show W, VAR, VA, power factor, or a percentage as appropriate. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
 
 For power-meter interpretation:
 

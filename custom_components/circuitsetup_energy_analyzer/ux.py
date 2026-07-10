@@ -21,6 +21,7 @@ from .models import (
     SensorRole,
 )
 from .notifications import notification_id_for_alert
+from .power_quality import MIN_RELATIONSHIP_SCORE
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
 FRIENDLY_SENSITIVITY_ALIASES = {
@@ -40,6 +41,46 @@ SENSITIVITY_LABELS = {
     "quiet": "Quiet",
     "balanced": "Balanced",
     "sensitive": "Sensitive",
+}
+ALERT_VALUE_METADATA = {
+    "reactive_to_real_ratio": (
+        "Reactive-to-real power ratio",
+        "%",
+        "percentage",
+    ),
+    "apparent_to_real_ratio": (
+        "Apparent-to-real power ratio",
+        "%",
+        "percentage",
+    ),
+    "power_factor": ("Power factor", "", "decimal"),
+    "power_factor_deficit": ("Power factor deficit", "", "decimal"),
+    "real_power": ("Real power", "W", "number"),
+    "reactive_power": ("Reactive power", "VAR", "number"),
+    "apparent_power": ("Apparent power", "VA", "number"),
+}
+POWER_QUALITY_RELATIONSHIP_METRICS = (
+    "reactive_to_real_ratio",
+    "reactive_power",
+    "power_factor_deficit",
+    "power_factor",
+    "apparent_to_real_ratio",
+    "apparent_power",
+)
+LEGACY_POWER_QUALITY_VALUE_CANDIDATES = {
+    "resistive_load_became_reactive": (
+        "reactive_to_real_ratio",
+        "power_factor_deficit",
+        "power_factor",
+    ),
+    "reactive_shift_under_stable_real_power": (
+        "reactive_to_real_ratio",
+        "reactive_power",
+    ),
+    "power_factor_shift_under_load": ("power_factor_deficit", "power_factor"),
+    "apparent_power_shift": ("apparent_to_real_ratio", "apparent_power"),
+    "split_phase_relationship_changed": POWER_QUALITY_RELATIONSHIP_METRICS,
+    "motor_relationship_changed": POWER_QUALITY_RELATIONSHIP_METRICS,
 }
 MAX_CONTRIBUTING_METRICS = 5
 MAX_ALERT_SOURCE_ENTITIES = 5
@@ -146,6 +187,11 @@ def alert_evidence_detail(
     last_seen = _isoformat_or_none(alert.last_seen)
     graph_window_start, graph_window_end = alert_graph_window(alert)
     feature = _alert_feature(alert)
+    value_metric = _alert_value_metric(alert, feature)
+    value_label, value_unit, value_format = ALERT_VALUE_METADATA.get(
+        value_metric,
+        (friendly_feature_name(value_metric), "", "number"),
+    )
     contributing_metrics = _bounded_contributing_metrics(
         alert.features,
         primary_key=feature,
@@ -156,9 +202,18 @@ def alert_evidence_detail(
         "circuit_id": alert.circuit_id,
         "feature": feature,
         "feature_name": friendly_feature_name(feature),
+        "value_metric": value_metric,
+        "value_label": value_label,
+        "value_unit": value_unit,
+        "value_format": value_format,
         "severity": alert.severity.value,
         "message": alert.message,
-        "what_happened": _alert_what_happened(alert, feature),
+        "what_happened": _alert_what_happened(
+            alert,
+            value_label=value_label,
+            value_unit=value_unit,
+            value_format=value_format,
+        ),
         "why_it_matters": _alert_why_it_matters(feature),
         "what_to_check_first": _alert_what_to_check_first(feature),
         "baseline_value": alert.baseline_value,
@@ -204,12 +259,48 @@ def alert_evidence_detail(
     return detail
 
 
-def _alert_what_happened(alert: AlertEvidence, feature: str) -> str:
-    feature_name = friendly_feature_name(feature)
+def _alert_value_metric(alert: AlertEvidence, feature: str) -> str:
+    explicit = str(alert.value_metric).strip()
+    if explicit or feature in ALERT_VALUE_METADATA:
+        return explicit or feature
+    candidates = LEGACY_POWER_QUALITY_VALUE_CANDIDATES.get(feature, ())
+    ranked = [
+        (metric, float(alert.features[metric]))
+        for metric in candidates
+        if isinstance(alert.features.get(metric), (int, float))
+    ]
+    if not ranked:
+        return feature
+    selected = max(ranked, key=lambda item: item[1])
+    if (
+        feature == "resistive_load_became_reactive"
+        and selected[1] < MIN_RELATIONSHIP_SCORE
+    ):
+        return "reactive_power"
+    return selected[0]
+
+
+def _alert_what_happened(
+    alert: AlertEvidence,
+    *,
+    value_label: str,
+    value_unit: str,
+    value_format: str,
+) -> str:
     return (
-        f"{feature_name} changed from the learned or configured expectation. "
-        f"Observed {alert.observed_value} compared with {alert.baseline_value}."
+        f"{value_label} changed from the learned or configured expectation. "
+        "Observed "
+        f"{_format_alert_value(alert.observed_value, value_unit, value_format)} "
+        "compared with baseline "
+        f"{_format_alert_value(alert.baseline_value, value_unit, value_format)}."
     )
+
+
+def _format_alert_value(value: float, unit: str, value_format: str) -> str:
+    if value_format == "percentage":
+        return f"{value * 100.0:.3f}%"
+    formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+    return f"{formatted}{f' {unit}' if unit else ''}"
 
 
 def _alert_why_it_matters(feature: str) -> str:

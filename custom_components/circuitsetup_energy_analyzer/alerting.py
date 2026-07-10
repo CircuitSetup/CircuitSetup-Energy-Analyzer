@@ -32,6 +32,7 @@ class Observation:
     observed_at: datetime
     observed_value: float = 0.0
     baseline_value: float = 0.0
+    value_metric: str = ""
     message: str = ""
     observation_key: str | None = None
     features: Mapping[str, Any] = field(default_factory=dict)
@@ -116,6 +117,7 @@ class ConservativeAlertPolicy:
             severity=Severity.WARNING,
             message=message,
             feature=last.feature,
+            value_metric=last.value_metric,
             observed_value=last.observed_value,
             baseline_value=last.baseline_value,
             change_ratio=change_ratio,
@@ -161,6 +163,7 @@ def alert_feedback_fingerprint_for_observation(
             severity=Severity.WARNING,
             message=observation.message,
             feature=observation.feature,
+            value_metric=observation.value_metric,
             observed_value=observation.observed_value,
             baseline_value=observation.baseline_value,
             change_ratio=ConservativeAlertPolicy._change_ratio(

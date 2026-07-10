@@ -1688,12 +1688,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: grid;
           gap: 6px;
         }
-        [data-evidence-graph],
-        .nilm-graph-section,
-        .evidence-explanation section,
+        .section-surface {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          padding: 16px;
+        }
         .legend {
           background: var(--card-background-color, #fff);
-          padding: 16px;
+          padding: 16px 0 0;
         }
         .comparison-scale {
           min-height: 160px;
@@ -1739,6 +1742,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         }
         .comparison-marker strong {
           font-size: 14px;
+        }
+        .comparison-metric {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 13px;
         }
         .comparison-marker.expected span { top: 0; }
         .comparison-marker.expected strong { top: 18px; }
@@ -1896,8 +1903,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font-size: 13px;
         }
         .safety-notice {
-          border-color: var(--warning-color, #f4b400);
-          background: var(--secondary-background-color, #fff8e1);
+          border-color: var(--divider-color, #d8dde6);
+          background: var(--card-background-color, #fff);
         }
         .safety-notice p {
           margin-top: 8px;
@@ -2207,10 +2214,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font-size: 13px;
           white-space: nowrap;
         }
-        .workspace-section + .workspace-section {
-          border-top: 1px solid var(--divider-color, #d8dee6);
-          padding-top: 18px;
-        }
         .nilm-lanes {
           display: flex;
           gap: 8px;
@@ -2311,11 +2314,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           width: 100%;
         }
         .nilm-review-inspector {
-          border-top: 1px solid var(--divider-color, #d8dee6);
           display: grid;
           gap: 10px;
           min-width: 0;
-          padding-top: 14px;
         }
         .nilm-review-card[aria-pressed="true"] .review-card-heading strong {
           color: var(--primary-color, #03a9f4);
@@ -2353,11 +2354,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           }
           .nilm-review-inspector {
             align-self: start;
-            border-left: 1px solid var(--divider-color, #d8dee6);
-            border-top: 0;
             grid-column: 2;
             grid-row: 1;
-            padding: 0 0 12px 20px;
+            padding: 16px;
           }
         }
         @media (max-width: 800px) {
@@ -2379,10 +2378,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           }
           .workspace-progress {
             grid-column: 1 / -1;
-          }
-          .comparison-marker span {
-            max-width: 8rem;
-            white-space: normal;
           }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -2967,39 +2962,39 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderAlertContent(alert, circuit) {
     return `
-      <section class="evidence-section evidence-meta summary">
+      <section class="evidence-section evidence-meta summary section-surface">
         ${this._metric(this._panelText("evidence.labels.feature"), alert.feature_name || this._friendlyFeature(alert.feature))}
         ${this._metric(this._panelText("evidence.labels.repeated"), alert.repeated_count)}
       </section>
       ${this._renderAlertComparison(alert)}
       ${this._renderSafetyNotice(alert)}
       <section class="evidence-section evidence-investigation">
-        <div data-evidence-graph>
+        <div class="section-surface" data-evidence-graph>
           <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
           ${this._renderChart(alert)}
         </div>
         <div class="evidence-explanation" data-evidence-explanation>
-          <section>
+          <section class="section-surface">
             <h2>${this._escape(this._panelText("evidence.sections.what_happened"))}</h2>
             <p>${this._escape(alert.what_happened || alert.message || this._panelText("evidence.fallbacks.what_happened"))}</p>
           </section>
-          <section>
+          <section class="section-surface">
             <h2>${this._escape(this._panelText("evidence.sections.why_it_matters"))}</h2>
             <p>${this._escape(alert.why_it_matters || this._panelText("evidence.fallbacks.why_it_matters"))}</p>
           </section>
-          <section>
+          <section class="section-surface">
             <h2>${this._escape(this._panelText("evidence.labels.check_first"))}</h2>
             <p>${this._escape(alert.what_to_check_first || this._changeSummary(alert))}</p>
           </section>
         </div>
       </section>
       ${this._renderAlertResponse()}
-      <details class="evidence-section disclosure" data-evidence-technical>
+      <details class="evidence-section disclosure section-surface" data-evidence-technical>
         <summary>${this._escape(this._panelText("evidence.sections.technical_details"))}</summary>
         <div class="summary">
-          ${this._metric(this._panelText("evidence.labels.baseline"), alert.baseline_value)}
-          ${this._metric(this._panelText("common.expected"), alert.expected_value)}
-          ${this._metric(this._panelText("evidence.labels.threshold"), alert.threshold)}
+          ${this._metric(this._alertMetricLabel(alert, "baseline"), this._formatAlertMetricValue(alert, alert.baseline_value))}
+          ${this._metric(this._alertMetricLabel(alert, "expected"), this._formatAlertMetricValue(alert, alert.expected_value))}
+          ${this._metric(this._alertMetricLabel(alert, "threshold"), this._formatAlertMetricValue(alert, alert.threshold))}
           ${this._metric(this._panelText("evidence.labels.samples"), alert.sample_count)}
           ${this._metric(this._panelText("evidence.labels.first_seen"), this._formatDateTime(alert.first_seen))}
           ${this._metric(this._panelText("evidence.labels.last_seen"), this._formatDateTime(alert.last_seen))}
@@ -3028,7 +3023,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     const busy = choices.some(([key]) => this._busyAction === key);
-    return `<section class="evidence-section response-section">
+    return `<section class="evidence-section response-section section-surface">
       <fieldset class="decision-group">
         <legend>${this._escape(this._panelText("actions.groups.respond_title"))}</legend>
         <p class="muted">${this._escape(this._panelText("actions.groups.respond_description"))}</p>
@@ -3046,7 +3041,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!renderedButtons.length) {
       return "";
     }
-    return `<details class="evidence-section disclosure action-disclosure" data-alert-disclosure="${name}">
+    return `<details class="evidence-section disclosure action-disclosure section-surface" data-alert-disclosure="${name}">
       <summary>${this._escape(title)}</summary>
       <div class="disclosure-content">
         <p class="muted">${this._escape(description)}</p>
@@ -3060,7 +3055,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!recommendations) {
       return "";
     }
-    return `<details class="evidence-section disclosure action-disclosure" data-alert-disclosure="recommendations">
+    return `<details class="evidence-section disclosure action-disclosure section-surface" data-alert-disclosure="recommendations">
       <summary>${this._escape(this._panelText("actions.groups.recommendations_title"))}</summary>
       <div class="disclosure-content">${recommendations}</div>
     </details>`;
@@ -3844,9 +3839,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <div class="nilm-workspace">
         ${this._renderNilmWorkspaceSummary(workspace)}
-        <section class="workspace-section nilm-graph-section">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
-        ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section">${intervalEditor}${intervalFeedback}</section>` : ""}
-        <section class="workspace-section">${this._renderNilmWorkspaceLanes(workspace)}</section>
+        <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
+        ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
+        <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
         <section class="workspace-section">${this._renderNilmReviewLayout(workspace)}</section>
         <section class="workspace-section">${this._renderNilmSecondaryCollections(workspace)}</section>
       </div>
@@ -3868,7 +3863,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const reviewed = Math.max(0, total - needsReview);
     const progressText = this._panelTextFormat("nilm_workspace.review_progress_value", { reviewed, total });
     return `
-      <section class="workspace-summary" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
+      <section class="workspace-summary section-surface" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
         <div class="workspace-summary-item">
           <span>${this._escape(this._panelText("nilm_workspace.circuit"))}</span>
           <strong>${this._escape(circuit.name || circuit.circuit_id || this._panelText("common.unknown"))}</strong>
@@ -3941,7 +3936,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmSecondaryCollections(workspace) {
-    return `<details class="disclosure" data-nilm-secondary-details>
+    return `<details class="disclosure section-surface" data-nilm-secondary-details>
       <summary>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</summary>
       <div class="disclosure-content">
         ${this._renderNilmSessionValidationCards(workspace)}
@@ -4082,7 +4077,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._renderNilmSignatureFacts(item)}
         ${this._renderNilmSignatureReview(item, reviewItem.index)}
       `;
-    return `<div class="nilm-review-inspector" data-nilm-review-inspector role="region" aria-label="${this._escape(title)}">
+    return `<div class="nilm-review-inspector section-surface" data-nilm-review-inspector role="region" aria-label="${this._escape(title)}">
       <h3>${this._escape(title)}</h3>
       ${content}
     </div>`;
@@ -4095,7 +4090,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const selectedItem = reviewItems.length ? this._nilmSelectedReviewItem(workspace) : null;
     const selectedKey = selectedItem ? this._nilmReviewKey(selectedItem) : "";
     return `<div class="nilm-review-layout" id="nilm_review_lane_panel" role="tabpanel" aria-labelledby="nilm_lane_${this._escape(this._nilmActiveLane)}">
-      <div class="nilm-review-list">
+      <div class="nilm-review-list section-surface">
       ${this._renderInlineFeedback("nilm-review")}
       ${reviewItems.length ? reviewItems.map((reviewItem) => {
         const selected = this._nilmReviewKey(reviewItem) === selectedKey;
@@ -4557,7 +4552,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return "";
     }
     return `
-      <section class="panel safety-notice">
+      <section class="section-surface safety-notice">
         <h2>${this._escape(this._panelText("chart.safety_notice"))}</h2>
         <p>${this._escape(alert.safety_notice)}</p>
       </section>
@@ -4996,34 +4991,65 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : `${percentChange > 0 ? "+" : ""}${this._formatNumber(percentChange)}%`;
     const changeAttribute = percentChange === null ? "unavailable" : this._formatNumber(percentChange);
     if (!scale) {
-      return `<section class="evidence-section" data-evidence-comparison="fallback">
+      return `<section class="evidence-section section-surface" data-evidence-comparison="fallback">
         <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
         <div class="summary">
-          ${this._metric(this._panelText("evidence.labels.observed"), alert && alert.observed_value)}
-          ${this._metric(this._panelText("common.expected"), alert && (alert.expected_value ?? alert.baseline_value))}
+          ${this._metric(this._alertMetricLabel(alert, "observed"), this._formatAlertMetricValue(alert, alert && alert.observed_value))}
+          ${this._metric(this._alertMetricLabel(alert, "expected"), this._formatAlertMetricValue(alert, alert && (alert.expected_value ?? alert.baseline_value)))}
         </div>
         <p class="comparison-change" data-comparison-change="${changeAttribute}"><strong>${this._escape(this._panelText("evidence.labels.change"))}:</strong> ${this._escape(change)}</p>
       </section>`;
     }
     const summaryValues = {
-      observed: this._formatMetricValue(scale.observed),
-      expected: this._formatMetricValue(scale.expected),
+      observed: this._formatAlertMetricValue(alert, scale.observed),
+      expected: this._formatAlertMetricValue(alert, scale.expected),
       change,
     };
+    const metricSummary = Boolean(alert && alert.value_label);
     const summary = scale.threshold === null
-      ? this._panelTextFormat("evidence.comparison_summary", summaryValues)
-      : this._panelTextFormat("evidence.comparison_summary_with_threshold", {
+      ? this._panelTextFormat(metricSummary ? "evidence.comparison_summary_metric" : "evidence.comparison_summary", {
         ...summaryValues,
-        threshold: this._formatMetricValue(scale.threshold),
+        metric: alert && alert.value_label,
+      })
+      : this._panelTextFormat(metricSummary ? "evidence.comparison_summary_with_threshold_metric" : "evidence.comparison_summary_with_threshold", {
+        ...summaryValues,
+        metric: alert && alert.value_label,
+        threshold: this._formatAlertMetricValue(alert, scale.threshold),
       });
-    return `<section class="evidence-section comparison" data-evidence-comparison="visual">
+    return `<section class="evidence-section comparison section-surface" data-evidence-comparison="visual">
       <h2>${this._escape(this._panelText("evidence.sections.comparison"))}</h2>
       <p class="comparison-change" data-comparison-change="${changeAttribute}"><strong>${this._escape(this._panelText("evidence.labels.change"))}:</strong> ${this._escape(change)}</p>
+      ${alert && alert.value_label ? `<p class="comparison-metric">${this._escape(alert.value_label)}</p>` : ""}
       <div class="comparison-scale" role="img" aria-label="${this._escape(summary)}">
         <div class="comparison-track"></div>
-        ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatMetricValue(marker.value))}</strong></span>`).join("")}
+        ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatAlertMetricValue(alert, marker.value))}</strong></span>`).join("")}
       </div>
     </section>`;
+  }
+
+  _alertMetricLabel(alert, roleKey) {
+    const role = this._panelText(`evidence.labels.${roleKey}`);
+    const metric = String(alert && alert.value_label || "").trim();
+    return metric ? `${role} ${metric}` : role;
+  }
+
+  _formatAlertMetricValue(alert, value) {
+    if (value === null || value === undefined || value === "") {
+      return this._panelText("common.unknown");
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return this._formatMetricValue(value);
+    }
+    if (alert && alert.value_format === "percentage") {
+      return `${(number * 100).toLocaleString(undefined, {
+        minimumFractionDigits: 3,
+        maximumFractionDigits: 3,
+      })}%`;
+    }
+    const formatted = number.toLocaleString(undefined, { maximumFractionDigits: 3 });
+    const unit = String(alert && alert.value_unit || "").trim();
+    return `${formatted}${unit ? ` ${unit}` : ""}`;
   }
 
   _renderActionGroup(title, description, buttons) {

@@ -1038,6 +1038,8 @@
         "loading": "Loading alert evidence...",
         "comparison_summary": "Observed {observed}; expected {expected}; change {change}.",
         "comparison_summary_with_threshold": "Observed {observed}; expected {expected}; threshold {threshold}; change {change}.",
+        "comparison_summary_metric": "Observed {metric}: {observed}; expected {metric}: {expected}; change {change}.",
+        "comparison_summary_with_threshold_metric": "Observed {metric}: {observed}; expected {metric}: {expected}; threshold {metric}: {threshold}; change {change}.",
         "change_unavailable": "Unavailable",
         "fallbacks": {
           "current_circuit_heading": "No current alert evidence",
