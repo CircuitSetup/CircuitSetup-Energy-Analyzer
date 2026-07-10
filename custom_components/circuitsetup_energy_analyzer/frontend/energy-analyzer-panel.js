@@ -114,11 +114,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._loading = true;
     this._historyLoading = false;
     this._nilmWorkspaceLoading = false;
+    this._nilmWorkspaceHistoryLoading = false;
     this._applianceDetailLoading = false;
     this._setupHealthLoading = false;
     this._error = "";
     this._historyError = "";
     this._nilmWorkspaceError = "";
+    this._nilmWorkspaceHistoryError = "";
     this._applianceDetailError = "";
     this._setupHealthError = "";
     this._busyAction = "";
@@ -139,6 +141,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmGraphWindow = null;
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
+    this._nilmIntervalFailedAction = "";
+    this._nilmIntervalFailedIndex = -1;
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -204,10 +208,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._error = "";
     this._historyError = "";
     this._historySeries = [];
+    this._nilmWorkspaceHistoryLoading = false;
     this._nilmWorkspace = null;
     this._applianceDetail = null;
     this._setupHealth = null;
     this._nilmWorkspaceError = "";
+    this._nilmWorkspaceHistoryError = "";
     this._applianceDetailError = "";
     this._setupHealthError = "";
     this._setupHealthLoading = false;
@@ -220,6 +226,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmGraphWindow = null;
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
+    this._nilmIntervalFailedAction = "";
+    this._nilmIntervalFailedIndex = -1;
     this._render();
 
     const routeUrl = new URL(routeKey, window.location.origin);
@@ -246,7 +254,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (alert && alert.graph_entities && alert.graph_entities.length) {
         await this._loadHistory(alert, requestId, routeKey);
       }
-      await this._loadNilmWorkspace(requestId, routeKey);
+      if (this._routeRequestsNilmWorkspace(routeKey)) {
+        await this._loadNilmWorkspace(requestId, routeKey);
+      }
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -286,6 +296,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   async _loadNilmWorkspace(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    if (!this._routeRequestsNilmWorkspace(routeKey)) {
+      return;
+    }
     const nilm = this._payload && this._payload.nilm;
     const routeUrl = new URL(routeKey, window.location.origin);
     const circuit = this._payload && this._payload.circuit;
@@ -303,6 +316,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       || `${NILM_WORKSPACE_API_PATH}?${query}`;
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
+    this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistorySeries = [];
     this._render();
 
@@ -312,27 +326,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._nilmWorkspace = workspace;
-      const historyPath = workspace && workspace.history && workspace.history.api_path;
-      const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
-        || (historyPath ? `/api/${historyPath}` : "");
-      if (historyPath) {
-        try {
-          const history = await this._requestJson(historyPath, historyFetchPath);
-          if (!this._isCurrentRequest(requestId, routeKey)) {
-            return;
-          }
-          this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
-        } catch (error) {
-          if (!this._isCurrentRequest(requestId, routeKey)) {
-            return;
-          }
-          this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
-        }
-      }
+      await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
+      this._nilmWorkspace = null;
       this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace", { message: error.message });
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
@@ -482,6 +481,43 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         this._error = message;
         this._renderAndScrollToTop();
+      }
+    }
+  }
+
+  async _loadNilmWorkspaceHistory(
+    workspace = this._nilmWorkspace,
+    requestId = this._evidenceRequestId,
+    routeKey = this._loadedRouteKey,
+  ) {
+    if (!this._routeRequestsNilmWorkspace(routeKey)) {
+      return;
+    }
+    const historyPath = workspace && workspace.history && workspace.history.api_path;
+    const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
+      || (historyPath ? `/api/${historyPath}` : "");
+    this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistorySeries = [];
+    if (!historyPath) {
+      return;
+    }
+    this._nilmWorkspaceHistoryLoading = true;
+    this._render();
+    try {
+      const history = await this._requestJson(historyPath, historyFetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._nilmWorkspaceHistoryError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._nilmWorkspaceHistoryLoading = false;
+        this._render();
       }
     }
   }
@@ -657,7 +693,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
   }
 
+  _clearNilmIntervalFeedback() {
+    this._nilmIntervalFailedAction = "";
+    this._nilmIntervalFailedIndex = -1;
+    if (this._inlineFeedback.scope === "nilm-interval") {
+      this._inlineFeedback = { scope: "", kind: "", message: "" };
+    }
+  }
+
+  _setNilmIntervalError(message, retryAction = "", retryIndex = -1) {
+    this._nilmIntervalFailedAction = retryAction;
+    this._nilmIntervalFailedIndex = retryIndex;
+    this._setInlineFeedback("nilm-interval", "error", message);
+  }
+
   async _callNilmLabelIntervalAction(index, actionKey) {
+    this._clearNilmIntervalFeedback();
     const workspace = this._nilmWorkspace;
     const intervals = workspace && workspace.label_intervals;
     let action = null;
@@ -665,8 +716,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (actionKey === "adjust") {
       const interval = intervals && intervals[index];
       if (!interval) {
-        this._error = this._panelText("errors.nilm_interval_required");
-        this._renderAndScrollToTop();
+        this._setNilmIntervalError(this._panelText("errors.nilm_interval_required"));
         return;
       }
       this._nilmLabelIntervalDraft = {
@@ -694,8 +744,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const start = this._datetimeLocalToIso(draft.start);
       const end = this._datetimeLocalToIso(draft.end);
       if (!label || !start || !end) {
-        this._error = this._panelText("errors.nilm_interval_fields_required");
-        this._renderAndScrollToTop();
+        this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
         return;
       }
       data.label = label;
@@ -708,8 +757,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       const groundTruthEntityId = String(draft.ground_truth_entity_id || "").trim();
       if (actionKey === "generate_sensor" && !groundTruthEntityId) {
-        this._error = this._panelText("errors.nilm_ground_truth_required");
-        this._renderAndScrollToTop();
+        this._setNilmIntervalError(this._panelText("errors.nilm_ground_truth_required"));
         return;
       }
       if (groundTruthEntityId) {
@@ -732,15 +780,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         data.assignment_id = existingAssignment.assignment_id;
       }
       if (!data.label) {
-        this._error = this._panelText("errors.nilm_interval_label_required");
-        this._renderAndScrollToTop();
+        this._setNilmIntervalError(this._panelText("errors.nilm_interval_label_required"));
         return;
       }
       if (interval && interval.appliance_id) {
         data.appliance_id = interval.appliance_id;
       }
     }
-    if (!this._guardActionCall(action, `NILM label interval ${actionKey}`)) {
+    if (!this._guardActionCall(action, `NILM label interval ${actionKey}`, "nilm-interval")) {
       return;
     }
     const busyKey = actionKey === "save" || actionKey === "generate_sensor"
@@ -765,13 +812,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
         this._nilmIntervalEditorOpen = false;
       }
+      this._clearNilmIntervalFeedback();
       this._busyAction = "";
       await this._loadEvidence({ routeKey: this._actionRefreshRouteKey("nilm_label_interval") });
       this._scrollToTop();
     } catch (error) {
-      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
       this._busyAction = "";
-      this._renderAndScrollToTop();
+      this._setNilmIntervalError(
+        this._panelTextFormat("errors.run_service", { service: action.service, message: error.message }),
+        actionKey,
+        index,
+      );
     }
   }
 
@@ -1037,8 +1088,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `${window.location.pathname}${window.location.search}`;
   }
 
-  _routeRequestsNilmWorkspace() {
-    const routeUrl = new URL(this._routeKey(), window.location.origin);
+  _routeRequestsNilmWorkspace(routeKey = this._routeKey()) {
+    const routeUrl = new URL(routeKey, window.location.origin);
     return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1";
   }
 
@@ -1761,6 +1812,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .review-card-heading {
           flex-wrap: wrap;
         }
+        .review-card-context {
+          flex-wrap: wrap;
+        }
         .review-card-heading strong {
           overflow-wrap: anywhere;
         }
@@ -1880,6 +1934,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
 
     this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
+    this._listen("[data-retry-alert-history]", () => {
+      const alert = this._payload && this._payload.alert;
+      return alert
+        ? this._loadHistory(alert, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+        : undefined;
+    });
+    this._listen("[data-retry-nilm-workspace]", () => (
+      this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+    ));
+    this._listen("[data-retry-nilm-history]", () => (
+      this._loadNilmWorkspaceHistory(this._nilmWorkspace, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+    ));
     this._listen("#apply_alert_decision", () => this._applyAlertDecision());
     for (const input of this.shadowRoot.querySelectorAll("[data-alert-decision]")) {
       input.addEventListener("change", () => {
@@ -1916,6 +1982,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       input.addEventListener("change", () => {
         const current = this._nilmDecisionDrafts.get(input.dataset.nilmDecisionKey) || { decision: "identify", identifyMode: "assign" };
         this._nilmDecisionDrafts.set(input.dataset.nilmDecisionKey, Object.assign({}, current, { identifyMode: input.value }));
+        this._render();
       });
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-decision-assignment-key]")) {
@@ -1999,6 +2066,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmLabelIntervalIndex || "-1", 10);
         this._callNilmLabelIntervalAction(index, button.dataset.nilmLabelIntervalAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-interval-retry]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.getAttribute("data-nilm-interval-retry-index") || "-1", 10);
+        this._callNilmLabelIntervalAction(index, button.getAttribute("data-nilm-interval-retry"));
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-session-action]")) {
@@ -2392,6 +2465,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           </section>
         </div>
       </section>
+      ${this._renderAlertResponse()}
       <details class="evidence-section disclosure" data-evidence-technical>
         <summary>${this._escape(this._panelText("evidence.sections.technical_details"))}</summary>
         <div class="summary">
@@ -2403,8 +2477,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${this._metric(this._panelText("evidence.labels.last_seen"), this._formatDateTime(alert.last_seen))}
         </div>
       </details>
-      ${this._renderNilmWorkspace()}
-      ${this._renderAlertResponse()}
       ${this._renderActionDisclosure("pause", this._panelText("actions.groups.pause_title"), this._panelText("actions.groups.pause_description"), [
         this._actionButton("pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
       ])}
@@ -2518,18 +2590,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           ${actions.label ? `<option value="label" ${identifyMode === "label" ? "selected" : ""}>${this._escape(this._panelText("nilm_workspace.identify_label_only"))}</option>` : ""}
         </select>
       </label>
-      ${this._renderNilmExistingAssignmentField(actions.assign, `signature_${index}`, draft.assignmentId, key)}
+      ${identifyMode === "assign" ? this._renderNilmExistingAssignmentField(actions.assign, `signature_${index}`, draft.assignmentId, key) : ""}
       ${this._renderNilmLabelField(signature, index)}
     ` : "";
     return `<div class="nilm-decision-flow">
-      <p class="muted">${this._escape(this._panelText("nilm_workspace.choose_decision"))}</p>
-      <div class="nilm-decision-options">
-        ${candidates.map(([value, icon, textKey]) => `<label class="nilm-decision-option">
-          <input type="radio" name="nilm_decision_${index}" value="${value}" data-nilm-decision data-nilm-decision-key="${this._escape(key)}" ${draft.decision === value ? "checked" : ""}>
-          <ha-icon icon="${icon}"></ha-icon>
-          <span>${this._escape(this._panelText(textKey))}</span>
-        </label>`).join("")}
-      </div>
+      <fieldset class="decision-group nilm-decision-group">
+        <legend>${this._escape(this._panelText("nilm_workspace.choose_decision"))}</legend>
+        <div class="nilm-decision-options">
+          ${candidates.map(([value, icon, textKey]) => `<label class="nilm-decision-option">
+            <input type="radio" name="nilm_decision_${index}" value="${value}" data-nilm-decision data-nilm-decision-key="${this._escape(key)}" ${draft.decision === value ? "checked" : ""}>
+            <ha-icon icon="${icon}"></ha-icon>
+            <span>${this._escape(this._panelText(textKey))}</span>
+          </label>`).join("")}
+        </div>
+      </fieldset>
       ${identifyFields}
       ${draft.decision === "merge" ? this._renderNilmMergeTarget(signature, index) : ""}
       <div class="actions">
@@ -3073,7 +3147,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const workspace = this._nilmWorkspace;
     if (this._nilmWorkspaceError && (!workspace || workspace.status !== "ok")) {
-      return `<section class="panel error"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p>${this._escape(this._nilmWorkspaceError)}</p></section>`;
+      return `<section class="panel error" data-nilm-workspace-error><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p>${this._escape(this._nilmWorkspaceError)}</p><button type="button" class="secondary" data-retry-nilm-workspace>${this._escape(this._panelText("common.retry"))}</button></section>`;
     }
     if (workspace && workspace.status !== "ok") {
       return `<section class="panel"><h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2><p class="muted">${this._escape(workspace.message || this._panelText("nilm_workspace.unavailable"))}</p></section>`;
@@ -3085,10 +3159,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const graphSessions = this._nilmFocusedSignature
       ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
       : workspace.sessions;
+    const intervalEditor = this._renderNilmLabelIntervalEditor(workspace);
     return `
       <section class="panel">
         <section class="workspace-section workspace-summary">${this._renderNilmWorkspaceSummary(workspace)}</section>
         <section class="workspace-section nilm-graph-section">${this._renderNilmGraph(workspace, graphWindow, graphSessions)}</section>
+        ${intervalEditor ? `<section class="workspace-section nilm-interval-editor-section">${intervalEditor}</section>` : ""}
         <section class="workspace-section">${this._renderNilmWorkspaceLanes(workspace)}</section>
         <section class="workspace-section">${this._renderNilmReviewLayout(workspace)}</section>
         <section class="workspace-section">${this._renderNilmSecondaryCollections(workspace)}</section>
@@ -3101,15 +3177,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       <h2>${this._escape(this._panelText("headers.nilm_workspace"))}</h2>
       <p class="muted">${this._escape(this._panelText("nilm_workspace.description"))}</p>
       ${this._renderNilmWorkspaceLanes(workspace, true)}
-      ${this._nilmWorkspaceError ? `<p class="muted">${this._escape(this._nilmWorkspaceError)}</p>` : ""}
     `;
   }
 
   _renderNilmGraph(workspace, graphWindow, graphSessions) {
     const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
-    const graph = graphWindow && series.length
-      ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
-      : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
+    const graph = this._nilmWorkspaceHistoryLoading
+      ? `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div>`
+      : this._nilmWorkspaceHistoryError
+        ? `<div data-nilm-history-error><p class="muted">${this._escape(this._nilmWorkspaceHistoryError)}</p><button type="button" class="secondary" data-retry-nilm-history>${this._escape(this._panelText("common.retry"))}</button></div>`
+        : graphWindow && series.length
+          ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: true, nilm_edges: workspace.edges, nilm_sessions: graphSessions })
+          : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
       ${this._renderNilmOverlayToggles(workspace)}
@@ -3122,13 +3201,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderNilmSecondaryCollections(workspace) {
-    const draft = this._nilmLabelIntervalDraft || {};
-    const editorOpen = this._nilmIntervalEditorOpen || draft.start || draft.end;
-    return `<details class="disclosure" data-nilm-secondary-details ${editorOpen ? "open" : ""}>
+    return `<details class="disclosure" data-nilm-secondary-details>
       <summary>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</summary>
       <div class="disclosure-content">
         ${this._renderNilmSessionValidationCards(workspace)}
-        ${this._renderNilmLabelIntervals(workspace)}
+        ${this._renderNilmSavedLabelIntervals(workspace)}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.estimated_appliances_title"), workspace.virtual_appliances, this._panelText("nilm_workspace.estimated_appliances_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.model_status || this._panelText("common.candidate"))}</span>
@@ -3244,10 +3321,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const confidence = Math.max(0, Math.min(100, Math.round(Number(item.confidence || 0) * 100)));
     const power = item.typical_power_w ?? item.estimated_power_w ?? item.median_power_w;
     const fingerprint = reviewItem.kind === "signature" ? this._nilmSignatureFingerprint(item) : "";
+    const contextFacts = reviewItem.kind === "signature" ? [
+      item.seen_count !== undefined
+        ? `${this._panelText("nilm_workspace.fact_seen_count")}: ${item.seen_count}`
+        : "",
+      item.last_seen
+        ? `${this._panelText("nilm_workspace.fact_last_seen")}: ${this._formatDateTime(item.last_seen)}`
+        : "",
+    ].filter(Boolean) : [];
     return `<button type="button" class="nilm-review-card" data-nilm-review-item="${this._escape(this._nilmReviewKey(reviewItem))}" ${fingerprint ? `data-nilm-signature-fingerprint="${this._escape(fingerprint)}"` : ""} aria-pressed="${selected}">
       <span class="review-card-heading"><strong>${this._escape(title)}</strong><span>${this._escape(this._friendlyFeature(item.review_state || item.lifecycle_state || this._nilmActiveLane))}</span></span>
       <span class="power-meter" style="--power-percent:${this._nilmPowerPercent(reviewItem, reviewItems)}%"><span></span></span>
       <span class="review-card-facts"><span>${this._escape(this._formatMetricValue(power))} W</span><span>${confidence}%</span></span>
+      ${contextFacts.length ? `<span class="review-card-facts review-card-context">${contextFacts.map((fact) => `<span>${this._escape(fact)}</span>`).join("")}</span>` : ""}
       <progress max="100" value="${confidence}" aria-label="${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence }))}"></progress>
     </button>`;
   }
@@ -3472,11 +3558,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return value;
   }
 
-  _renderNilmLabelIntervals(workspace) {
+  _renderNilmIntervalFeedback() {
+    const feedback = this._renderInlineFeedback("nilm-interval");
+    const retry = this._nilmIntervalFailedAction
+      ? `<div class="actions"><button type="button" class="secondary" data-nilm-interval-retry="${this._escape(this._nilmIntervalFailedAction)}" data-nilm-interval-retry-index="${this._nilmIntervalFailedIndex}">${this._escape(this._panelText("common.retry"))}</button></div>`
+      : "";
+    return `${feedback}${retry}`;
+  }
+
+  _renderNilmLabelIntervalEditor(workspace) {
     const draft = this._nilmLabelIntervalDraft || {};
-    const intervals = Array.isArray(workspace && workspace.label_intervals)
-      ? workspace.label_intervals
-      : [];
+    const editorOpen = this._nilmIntervalEditorOpen || draft.start || draft.end;
+    if (!editorOpen) {
+      return "";
+    }
     const sensorAction = workspace && workspace.actions && workspace.actions.sensor_label_interval;
     const groundTruthOptions = sensorAction && Array.isArray(sensorAction.ground_truth_options)
       ? sensorAction.ground_truth_options
@@ -3484,11 +3579,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
     const generateBusy = this._busyAction === "nilm_label_interval_generate_sensor" || !groundTruthOptions.length ? "disabled" : "";
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
-    const editorOpen = this._nilmIntervalEditorOpen || draft.start || draft.end;
-    return `
-      <h3>${this._escape(this._panelText("nilm_workspace.manual_labels"))}</h3>
-      <p class="muted">${this._escape(this._panelText("nilm_workspace.manual_labels_description"))}</p>
-      ${editorOpen ? `<div class="metric">
+    return `<div class="metric" data-nilm-interval-editor>
         <p class="muted"><strong>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</strong> ${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
         <div class="nilm-interval-form">
           <label>
@@ -3516,7 +3607,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <button type="button" class="secondary" data-nilm-label-interval-action="generate_sensor" ${generateBusy}>${this._escape(this._panelText("actions.labels.generate_from_sensor"))}</button>
         </div>
         ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">${this._escape(this._panelTextFormat("nilm_workspace.interval_energy_preview", { energy: this._formatNumber(intervalPreview.energy_kwh), duration: this._formatNumber(intervalPreview.duration_minutes), source: intervalPreview.source_name }))}</p>` : ""}
-      </div>` : ""}
+        ${this._renderNilmIntervalFeedback()}
+      </div>`;
+  }
+
+  _renderNilmSavedLabelIntervals(workspace) {
+    const intervals = Array.isArray(workspace && workspace.label_intervals)
+      ? workspace.label_intervals
+      : [];
+    const editorOpen = this._nilmIntervalEditorOpen
+      || this._nilmLabelIntervalDraft.start
+      || this._nilmLabelIntervalDraft.end;
+    return `
+      <h3>${this._escape(this._panelText("nilm_workspace.manual_labels"))}</h3>
+      <p class="muted">${this._escape(this._panelText("nilm_workspace.manual_labels_description"))}</p>
+      ${!editorOpen ? this._renderNilmIntervalFeedback() : ""}
       ${intervals.length ? `<div class="entity-list">${intervals.map((item, index) => `
         <div class="metric">
           <span>${this._escape(item.start || "")} - ${this._escape(item.end || "")}</span>
@@ -3757,7 +3862,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></div>`;
     }
     if (this._historyError) {
-      return `<p class="muted">${this._escape(this._historyError)}</p>`;
+      return `<div data-alert-history-error><p class="muted">${this._escape(this._historyError)}</p><button type="button" class="secondary" data-retry-alert-history>${this._escape(this._panelText("common.retry"))}</button></div>`;
     }
     const series = this._chartSeries();
     if (!series.length) {
@@ -4104,7 +4209,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
         ])}
       </section>
-      ${this._renderNilmWorkspace()}
       ${this._renderRecommendations()}
     `;
   }

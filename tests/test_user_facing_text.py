@@ -1323,7 +1323,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_zoomNilmGraph",
         "_panNilmGraph",
         "_nilmWorkspaceGraphWindow",
-        "_renderNilmLabelIntervals",
+        "_renderNilmLabelIntervalEditor",
+        "_renderNilmSavedLabelIntervals",
         "_renderNilmAssignmentActions",
         "_callNilmWorkspaceItemAction",
         "_callNilmLabelIntervalAction",
@@ -1560,6 +1561,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "available-nilm-actions" in PANEL_MODULE_VERSION
     assert "visual-hierarchy" in PANEL_MODULE_VERSION
     assert "visual-hierarchy-review" in PANEL_MODULE_VERSION
+    assert "scoped-retries" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -2008,6 +2010,9 @@ panel._nilmWorkspace = {
   edges: [],
   validation: {},
   actions: {},
+  lanes: {
+    needs_review: { label: "Needs Review", signature_ids: [], assignment_ids: [] },
+  },
 };
 const initialHtml = panel._renderNilmWorkspaceBody();
 if (!initialHtml.includes('data-nilm-open-interval-editor')) {
@@ -2023,18 +2028,32 @@ panel._selectNilmEdgeTime({
     nilmEdgeDirection: "on",
   },
 });
-const selectedHtml = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
+const selectedHtml = panel._renderNilmWorkspaceBody();
 if (
   !panel._nilmIntervalEditorOpen
   || !selectedHtml.includes('class="nilm-interval-form"')
 ) {
   throw new Error(`edge selection did not reveal interval editor: ${selectedHtml}`);
 }
+const graph = selectedHtml.indexOf('class="workspace-section nilm-graph-section"');
+const editor = selectedHtml.indexOf(
+  'class="workspace-section nilm-interval-editor-section"'
+);
+const lanes = selectedHtml.indexOf('role="tablist"');
+if (!(graph >= 0 && graph < editor && editor < lanes)) {
+  throw new Error(`interval editor is not directly below graph: ${selectedHtml}`);
+}
+const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
 if (
-  !selectedHtml.includes('data-nilm-secondary-details')
-  || !selectedHtml.includes('<details')
+  !secondary.includes('data-nilm-secondary-details')
+  || !secondary.includes('<details')
 ) {
   throw new Error(`secondary collections lost their disclosure: ${selectedHtml}`);
+}
+if (secondary.includes('class="nilm-interval-form"')) {
+  throw new Error(
+    `secondary disclosure still owns the active interval editor: ${secondary}`
+  );
 }
 """
     )
@@ -2300,6 +2319,76 @@ if (!mergeHtml.includes('data-selected="sig-2"')) {
     )
 
 
+def test_nilm_identify_modes_rerender_only_their_relevant_fields() -> None:
+    _run_panel_node_script(
+        """
+const listeners = {};
+let rerenders = 0;
+const signature = {
+  signature_id: "sig-1",
+  display_label: "Unknown load",
+  actions: {
+    label: { service: "label_nilm_signature" },
+    assign: {
+      service: "assign_nilm_signature",
+      assignment_options: [{ value: "assignment-1", label: "Dishwasher" }],
+    },
+  },
+};
+const panel = new context.Panel();
+const key = panel._nilmDecisionDraftKey(signature);
+const identifyMode = {
+  value: "label",
+  dataset: { nilmDecisionKey: key },
+  addEventListener(type, callback) { listeners[type] = callback; },
+};
+panel._loading = false;
+panel._payload = { status: "not_found", actions: {} };
+panel._nilmWorkspace = { status: "ok", signatures: [signature] };
+panel._nilmDecisionDrafts.set(key, { decision: "identify", identifyMode: "assign" });
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelector() { return null; },
+  querySelectorAll(selector) {
+    return selector === "[data-nilm-identify-mode]" ? [identifyMode] : [];
+  },
+};
+panel._render();
+if (typeof listeners.change !== "function") {
+  throw new Error("identify mode change listener was not registered");
+}
+panel._render = () => { rerenders += 1; };
+
+listeners.change();
+const labelHtml = panel._renderNilmDecisionFlow(signature, 0);
+for (const semantic of [
+  '<fieldset class="decision-group nilm-decision-group"',
+  "<legend>",
+]) {
+  if (!labelHtml.includes(semantic)) {
+    throw new Error(`decision choices lack ${semantic}: ${labelHtml}`);
+  }
+}
+if (labelHtml.includes('data-nilm-existing-assignment="signature_0"')) {
+  throw new Error(`Label only exposed an ignored assignment selector: ${labelHtml}`);
+}
+if (!labelHtml.includes('id="nilm_label_0"') || rerenders !== 1) {
+  throw new Error(`Label only did not rerender its field: ${labelHtml}`);
+}
+
+identifyMode.value = "assign";
+listeners.change();
+const assignHtml = panel._renderNilmDecisionFlow(signature, 0);
+if (!assignHtml.includes('data-nilm-existing-assignment="signature_0"')) {
+  throw new Error(`Assign mode did not expose assignment selector: ${assignHtml}`);
+}
+if (!assignHtml.includes('id="nilm_label_0"') || rerenders !== 2) {
+  throw new Error(`Assign mode did not rerender its fields: ${assignHtml}`);
+}
+"""
+    )
+
+
 def test_nilm_decision_identify_assigns_without_scrolling_to_top() -> None:
     _run_panel_node_script(
         """
@@ -2541,13 +2630,42 @@ for (const duplicate of ["Show on Graph", "data-nilm-signature-focus"]) {
     )
 
 
+def test_nilm_review_card_shows_compact_occurrence_and_last_seen_context() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const reviewItem = {
+  kind: "signature",
+  index: 0,
+  item: {
+    signature_id: "sig-1",
+    display_label: "Unknown load",
+    typical_power_w: 1250,
+    confidence: 0.82,
+    seen_count: 7,
+    last_seen: "2026-07-09T14:30:00Z",
+  },
+};
+const html = panel._renderNilmReviewCard(reviewItem, [reviewItem], true);
+for (const expected of ["Seen count: 7", "Last seen:", "2026-07-09"]) {
+  if (!html.includes(expected)) {
+    throw new Error(`review card omitted ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_nilm_failed_interval_save_preserves_open_editor_and_draft() -> None:
     _run_panel_node_script(
         """
 (async () => {
 const panel = new context.Panel();
 panel._render = () => {};
-panel._renderAndScrollToTop = () => {};
+panel.shadowRoot.querySelector = () => null;
+let scrolls = 0;
+panel._renderAndScrollToTop = () => { scrolls += 1; };
+panel._scrollToTop = () => { scrolls += 1; };
 panel._nilmIntervalEditorOpen = true;
 panel._nilmLabelIntervalDraft = {
   start: "2026-06-24T18:12",
@@ -2575,6 +2693,72 @@ await panel._callNilmLabelIntervalAction(-1, "save");
 
 if (!panel._nilmIntervalEditorOpen || panel._nilmLabelIntervalDraft !== draft) {
   throw new Error("failed interval save discarded the open draft");
+}
+if (scrolls !== 0) {
+  throw new Error(`failed interval save scrolled ${scrolls} times`);
+}
+if (panel._inlineFeedback.scope !== "nilm-interval"
+    || panel._inlineFeedback.kind !== "error"
+    || panel._nilmIntervalFailedAction !== "save") {
+  const state = JSON.stringify({
+    feedback: panel._inlineFeedback,
+    retry: panel._nilmIntervalFailedAction,
+  });
+  throw new Error(`failed interval save was not locally retryable: ${state}`);
+}
+const html = panel._renderNilmLabelIntervalEditor(panel._nilmWorkspace);
+if (!html.includes('data-nilm-interval-retry="save"')
+    || !html.includes("save failed")) {
+  throw new Error(`interval editor hid retry feedback: ${html}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_interval_validation_stays_local_and_keeps_draft_context() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let scrolls = 0;
+const panel = new context.Panel();
+panel._render = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._renderAndScrollToTop = () => { scrolls += 1; };
+panel._scrollToTop = () => { scrolls += 1; };
+panel._nilmIntervalEditorOpen = true;
+panel._nilmLabelIntervalDraft = {
+  start: "2026-06-24T18:12",
+  end: "2026-06-24T19:03",
+  label: "",
+  appliance_id: "",
+  ground_truth_entity_id: "",
+};
+const draft = panel._nilmLabelIntervalDraft;
+panel._nilmWorkspace = {
+  actions: {
+    label_interval: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_interval",
+      data: {},
+    },
+  },
+  label_intervals: [],
+};
+
+await panel._callNilmLabelIntervalAction(-1, "save");
+
+if (scrolls !== 0 || panel._nilmLabelIntervalDraft !== draft
+    || !panel._nilmIntervalEditorOpen) {
+  throw new Error("interval validation lost graph/form context");
+}
+if (panel._inlineFeedback.scope !== "nilm-interval"
+    || panel._inlineFeedback.kind !== "error") {
+  const feedback = JSON.stringify(panel._inlineFeedback);
+  throw new Error(`interval validation was not local: ${feedback}`);
 }
 })().catch((error) => {
   console.error(error);
@@ -3210,7 +3394,7 @@ panel._nilmLabelIntervalDraft = {
   end: "2026-06-24T19:03",
   label: "Dishwasher"
 };
-const html = panel._renderNilmLabelIntervals({
+const html = panel._renderNilmLabelIntervalEditor({
   label_intervals: [],
   actions: {
     sensor_label_interval: {
@@ -3990,6 +4174,286 @@ for (const marker of ["observed", "expected", "threshold"]) {
     throw new Error(`missing ${marker} marker: ${html}`);
   }
 }
+"""
+    )
+
+
+def test_alert_route_never_loads_or_renders_nilm_and_response_precedes_details() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+(async () => {
+const requests = [];
+const panel = new context.Panel();
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?alert_id=alert-1";
+panel._render = () => {};
+panel._requestJson = async (apiPath, fetchPath) => {
+  requests.push({ apiPath, fetchPath });
+  if (apiPath.startsWith("circuitsetup_energy_analyzer/nilm_workspace")) {
+    return { status: "ok", signatures: [], history: {} };
+  }
+  return {
+    status: "matched_alert",
+    circuit: { circuit_id: "mains", name: "Whole Home" },
+    alert: {
+      alert_id: "alert-1",
+      circuit_id: "mains",
+      feature: "daily_energy",
+      feature_name: "Daily Energy",
+      observed_value: 18.2,
+      expected_value: 12.0,
+      threshold: 16.0,
+      repeated_count: 2,
+      graph_entities: [],
+      what_happened: "Energy increased.",
+      why_it_matters: "The change is worth reviewing.",
+      what_to_check_first: "Check recent loads.",
+    },
+    nilm: {
+      workspace_call_api_path:
+        "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+      workspace_api_path:
+        "/api/circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains",
+    },
+    actions: { acknowledge: { service: "acknowledge_alert", data: {} } },
+  };
+};
+
+await panel._loadEvidence({ routeKey: panel._routeKey() });
+
+if (
+  requests.length !== 1
+  || !requests[0].apiPath.startsWith("circuitsetup_energy_analyzer/alert_evidence")
+) {
+  const calls = JSON.stringify(requests);
+  throw new Error(`alert route loaded another destination: ${calls}`);
+}
+if (panel._nilmWorkspace !== null) {
+  const workspace = JSON.stringify(panel._nilmWorkspace);
+  throw new Error(`alert route retained NILM workspace: ${workspace}`);
+}
+panel._nilmWorkspace = { status: "ok", signatures: [], history: {} };
+const html = panel._renderAlertContent(panel._payload.alert, panel._payload.circuit);
+for (const forbidden of ["NILM Workspace", "workspace-summary", "nilm-review-layout"]) {
+  if (html.includes(forbidden)) {
+    throw new Error(`alert evidence embedded NILM content ${forbidden}: ${html}`);
+  }
+}
+const explanation = html.indexOf("data-evidence-explanation");
+const response = html.indexOf('class="evidence-section response-section"');
+const technical = html.indexOf("data-evidence-technical");
+if (!(explanation >= 0 && explanation < response && response < technical)) {
+  throw new Error(`response hierarchy is wrong: ${html}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_alert_history_error_stays_in_graph_and_retries_only_history() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+let retryHistory = 0;
+let reloadEvidence = 0;
+const listeners = {};
+const retry = {
+  addEventListener(type, callback) { listeners[type] = callback; },
+};
+const panel = new context.Panel();
+panel._loading = false;
+panel._historyError = "Could not load history samples.";
+panel._payload = {
+  status: "matched_alert",
+  circuit: { circuit_id: "mains", name: "Whole Home" },
+  alert: {
+    alert_id: "alert-1",
+    circuit_id: "mains",
+    feature: "daily_energy",
+    observed_value: 18.2,
+    expected_value: 12.0,
+    repeated_count: 2,
+    graph_entities: ["sensor.mains_power"],
+  },
+  actions: {},
+};
+const draft = { decision: "identify", identifyMode: "label" };
+panel._nilmDecisionDrafts.set("draft", draft);
+panel._loadHistory = async () => { retryHistory += 1; };
+panel._loadEvidence = async () => { reloadEvidence += 1; };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll() { return []; },
+  querySelector(selector) {
+    return selector === "[data-retry-alert-history]" ? retry : null;
+  },
+};
+
+panel._render();
+if (!panel.shadowRoot.innerHTML.includes("data-alert-history-error")
+    || !panel.shadowRoot.innerHTML.includes("data-evidence-graph")) {
+  throw new Error(
+    `alert history failure left the graph region: ${panel.shadowRoot.innerHTML}`
+  );
+}
+if (typeof listeners.click !== "function") {
+  throw new Error("alert history retry listener was not registered");
+}
+await listeners.click();
+if (retryHistory !== 1 || reloadEvidence !== 0) {
+  throw new Error(
+    `history retry reloaded the wrong operation: ${retryHistory}/${reloadEvidence}`
+  );
+}
+if (panel._nilmDecisionDrafts.get("draft") !== draft) {
+  throw new Error("alert history retry discarded unrelated draft context");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_load_errors_have_workspace_and_graph_scoped_retries() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+
+const workspaceListeners = {};
+const workspaceRetry = {
+  addEventListener(type, callback) { workspaceListeners[type] = callback; },
+};
+const workspacePanel = new context.Panel();
+workspacePanel._loading = false;
+workspacePanel._payload = { status: "circuit_found_no_evidence", actions: {} };
+workspacePanel._nilmWorkspaceError = "Could not load NILM workspace.";
+const decisionDraft = { decision: "ignore" };
+workspacePanel._nilmDecisionDrafts.set("draft", decisionDraft);
+let workspaceLoads = 0;
+let historyLoads = 0;
+workspacePanel._loadNilmWorkspace = async () => { workspaceLoads += 1; };
+workspacePanel._loadNilmWorkspaceHistory = async () => { historyLoads += 1; };
+workspacePanel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll() { return []; },
+  querySelector(selector) {
+    return selector === "[data-retry-nilm-workspace]" ? workspaceRetry : null;
+  },
+};
+workspacePanel._render();
+if (!workspacePanel.shadowRoot.innerHTML.includes("data-nilm-workspace-error")) {
+  throw new Error(
+    `full NILM failure has no workspace retry: ${workspacePanel.shadowRoot.innerHTML}`
+  );
+}
+if (typeof workspaceListeners.click !== "function") {
+  throw new Error("workspace retry listener was not registered");
+}
+await workspaceListeners.click();
+if (workspaceLoads !== 1 || historyLoads !== 0
+    || workspacePanel._nilmDecisionDrafts.get("draft") !== decisionDraft) {
+  throw new Error("workspace retry did not preserve its operation scope");
+}
+
+const historyListeners = {};
+const historyRetry = {
+  addEventListener(type, callback) { historyListeners[type] = callback; },
+};
+const historyPanel = new context.Panel();
+historyPanel._loading = false;
+historyPanel._payload = { status: "circuit_found_no_evidence", actions: {} };
+historyPanel._nilmWorkspace = {
+  status: "ok",
+  history: { api_path: "history/period/2026-07-09" },
+  signatures: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {},
+  actions: {},
+  lanes: {},
+};
+historyPanel._nilmWorkspaceHistoryError = "Could not load NILM history.";
+const labelDraft = { start: "2026-07-09T10:00", label: "Dryer" };
+historyPanel._nilmLabelIntervalDraft = labelDraft;
+workspaceLoads = 0;
+historyLoads = 0;
+historyPanel._loadNilmWorkspace = async () => { workspaceLoads += 1; };
+historyPanel._loadNilmWorkspaceHistory = async () => { historyLoads += 1; };
+historyPanel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll() { return []; },
+  querySelector(selector) {
+    return selector === "[data-retry-nilm-history]" ? historyRetry : null;
+  },
+};
+historyPanel._render();
+const html = historyPanel.shadowRoot.innerHTML;
+if (!html.includes("data-nilm-history-error")
+    || !html.includes('class="workspace-section nilm-graph-section"')
+    || html.includes("No graph history is available yet.")) {
+  throw new Error(`NILM history failure was rendered as empty data: ${html}`);
+}
+if (typeof historyListeners.click !== "function") {
+  throw new Error("NILM history retry listener was not registered");
+}
+await historyListeners.click();
+if (historyLoads !== 1 || workspaceLoads !== 0
+    || historyPanel._nilmLabelIntervalDraft !== labelDraft) {
+  throw new Error("NILM history retry did not preserve graph draft context");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_failed_nilm_workspace_refresh_does_not_leave_stale_content_visible() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const panel = new context.Panel();
+panel._render = () => {};
+panel._payload = { circuit: { circuit_id: "mains" } };
+panel._nilmWorkspace = { status: "ok", signatures: [{ signature_id: "stale" }] };
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 1;
+panel._requestJson = async () => { throw new Error("refresh failed"); };
+
+await panel._loadNilmWorkspace(1, panel._loadedRouteKey);
+
+if (
+  panel._nilmWorkspace !== null
+  || !panel._nilmWorkspaceError.includes("refresh failed")
+) {
+  throw new Error(`failed refresh left stale workspace: ${JSON.stringify({
+    workspace: panel._nilmWorkspace,
+    error: panel._nilmWorkspaceError,
+  })}`);
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     )
 
