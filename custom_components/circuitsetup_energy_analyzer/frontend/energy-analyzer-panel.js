@@ -121,6 +121,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historyError = "";
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
     this._setupHealthError = "";
     this._busyAction = "";
@@ -214,6 +215,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._setupHealth = null;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
     this._setupHealthError = "";
     this._setupHealthLoading = false;
@@ -317,6 +319,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistoryFailedRequest = null;
     this._nilmWorkspaceHistorySeries = [];
     this._render();
 
@@ -497,6 +500,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
       || (historyPath ? `/api/${historyPath}` : "");
     this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistoryFailedRequest = null;
     this._nilmWorkspaceHistorySeries = [];
     if (!historyPath) {
       return;
@@ -509,6 +513,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
+      this._nilmWorkspaceHistoryError = "";
+      this._nilmWorkspaceHistoryFailedRequest = null;
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -1943,9 +1949,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
-    this._listen("[data-retry-nilm-history]", () => (
-      this._loadNilmWorkspaceHistory(this._nilmWorkspace, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
-    ));
+    this._listen("[data-retry-nilm-history]", () => {
+      const failedRequest = this._nilmWorkspaceHistoryFailedRequest;
+      return failedRequest
+        ? this._loadNilmWorkspaceHistoryForWindow(
+          failedRequest.window,
+          failedRequest,
+        )
+        : this._loadNilmWorkspaceHistory(
+          this._nilmWorkspace,
+          this._evidenceRequestId,
+          this._loadedRouteKey || this._routeKey(),
+        );
+    });
     this._listen("#apply_alert_decision", () => this._applyAlertDecision());
     for (const input of this.shadowRoot.querySelectorAll("[data-alert-decision]")) {
       input.addEventListener("change", () => {
@@ -2819,12 +2835,46 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return { start: start - padding, end: end + padding };
   }
 
-  async _loadNilmWorkspaceHistoryForWindow(window) {
+  async _loadNilmWorkspaceHistoryForWindow(window, failedRequest = null) {
     const workspace = this._nilmWorkspace;
     const history = workspace && workspace.history;
     if (!history || !history.api_path) {
       return false;
     }
+    const request = failedRequest || this._nilmWorkspaceFocusedHistoryRequest(
+      history,
+      window,
+    );
+    this._nilmWorkspaceHistoryError = "";
+    this._nilmWorkspaceHistoryFailedRequest = null;
+    this._nilmWorkspaceHistorySeries = [];
+    this._nilmWorkspaceHistoryLoading = true;
+    this._render();
+    try {
+      const rows = await this._requestJson(request.apiPath, request.fetchPath);
+      this._nilmWorkspaceHistorySeries = Array.isArray(rows) ? rows : [];
+      this._nilmWorkspaceHistoryError = "";
+      this._nilmWorkspaceHistoryFailedRequest = null;
+      Object.assign(history, {
+        api_path: request.apiPath,
+        fetch_path: request.fetchPath,
+        hours: request.hours,
+        start: new Date(request.start).toISOString(),
+        end: new Date(request.end).toISOString(),
+      });
+      return true;
+    } catch (error) {
+      this._nilmWorkspaceHistorySeries = [];
+      this._nilmWorkspaceHistoryError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
+      this._nilmWorkspaceHistoryFailedRequest = request;
+      return false;
+    } finally {
+      this._nilmWorkspaceHistoryLoading = false;
+      this._render();
+    }
+  }
+
+  _nilmWorkspaceFocusedHistoryRequest(history, window) {
     const historyEnd = Date.parse(history.end || "");
     const end = Math.max(
       Number.isFinite(historyEnd) ? historyEnd : Date.now(),
@@ -2835,29 +2885,24 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       1,
       Math.ceil((end - window.start) / (60 * 60 * 1000)),
     );
-    const hours = Number.isFinite(maxHours) ? Math.min(maxHours, neededHours) : neededHours;
+    const hours = Number.isFinite(maxHours)
+      ? Math.min(maxHours, neededHours)
+      : neededHours;
     const start = end - hours * 60 * 60 * 1000;
-    const apiPath = this._nilmWorkspaceHistoryPathWithHours(history.api_path, hours);
-    const fetchPath = this._nilmWorkspaceHistoryPathWithHours(
-      history.fetch_path || `/api/${history.api_path}`,
+    return {
+      window: { start: window.start, end: window.end },
       hours,
-    );
-    try {
-      const rows = await this._requestJson(apiPath, fetchPath);
-      this._nilmWorkspaceHistorySeries = Array.isArray(rows) ? rows : [];
-      this._nilmWorkspaceError = "";
-      Object.assign(history, {
-        api_path: apiPath,
-        fetch_path: fetchPath,
+      start,
+      end,
+      apiPath: this._nilmWorkspaceHistoryPathWithHours(
+        history.api_path,
         hours,
-        start: new Date(start).toISOString(),
-        end: new Date(end).toISOString(),
-      });
-      return true;
-    } catch (error) {
-      this._nilmWorkspaceError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
-      return false;
-    }
+      ),
+      fetchPath: this._nilmWorkspaceHistoryPathWithHours(
+        history.fetch_path || `/api/${history.api_path}`,
+        hours,
+      ),
+    };
   }
 
   _nilmWorkspaceHistoryPathWithHours(path, hours) {

@@ -1562,6 +1562,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "visual-hierarchy" in PANEL_MODULE_VERSION
     assert "visual-hierarchy-review" in PANEL_MODULE_VERSION
     assert "scoped-retries" in PANEL_MODULE_VERSION
+    assert "focused-history-retry" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -5088,6 +5089,162 @@ if (!ticks.some((tick) => /Jun|6\\//.test(tick.label))) {
     `expected a displayed date in HA timezone labels: ${labels}`
   );
 }
+"""
+    )
+
+
+def test_focused_nilm_history_failure_retries_exact_window_and_keeps_drafts() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+(async () => {
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+const listeners = {};
+const retry = {
+  addEventListener(type, callback) { listeners[type] = callback; },
+};
+const requests = [];
+const panel = new context.Panel();
+panel._loading = false;
+panel._loadedRouteKey = panel._routeKey();
+panel._evidenceRequestId = 1;
+panel._payload = { status: "circuit_found_no_evidence", actions: {} };
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {
+    start: "2026-06-06T03:00:00Z",
+    end: "2026-06-06T04:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=1",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history"
+      + "?circuit_id=mains&hours=1",
+  },
+  signatures: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  assignments: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  sessions: [],
+  edges: [],
+  validation: {},
+  actions: {},
+  lanes: {},
+};
+const stale = [[{
+  entity_id: "sensor.mains_power",
+  state: "100",
+  last_changed: "2026-06-06T03:30:00Z",
+}]];
+const fresh = [[{
+  entity_id: "sensor.mains_power",
+  state: "350",
+  last_changed: "2026-06-06T02:05:00Z",
+}]];
+panel._nilmWorkspaceHistorySeries = stale;
+panel._nilmWorkspaceError = "unrelated workspace warning";
+panel._nilmFocusedSignature = "signature-1";
+panel._nilmGraphWindow = { start: 1, end: 2, min: 0, max: 3 };
+panel._nilmIntervalEditorOpen = true;
+panel._nilmLabelIntervalDraft = {
+  start: "2026-06-06T02:00",
+  end: "2026-06-06T02:30",
+  label: "Dryer",
+};
+panel._nilmDecisionDrafts.set("signature-1", {
+  decision: "identify",
+  identifyMode: "label",
+});
+const graphWindow = panel._nilmGraphWindow;
+const intervalDraft = panel._nilmLabelIntervalDraft;
+const decisionDrafts = panel._nilmDecisionDrafts;
+panel._requestJson = async (apiPath, fetchPath) => {
+  requests.push({ apiPath, fetchPath });
+  if (requests.length === 1) throw new Error("focused history failed");
+  return fresh;
+};
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll() { return []; },
+  querySelector(selector) {
+    if (
+      selector === "[data-retry-nilm-history]"
+      && this.innerHTML.includes("data-retry-nilm-history")
+    ) {
+      return retry;
+    }
+    return null;
+  },
+};
+const requestedWindow = {
+  start: Date.parse("2026-06-06T01:30:00Z"),
+  end: Date.parse("2026-06-06T02:45:00Z"),
+};
+
+await panel._loadNilmWorkspaceHistoryForWindow(requestedWindow);
+
+if (panel._nilmWorkspaceHistorySeries.length !== 0) {
+  throw new Error("focused history failure left stale graph series");
+}
+if (!panel._nilmWorkspaceHistoryError.includes("focused history failed")) {
+  throw new Error("focused history failure did not use graph-local error");
+}
+if (!panel.shadowRoot.innerHTML.includes("data-nilm-history-error")) {
+  throw new Error("focused history failure was not visible in graph region");
+}
+if (typeof listeners.click !== "function") {
+  throw new Error("focused history retry listener was not rebound");
+}
+const failed = panel._nilmWorkspaceHistoryFailedRequest;
+if (
+  !failed
+  || failed.hours !== 3
+  || failed.window.start !== requestedWindow.start
+  || failed.window.end !== requestedWindow.end
+) {
+  throw new Error(`focused retry request was not retained: ${JSON.stringify(failed)}`);
+}
+
+await listeners.click();
+
+if (requests.length !== 2) {
+  throw new Error(`focused retry request count was ${requests.length}`);
+}
+if (
+  requests[0].apiPath !== requests[1].apiPath
+  || requests[0].fetchPath !== requests[1].fetchPath
+  || !requests[1].apiPath.includes("hours=3")
+) {
+  throw new Error(`focused retry changed path: ${JSON.stringify(requests)}`);
+}
+if (panel._nilmWorkspaceHistorySeries !== fresh) {
+  throw new Error("focused history retry did not replace graph series");
+}
+if (
+  panel._nilmWorkspaceHistoryError
+  || panel._nilmWorkspaceHistoryFailedRequest !== null
+) {
+  throw new Error("focused history success left failed-operation state");
+}
+if (panel._nilmWorkspaceError !== "unrelated workspace warning") {
+  throw new Error("focused history retry cleared unrelated workspace error");
+}
+if (
+  panel._nilmFocusedSignature !== "signature-1"
+  || panel._nilmGraphWindow !== graphWindow
+  || panel._nilmLabelIntervalDraft !== intervalDraft
+  || panel._nilmDecisionDrafts !== decisionDrafts
+  || !panel._nilmIntervalEditorOpen
+) {
+  throw new Error("focused history retry discarded review context");
+}
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     )
 
