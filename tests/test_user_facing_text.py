@@ -2102,7 +2102,6 @@ def test_alert_decision_action_contracts() -> None:
         if (outcome === "resolve") settle.resolve();
         else settle.reject(new Error("late failure"));
         await operation;
-        const label = `${kind} ${outcome}`;
         assert.deepEqual(
           [panel._payload, requests, renders, scrolls, replaces,
             panel._lastActionMessage, panel._error, panel._inlineFeedback.message],
@@ -2345,8 +2344,14 @@ def test_nilm_lane_rendering_contracts() -> None:
       ]) {
         assert.ok(!summary.includes(duplicate));
       }
+      name = "test_nilm_workspace_renders_review_lanes_from_payload";
       const lanes = panel._renderNilmWorkspaceLanes(workspace);
       assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 6);
+      for (const expected of [
+        'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
+        "Needs Review", "Needs Validation", "Ready to Publish", "Published",
+        "Ignored / Expected", "<strong>2</strong>",
+      ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
         /summaryOnly/,
@@ -2800,6 +2805,75 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(html.includes("Dishwasher"));
       assert.ok(html.includes("Confidence 80%"));
     }
+
+    const validationSession = {
+      session_id: "session-dishwasher",
+      start: "2026-06-24T18:12:00Z",
+      end: "2026-06-24T19:03:00Z",
+      display_label: "Dishwasher",
+      assignment_id: "assignment-dishwasher",
+      signature_fingerprint: "dishwasher-fingerprint",
+      confidence: 0.82,
+      median_power_w: 720,
+      estimated_energy_kwh: 0.61,
+      actions: { validate: {}, reject: {} },
+    };
+    name = "test_nilm_workspace_renders_session_validation_cards";
+    {
+      const panel = makePanel({ _nilmWorkspace: makeWorkspace({
+        signatures: [{ signature_id: "sig-dishwasher",
+          feedback_fingerprint: "dishwasher-fingerprint", actions: { ignore: {} } }],
+        sessions: [validationSession],
+      }) });
+      const html = panel._renderNilmWorkspaceBody();
+      for (const expected of [
+        "Session Validation", "Predicted Dishwasher", "2026-06-24", "51m",
+        "Estimated by NILM", "Confidence 82%", "Correct", "Wrong appliance",
+        "Adjust Interval", 'data-nilm-session-action="validate"',
+        'data-nilm-session-action="reject"', 'data-nilm-session-interval-index="0"',
+      ]) assert.ok(html.includes(expected), expected);
+      for (const duplicate of ["Ignore Similar", 'data-nilm-action="ignore"']) {
+        assert.ok(!html.includes(duplicate), duplicate);
+      }
+    }
+
+    name = "test_nilm_workspace_hides_already_reviewed_session_validation_cards";
+    {
+      const workspace = makeWorkspace({
+        assignments: [{ assignment_id: "assignment-dishwasher",
+          confirmed_session_ids: ["session-confirmed"],
+          rejected_session_ids: ["session-rejected"] }],
+        sessions: [
+          { ...validationSession, session_id: "session-confirmed", display_label: "Already Confirmed" },
+          { ...validationSession, session_id: "session-rejected", display_label: "Already Rejected" },
+          { ...validationSession, session_id: "session-pending", display_label: "Pending Dishwasher" },
+        ],
+      });
+      const html = makePanel({ _nilmWorkspace: workspace })._renderNilmWorkspaceBody();
+      for (const hidden of ["Already Confirmed", "Already Rejected"]) {
+        assert.ok(!html.includes(hidden), hidden);
+      }
+      assert.ok(html.includes("Predicted Pending Dishwasher"));
+    }
+
+    name = "test_nilm_workspace_marks_low_confidence_estimated_sessions";
+    {
+      const panel = makePanel({ _nilmWorkspace: makeWorkspace({
+        history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
+        sessions: [{ ...validationSession, confidence: 0.7 }],
+      }) });
+      panel._nilmWorkspaceHistorySeries = [[
+        { entity_id: "sensor.mains_power", state: "200",
+          last_changed: "2026-06-24T18:00:00Z" },
+        { entity_id: "sensor.mains_power", state: "900",
+          last_changed: "2026-06-24T19:10:00Z" },
+      ]];
+      const html = panel._renderNilmWorkspaceBody();
+      for (const expected of [
+        "Estimated by NILM", "Low confidence", "Confidence 70%",
+        'data-nilm-session-confidence="0.70"', 'data-nilm-low-confidence="true"',
+      ]) assert.ok(html.includes(expected), expected);
+    }
   } catch (error) {
     console.error(name, error);
     throw error;
@@ -2807,85 +2881,6 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
 })();
 """
     )
-
-def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
-    _run_panel_node_script(
-        """
-const panel = new context.Panel();
-panel._nilmWorkspace = {
-  status: "ok",
-  history: {},
-  signatures: [],
-  label_intervals: [],
-  virtual_appliances: [],
-  assignments: [],
-  known_load_overlays: [],
-  solar_overlays: [],
-  sessions: [],
-  edges: [],
-  validation: {},
-  lanes: {
-    needs_review: {
-      label: "Needs Review",
-      signature_ids: ["sig-new"],
-      assignment_ids: []
-    },
-    assigned: {
-      label: "Assigned",
-      signature_ids: [],
-      assignment_ids: ["assignment-1"]
-    },
-    needs_validation: {
-      label: "Needs Validation",
-      signature_ids: [],
-      assignment_ids: ["assignment-2"]
-    },
-    ready_to_publish: {
-      label: "Ready to Publish",
-      signature_ids: [],
-      assignment_ids: ["assignment-3", "assignment-4"]
-    },
-    published: {
-      label: "Published",
-      signature_ids: [],
-      assignment_ids: ["assignment-5"]
-    },
-    ignored_expected: {
-      label: "Ignored / Expected",
-      signature_ids: ["sig-ignored"],
-      assignment_ids: []
-    }
-  },
-  lane_counts: {
-    needs_review: 1,
-    assigned: 1,
-    needs_validation: 1,
-    ready_to_publish: 2,
-    published: 1,
-    ignored_expected: 1
-  }
-};
-const html = panel._renderNilmWorkspaceBody();
-for (const expected of [
-  "Review lanes",
-  "Needs Review",
-  "Needs Validation",
-  "Ready to Publish",
-  "Published",
-  "Ignored / Expected",
-  'role="tablist"',
-  'role="tab"',
-  'data-nilm-lane="needs_review"',
-  'aria-selected="true"',
-  '<strong>2</strong>'
-]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
-  }
-}
-"""
-    )
-
 
 def test_nilm_lane_count_badge_respects_radius_limit() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
@@ -2981,11 +2976,17 @@ def test_nilm_decision_render_contracts() -> None:
       ]) {
         assert.ok(html.includes(expected));
       }
+      name = "test_nilm_workspace_does_not_duplicate_review_item_control_ids";
+      assert.equal((html.match(/id="nilm_label_0"/g) || []).length, 1);
+      assert.ok(!html.includes('id="nilm_merge_targets_0"'));
       panel._nilmDecisionDrafts.set(key, {
         ...panel._nilmDecisionDraft(signature),
         decision: "merge",
       });
-      assert.ok(panel._renderNilmDecisionFlow(signature, 0).includes('data-selected="sig-2"'));
+      const mergeHtml = panel._renderNilmDecisionFlow(signature, 0);
+      assert.ok(mergeHtml.includes('data-selected="sig-2"'));
+      assert.equal((mergeHtml.match(/id="nilm_merge_targets_0"/g) || []).length, 1);
+      assert.ok(!mergeHtml.includes('id="nilm_label_0"'));
     }
 
     name = "test_nilm_identify_modes_rerender_only_their_relevant_fields";
@@ -3037,6 +3038,20 @@ def test_nilm_decision_render_contracts() -> None:
       );
       assert.equal(rerenders, 1);
     }
+
+    name = "test_nilm_assignment_actions_use_ha_device_workflow_labels";
+    {
+      const panel = makePanel();
+      for (const [action, expected, stale] of [
+        ["publish", "Create HA Device", "Publish Entities"],
+        ["unpublish", "Remove HA Device", "Disable Publishing"],
+      ]) {
+        const html = panel._renderNilmAssignmentActions({ assignment_id: "assignment-washer",
+          display_name: "Washer", actions: { [action]: {} } }, 0);
+        assert.ok(html.includes(expected));
+        assert.ok(!html.includes(stale));
+      }
+    }
   } catch (error) {
     console.error(name, error);
     throw error;
@@ -3044,355 +3059,6 @@ def test_nilm_decision_render_contracts() -> None:
 })();
 """
     )
-
-def test_nilm_assignment_actions_use_ha_device_workflow_labels() -> None:
-    _run_panel_node_script(
-        """
-const panel = new context.Panel();
-const publishHtml = panel._renderNilmAssignmentActions({
-  assignment_id: "assignment-washer",
-  display_name: "Washer",
-  actions: { publish: {} }
-}, 0);
-const unpublishHtml = panel._renderNilmAssignmentActions({
-  assignment_id: "assignment-washer",
-  display_name: "Washer",
-  actions: { unpublish: {} }
-}, 0);
-for (const expected of ["Create HA Device", "Remove HA Device"]) {
-  const html = expected === "Create HA Device" ? publishHtml : unpublishHtml;
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
-  }
-}
-for (const stale of ["Publish Entities", "Disable Publishing"]) {
-  if (publishHtml.includes(stale) || unpublishHtml.includes(stale)) {
-    throw new Error(`stale label ${stale}`);
-  }
-}
-"""
-    )
-
-
-def test_nilm_workspace_does_not_duplicate_review_item_control_ids() -> None:
-    _run_panel_node_script(
-        """
-const panel = makePanel();
-panel._nilmWorkspace = makeWorkspace({
-  status: "ok",
-  history: {},
-  signatures: [
-    {
-      signature_id: "sig-1",
-      display_label: "Unknown load 1",
-      confidence: 0.42,
-      actions: {
-        label: {},
-        assign: {},
-        ignore: {},
-        mark_expected: {},
-        merge: {
-          target_options: [{ value: "sig-2", label: "Unknown load 2" }]
-        }
-      }
-    },
-    {
-      signature_id: "sig-2",
-      display_label: "Unknown load 2",
-      user_label: "Dryer",
-      review_state: "confirmed",
-      actions: { label: {} }
-    }
-  ],
-  virtual_appliances: [],
-  assignments: [],
-  known_load_overlays: [],
-  solar_overlays: [],
-  sessions: [],
-  edges: [],
-  validation: {}
-});
-panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-1"];
-const signature = panel._nilmWorkspace.signatures[0];
-const key = panel._nilmDecisionDraftKey(signature);
-panel._nilmDecisionDrafts.set(key, { decision: "identify", identifyMode: "assign" });
-const identifyHtml = panel._renderNilmWorkspaceBody();
-if ((identifyHtml.match(/id="nilm_label_0"/g) || []).length !== 1) {
-  throw new Error(`identify label was duplicated: ${identifyHtml}`);
-}
-if (identifyHtml.includes('id="nilm_merge_targets_0"')) {
-  throw new Error(`identify rendered unrelated merge controls: ${identifyHtml}`);
-}
-panel._nilmDecisionDrafts.set(key, { decision: "merge", identifyMode: "assign" });
-const mergeHtml = panel._renderNilmWorkspaceBody();
-if ((mergeHtml.match(/id="nilm_merge_targets_0"/g) || []).length !== 1) {
-  throw new Error(`merge target was duplicated: ${mergeHtml}`);
-}
-if (mergeHtml.includes('id="nilm_label_0"')) {
-  throw new Error(`merge rendered unrelated identify controls: ${mergeHtml}`);
-}
-"""
-    )
-
-
-def test_nilm_workspace_renders_session_validation_cards() -> None:
-    _run_panel_node_script(
-        """
-const panel = makePanel();
-panel._nilmWorkspace = makeWorkspace({
-  status: "ok",
-  history: {},
-  signatures: [
-    {
-      signature_id: "sig-dishwasher",
-      feedback_fingerprint: "dishwasher-fingerprint",
-      actions: { ignore: {} }
-    }
-  ],
-  virtual_appliances: [],
-  assignments: [],
-  known_load_overlays: [],
-  solar_overlays: [],
-  sessions: [
-    {
-      session_id: "session-dishwasher",
-      start: "2026-06-24T18:12:00Z",
-      end: "2026-06-24T19:03:00Z",
-      display_label: "Dishwasher",
-      assignment_id: "assignment-dishwasher",
-      signature_fingerprint: "dishwasher-fingerprint",
-      confidence: 0.82,
-      median_power_w: 720,
-      estimated_energy_kwh: 0.61,
-      actions: {
-        validate: {},
-        reject: {}
-      }
-    }
-  ],
-  edges: [],
-  validation: {}
-});
-const html = panel._renderNilmWorkspaceBody();
-for (const expected of [
-  "Session Validation",
-  "Predicted Dishwasher",
-  "2026-06-24",
-  "51m",
-  "Estimated by NILM",
-  "Confidence 82%",
-  "Correct",
-  "Wrong appliance",
-  "Adjust Interval",
-  'data-nilm-session-action="validate"',
-  'data-nilm-session-action="reject"',
-  'data-nilm-session-interval-index="0"'
-]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
-  }
-}
-for (const duplicate of ["Ignore Similar", 'data-nilm-action="ignore"']) {
-  if (html.includes(duplicate)) {
-    throw new Error(`session validation duplicated ${duplicate}: ${html}`);
-  }
-}
-"""
-    )
-
-
-def test_nilm_session_validation_actions_reload_workspace_in_place() -> None:
-    _run_panel_node_script(
-        """
-(async () => {
-const calls = [];
-const refreshes = [];
-let assigned = false;
-const panel = new context.Panel();
-context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
-context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
-context.window.location.assign = () => { assigned = true; };
-panel._render = () => {};
-panel._scrollToTop = () => {};
-panel._hass = {
-  callService: async (domain, service, data) => calls.push({ domain, service, data }),
-};
-panel._refreshNilmWorkspaceData = async (requestId, routeKey) => {
-  refreshes.push({ requestId, routeKey });
-  panel._nilmWorkspace.lanes.ready_to_publish.assignment_ids = [
-    "assignment-dishwasher",
-  ];
-  return true;
-};
-panel._nilmWorkspace = makeWorkspace({
-  sessions: [
-    {
-      display_name: "Dishwasher",
-      actions: {
-        validate: {
-          domain: "circuitsetup_energy_analyzer",
-          service: "validate_nilm_session",
-          data: {
-            circuit_id: "mains",
-            session_id: "session-1",
-            assignment_id: "assignment-dishwasher",
-          },
-        },
-      },
-    },
-  ],
-});
-
-await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
-
-if (assigned) {
-  throw new Error("session validation should not force a browser reload");
-}
-if (calls.length !== 1 || calls[0].service !== "validate_nilm_session") {
-  throw new Error(`expected validate service call, got ${JSON.stringify(calls)}`);
-}
-if (refreshes.length !== 1 || !refreshes[0].routeKey.includes("nilm_workspace=1")) {
-  throw new Error(
-    `expected in-place NILM refresh, got ${JSON.stringify(refreshes)}`
-  );
-}
-if (panel._inlineFeedback.message !== "Confirmed Dishwasher.") {
-  throw new Error(`expected local confirmation, got ${panel._inlineFeedback.message}`);
-}
-})().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
-"""
-    )
-
-
-def test_nilm_session_validation_buttons_call_services_or_update_interval() -> None:
-    _run_panel_node_script(
-        """
-(async () => {
-const calls = [];
-const refreshes = [];
-const panel = new context.Panel();
-context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
-context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
-panel._render = () => {};
-panel._scrollToTop = () => {};
-panel._hass = {
-  callService: async (domain, service, data) => calls.push({ domain, service, data }),
-};
-panel._refreshNilmWorkspaceData = async (requestId, routeKey) => {
-  refreshes.push({ requestId, routeKey });
-  panel._nilmWorkspace.lanes.ready_to_publish.assignment_ids = [
-    "assignment-dishwasher",
-  ];
-  return true;
-};
-panel._nilmWorkspace = makeWorkspace({
-  status: "ok",
-  signatures: [
-    {
-      signature_id: "sig-dishwasher",
-      feedback_fingerprint: "dishwasher-fingerprint",
-      actions: {
-        ignore: {
-          domain: "circuitsetup_energy_analyzer",
-          service: "ignore_nilm_signature",
-          data: {
-            circuit_id: "mains",
-            signature_id: "sig-dishwasher",
-          },
-        },
-      },
-    },
-  ],
-  sessions: [
-    {
-      session_id: "session-dishwasher",
-      start: "2026-06-24T18:12:00Z",
-      end: "2026-06-24T19:03:00Z",
-      display_name: "Dishwasher",
-      assignment_id: "assignment-dishwasher",
-      signature_fingerprint: "dishwasher-fingerprint",
-      actions: {
-        validate: {
-          domain: "circuitsetup_energy_analyzer",
-          service: "validate_nilm_session",
-          data: {
-            circuit_id: "mains",
-            session_id: "session-dishwasher",
-            assignment_id: "assignment-dishwasher",
-          },
-        },
-        reject: {
-          domain: "circuitsetup_energy_analyzer",
-          service: "reject_nilm_session",
-          data: {
-            circuit_id: "mains",
-            session_id: "session-dishwasher",
-            assignment_id: "assignment-dishwasher",
-          },
-        },
-      },
-    },
-  ],
-});
-
-await panel._callNilmWorkspaceItemAction("sessions", 0, "validate");
-if (calls[calls.length - 1].service !== "validate_nilm_session") {
-  throw new Error(`Correct did not call validate service: ${JSON.stringify(calls)}`);
-}
-if (refreshes.length !== 1) {
-  throw new Error(`Correct did not refresh NILM: ${JSON.stringify(refreshes)}`);
-}
-if (panel._inlineFeedback.message !== "Confirmed Dishwasher.") {
-  throw new Error(`Correct used wrong label: ${panel._inlineFeedback.message}`);
-}
-
-await panel._callNilmWorkspaceItemAction("sessions", 0, "reject");
-if (calls[calls.length - 1].service !== "reject_nilm_session") {
-  throw new Error(`Wrong appliance missed reject: ${JSON.stringify(calls)}`);
-}
-if (refreshes.length !== 2) {
-  throw new Error(`Wrong appliance did not refresh NILM: ${JSON.stringify(refreshes)}`);
-}
-if (panel._inlineFeedback.message !== "Marked Dishwasher for review.") {
-  throw new Error(`Wrong appliance used wrong label: ${panel._inlineFeedback.message}`);
-}
-
-panel._selectNilmSessionIntervalByIndex(0);
-const expectedStart = panel._datetimeLocalFromMillis(
-  Date.parse("2026-06-24T18:12:00Z")
-);
-const expectedEnd = panel._datetimeLocalFromMillis(
-  Date.parse("2026-06-24T19:03:00Z")
-);
-if (
-  panel._nilmLabelIntervalDraft.start !== expectedStart
-  || panel._nilmLabelIntervalDraft.end !== expectedEnd
-) {
-  throw new Error(
-    `Adjust Interval range: ${JSON.stringify(panel._nilmLabelIntervalDraft)}`
-  );
-}
-if (!panel._nilmIntervalEditorOpen) {
-  throw new Error("Adjust Interval did not open the editable interval form");
-}
-
-await panel._callNilmAction(0, "ignore");
-if (calls[calls.length - 1].service !== "ignore_nilm_signature") {
-  throw new Error(`Ignore Similar missed service: ${JSON.stringify(calls)}`);
-}
-if (panel._lastActionMessage !== "Ignored signature.") {
-  throw new Error(`Ignore Similar message: ${panel._lastActionMessage}`);
-}
-})().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
-"""
-    )
-
 
 def test_panel_action_message_clears_on_evidence_route_change() -> None:
     _run_panel_node_script(
@@ -3511,196 +3177,6 @@ const html = panel._chartSvg(
 );
 if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
   throw new Error(`expected point hover title with label and value: ${html}`);
-}
-"""
-    )
-
-
-def test_nilm_workspace_hides_already_reviewed_session_validation_cards() -> None:
-    _run_panel_node_script(
-        """
-const panel = makePanel();
-panel._nilmWorkspace = makeWorkspace({
-  status: "ok",
-  history: {},
-  signatures: [],
-  virtual_appliances: [],
-  assignments: [
-    {
-      assignment_id: "assignment-dishwasher",
-      confirmed_session_ids: ["session-confirmed"],
-      rejected_session_ids: ["session-rejected"]
-    }
-  ],
-  known_load_overlays: [],
-  solar_overlays: [],
-  sessions: [
-    {
-      session_id: "session-confirmed",
-      start: "2026-06-24T18:12:00Z",
-      end: "2026-06-24T19:03:00Z",
-      display_label: "Already Confirmed",
-      assignment_id: "assignment-dishwasher",
-      actions: { validate: {}, reject: {} }
-    },
-    {
-      session_id: "session-rejected",
-      start: "2026-06-24T20:12:00Z",
-      end: "2026-06-24T21:03:00Z",
-      display_label: "Already Rejected",
-      assignment_id: "assignment-dishwasher",
-      actions: { validate: {}, reject: {} }
-    },
-    {
-      session_id: "session-pending",
-      start: "2026-06-25T18:12:00Z",
-      end: "2026-06-25T19:03:00Z",
-      display_label: "Pending Dishwasher",
-      assignment_id: "assignment-dishwasher",
-      actions: { validate: {}, reject: {} }
-    }
-  ],
-  edges: [],
-  validation: {}
-});
-const html = panel._renderNilmWorkspaceBody();
-for (const hidden of ["Already Confirmed", "Already Rejected"]) {
-  if (html.includes(hidden)) {
-    throw new Error(`reviewed session still visible: ${hidden}: ${html}`);
-  }
-}
-if (!html.includes("Predicted Pending Dishwasher")) {
-  throw new Error(`pending session missing: ${html}`);
-}
-"""
-    )
-
-
-def test_nilm_workspace_marks_low_confidence_estimated_sessions() -> None:
-    _run_panel_node_script(
-        """
-const panel = makePanel();
-panel._nilmWorkspaceHistorySeries = [[
-  {
-    entity_id: "sensor.mains_power",
-    state: "200",
-    last_changed: "2026-06-24T18:00:00Z"
-  },
-  {
-    entity_id: "sensor.mains_power",
-    state: "900",
-    last_changed: "2026-06-24T19:10:00Z"
-  }
-]];
-panel._nilmWorkspace = makeWorkspace({
-  status: "ok",
-  history: {
-    start: "2026-06-24T18:00:00Z",
-    end: "2026-06-24T19:10:00Z"
-  },
-  signatures: [],
-  virtual_appliances: [],
-  assignments: [],
-  known_load_overlays: [],
-  solar_overlays: [],
-  sessions: [
-    {
-      session_id: "session-low",
-      start: "2026-06-24T18:12:00Z",
-      end: "2026-06-24T19:03:00Z",
-      display_label: "Dishwasher",
-      assignment_id: "assignment-dishwasher",
-      confidence: 0.7,
-      median_power_w: 720,
-      estimated_energy_kwh: 0.61,
-      actions: { validate: {}, reject: {} }
-    }
-  ],
-  edges: [],
-  validation: {}
-});
-const html = panel._renderNilmWorkspaceBody();
-for (const expected of [
-  "Estimated by NILM",
-  "Low confidence",
-  "Confidence 70%",
-  'data-nilm-session-confidence="0.70"',
-  'data-nilm-low-confidence="true"'
-]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
-  }
-}
-"""
-    )
-
-
-def test_nilm_session_validation_adjust_interval_loads_session_times() -> None:
-    _run_panel_node_script(
-        """
-const panel = new context.Panel();
-let rendered = false;
-panel._render = () => { rendered = true; };
-panel._nilmWorkspace = {
-  sessions: [
-    {
-      start: "2026-06-24T18:12:00Z",
-      end: "2026-06-24T19:03:00Z",
-    }
-  ]
-};
-panel._selectNilmSessionIntervalByIndex(0);
-const expectedStart = panel._datetimeLocalFromMillis(
-  Date.parse("2026-06-24T18:12:00Z")
-);
-const expectedEnd = panel._datetimeLocalFromMillis(
-  Date.parse("2026-06-24T19:03:00Z")
-);
-if (panel._nilmLabelIntervalDraft.start !== expectedStart) {
-  throw new Error(`wrong start ${panel._nilmLabelIntervalDraft.start}`);
-}
-if (panel._nilmLabelIntervalDraft.end !== expectedEnd) {
-  throw new Error(`wrong end ${panel._nilmLabelIntervalDraft.end}`);
-}
-if (panel._lastActionMessage !== "Loaded NILM session interval.") {
-  throw new Error(`wrong message ${panel._lastActionMessage}`);
-}
-if (!rendered) {
-  throw new Error("adjust interval did not re-render");
-}
-if (!panel._nilmIntervalEditorOpen) {
-  throw new Error("adjust interval did not open the interval editor");
-}
-"""
-    )
-
-
-def test_nilm_label_interval_form_asks_whether_appliance_was_running() -> None:
-    _run_panel_node_script(
-        """
-const panel = new context.Panel();
-panel._nilmLabelIntervalDraft = {
-  start: "2026-06-24T18:12",
-  end: "2026-06-24T19:03",
-  label: "Dishwasher"
-};
-const html = panel._renderNilmLabelIntervalEditor({
-  label_intervals: [],
-  actions: {
-    sensor_label_interval: {
-      ground_truth_options: []
-    }
-  }
-});
-for (const expected of [
-  "Was this appliance running here?",
-  "Review the selected graph window",
-  "Dishwasher",
-  "Save Interval"
-]) {
-  if (!html.includes(expected)) {
-    throw new Error(`missing ${expected}: ${html}`);
-  }
 }
 """
     )
@@ -4532,8 +4008,9 @@ def test_nilm_decision_action_contracts() -> None:
       const secondKey = panel._nilmDecisionDraftKey(second);
       panel._nilmDecisionDrafts.set(firstKey, { decision: "ignore", identifyMode: "assign" });
       panel._nilmDecisionDrafts.set(secondKey, { decision: "ignore", identifyMode: "assign" });
-      panel._loadNilmWorkspace = async () => {
+      panel._refreshNilmWorkspaceData = async () => {
         panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-2"];
+        return true;
       };
       let focused = "";
       panel._focusNilmSignatureOnGraph = async (fingerprint, options) => {
@@ -4578,11 +4055,11 @@ def test_nilm_decision_action_contracts() -> None:
       });
       panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-a"];
       panel._nilmSelectedReviewKey = "signature:sig-a";
-      panel._loadNilmWorkspace = async () => { workspaceLoads += 1; };
+      panel._refreshNilmWorkspaceData = async () => { workspaceLoads += 1; return true; };
       panel._focusNilmSignatureOnGraph = async () => { graphFocus += 1; };
-      const operation = panel._callNilmAction(0, "ignore", {
-        feedbackScope: panel._nilmDecisionDraftKey(signature),
-      });
+      const operation = panel._callNilmAction(
+        0, "ignore", panel._nilmDecisionDraftKey(signature),
+      );
       await Promise.resolve();
       assert.ok(panel._busyAction);
       context.window.location.search = "?circuit_id=mains-b";
@@ -4621,10 +4098,11 @@ def test_nilm_decision_action_contracts() -> None:
         signatures: [signature],
       });
       panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-1"];
-      panel._loadNilmWorkspace = async () => { signature.user_label = "Dishwasher"; };
-      await panel._callNilmAction(0, "label", {
-        feedbackScope: panel._nilmDecisionDraftKey(signature),
-      });
+      panel._refreshNilmWorkspaceData = async () => {
+        signature.user_label = "Dishwasher";
+        return true;
+      };
+      await panel._callNilmAction(0, "label", panel._nilmDecisionDraftKey(signature));
       const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
       for (const expected of [
         'data-inline-feedback="nilm-review"',
@@ -4639,9 +4117,13 @@ def test_nilm_decision_action_contracts() -> None:
 
     name = "test_nilm_assignment_and_session_completions_ignore_replacement_routes";
     const itemCases = [
-      { kind: "publish", collection: "assignments", action: "publish", lane: "published" },
-      { kind: "save", lane: "assigned" },
-      { kind: "session", collection: "sessions", action: "validate", lane: "ready_to_publish" },
+      { kind: "publish", collection: "assignments", action: "publish", lane: "published",
+        message: "Created an estimated HA appliance device." },
+      { kind: "save", lane: "assigned", message: "Saved assignment changes." },
+      { kind: "session", collection: "sessions", action: "validate",
+        lane: "ready_to_publish", message: "Confirmed Dishwasher." },
+      { kind: "session-reject", collection: "sessions", action: "reject",
+        lane: "needs_validation", message: "Marked Dishwasher for review." },
     ];
     for (const row of itemCases) {
       const { kind } = row;
@@ -4666,7 +4148,7 @@ def test_nilm_decision_action_contracts() -> None:
           appliance_profile: "washer",
           actions: kind === "save" ? { rename: action } : { publish: action } };
         const session = { session_id: "session-1", assignment_id: "assignment-1",
-          actions: { validate: action } };
+          actions: { [row.action]: action } };
         panel._nilmWorkspace = makeWorkspace({
           assignments: [assignment],
           sessions: [session],
@@ -4690,7 +4172,6 @@ def test_nilm_decision_action_contracts() -> None:
         if (outcome === "resolve") settle.resolve();
         else settle.reject(new Error("late failure"));
         await operation;
-        const label = `${kind} ${outcome}`;
         assert.deepEqual(
           [panel._payload, requests, refreshes, assigns, renders, scrolls,
             panel._lastActionMessage, panel._error],
@@ -4699,9 +4180,13 @@ def test_nilm_decision_action_contracts() -> None:
       }
     }
 
-    name = "test_nilm_assignment_and_session_success_preserves_the_lane_inspector";
     for (const row of itemCases) {
       const { kind } = row;
+      name = kind === "session"
+        ? "test_nilm_session_validation_actions_reload_workspace_in_place"
+        : kind === "session-reject"
+          ? "test_nilm_session_validation_buttons_call_services_or_update_interval"
+          : "test_nilm_assignment_and_session_success_preserves_the_lane_inspector";
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       let assigns = 0;
       let refreshes = 0;
@@ -4725,7 +4210,8 @@ def test_nilm_decision_action_contracts() -> None:
         appliance_profile: "washer",
         actions: kind === "save" ? { rename: action } : { publish: action } };
       const session = { session_id: "session-1", assignment_id: "assignment-1",
-        actions: { validate: action } };
+        display_name: "Dishwasher",
+        actions: { [row.action]: action } };
       panel._nilmWorkspace = makeWorkspace({
         assignments: [assignment],
         sessions: [session],
@@ -4746,9 +4232,7 @@ def test_nilm_decision_action_contracts() -> None:
         for (const lane of Object.values(panel._nilmWorkspace.lanes)) {
           lane.assignment_ids = [];
         }
-        const target = kind === "publish" ? "published" :
-          kind === "session" ? "ready_to_publish" : "assigned";
-        panel._nilmWorkspace.lanes[target].assignment_ids = ["assignment-1"];
+        panel._nilmWorkspace.lanes[row.lane].assignment_ids = ["assignment-1"];
         if (kind === "save") assignment.display_name = "Dishwasher Updated";
         return true;
       };
@@ -4756,19 +4240,49 @@ def test_nilm_decision_action_contracts() -> None:
       else await panel._callNilmWorkspaceItemAction(row.collection, 0, row.action);
       assert.deepEqual(
         [refreshes, assigns, panel._nilmActiveLane, panel._nilmSelectedReviewKey,
-          panel._inlineFeedback.scope, panel._inlineFeedback.kind, feedbackFocus, restoredScroll],
+          panel._inlineFeedback.scope, panel._inlineFeedback.kind,
+          panel._inlineFeedback.message, feedbackFocus, restoredScroll],
         [1, 0, row.lane, "assignment:assignment-1",
-          "assignment:assignment-1", "success", 1, 420],
+          "assignment:assignment-1", "success", row.message, 1, 420],
       );
       const inspector = panel._renderNilmReviewLayout(panel._nilmWorkspace);
       assert.match(inspector, /data-nilm-review-inspector/);
       assert.match(inspector, /data-nilm-assignment-index="0"/);
     }
 
+    name = "test_partial_assignment_save_failure_refreshes_successful_change";
+    {
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      let calls = 0;
+      let refreshes = 0;
+      const assignment = { assignment_id: "a", display_name: "Old",
+        appliance_profile: "washer", actions: {
+          rename: makeAction("rename"), change_profile: makeAction("profile"),
+        } };
+      const panel = makePanel({ _nilmWorkspace: { assignments: [assignment] } });
+      panel._render = () => {};
+      panel.shadowRoot.querySelector = (selector) => selector.includes("label")
+        ? { value: "New" } : { value: "dryer" };
+      panel._hass = { callService: async () => {
+        calls += 1;
+        if (calls === 2) throw new Error("profile failed");
+      } };
+      panel._refreshNilmWorkspaceData = async () => { refreshes += 1; return true; };
+      const profileKey = `${panel._nilmAssignmentDraftKey(assignment)}:appliance_profile`;
+      panel._nilmAssignmentDrafts.set(profileKey, "dryer");
+      await panel._saveNilmAssignmentChanges(0);
+      assert.deepEqual(
+        [calls, refreshes, panel._busyAction, panel._error,
+          panel._nilmAssignmentDrafts.has(profileKey)],
+        [2, 1, "", "Could not save assignment changes: profile failed", true],
+      );
+    }
+
     const sessionAssign = makeAction("assign_session", { session_id: "session-new" });
     sessionAssign.requires = ["label"];
     const newSession = { session_id: "session-new", display_name: "Dryer",
       actions: { assign: sessionAssign } };
+    const oldAssignment = { assignment_id: "assignment-old", display_name: "Old" };
     const source = { assignment_id: "assignment-source", display_name: "Dryer",
       actions: { merge: makeAction("merge_assignments") } };
     const mergeTarget = { assignment_id: "assignment-target", display_name: "Laundry",
@@ -4778,24 +4292,31 @@ def test_nilm_decision_action_contracts() -> None:
         name: "test_new_session_assignment_selects_refreshed_assignment_inspector",
         kind: "session", lane: "assigned", id: "assignment-new",
         sessions: [newSession], assignments: [],
-        result: { assignment_id: "assignment-new", display_name: "Dryer",
+        results: [{ assignment_id: "assignment-new", display_name: "Dryer",
           session_ids: ["session-new"], actions: { publish: {} } },
+        ],
       },
       {
         name: "test_save_with_merge_selects_surviving_target_inspector",
         kind: "merge", lane: "published", id: "assignment-target",
-        sessions: [], assignments: [source, mergeTarget], result: mergeTarget,
+        sessions: [], assignments: [source, mergeTarget], results: [mergeTarget],
+      },
+      {
+        name: "test_existing_session_reassignment_selects_explicit_target",
+        kind: "reassign", lane: "published", id: "assignment-target",
+        sessions: [{ session_id: "session-move", assignment_id: "assignment-old",
+          display_name: "Dryer", actions: { assign: sessionAssign } }],
+        assignments: [oldAssignment, mergeTarget], results: [oldAssignment, mergeTarget],
       },
     ]) {
       name = row.name;
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       const calls = [];
       let focused = 0;
-      const refreshed = makeWorkspace({ assignments: [row.result], sessions: row.sessions });
+      const refreshed = makeWorkspace({ assignments: row.results, sessions: row.sessions });
       refreshed.lanes[row.lane].assignment_ids = [row.id];
+      if (row.kind === "reassign") refreshed.lanes.assigned.assignment_ids = ["assignment-old"];
       const panel = makePanel({
-        _evidenceRequestId: 9,
-        _payload: { circuit: { circuit_id: "mains" }, actions: {} },
         _nilmWorkspace: makeWorkspace({
           assignments: row.assignments,
           sessions: row.sessions,
@@ -4818,14 +4339,19 @@ def test_nilm_decision_action_contracts() -> None:
         panel._nilmWorkspace = refreshed;
         return true;
       };
-      if (row.kind === "session") {
+      if (row.kind === "reassign") {
+        panel._nilmExistingAssignmentSelection = () => (
+          { label: "Laundry", assignment_id: row.id }
+        );
+      }
+      if (row.kind !== "merge") {
         await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");
       } else {
         await panel._saveNilmAssignmentChanges(0);
       }
       assert.equal(
         calls[0][row.kind === "merge" ? "target_assignment_id" : "assignment_id"],
-        row.kind === "merge" ? row.id : undefined,
+        row.kind === "session" ? undefined : row.id,
       );
       assert.deepEqual(
         [panel._nilmActiveLane, panel._nilmSelectedReviewKey,
@@ -4834,53 +4360,70 @@ def test_nilm_decision_action_contracts() -> None:
       );
       const inspector = panel._renderNilmReviewLayout(panel._nilmWorkspace);
       assert.equal((inspector.match(/data-nilm-review-inspector/g) || []).length, 1);
-      assert.match(inspector, /data-nilm-assignment-index="0"/);
+      assert.match(
+        inspector,
+        new RegExp(`data-nilm-assignment-index="${row.kind === "reassign" ? 1 : 0}"`),
+      );
     }
 
-    name = "test_overlapping_workspace_refreshes_keep_newest_assignment_state";
-    {
+    for (const newerFails of [false, true]) {
+      name = "test_workspace_mutations_converge_after_service_reordering_or_failure";
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
-      const pending = [];
+      const services = [];
+      const requests = [];
       let focused = 0;
       const assignments = ["older", "newer"].map((suffix) => ({
         assignment_id: `assignment-${suffix}`,
         display_name: suffix,
         actions: { publish: makeAction(`publish_${suffix}`) },
       }));
-      const panel = makePanel({
-        _evidenceRequestId: 11,
-        _payload: { circuit: { circuit_id: "mains" }, actions: {} },
-        _nilmWorkspace: makeWorkspace({ assignments }),
-      });
-      panel._nilmWorkspace.lanes.assigned.assignment_ids = assignments.map(
-        (assignment) => assignment.assignment_id,
-      );
+      const panel = makePanel({ _nilmWorkspace: makeWorkspace({ assignments }) });
       panel._loadedRouteKey = panel._routeKey();
       panel._render = () => {};
-      panel._hass = { callService: async () => {} };
-      panel._requestJson = () => new Promise((resolve) => pending.push(resolve));
       panel.shadowRoot.querySelector = (selector) =>
         selector === '[data-inline-feedback="assignment:assignment-newer"]' ?
           { focus() { focused += 1; } } : null;
+      panel._hass = { callService: () => new Promise((resolve, reject) => {
+        services.push({ resolve, reject });
+      }) };
+      panel._requestJson = () => new Promise((resolve) => requests.push(resolve));
       const older = panel._callNilmWorkspaceItemAction("assignments", 0, "publish");
-      await new Promise((resolve) => setImmediate(resolve));
       const newer = panel._callNilmWorkspaceItemAction("assignments", 1, "publish");
       await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(pending.length, 2);
-      const newerWorkspace = makeWorkspace({ assignments: [assignments[1]] });
-      newerWorkspace.lanes.published.assignment_ids = ["assignment-newer"];
-      pending[1](newerWorkspace);
-      await newer;
-      const newestFeedback = panel._inlineFeedback;
-      const olderWorkspace = makeWorkspace({ assignments: [assignments[0]] });
-      olderWorkspace.lanes.published.assignment_ids = ["assignment-older"];
-      pending[0](olderWorkspace);
-      await older;
-      assert.deepEqual(
-        [panel._nilmWorkspace, panel._nilmActiveLane, panel._nilmSelectedReviewKey,
-          panel._inlineFeedback, focused],
-        [newerWorkspace, "published", "assignment:assignment-newer", newestFeedback, 1],
+      assert.equal(services.length, 2);
+      const converged = makeWorkspace({ assignments });
+      converged.lanes.published.assignment_ids = assignments.map(
+        (assignment) => assignment.assignment_id,
       );
+      if (newerFails) {
+        services[0].resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(requests.length, 1);
+        services[1].reject(new Error("newer failed"));
+        await newer;
+        requests[0](converged);
+        await older;
+        assert.equal(panel._nilmWorkspace, converged);
+        assert.match(panel._error, /newer failed/);
+      } else {
+        services[1].resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+        const newerWorkspace = makeWorkspace({ assignments: [assignments[1]] });
+        newerWorkspace.lanes.published.assignment_ids = ["assignment-newer"];
+        requests[0](newerWorkspace);
+        services[0].resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(requests.length, 2);
+        const feedback = panel._inlineFeedback;
+        requests[1](converged);
+        await Promise.all([older, newer]);
+        name = "test_overlapping_workspace_refreshes_keep_newest_assignment_state";
+        assert.deepEqual(
+          [panel._nilmWorkspace, panel._nilmActiveLane, panel._nilmSelectedReviewKey,
+            panel._inlineFeedback, focused],
+          [converged, "published", "assignment:assignment-newer", feedback, 1],
+        );
+      }
     }
   } catch (error) {
     console.error(name, error);
@@ -4923,6 +4466,34 @@ def test_nilm_interval_action_contracts() -> None:
       end: "2026-06-24T19:03", label: "Dishwasher",
       appliance_id: "dishwasher", ground_truth_entity_id: "" };
     const workspacePath = "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains";
+
+    name = "test_nilm_session_validation_adjust_interval_loads_session_times";
+    {
+      const start = "2026-06-24T18:12:00Z";
+      const end = "2026-06-24T19:03:00Z";
+      let renders = 0;
+      const panel = makePanel({ _nilmWorkspace: makeWorkspace({ sessions: [{ start, end }] }) });
+      panel._render = () => { renders += 1; };
+      panel._selectNilmSessionIntervalByIndex(0);
+      assert.deepEqual(
+        [panel._nilmLabelIntervalDraft.start, panel._nilmLabelIntervalDraft.end,
+          panel._nilmIntervalEditorOpen, panel._lastActionMessage, renders],
+        [panel._datetimeLocalFromMillis(Date.parse(start)),
+          panel._datetimeLocalFromMillis(Date.parse(end)), true,
+          "Loaded NILM session interval.", 1],
+      );
+    }
+
+    name = "test_nilm_label_interval_form_asks_whether_appliance_was_running";
+    {
+      const panel = makePanel({ _nilmLabelIntervalDraft: { ...baseIntervalDraft } });
+      const html = panel._renderNilmLabelIntervalEditor({ label_intervals: [],
+        actions: { sensor_label_interval: { ground_truth_options: [] } } });
+      for (const expected of [
+        "Was this appliance running here?", "Review the selected graph window",
+        "Dishwasher", "Save Interval",
+      ]) assert.ok(html.includes(expected), expected);
+    }
 
     name = "test_nilm_failed_interval_save_preserves_open_editor_and_draft";
     {
@@ -5241,6 +4812,110 @@ def test_nilm_interval_action_contracts() -> None:
           "assignment:assignment-1", decisionDrafts],
       );
       assert.match(panel._inlineFeedback.message, /Saved interval label: Dishwasher/i);
+    }
+
+    for (const kind of ["interval", "signature"]) {
+      name = kind === "interval"
+        ? "test_interval_mutation_coalesces_with_assignment_refresh"
+        : "test_signature_mutation_coalesces_with_assignment_refresh";
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      const requests = [];
+      const assignment = { assignment_id: "assignment-1", display_name: "Dryer",
+        actions: { publish: makeAction("publish_assignment") } };
+      const interval = { interval_id: "interval-1", label: "Dryer",
+        actions: { delete: makeAction("delete_interval") } };
+      const signature = { signature_id: "signature-1",
+        actions: { ignore: makeAction("ignore_signature") } };
+      const workspace = makeWorkspace({ assignments: [assignment],
+        label_intervals: [interval], signatures: [signature] });
+      workspace.lanes.needs_review.signature_ids = ["signature-1"];
+      const panel = makePanel({
+        _nilmWorkspace: workspace,
+      });
+      panel._render = () => {};
+      panel.shadowRoot.querySelector = () => null;
+      panel._hass = { callService: async () => {} };
+      panel._requestJson = () => new Promise((resolve) => requests.push(resolve));
+      const publish = panel._callNilmWorkspaceItemAction("assignments", 0, "publish");
+      const mutation = kind === "interval"
+        ? panel._callNilmLabelIntervalAction(0, "delete")
+        : panel._callNilmAction(0, "ignore", "signature:signature-1");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(requests.length, 1);
+      requests[0](makeWorkspace({ assignments: [assignment] }));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(requests.length, 2);
+      const converged = makeWorkspace({ assignments: [assignment] });
+      converged.lanes.published.assignment_ids = ["assignment-1"];
+      requests[1](converged);
+      await Promise.all([publish, mutation]);
+      assert.deepEqual(
+        [panel._nilmWorkspace, panel._inlineFeedback.scope,
+          panel._inlineFeedback.kind, panel._busyAction],
+        [converged, kind === "interval" ? "nilm-interval" : "nilm-review", "success", ""],
+      );
+    }
+
+    name = "test_interval_stale_failure_and_retry_preserve_replacement_route";
+    {
+      context.window.location.search = "?nilm_workspace=1&circuit_id=a";
+      let rejectService;
+      let renders = 0;
+      const interval = { interval_id: "interval-a", label: "Dryer",
+        actions: { delete: makeAction("delete_interval") } };
+      const panel = makePanel({
+        _nilmWorkspace: makeWorkspace({ label_intervals: [interval] }),
+      });
+      panel._render = () => { renders += 1; };
+      panel.shadowRoot.querySelector = () => null;
+      panel._hass = { callService: () => new Promise((_resolve, reject) => {
+        rejectService = reject;
+      }) };
+      const operation = panel._callNilmLabelIntervalAction(0, "delete");
+      await Promise.resolve();
+      context.window.location.search = "?circuit_id=b";
+      const payloadB = { status: "circuit_found_no_evidence",
+        circuit: { circuit_id: "b" }, actions: {} };
+      panel._requestJson = async () => payloadB;
+      await panel._loadEvidence({ routeKey: panel._routeKey() });
+      panel._busyAction = "route_b_busy";
+      panel._inlineFeedback = { scope: "route-b", kind: "success", message: "Route B" };
+      const rendersAtB = renders;
+      rejectService(new Error("late interval failure"));
+      await operation;
+      assert.deepEqual(
+        [panel._payload, panel._busyAction, panel._inlineFeedback,
+          panel._error, renders],
+        [payloadB, "route_b_busy",
+          { scope: "route-b", kind: "success", message: "Route B" }, "", rendersAtB],
+      );
+
+      context.window.location.search = "?nilm_workspace=1&circuit_id=a";
+      let resolveRetry;
+      let requestCount = 0;
+      const retryPanel = makePanel({
+        _nilmIntervalRefreshSuccessMessage: "Saved interval",
+      });
+      retryPanel._render = () => {};
+      retryPanel.shadowRoot.querySelector = () => null;
+      retryPanel._requestJson = async () => {
+        requestCount += 1;
+        if (requestCount === 1) return new Promise((resolve) => { resolveRetry = resolve; });
+        return payloadB;
+      };
+      const retry = retryPanel._retryNilmIntervalWorkspaceRefresh();
+      await new Promise((resolve) => setImmediate(resolve));
+      context.window.location.search = "?circuit_id=b";
+      await retryPanel._loadEvidence({ routeKey: retryPanel._routeKey() });
+      retryPanel._busyAction = "route_b_busy";
+      retryPanel._inlineFeedback = { scope: "route-b", kind: "success", message: "Route B" };
+      resolveRetry(makeWorkspace());
+      await retry;
+      assert.deepEqual(
+        [retryPanel._payload, retryPanel._busyAction, retryPanel._inlineFeedback],
+        [payloadB, "route_b_busy",
+          { scope: "route-b", kind: "success", message: "Route B" }],
+      );
     }
   } catch (error) {
     console.error(name, error);

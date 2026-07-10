@@ -264,7 +264,8 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
         "await this._refreshNilmWorkspaceData"
     )
     assert "if (!actionContext.isCurrent())" in body
-    assert "actionContext.mutationId" in body
+    assert "if (!actionContext.isRouteCurrent())" in body
+    assert "this._busyAction === busyKey" in body
     assert "merge.data.target_assignment_id" in body
     assert "this._selectRefreshedNilmAssignment" in body
     assert "this._storeActionMessageForReload" not in body
@@ -289,7 +290,8 @@ def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> No
         "await this._refreshNilmWorkspaceData"
     )
     assert "if (!actionContext.isCurrent())" in body
-    assert "actionContext.mutationId" in body
+    assert "if (!actionContext.isRouteCurrent())" in body
+    assert "this._busyAction === busyKey" in body
     assert "this._selectRefreshedNilmAssignment(item, data)" in body
     assert "this._storeActionMessageForReload" not in body
     assert "window.location.assign" not in body

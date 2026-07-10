@@ -131,6 +131,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._nilmWorkspaceMutationId = 0;
+    this._nilmWorkspaceRefreshCycle = null;
     this._nilmFocusedHistoryToken = 0;
     this._listeningForRouteChanges = false;
     this._nilmLabelDrafts = new Map();
@@ -523,29 +524,65 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   async _refreshNilmWorkspaceData(
     requestId = this._evidenceRequestId,
     routeKey = this._loadedRouteKey || this._routeKey(),
-    mutationId = null,
   ) {
     if (!this._routeRequestsNilmWorkspace(routeKey)) {
       return false;
     }
-    const { apiPath, fetchPath } = this._nilmWorkspaceRequestPaths(routeKey);
-    if (!apiPath) {
-      return false;
+    let cycle = this._nilmWorkspaceRefreshCycle;
+    if (!cycle || cycle.requestId !== requestId || cycle.routeKey !== routeKey) {
+      cycle = { requestId, routeKey, requested: 0, running: false, task: null };
+      this._nilmWorkspaceRefreshCycle = cycle;
     }
+    cycle.requested += 1;
+    if (!cycle.task || !cycle.running) {
+      cycle.running = true;
+      cycle.task = (async () => {
+        try {
+          while (true) {
+            if (cycle !== this._nilmWorkspaceRefreshCycle
+                || !this._isCurrentRequest(requestId, routeKey)) {
+              return false;
+            }
+            const generation = cycle.requested;
+            const { apiPath, fetchPath } = this._nilmWorkspaceRequestPaths(routeKey);
+            if (!apiPath) {
+              return false;
+            }
+            let workspace;
+            try {
+              workspace = await this._requestJson(apiPath, fetchPath);
+            } catch (_error) {
+              if (generation === cycle.requested) {
+                return false;
+              }
+              continue;
+            }
+            if (cycle !== this._nilmWorkspaceRefreshCycle
+                || !this._isCurrentRequest(requestId, routeKey)) {
+              return false;
+            }
+            if (generation !== cycle.requested) {
+              continue;
+            }
+            this._invalidateNilmFocusedHistoryRequests();
+            this._nilmWorkspaceHistoryLoading = false;
+            this._nilmWorkspaceHistoryError = "";
+            this._nilmWorkspaceHistoryFailedRequest = null;
+            this._nilmWorkspace = workspace;
+            return true;
+          }
+        } finally {
+          cycle.running = false;
+        }
+      })();
+    }
+    const task = cycle.task;
     try {
-      const workspace = await this._requestJson(apiPath, fetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)
-          || (mutationId !== null && mutationId !== this._nilmWorkspaceMutationId)) {
-        return false;
+      return await task;
+    } finally {
+      if (cycle.task === task) {
+        cycle.task = null;
       }
-      this._invalidateNilmFocusedHistoryRequests();
-      this._nilmWorkspaceHistoryLoading = false;
-      this._nilmWorkspaceHistoryError = "";
-      this._nilmWorkspaceHistoryFailedRequest = null;
-      this._nilmWorkspace = workspace;
-      return true;
-    } catch (_error) {
-      return false;
     }
   }
 
@@ -679,25 +716,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._setInlineFeedback(key, "error", this._panelText("errors.nilm_decision_required"));
       return;
     }
-    await this._callNilmAction(index, actionKey, { feedbackScope: key });
+    await this._callNilmAction(index, actionKey, key);
   }
 
-  async _callNilmAction(index, actionKey, options = {}) {
+  async _callNilmAction(index, actionKey, feedbackScope) {
     const signatures = this._nilmReviewSignatures();
     const signature = signatures && signatures[index];
     const action = signature && signature.actions && signature.actions[actionKey];
-    const feedbackScope = options.feedbackScope || "";
     if (!this._guardActionCall(action, `NILM ${actionKey}`, feedbackScope)) {
       return;
     }
-    const reject = (message) => {
-      if (feedbackScope) {
-        this._setInlineFeedback(feedbackScope, "error", message);
-      } else {
-        this._error = message;
-        this._renderAndScrollToTop();
-      }
-    };
+    const reject = (message) => this._setInlineFeedback(feedbackScope, "error", message);
     const data = Object.assign({}, action.data || {});
     if (actionKey === "label" || actionKey === "assign") {
       const labelInput = this.shadowRoot.querySelector(`#nilm_label_${index}`);
@@ -722,9 +751,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       data.target_signature_id = target;
     }
-    const requestId = this._evidenceRequestId;
-    const routeKey = this._routeKey();
-    const isCurrent = () => this._isCurrentRequest(requestId, routeKey);
+    const actionContext = this._nilmWorkspaceActionContext();
+    const previousItems = this._nilmLaneItems(this._nilmWorkspace);
+    const previousKey = `signature:${signature.signature_id || this._nilmSignatureFingerprint(signature)}`;
+    const previousIndex = Math.max(
+      0,
+      previousItems.findIndex((item) => this._nilmReviewKey(item) === previousKey),
+    );
     const busyKey = `nilm_${index}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
@@ -734,53 +767,54 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
-      if (!isCurrent()) {
+      if (!actionContext.isRouteCurrent()) {
         return;
       }
+      const message = this._nilmActionMessage(actionKey, data);
+      const refreshed = await this._refreshNilmWorkspaceData(
+        actionContext.requestId,
+        actionContext.routeKey,
+      );
+      if (!actionContext.isRouteCurrent()) {
+        return;
+      }
+      if (!actionContext.isCurrent()) {
+        if (refreshed) this._render();
+        return;
+      }
+      if (this._busyAction === busyKey) this._busyAction = "";
       if (actionKey === "label" || actionKey === "assign") {
         this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
       }
-      const message = this._nilmActionMessage(actionKey, data);
-      this._busyAction = "";
-      if (feedbackScope) {
-        const previousItems = this._nilmLaneItems(this._nilmWorkspace);
-        const previousKey = `signature:${signature.signature_id || this._nilmSignatureFingerprint(signature)}`;
-        const previousIndex = Math.max(0, previousItems.findIndex((item) => this._nilmReviewKey(item) === previousKey));
-        const graphHistory = this._nilmWorkspaceHistorySeries;
-        const preserveGraphHistory = Boolean(this._nilmFocusedSignature || this._nilmGraphWindow);
-        await this._loadNilmWorkspace(requestId, routeKey);
-        if (!isCurrent()) {
-          return;
-        }
-        if (preserveGraphHistory) {
-          this._nilmWorkspaceHistorySeries = graphHistory;
-        }
-        this._nilmDecisionDrafts.delete(this._nilmDecisionDraftKey(signature));
-        const remainingItems = this._nilmLaneItems(this._nilmWorkspace)
-          .filter((item) => this._nilmReviewKey(item) !== previousKey);
-        const nextItem = remainingItems[Math.min(previousIndex, Math.max(0, remainingItems.length - 1))] || null;
-        this._nilmSelectedReviewKey = nextItem ? this._nilmReviewKey(nextItem) : "";
-        if (nextItem && nextItem.kind === "signature") {
-          const fingerprint = this._nilmSignatureFingerprint(nextItem.item);
-          if (fingerprint) {
-            await this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
-            if (!isCurrent()) {
-              return;
-            }
+      this._nilmDecisionDrafts.delete(this._nilmDecisionDraftKey(signature));
+      if (!refreshed) {
+        this._setInlineFeedback(
+          feedbackScope,
+          "error",
+          this._panelTextFormat("messages.nilm_interval_action_refresh_failed", { message }),
+        );
+        return;
+      }
+      const remainingItems = this._nilmLaneItems(this._nilmWorkspace)
+        .filter((item) => this._nilmReviewKey(item) !== previousKey);
+      const nextItem = remainingItems[Math.min(previousIndex, Math.max(0, remainingItems.length - 1))] || null;
+      this._nilmSelectedReviewKey = nextItem ? this._nilmReviewKey(nextItem) : "";
+      if (nextItem && nextItem.kind === "signature") {
+        const fingerprint = this._nilmSignatureFingerprint(nextItem.item);
+        if (fingerprint) {
+          await this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
+          if (!actionContext.isCurrent()) {
+            return;
           }
         }
-        this._setInlineFeedback("nilm-review", "success", message);
-      } else {
-        this._lastActionMessage = message;
-        await this._loadEvidence({ routeKey: this._actionRefreshRouteKey(`nilm_${actionKey}`) });
-        this._scrollToTop();
       }
+      this._setInlineFeedback("nilm-review", "success", message);
     } catch (error) {
-      if (!isCurrent()) {
+      if (!actionContext.isCurrent()) {
         return;
       }
       const message = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
-      this._busyAction = "";
+      if (this._busyAction === busyKey) this._busyAction = "";
       reject(message);
     }
   }
@@ -827,16 +861,23 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!successMessage) {
       return;
     }
-    const requestId = this._evidenceRequestId;
-    const routeKey = this._loadedRouteKey || this._routeKey();
+    const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
-    this._busyAction = "nilm_interval_refresh";
+    const busyKey = "nilm_interval_refresh";
+    this._busyAction = busyKey;
     this._render();
-    const refreshed = await this._refreshNilmWorkspaceData(requestId, routeKey);
-    this._busyAction = "";
-    if (!this._isCurrentRequest(requestId, routeKey)) {
+    const refreshed = await this._refreshNilmWorkspaceData(
+      actionContext.requestId,
+      actionContext.routeKey,
+    );
+    if (!actionContext.isRouteCurrent()) {
       return;
     }
+    if (!actionContext.isCurrent()) {
+      if (refreshed) this._render();
+      return;
+    }
+    if (this._busyAction === busyKey) this._busyAction = "";
     if (!refreshed) {
       this._setNilmIntervalRefreshError(successMessage);
       this._restoreNilmIntervalScroll(scrollTop);
@@ -933,8 +974,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const busyKey = actionKey === "save" || actionKey === "generate_sensor"
       ? `nilm_label_interval_${actionKey}`
       : `nilm_label_interval_${index}_${actionKey}`;
-    const requestId = this._evidenceRequestId;
-    const routeKey = this._loadedRouteKey || this._routeKey();
+    const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
     this._busyAction = busyKey;
     this._render();
@@ -944,7 +984,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!actionContext.isRouteCurrent()) {
         return;
       }
       const message = actionKey === "save"
@@ -954,23 +994,34 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           : actionKey === "assign"
             ? this._panelTextFormat("messages.assigned_interval", { label: data.label })
             : this._panelText("messages.deleted_interval_label");
+      const refreshed = await this._refreshNilmWorkspaceData(
+        actionContext.requestId,
+        actionContext.routeKey,
+      );
+      if (!actionContext.isRouteCurrent()) {
+        return;
+      }
+      if (!actionContext.isCurrent()) {
+        if (refreshed) this._render();
+        return;
+      }
       if (actionKey === "save" || actionKey === "generate_sensor") {
         this._nilmLabelIntervalDraft = { start: "", end: "", label: "", appliance_id: "", ground_truth_entity_id: "" };
         this._nilmIntervalEditorOpen = false;
       }
-      this._busyAction = "";
-      const refreshed = await this._refreshNilmWorkspaceData(requestId, routeKey);
-      if (this._isCurrentRequest(requestId, routeKey)) {
-        if (refreshed) {
-          this._nilmIntervalRefreshSuccessMessage = "";
-          this._setInlineFeedback("nilm-interval", "success", message);
-        } else {
-          this._setNilmIntervalRefreshError(message);
-        }
-        this._restoreNilmIntervalScroll(scrollTop);
+      if (this._busyAction === busyKey) this._busyAction = "";
+      if (refreshed) {
+        this._nilmIntervalRefreshSuccessMessage = "";
+        this._setInlineFeedback("nilm-interval", "success", message);
+      } else {
+        this._setNilmIntervalRefreshError(message);
       }
+      this._restoreNilmIntervalScroll(scrollTop);
     } catch (error) {
-      this._busyAction = "";
+      if (!actionContext.isCurrent()) {
+        return;
+      }
+      if (this._busyAction === busyKey) this._busyAction = "";
       this._setNilmIntervalError(
         this._panelTextFormat("errors.run_service", { service: action.service, message: error.message }),
         actionKey,
@@ -1048,19 +1099,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, data);
       }
-      if (!actionContext.isCurrent()) {
+      if (!actionContext.isRouteCurrent()) {
         return;
       }
       const message = this._nilmWorkspaceActionMessage(actionKey, data, item);
-      this._busyAction = "";
       const refreshed = await this._refreshNilmWorkspaceData(
         actionContext.requestId,
         actionContext.routeKey,
-        actionContext.mutationId,
       );
-      if (!actionContext.isCurrent()) {
+      if (!actionContext.isRouteCurrent()) {
         return;
       }
+      if (!actionContext.isCurrent()) {
+        if (refreshed) this._render();
+        return;
+      }
+      if (this._busyAction === busyKey) this._busyAction = "";
       const feedbackScope = refreshed
         ? this._selectRefreshedNilmAssignment(item, data)
         : "nilm-review";
@@ -1077,7 +1131,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
-      this._busyAction = "";
+      if (this._busyAction === busyKey) this._busyAction = "";
       this._renderAndScrollToTop();
     }
   }
@@ -1121,8 +1175,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
-    this._busyAction = `nilm_assignments_${index}_save`;
+    const busyKey = `nilm_assignments_${index}_save`;
+    this._busyAction = busyKey;
     this._render();
+    let completedCalls = 0;
     try {
       for (const call of calls) {
         if (call.action.domain) {
@@ -1130,23 +1186,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         } else {
           await this._hass.callService("circuitsetup_energy_analyzer", call.action.service, call.data);
         }
-        if (!actionContext.isCurrent()) {
+        completedCalls += 1;
+        if (!actionContext.isRouteCurrent()) {
           return;
         }
+      }
+      const message = this._nilmWorkspaceActionMessage("save", {}, item);
+      const refreshed = await this._refreshNilmWorkspaceData(
+        actionContext.requestId,
+        actionContext.routeKey,
+      );
+      if (!actionContext.isRouteCurrent()) {
+        return;
+      }
+      if (!actionContext.isCurrent()) {
+        if (refreshed) this._render();
+        return;
       }
       const draftKey = this._nilmAssignmentDraftKey(item);
       this._nilmAssignmentDrafts.delete(`${draftKey}:label`);
       this._nilmAssignmentDrafts.delete(`${draftKey}:appliance_profile`);
-      const message = this._nilmWorkspaceActionMessage("save", {}, item);
-      this._busyAction = "";
-      const refreshed = await this._refreshNilmWorkspaceData(
-        actionContext.requestId,
-        actionContext.routeKey,
-        actionContext.mutationId,
-      );
-      if (!actionContext.isCurrent()) {
-        return;
-      }
+      if (this._busyAction === busyKey) this._busyAction = "";
       const merge = calls.find((call) => call.actionKey === "merge");
       const feedbackScope = refreshed
         ? this._selectRefreshedNilmAssignment(
@@ -1164,11 +1224,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       );
       this._restoreNilmIntervalScroll(scrollTop);
     } catch (error) {
+      const refreshed = completedCalls && actionContext.isRouteCurrent()
+        ? await this._refreshNilmWorkspaceData(actionContext.requestId, actionContext.routeKey)
+        : false;
+      if (!actionContext.isRouteCurrent()) {
+        return;
+      }
       if (!actionContext.isCurrent()) {
+        if (refreshed) this._render();
         return;
       }
       this._error = this._panelTextFormat("errors.save_assignment", { message: error.message });
-      this._busyAction = "";
+      if (this._busyAction === busyKey) this._busyAction = "";
       this._renderAndScrollToTop();
     }
   }
@@ -1453,7 +1520,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return {
       requestId: actionContext.requestId,
       routeKey: actionContext.routeKey,
-      mutationId,
+      isRouteCurrent: actionContext.isCurrent,
       isCurrent: () => actionContext.isCurrent()
         && mutationId === this._nilmWorkspaceMutationId,
     };
@@ -1465,8 +1532,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const candidateIds = [
       preferredAssignmentId,
       data.target_assignment_id,
-      item && item.assignment_id,
       data.assignment_id,
+      item && item.assignment_id,
     ].filter(Boolean);
     const sessionId = (item && item.session_id) || data.session_id || "";
     const assignment = candidateIds
