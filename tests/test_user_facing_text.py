@@ -1559,6 +1559,7 @@ def test_panel_module_version_tracks_recent_timeline_frontend_change() -> None:
     assert "cost-currency" in PANEL_MODULE_VERSION
     assert "available-nilm-actions" in PANEL_MODULE_VERSION
     assert "visual-hierarchy" in PANEL_MODULE_VERSION
+    assert "visual-hierarchy-review" in PANEL_MODULE_VERSION
 
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
@@ -1594,6 +1595,27 @@ if (!html.includes("Review lanes") || !html.includes("Needs Review")
 }
 """
     )
+
+
+def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    command_rule = re.search(r"button, a\.button\s*\{(?P<body>.*?)\}", asset, re.DOTALL)
+
+    assert command_rule is not None
+    assert "min-height: 44px" in command_rule.group("body")
+    for selector in (
+        "button:focus-visible",
+        "a.button:focus-visible",
+        ".decision-tile:has(input:focus-visible)",
+        ".nilm-decision-option:has(input:focus-visible)",
+        ".nilm-lane:focus-visible",
+        ".nilm-review-card:focus-visible",
+        '.nilm-review-card[aria-pressed="true"]:focus-visible',
+    ):
+        assert selector in asset
+    assert "outline: none" in asset
+    assert "0 0 0 2px var(--card-background-color" in asset
+    assert "0 0 0 5px var(--primary-color" in asset
 
 
 def test_nilm_workspace_renders_review_lanes_from_payload() -> None:
@@ -2348,6 +2370,7 @@ def test_nilm_decision_failure_keeps_draft_and_feedback_in_inspector() -> None:
         """
 (async () => {
 let scrolled = 0;
+let focused = 0;
 const panel = new context.Panel();
 panel._render = () => {};
 panel._scrollToTop = () => { scrolled += 1; };
@@ -2357,6 +2380,9 @@ panel._hass = {
 };
 panel.shadowRoot.querySelector = (selector) => {
   if (selector === "#nilm_label_0") return { value: "Dishwasher" };
+  if (selector.startsWith('[data-inline-feedback=')) {
+    return { focus() { focused += 1; } };
+  }
   return null;
 };
 const signature = {
@@ -2386,6 +2412,9 @@ if (panel._inlineFeedback.scope !== key || panel._inlineFeedback.kind !== "error
 }
 if (scrolled !== 0) {
   throw new Error(`failed decision scrolled to the page top ${scrolled} times`);
+}
+if (focused !== 1) {
+  throw new Error(`failed decision focused feedback ${focused} times`);
 }
 })().catch((error) => {
   console.error(error);
@@ -4367,10 +4396,15 @@ def test_alert_decision_service_failure_stays_local() -> None:
 (async () => {
 let loads = 0;
 let scrolls = 0;
+let focused = 0;
 const panel = new context.Panel();
 panel._render = () => {};
 panel._scrollToTop = () => { scrolls += 1; };
-panel.shadowRoot.querySelector = () => null;
+panel.shadowRoot.querySelector = (selector) => (
+  selector === '[data-inline-feedback="alert-response"]'
+    ? { focus() { focused += 1; } }
+    : null
+);
 panel._hass = {
   callService: async () => { throw new Error("service offline"); },
 };
@@ -4387,11 +4421,15 @@ await panel._applyAlertDecision();
 if (loads !== 0) throw new Error("failed response unexpectedly refreshed");
 if (scrolls !== 0) throw new Error(`failed response scrolled ${scrolls} times`);
 if (panel._error) throw new Error(`response failure leaked globally: ${panel._error}`);
+if (panel._alertDecision !== "mark_unhelpful") {
+  throw new Error(`failed response cleared selection: ${panel._alertDecision}`);
+}
 if (panel._inlineFeedback.scope !== "alert-response"
     || panel._inlineFeedback.kind !== "error"
     || !panel._inlineFeedback.message.includes("service offline")) {
   throw new Error(`missing local failure: ${JSON.stringify(panel._inlineFeedback)}`);
 }
+if (focused !== 1) throw new Error(`failed response focused feedback ${focused} times`);
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -5052,6 +5090,11 @@ def test_readme_explains_notification_evidence_workflow() -> None:
     assert "graph-first evidence" in normalized_text
     assert "focused inspector" in normalized_text
     assert "single **Apply**" in normalized_text
+    assert (
+        "Alert evidence panel showing observed and expected metrics with "
+        "investigation context"
+    ) in readme_text
+    assert "source graph and investigation context" not in readme_text
 
 
 def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:

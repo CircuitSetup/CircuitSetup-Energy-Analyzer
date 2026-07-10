@@ -1567,6 +1567,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           font-weight: 700;
           justify-content: center;
           line-height: 1.2;
+          min-height: 44px;
           padding: 10px 14px;
           text-decoration: none;
         }
@@ -1580,6 +1581,18 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         button:disabled {
           cursor: wait;
           opacity: 0.65;
+        }
+        button:focus-visible,
+        a.button:focus-visible,
+        .decision-tile:has(input:focus-visible),
+        .nilm-decision-option:has(input:focus-visible),
+        .nilm-lane:focus-visible,
+        .nilm-review-card:focus-visible,
+        .nilm-review-card[aria-pressed="true"]:focus-visible {
+          box-shadow:
+            0 0 0 2px var(--card-background-color, #fff),
+            0 0 0 5px var(--primary-color, #03a9f4);
+          outline: none;
         }
         .error {
           border-color: var(--error-color, #db4437);

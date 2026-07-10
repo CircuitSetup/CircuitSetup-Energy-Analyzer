@@ -741,7 +741,7 @@ For a dashboard-first view of the same concepts, see `docs/dashboard-example.yam
 
 ![Dynamic Energy Analyzer alert evidence opened from a notification link](docs/images/readme/alert-evidence.png)
 
-![Alert evidence panel showing the source graph and investigation context](docs/images/readme/notifications-repairs.png)
+![Alert evidence panel showing observed and expected metrics with investigation context](docs/images/readme/notifications-repairs.png)
 
 ## Alert automation blueprint
 
