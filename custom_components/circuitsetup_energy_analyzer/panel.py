@@ -112,7 +112,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260710-3"
+PANEL_MODULE_VERSION = "20260710-4"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -674,24 +674,29 @@ def nilm_workspace_payload(
         reviewed_session_ids=reviewed_session_ids,
         limit=None,
     )
-    all_sessions = _merge_nilm_session_payloads(
-        all_generated_sessions,
-        stored_sessions,
+    all_sessions = _nilm_workspace_visible_sessions(
+        _merge_nilm_session_payloads(all_generated_sessions, stored_sessions),
+        signatures,
+        assignments,
     )
     all_sessions = _add_nilm_session_display_labels(
         all_sessions,
         session_display_labels,
     )
     sessions = _add_nilm_session_display_labels(
-        _merge_nilm_session_payloads(
-            _nilm_workspace_sessions(
-                recent_edges,
-                config.circuit_id,
-                signatures=signatures,
-                assignments=assignments,
-                reviewed_session_ids=reviewed_session_ids,
+        _nilm_workspace_visible_sessions(
+            _merge_nilm_session_payloads(
+                _nilm_workspace_sessions(
+                    recent_edges,
+                    config.circuit_id,
+                    signatures=signatures,
+                    assignments=assignments,
+                    reviewed_session_ids=reviewed_session_ids,
+                ),
+                stored_sessions,
             ),
-            stored_sessions,
+            signatures,
+            assignments,
         ),
         session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
@@ -708,7 +713,7 @@ def nilm_workspace_payload(
         all_sessions,
         assignments,
     )
-    lanes = _nilm_workspace_lanes(signatures, assignments)
+    lanes = _nilm_workspace_lanes(signatures, assignments, label_intervals)
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -731,16 +736,15 @@ def nilm_workspace_payload(
         "validation": validation,
         "lanes": lanes,
         "lane_counts": {
-            key: len(value["assignment_ids"]) + len(value["signature_ids"])
+            key: sum(
+                len(value[item_key])
+                for item_key in ("assignment_ids", "signature_ids", "interval_ids")
+            )
             for key, value in lanes.items()
         },
         "selection_guidance": _nilm_selection_guidance(),
         "actions": {
             "label_interval": _nilm_label_interval_action(config),
-            "sensor_label_interval": _nilm_sensor_label_interval_action(
-                config,
-                known_load_overlays,
-            ),
         },
         "edges": [
             _nilm_edge_payload(edge)
@@ -1565,7 +1569,8 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "domain": DOMAIN,
         "service": SERVICE_LABEL_NILM_INTERVAL,
         "data": data,
-        "requires": [ATTR_START, ATTR_END, ATTR_LABEL],
+        "requires": [ATTR_START, ATTR_END, ATTR_LABEL, ATTR_APPLIANCE_PROFILE],
+        "profile_options": _nilm_appliance_profile_options(),
     }
 
 
@@ -1704,24 +1709,9 @@ def _nilm_assignment_payload(
             "data": dict(action_data),
             "requires": [ATTR_APPLIANCE_PROFILE],
         }
-        profile_options = []
-        seen_profiles: set[str] = set()
-        current_profile = str(payload.get(ATTR_APPLIANCE_PROFILE) or "").strip()
-        for profile in (
-            current_profile,
-            *(
-                item.value
-                for item in ApplianceProfile
-                if item is not ApplianceProfile.MAINS_NILM
-            ),
-        ):
-            if not profile or profile in seen_profiles:
-                continue
-            seen_profiles.add(profile)
-            profile_options.append(
-                {"value": profile, "label": friendly_feature_name(profile)},
-            )
-        actions["change_profile"]["profile_options"] = profile_options
+        actions["change_profile"]["profile_options"] = (
+            _nilm_appliance_profile_options(payload.get(ATTR_APPLIANCE_PROFILE))
+        )
         if _nilm_assignment_has_ground_truth_intervals(payload, label_intervals):
             actions["validate_history"] = {
                 "domain": DOMAIN,
@@ -1885,15 +1875,32 @@ def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:
     )
 
 
+def _nilm_appliance_profile_options(
+    current_profile: Any = None,
+) -> list[dict[str, str]]:
+    values = (
+        str(current_profile or "").strip(),
+        *(
+            item.value
+            for item in ApplianceProfile
+            if item is not ApplianceProfile.MAINS_NILM
+        ),
+    )
+    return [
+        {"value": profile, "label": friendly_feature_name(profile)}
+        for index, profile in enumerate(values)
+        if profile and profile not in values[:index]
+    ]
+
+
 def _nilm_workspace_lanes(
     signatures: list[dict[str, Any]],
     assignments: list[dict[str, Any]],
+    label_intervals: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, dict[str, Any]]:
     lanes = {
         "needs_review": _nilm_lane("Needs Review"),
         "assigned": _nilm_lane("Assigned"),
-        "needs_validation": _nilm_lane("Needs Validation"),
-        "ready_to_publish": _nilm_lane("Ready to Publish"),
         "published": _nilm_lane("Published"),
         "ignored_expected": _nilm_lane("Ignored / Expected"),
     }
@@ -1902,12 +1909,7 @@ def _nilm_workspace_lanes(
         signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
         if not signature_id:
             continue
-        review_state = str(signature.get("review_state") or "").strip().lower()
-        if signature.get("ignored") or signature.get("expected") or review_state in {
-            "ignored",
-            "expected",
-            "merged",
-        }:
+        if _nilm_signature_hidden(signature):
             lanes["ignored_expected"]["signature_ids"].append(signature_id)
         elif _nilm_signature_identifiers(signature).isdisjoint(
             assigned_signature_ids,
@@ -1920,24 +1922,62 @@ def _nilm_workspace_lanes(
             continue
         state = str(assignment.get("lifecycle_state") or "").strip().lower()
         confidence = _clamped_float(assignment.get("confidence"), default=0.0)
-        if state in {"ignored", "expected", "retired"}:
+        if _nilm_assignment_hidden(assignment):
             lane = "ignored_expected"
-        elif state in {"needs_validation", "conflict", "low_confidence"} or (
-            confidence < 0.8
-        ):
-            lane = "needs_validation"
         elif assignment.get("publish_entities") is True or state == "published":
             lane = "published"
-        elif state in {"validated", "ready_to_publish"}:
-            lane = "ready_to_publish"
+        elif state in {
+            "needs_validation",
+            "conflict",
+            "low_confidence",
+            "validated",
+            "ready_to_publish",
+        } or confidence < 0.8:
+            lane = "needs_review"
         else:
             lane = "assigned"
         lanes[lane]["assignment_ids"].append(assignment_id)
+    assigned_interval_ids = {
+        str(value or "").strip()
+        for assignment in assignments
+        for value in _iter_items(assignment.get("label_interval_ids"))
+        if str(value or "").strip()
+    }
+    for interval in label_intervals:
+        interval_id = str(interval.get(ATTR_INTERVAL_ID) or "").strip()
+        if (
+            interval_id
+            and interval_id not in assigned_interval_ids
+            and not str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        ):
+            lanes["needs_review"]["interval_ids"].append(interval_id)
     return lanes
 
 
 def _nilm_lane(label: str) -> dict[str, Any]:
-    return {"label": label, "assignment_ids": [], "signature_ids": []}
+    return {
+        "label": label,
+        "assignment_ids": [],
+        "signature_ids": [],
+        "interval_ids": [],
+    }
+
+
+def _nilm_assignment_hidden(assignment: Mapping[str, Any]) -> bool:
+    return str(assignment.get("lifecycle_state") or "").strip().lower() in {
+        "ignored",
+        "expected",
+        "retired",
+    }
+
+
+def _nilm_signature_hidden(signature: Mapping[str, Any]) -> bool:
+    state = str(signature.get("review_state") or "").strip().lower()
+    return bool(
+        signature.get("ignored")
+        or signature.get("expected")
+        or state in {"ignored", "expected", "merged"}
+    )
 
 
 def _nilm_assigned_signature_ids(
@@ -1985,7 +2025,6 @@ def _nilm_selection_guidance() -> dict[str, Any]:
         "show_likely_paired_off_edge": True,
         "preview_interval_kwh": True,
         "show_known_load_overlap": True,
-        "question": "Was this appliance running here?",
     }
 
 
@@ -2433,10 +2472,18 @@ def _nilm_workspace_session_specs(
     specs: list[tuple[str, str | None]] = []
     seen: set[tuple[str, str | None]] = set()
     seen_fingerprints: set[str] = set()
+    hidden_fingerprints: set[str] = set()
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
-        for value in _iter_items(assignment.get("signature_fingerprints")):
-            fingerprint = str(value or "").strip()
+        fingerprints = {
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("signature_fingerprints"))
+            if str(value or "").strip()
+        }
+        if _nilm_assignment_hidden(assignment):
+            hidden_fingerprints.update(fingerprints)
+            continue
+        for fingerprint in fingerprints:
             key = (fingerprint, assignment_id)
             if fingerprint and key not in seen:
                 specs.append(key)
@@ -2445,12 +2492,61 @@ def _nilm_workspace_session_specs(
     for signature in signatures:
         fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
-        if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
+        if (
+            fingerprint
+            and not _nilm_signature_hidden(signature)
+            and fingerprint not in hidden_fingerprints
+            and fingerprint not in seen_fingerprints
+            and key not in seen
+        ):
             specs.append(key)
             seen.add(key)
-    if specs:
+    if specs or signatures or assignments:
         return specs
     return [(_nilm_workspace_signature_fingerprint(signatures), None)]
+
+
+def _nilm_workspace_visible_sessions(
+    sessions: Iterable[Mapping[str, Any]],
+    signatures: Iterable[Mapping[str, Any]],
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    hidden_assignment_ids = {
+        str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        for assignment in assignments
+        if _nilm_assignment_hidden(assignment)
+        if str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    }
+    hidden_fingerprints = {
+        str(value or "").strip()
+        for assignment in assignments
+        if _nilm_assignment_hidden(assignment)
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    }
+    visible_assignment_fingerprints = {
+        str(value or "").strip()
+        for assignment in assignments
+        if not _nilm_assignment_hidden(assignment)
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    }
+    hidden_fingerprints.update(
+        fingerprint
+        for signature in signatures
+        if _nilm_signature_hidden(signature)
+        if (fingerprint := _nilm_signature_session_fingerprint(signature))
+        if str(signature.get("review_state") or "").strip().lower() != "merged"
+        or fingerprint not in visible_assignment_fingerprints
+    )
+    return [
+        dict(session)
+        for session in sessions
+        if str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        not in hidden_assignment_ids
+        and str(session.get("signature_fingerprint") or "").strip()
+        not in hidden_fingerprints
+    ]
 
 
 def _nilm_signature_lookup_keys(signature: Mapping[str, Any]) -> list[str]:

@@ -270,7 +270,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
     assert "if (!actionContext.isCurrent())" in body
     assert "if (!actionContext.isRouteCurrent())" in body
     assert "this._busyAction === busyKey" in body
-    assert "merge.data.target_assignment_id" in body
+    assert "merge.data.target_assignment_id" not in body
     assert "this._selectRefreshedNilmAssignment" in body
     assert "this._storeActionMessageForReload" not in body
     assert "window.location.assign" not in body
@@ -1453,27 +1453,23 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["virtual_appliances"][0]["confidence"] == 0.9
     assert payload["virtual_appliances"][0]["model_status"] == "assigned"
     assert payload["virtual_appliances"][0]["active_session_id"] is None
-    assert payload["actions"]["label_interval"] == {
-        "domain": DOMAIN,
-        "service": "label_nilm_interval",
-        "data": {
-            "circuit_id": "mains",
-            "mains_entity_id": "sensor.mains_power",
-        },
-        "requires": ["start", "end", "label"],
+    label_action = payload["actions"]["label_interval"]
+    assert label_action["domain"] == DOMAIN
+    assert label_action["service"] == "label_nilm_interval"
+    assert label_action["data"] == {
+        "circuit_id": "mains",
+        "mains_entity_id": "sensor.mains_power",
     }
-    assert payload["actions"]["sensor_label_interval"] == {
-        "domain": DOMAIN,
-        "service": "generate_nilm_sensor_label_intervals",
-        "data": {
-            "circuit_id": "mains",
-            "mains_entity_id": "sensor.mains_power",
-        },
-        "requires": ["start", "end", "label", "ground_truth_entity_id"],
-        "ground_truth_options": [
-            {"value": "sensor.pool_pump_power", "label": "Pool Pump"}
-        ],
-    }
+    assert label_action["requires"] == [
+        "start",
+        "end",
+        "label",
+        "appliance_profile",
+    ]
+    assert {"value": "washer", "label": "Washer"} in label_action[
+        "profile_options"
+    ]
+    assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"
     assert payload["sessions"][0]["actions"]["assign"] == {
@@ -1605,21 +1601,19 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
 
     assert payload["lanes"]["needs_review"]["signature_ids"] == ["sig-new"]
     assert payload["lanes"]["assigned"]["assignment_ids"] == ["assignment-assigned"]
-    assert payload["lanes"]["needs_validation"]["assignment_ids"] == [
+    assert payload["lanes"]["needs_review"]["assignment_ids"] == [
         "assignment-zero-confidence",
-        "assignment-validation"
-    ]
-    assert payload["lanes"]["ready_to_publish"]["assignment_ids"] == [
-        "assignment-ready"
+        "assignment-ready",
     ]
     assert payload["lanes"]["published"]["assignment_ids"] == [
-        "assignment-published"
+        "assignment-validation",
+        "assignment-published",
     ]
     assert payload["lanes"]["ignored_expected"]["assignment_ids"] == [
         "assignment-ignored"
     ]
     assert payload["lanes"]["ignored_expected"]["signature_ids"] == ["sig-ignored"]
-    assert payload["lane_counts"]["needs_review"] == 1
+    assert payload["lane_counts"]["needs_review"] == 3
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
     )
@@ -1634,7 +1628,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "show_likely_paired_off_edge": True,
         "preview_interval_kwh": True,
         "show_known_load_overlap": True,
-        "question": "Was this appliance running here?",
     }
     virtual = payload["virtual_appliances"][0]
     assert virtual["source_type"] == "nilm_estimate"
@@ -1647,6 +1640,90 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
+
+
+def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_lanes,
+        _nilm_workspace_session_specs,
+    )
+
+    signatures = [
+        {"signature_id": "sig-retired", "review_state": "assigned"},
+        {"signature_id": "sig-new", "review_state": "new"},
+        {"signature_id": "sig-ignored", "review_state": "ignored"},
+    ]
+    assignments = [
+        {
+            "assignment_id": "assignment-retired",
+            "signature_fingerprints": ["sig-retired"],
+            "label_interval_ids": ["interval-retired"],
+            "lifecycle_state": "retired",
+        }
+    ]
+    intervals = [
+        {"interval_id": "interval-retired", "label": "Dishwasher"},
+        {"interval_id": "interval-new", "label": "Dryer"},
+    ]
+
+    assert _nilm_workspace_session_specs(signatures, assignments) == [
+        ("sig-new", None)
+    ]
+    lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
+    assert set(lanes) == {
+        "needs_review",
+        "assigned",
+        "published",
+        "ignored_expected",
+    }
+    assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
+    assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
+    assert lanes["ignored_expected"]["assignment_ids"] == [
+        "assignment-retired"
+    ]
+
+
+def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    sessions = [{"session_id": "session-unassigned"}]
+
+    assert _nilm_workspace_visible_sessions(
+        sessions,
+        [{"ignored": True}],
+        [{"lifecycle_state": "retired"}],
+    ) == sessions
+
+
+def test_nilm_workspace_keeps_merged_signature_sessions_on_visible_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    session = {
+        "session_id": "session-merged",
+        "assignment_id": "assignment-dishwasher",
+        "signature_fingerprint": "merged-fingerprint",
+    }
+
+    assert _nilm_workspace_visible_sessions(
+        [session],
+        [
+            {
+                "review_state": "merged",
+                "feedback_fingerprint": "merged-fingerprint",
+            }
+        ],
+        [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["merged-fingerprint"],
+            }
+        ],
+    ) == [session]
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:

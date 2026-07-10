@@ -98,13 +98,11 @@ function makeWorkspace({{ lanes = {{}}, lane_counts = {{}}, ...overrides }} = {{
   const labels = {{
     needs_review: "Needs Review",
     assigned: "Assigned",
-    needs_validation: "Needs Validation",
-    ready_to_publish: "Ready to Publish",
     published: "Published",
     ignored_expected: "Ignored / Expected",
   }};
   const baseLanes = Object.fromEntries(Object.entries(labels).map(([key, label]) => [
-    key, {{ label, signature_ids: [], assignment_ids: [] }},
+    key, {{ label, signature_ids: [], assignment_ids: [], interval_ids: [] }},
   ]));
   const baseCounts = Object.fromEntries(
     Object.keys(baseLanes).map((key) => [key, 0]),
@@ -1347,12 +1345,9 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_nilmApplianceDetailButton",
         "estimated_daily_energy",
         "model_status",
-        "_renderNilmValidation",
-        "ground_truth_entity_id",
-        "ground_truth_options",
-        "<select data-nilm-label-interval-input=\"ground_truth_entity_id\"",
-        "_panelText(\"nilm_workspace.sessions_title\")",
-        "_panelText(\"nilm_workspace.manual_labels\")",
+            "_renderNilmValidation",
+            "ground_truth_entity_id",
+            "_panelText(\"nilm_workspace.sessions_title\")",
         "_panelText(\"nilm_workspace.edges_title\")",
         "data-nilm-signature-fingerprint",
         "_focusNilmSignatureOnGraph",
@@ -1364,9 +1359,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-graph-window",
         "_zoomNilmGraph",
         "_panNilmGraph",
-        "_nilmWorkspaceGraphWindow",
-        "_renderNilmLabelIntervalEditor",
-        "_renderNilmSavedLabelIntervals",
+            "_nilmWorkspaceGraphWindow",
+            "_renderNilmLabelIntervalEditor",
         "_renderNilmAssignmentActions",
         "_callNilmWorkspaceItemAction",
         "_callNilmLabelIntervalAction",
@@ -1477,10 +1471,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "NILM Workspace",
         "Respond to this alert",
         "Known Load Overlays",
-        "Manual Labels",
+        "Label appliance interval",
         "Identify this load",
         "Sessions, validation, and technical details",
-        "Save Assignment",
+        "Appliance Type",
         "Alert evidence chart",
         "Matched alert",
         "Expected effect:",
@@ -2298,7 +2292,7 @@ def test_focused_nilm_history_request_contracts() -> None:
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
     asset = PANEL_ASSET.read_text(encoding="utf-8")
 
-    graph = asset.index("_renderNilmGraph(workspace, graphWindow, graphSessions)")
+    graph = asset.index("_renderNilmGraph(workspace, graphWindow, graphBands)")
     lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
     review = asset.index("_renderNilmReviewLayout(workspace)")
     secondary = asset.index("_renderNilmSecondaryCollections(workspace)")
@@ -2318,8 +2312,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       const panel = makePanel();
       const workspace = makeWorkspace({
         circuit: { circuit_id: "mains", name: "Whole Home Main" },
-        lane_counts: { needs_review: 2, assigned: 1, needs_validation: 2,
-          ready_to_publish: 1, published: 2, ignored_expected: 1 },
+        lane_counts: { needs_review: 5, assigned: 1, published: 2,
+          ignored_expected: 1 },
       });
       workspace.lanes.needs_review.signature_ids = ["sig-1", "sig-2"];
       workspace.lanes.assigned.assignment_ids = ["assignment-1"];
@@ -2327,7 +2321,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       for (const expected of [
         "Whole Home Main",
         "data-nilm-review-progress",
-        'value="7"',
+        'value="4"',
         'max="9"',
       ]) {
         assert.ok(summary.includes(expected));
@@ -2346,11 +2340,10 @@ def test_nilm_lane_rendering_contracts() -> None:
       }
       name = "test_nilm_workspace_renders_review_lanes_from_payload";
       const lanes = panel._renderNilmWorkspaceLanes(workspace);
-      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 6);
+      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 4);
       for (const expected of [
         'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
-        "Needs Review", "Needs Validation", "Ready to Publish", "Published",
-        "Ignored / Expected", "<strong>2</strong>",
+        "Needs Review", "Published", "Ignored / Expected", "<strong>5</strong>",
       ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
@@ -2412,7 +2405,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       const selectedCard = html.indexOf('data-nilm-review-item="signature:sig-2"');
       const inspector = html.indexOf('<div class="nilm-review-inspector"');
       assert.ok(selectedCard >= 0 && inspector > selectedCard);
-      assert.ok(html.slice(selectedCard, inspector).trimEnd().endsWith("</button>"));
+      assert.ok(html.slice(selectedCard, inspector).includes("</button>"));
+      assert.ok(html.indexOf('class="nilm-review-list"') < inspector);
       panel._nilmActiveLane = "assigned";
       panel._nilmSelectedReviewKey = "";
       assert.ok(
@@ -2625,9 +2619,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       });
       const html = panel._renderNilmWorkspaceLanes(makeWorkspace());
       assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
-      assert.equal((html.match(/tabindex="-1"/g) || []).length, 5);
-      const laneKeys = ["needs_review", "assigned", "needs_validation",
-        "ready_to_publish", "published", "ignored_expected"];
+      assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
+      const laneKeys = ["needs_review", "assigned", "published", "ignored_expected"];
       let buttons = [];
       const shadow = {
         activeElement: null,
@@ -2730,7 +2723,6 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.equal((html.match(/<details/g) || []).length, 1);
       for (const expected of [
         "Sessions, validation, and technical details",
-        "Manual Labels",
         "Estimated Appliances",
         "Validation",
         "NILM Sessions",
@@ -2738,6 +2730,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       ]) {
         assert.ok(html.includes(expected));
       }
+      assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
     }
 
@@ -2778,7 +2771,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       ]) {
         assert.equal(html.split(marker).length - 1, 1);
       }
-      for (const action of ["save", "validate_history", "publish", "unpublish", "retire"]) {
+      for (const action of ["save", "merge", "validate_history", "publish", "unpublish", "retire"]) {
         const marker = `data-nilm-assignment-index="0" data-nilm-assignment-action="${action}"`;
         assert.equal(html.split(marker).length - 1, 1);
       }
@@ -3303,22 +3296,12 @@ card._nilmWorkspace = {
     needs_review: {
       label: "Needs Review",
       signature_ids: ["sig-new"],
-      assignment_ids: []
+      assignment_ids: ["assignment-2", "assignment-3", "assignment-4"]
     },
     assigned: {
       label: "Assigned",
       signature_ids: [],
       assignment_ids: ["assignment-1"]
-    },
-    needs_validation: {
-      label: "Needs Validation",
-      signature_ids: [],
-      assignment_ids: ["assignment-2"]
-    },
-    ready_to_publish: {
-      label: "Ready to Publish",
-      signature_ids: [],
-      assignment_ids: ["assignment-3", "assignment-4"]
     },
     published: {
       label: "Published",
@@ -3332,10 +3315,8 @@ card._nilmWorkspace = {
     }
   },
   lane_counts: {
-    needs_review: 1,
+    needs_review: 4,
     assigned: 1,
-    needs_validation: 1,
-    ready_to_publish: 2,
     published: 1,
     ignored_expected: 1
   },
@@ -3368,7 +3349,7 @@ for (const expected of [
   "NILM mains power",
   "Whole Home Main",
   "Review progress",
-  "6 of 7 reviewed",
+  "3 of 7 reviewed",
   "Pool Pump",
   "axis-label",
   ">W<",
@@ -3706,7 +3687,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
         "No actions are available for this appliance right now.",
         "NILM Signatures",
         "Estimated Appliances",
-        "Manual Labels",
+        "Label appliance interval",
         "Session Validation",
         "Prediction Preview",
         "Known Load Overlays",
@@ -4121,9 +4102,9 @@ def test_nilm_decision_action_contracts() -> None:
         message: "Created an estimated HA appliance device." },
       { kind: "save", lane: "assigned", message: "Saved assignment changes." },
       { kind: "session", collection: "sessions", action: "validate",
-        lane: "ready_to_publish", message: "Confirmed Dishwasher." },
+        lane: "needs_review", message: "Confirmed Dishwasher." },
       { kind: "session-reject", collection: "sessions", action: "reject",
-        lane: "needs_validation", message: "Marked Dishwasher for review." },
+        lane: "needs_review", message: "Marked Dishwasher for review." },
     ];
     for (const row of itemCases) {
       const { kind } = row;
@@ -4284,7 +4265,8 @@ def test_nilm_decision_action_contracts() -> None:
       actions: { assign: sessionAssign } };
     const oldAssignment = { assignment_id: "assignment-old", display_name: "Old" };
     const source = { assignment_id: "assignment-source", display_name: "Dryer",
-      actions: { merge: makeAction("merge_assignments") } };
+      actions: { merge: { ...makeAction("merge_assignments"),
+        requires: ["target_assignment_id"] } } };
     const mergeTarget = { assignment_id: "assignment-target", display_name: "Laundry",
       actions: { publish: {} } };
     for (const row of [
@@ -4347,7 +4329,7 @@ def test_nilm_decision_action_contracts() -> None:
       if (row.kind !== "merge") {
         await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");
       } else {
-        await panel._saveNilmAssignmentChanges(0);
+        await panel._callNilmWorkspaceItemAction("assignments", 0, "merge");
       }
       assert.equal(
         calls[0][row.kind === "merge" ? "target_assignment_id" : "assignment_id"],
@@ -4476,15 +4458,81 @@ def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
     assert "box-shadow:" not in surface_rule.group("body")
 
 
+def test_nilm_multi_interval_labeling_contracts() -> None:
+    _run_panel_node_script(
+        """
+(() => {
+  const panel = makePanel({
+    _nilmIntervalEditorOpen: true,
+    _nilmActiveIntervalIndex: 1,
+    _nilmLabelIntervalDraft: {
+      label: "Dishwasher",
+      appliance_id: "dishwasher",
+      appliance_profile: "dishwasher",
+      intervals: [
+        { start: "2026-07-10T08:00", end: "2026-07-10T08:30" },
+        { start: "2026-07-10T09:00", end: "2026-07-10T09:45" },
+      ],
+    },
+  });
+  const workspace = makeWorkspace({ actions: { label_interval: {
+    ...makeAction("label_nilm_interval"),
+    profile_options: [{ value: "dishwasher", label: "Dishwasher" }],
+  } } });
+  const html = panel._renderNilmLabelIntervalEditor(workspace);
+  assert.ok(html.includes("Label appliance interval"));
+  assert.ok(html.includes("Click and drag across the graph"));
+  assert.ok(html.includes('data-nilm-interval-row="0"'));
+  assert.ok(html.includes('data-nilm-interval-row="1"'));
+  assert.ok(html.includes('data-nilm-active="true"'));
+  assert.ok(html.indexOf("Appliance Type") < html.indexOf('data-nilm-interval-row="0"'));
+  assert.ok(!html.includes("Ground Truth Sensor"));
+  assert.ok(!html.includes("Generate From Sensor"));
+
+  panel._nilmLabelIntervalDraft.intervals[0].interval_id = "saved-1";
+  const bands = panel._nilmGraphBands(makeWorkspace({
+    assignments: [{ assignment_id: "retired", lifecycle_state: "retired",
+      label_interval_ids: ["retired-1"] }],
+    label_intervals: [
+      { interval_id: "saved-1", start: "2026-07-10T08:00Z", end: "2026-07-10T08:30Z" },
+      { interval_id: "retired-1", start: "2026-07-10T10:00Z", end: "2026-07-10T10:30Z" },
+    ],
+  }), []);
+  assert.equal(bands.filter((item) => item.interval_id === "saved-1").length, 1);
+  assert.equal(bands.filter((item) => item.interval_id === "retired-1").length, 0);
+  assert.ok(bands.some((item) => item.band_kind === "draft" && item.selected));
+
+  const listeners = {};
+  const chart = {
+    dataset: { chartLeft: "54", chartRight: "876", chartStart: "0", chartEnd: "1000" },
+    getAttribute: () => "0 0 900 320",
+    getBoundingClientRect: () => ({ left: 0, width: 900 }),
+    setPointerCapture() {},
+    addEventListener(type, callback) { listeners[type] = callback; },
+    removeEventListener() {},
+  };
+  panel._render = () => {};
+  panel._startNilmChartSelection({ clientX: 300, pointerId: 1 }, chart);
+  listeners.pointerup({ clientX: 500 });
+  assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 3);
+  assert.equal(panel._nilmActiveIntervalIndex, 2);
+  assert.ok(panel._nilmLabelIntervalDraft.intervals[2].start);
+  assert.ok(panel._nilmLabelIntervalDraft.intervals[2].end);
+})();
+"""
+    )
+
+
 def test_nilm_interval_action_contracts() -> None:
     _run_panel_node_script(
         """
 (async () => {
   let name = "";
   try {
-    const baseIntervalDraft = { start: "2026-06-24T18:12",
-      end: "2026-06-24T19:03", label: "Dishwasher",
-      appliance_id: "dishwasher", ground_truth_entity_id: "" };
+    const baseIntervalDraft = { label: "Dishwasher", appliance_id: "dishwasher",
+      appliance_profile: "dishwasher", assignment_id: "",
+      intervals: [{ start: "2026-06-24T18:12", end: "2026-06-24T19:03",
+        interval_id: "" }] };
     const workspacePath = "circuitsetup_energy_analyzer/nilm_workspace?circuit_id=mains";
 
     name = "test_nilm_session_validation_adjust_interval_loads_session_times";
@@ -4496,7 +4544,8 @@ def test_nilm_interval_action_contracts() -> None:
       panel._render = () => { renders += 1; };
       panel._selectNilmSessionIntervalByIndex(0);
       assert.deepEqual(
-        [panel._nilmLabelIntervalDraft.start, panel._nilmLabelIntervalDraft.end,
+        [panel._nilmLabelIntervalDraft.intervals[0].start,
+          panel._nilmLabelIntervalDraft.intervals[0].end,
           panel._nilmIntervalEditorOpen, panel._lastActionMessage, renders],
         [panel._datetimeLocalFromMillis(Date.parse(start)),
           panel._datetimeLocalFromMillis(Date.parse(end)), true,
@@ -4504,14 +4553,16 @@ def test_nilm_interval_action_contracts() -> None:
       );
     }
 
-    name = "test_nilm_label_interval_form_asks_whether_appliance_was_running";
+    name = "test_nilm_label_interval_form_guides_graph_selection";
     {
       const panel = makePanel({ _nilmLabelIntervalDraft: { ...baseIntervalDraft } });
       const html = panel._renderNilmLabelIntervalEditor({ label_intervals: [],
-        actions: { sensor_label_interval: { ground_truth_options: [] } } });
+        actions: { label_interval: { profile_options: [
+          { value: "dishwasher", label: "Dishwasher" },
+        ] } } });
       for (const expected of [
-        "Was this appliance running here?", "Review the selected graph window",
-        "Dishwasher", "Save Interval",
+        "Label appliance interval", "Click and drag across the graph",
+        "Appliance Type", "Dishwasher", "Save Interval",
       ]) assert.ok(html.includes(expected), expected);
     }
 
@@ -4571,8 +4622,6 @@ def test_nilm_interval_action_contracts() -> None:
     context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
     for (const { actionKey, clearsEditor } of [
       { actionKey: "save", clearsEditor: true },
-      { actionKey: "generate_sensor", clearsEditor: true },
-      { actionKey: "assign", clearsEditor: false },
       { actionKey: "delete", clearsEditor: false },
     ]) {
       let scrolls = 0;
@@ -4617,12 +4666,13 @@ def test_nilm_interval_action_contracts() -> None:
         circuit: panel._payload.circuit,
         actions: {
           label_interval: makeAction("label_nilm_interval"),
-          sensor_label_interval: makeAction("generate_nilm_sensor_label_intervals"),
         },
         label_intervals: [interval],
       });
       const refreshed = makeWorkspace({
         ...workspace,
+        assignments: actionKey === "save" ? [{ assignment_id: "assignment-saved",
+          appliance_id: "dishwasher", lifecycle_state: "needs_validation" }] : [],
         label_intervals: actionKey === "delete" ? [] : [interval],
       });
       const graphSeries = [["graph"]];
@@ -4635,11 +4685,7 @@ def test_nilm_interval_action_contracts() -> None:
         _nilmActiveLane: "assigned",
         _nilmSelectedReviewKey: "assignment:assignment-2",
         _nilmIntervalEditorOpen: true,
-        _nilmLabelIntervalDraft: {
-          ...baseIntervalDraft,
-          ground_truth_entity_id: actionKey === "generate_sensor" ?
-            "binary_sensor.dishwasher_running" : "",
-        },
+        _nilmLabelIntervalDraft: { ...baseIntervalDraft },
       });
       panel._nilmDecisionDrafts.set("unrelated-decision", { decision: "ignore" });
       panel._nilmAssignmentDrafts.set("unrelated-assignment", "Heat pump");
@@ -4652,16 +4698,20 @@ def test_nilm_interval_action_contracts() -> None:
         assert.ok(apiPath.includes("nilm_workspace"));
         return refreshed;
       };
-      const index = ["save", "generate_sensor"].includes(actionKey) ? -1 : 0;
+      const index = actionKey === "save" ? -1 : 0;
       await panel._callNilmLabelIntervalAction(index, actionKey);
       assert.deepEqual([evidenceLoads, scrolls, workspaceLoads], [0, 0, 1]);
+      const expectedLane = actionKey === "save" ? "needs_review" : "assigned";
+      const expectedReviewKey = actionKey === "save"
+        ? "assignment:assignment-saved"
+        : "assignment:assignment-2";
       assert.deepEqual(
         [context.window.scrollY, panel._nilmWorkspace, panel._nilmWorkspaceHistorySeries,
           panel._nilmGraphWindow, panel._nilmFocusedSignature, panel._nilmActiveLane,
           panel._nilmSelectedReviewKey, panel._nilmDecisionDrafts, panel._nilmAssignmentDrafts,
           panel._inlineFeedback.scope, panel._inlineFeedback.kind],
-        [640, refreshed, graphSeries, graphWindow, "signature-2", "assigned",
-          "assignment:assignment-2", decisionDrafts, assignmentDrafts, "nilm-interval", "success"],
+        [640, refreshed, graphSeries, graphWindow, "signature-2", expectedLane,
+          expectedReviewKey, decisionDrafts, assignmentDrafts, "nilm-interval", "success"],
       );
       assert.ok(panel._inlineFeedback.message);
       assert.equal(focuses, 1);
@@ -4670,6 +4720,7 @@ def test_nilm_interval_action_contracts() -> None:
         assert.ok(!panel._nilmIntervalEditorOpen);
         assert.notEqual(panel._nilmLabelIntervalDraft, editorDraft);
         assert.equal(panel._nilmLabelIntervalDraft.label, "");
+        assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 1);
       } else {
         assert.ok(panel._nilmIntervalEditorOpen);
         assert.equal(panel._nilmLabelIntervalDraft, editorDraft);
@@ -4782,9 +4833,10 @@ def test_nilm_interval_action_contracts() -> None:
         _nilmActiveLane: "assigned",
         _nilmSelectedReviewKey: "assignment:assignment-1",
         _nilmIntervalEditorOpen: true,
-        _nilmLabelIntervalDraft: { start: "2026-07-09T18:00",
-          end: "2026-07-09T18:30", label: "Dishwasher",
-          appliance_id: "dishwasher", ground_truth_entity_id: "" },
+        _nilmLabelIntervalDraft: { label: "Dishwasher",
+          appliance_id: "dishwasher", appliance_profile: "dishwasher",
+          intervals: [{ start: "2026-07-09T18:00",
+            end: "2026-07-09T18:30", interval_id: "" }] },
       });
       panel._loadedRouteKey = panel._routeKey();
       panel._nilmDecisionDrafts.set("unrelated", { decision: "ignore" });
@@ -5363,7 +5415,6 @@ def test_save_assignment_calls_changed_assignment_services() -> None:
   const expected = [
     "rename_nilm_appliance",
     "change_nilm_appliance_profile",
-    "merge_nilm_assignments",
   ].join(",");
   if (services !== expected) {
     throw new Error(`unexpected services: ${services}`);
@@ -5374,8 +5425,18 @@ def test_save_assignment_calls_changed_assignment_services() -> None:
   if (calls[1].data.appliance_profile !== "dishwasher") {
     throw new Error("profile call did not include edited appliance type");
   }
-  if (calls[2].data.target_assignment_id !== "assignment-target") {
-    throw new Error("merge call did not include selected target");
+  const item = panel._nilmWorkspace.assignments[0];
+  panel._nilmAssignmentDrafts.clear();
+  const clean = panel._renderNilmAssignmentActions(item, 0);
+  if (!clean.includes(">Save</button>") || !clean.includes("disabled")
+      || !clean.includes('data-nilm-assignment-action="merge"')) {
+    throw new Error("clean assignment actions did not keep Save neutral and Merge separate");
+  }
+  panel._nilmAssignmentDrafts.set("assignment-source:label", "Dishwasher Prime");
+  const dirty = panel._renderNilmAssignmentActions(item, 0);
+  const save = dirty.match(/<button[^>]+data-nilm-assignment-action="save"[^>]*>/)[0];
+  if (save.includes("secondary") || save.includes("disabled")) {
+    throw new Error("changed assignment did not activate the primary Save action");
   }
 })().catch((error) => {
   console.error(error);
@@ -5686,10 +5747,7 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "NILM Review" in readme_text
     assert "Diagnostics and Evidence" in readme_text
     assert "NILM review lanes" in readme_text
-    assert (
-        "Needs Review, Assigned, Needs Validation, Ready to Publish, "
-        "Published, and Ignored / Expected"
-    ) in readme_text
+    assert "Needs Review, Assigned, Published, and Ignored / Expected" in readme_text
     assert "instead of service-control cards" in readme_text
     assert "expert evidence links and NILM buttons" in readme_text
     assert "Missing, disabled, or unavailable entities" in readme_text
@@ -5777,21 +5835,18 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for expected in (
-        "NILM workspace can also pair compatible on/off edges into likely sessions",
+        "NILM workspace can also pair compatible on/off edges",
         "Open NILM Graph & Review",
         "Mains, Solar, and NILM",
-        "label signatures, save graph intervals, merge duplicate signatures",
-        "assign a signature/session/interval to an appliance",
-        "Adjust Label",
-        "Validate History",
+        "drag across the graph to select one or more appliance intervals",
+        "Label appliance interval",
+        "highlights the active graph selection and matching time fields",
+        "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
-        "known-load sensors as selectable ground-truth sources",
-        "The workspace groups work into lanes",
-        "Needs Review, Assigned, Needs Validation, Ready to Publish, "
-        "Published, and Ignored / Expected",
+        "The workspace groups work into four lanes",
+        "Needs Review, Assigned, Published, and Ignored / Expected",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
-        "appliance-profile choices",
         "Published NILM appliances are marked as estimated",
         "Remove HA Device",
         "NILM estimates are inferred from aggregate power and are not safety evidence",

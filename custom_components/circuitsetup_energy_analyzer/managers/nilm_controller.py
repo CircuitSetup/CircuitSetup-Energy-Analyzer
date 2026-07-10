@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
-from ..const import CONF_ENABLE_EXPERIMENTAL_NILM
+from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
 from ..nilm import NilmEdge
@@ -353,6 +354,8 @@ class NilmController:
         start: Any,
         end: Any,
         appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
         mains_entity_id: str | None = None,
         ground_truth_entity_id: str | None = None,
         validation_start: Any = None,
@@ -393,6 +396,9 @@ class NilmController:
             ),
             None,
         )
+        assignment_id_text = str(
+            assignment_id or (existing or {}).get("assignment_id") or ""
+        ).strip()
         try:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
@@ -413,6 +419,8 @@ class NilmController:
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text
+        if assignment_id_text:
+            payload["assignment_id"] = assignment_id_text
         if validation_start is not None and validation_end is not None:
             validation_start_dt = self._label_interval_datetime(
                 validation_start,
@@ -432,6 +440,21 @@ class NilmController:
         else:
             existing.clear()
             existing.update(payload)
+        profile_text = str(appliance_profile or "").strip()
+        if profile_text:
+            assignment = self.upsert_assignment(
+                circuit_id,
+                label=label_text,
+                appliance_id=payload["appliance_id"],
+                appliance_profile=profile_text,
+                assignment_id=assignment_id_text or None,
+                label_interval_id=interval_id_text,
+                lifecycle_state="needs_validation",
+                confidence=payload["confidence"],
+            )
+            payload["assignment_id"] = assignment["assignment_id"]
+            if existing is not None:
+                existing["assignment_id"] = assignment["assignment_id"]
         del intervals[:-self._label_interval_max_items]
 
         coordinator.store_persistence.mark_dirty()
@@ -1295,11 +1318,20 @@ class NilmController:
     ) -> dict[str, Any]:
         """Publish estimated HA entities for a NILM assignment."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
+        previous = dict(assignment)
         assignment["publish_entities"] = True
         assignment["created_device"] = True
         assignment["lifecycle_state"] = "published"
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
+        if await self._async_wait_for_assignment_entities(assignment_id, True) is False:
+            assignment.clear()
+            assignment.update(previous)
+            await self.async_save_assignment_change()
+            raise ValueError(
+                f"Publishing assignment '{assignment_id}' did not create "
+                "Home Assistant entities."
+            )
         return dict(assignment)
 
     async def async_unpublish_nilm_appliance_assignment(
@@ -1309,11 +1341,21 @@ class NilmController:
     ) -> dict[str, Any]:
         """Stop publishing estimated HA entities for a NILM assignment."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
+        previous = dict(assignment)
         assignment["publish_entities"] = False
+        assignment["created_device"] = False
         if assignment.get("lifecycle_state") == "published":
             assignment["lifecycle_state"] = "validated"
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
+        if await self._async_wait_for_assignment_entities(assignment_id, False) is True:
+            assignment.clear()
+            assignment.update(previous)
+            await self.async_save_assignment_change()
+            raise ValueError(
+                f"Unpublishing assignment '{assignment_id}' did not remove "
+                "Home Assistant entities."
+            )
         return dict(assignment)
 
     async def async_retire_nilm_appliance_assignment(
@@ -1324,6 +1366,7 @@ class NilmController:
         """Retire a NILM assignment and stop publishing entities."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["publish_entities"] = False
+        assignment["created_device"] = False
         assignment["lifecycle_state"] = "retired"
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
@@ -1360,6 +1403,82 @@ class NilmController:
             self._coordinator.current_time()
         )
         await self._coordinator.config_entry_controller.async_reload()
+
+    def _assignment_entities_present(
+        self,
+        assignment_id: str,
+        *,
+        expected: bool,
+    ) -> bool | None:
+        hass = self._coordinator.hass
+        entry_id = str(getattr(self._coordinator, "entry_id", "") or "")
+        try:
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
+
+            entity_registry = er.async_get(hass)
+            device_registry = dr.async_get(hass)
+        except (AttributeError, ImportError, KeyError, TypeError):
+            entity_registry = None
+            device_registry = None
+        if entity_registry is not None and device_registry is not None and entry_id:
+            unique_id_prefix = f"{entry_id}_nilm_{assignment_id}_"
+            registered_unique_ids = {
+                str(getattr(entry, "unique_id", ""))
+                for entry in er.async_entries_for_config_entry(
+                    entity_registry,
+                    entry_id,
+                )
+                if getattr(entry, "platform", None) == DOMAIN
+                and str(getattr(entry, "unique_id", "")).startswith(unique_id_prefix)
+            }
+            if expected:
+                from ..sensor import NILM_VIRTUAL_SENSOR_DESCRIPTIONS
+
+                expected_unique_ids = {
+                    f"{unique_id_prefix}{description.key}"
+                    for description in NILM_VIRTUAL_SENSOR_DESCRIPTIONS
+                }
+                expected_unique_ids.add(f"{unique_id_prefix}estimated_running")
+                entity_present = expected_unique_ids <= registered_unique_ids
+            else:
+                entity_present = bool(registered_unique_ids)
+            device_present = device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry_id}_nilm_{assignment_id}")},
+            ) is not None
+            return (
+                entity_present and device_present
+                if expected
+                else entity_present or device_present
+            )
+
+        async_all = getattr(getattr(hass, "states", None), "async_all", None)
+        if callable(async_all):
+            return any(
+                str(getattr(state, "attributes", {}).get("assignment_id") or "")
+                == assignment_id
+                for state in async_all()
+            )
+        return None
+
+    async def _async_wait_for_assignment_entities(
+        self,
+        assignment_id: str,
+        expected: bool,
+    ) -> bool | None:
+        present = self._assignment_entities_present(
+            assignment_id,
+            expected=expected,
+        )
+        for _ in range(20):
+            if present is None or present is expected:
+                return present
+            await asyncio.sleep(0.05)
+            present = self._assignment_entities_present(
+                assignment_id,
+                expected=expected,
+            )
+        return present
 
 
 def _alert_feature(alert: AlertEvidence) -> str:

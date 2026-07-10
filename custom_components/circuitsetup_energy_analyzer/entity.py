@@ -694,11 +694,26 @@ def prune_stale_device_registry_entries(
     if not callable(update_device):
         return
 
+    entity_registry = _entity_registry_for_hass(hass)
+    active_device_ids: set[str] = set()
+    if entity_registry is not None:
+        entities = getattr(entity_registry, "entities", {})
+        entity_values = entities.values() if hasattr(entities, "values") else entities
+        active_device_ids = {
+            str(device_id)
+            for entry in entity_values
+            if getattr(entry, "config_entry_id", None) == entry_id
+            and getattr(entry, "platform", None) == DOMAIN
+            if (device_id := getattr(entry, "device_id", None))
+        }
+
     for device_id in stale_device_registry_device_ids(
         values,
         entry_id=entry_id,
         desired_identifiers=desired_identifiers,
     ):
+        if device_id in active_device_ids:
+            continue
         update_device(device_id, remove_config_entry_id=entry_id)
 
 

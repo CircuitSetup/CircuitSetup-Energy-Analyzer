@@ -251,6 +251,20 @@ label_nilm_interval:
       example: dishwasher
       selector:
         text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional existing appliance assignment to update with this interval.
+      required: false
+      example: assignment-dishwasher
+      selector:
+        text:
+    appliance_profile:
+      name: Appliance Profile
+      description: Optional appliance type. When supplied, the interval is attached to an appliance assignment for review.
+      required: false
+      example: dishwasher
+      selector:
+        text:
     mains_entity_id:
       name: Mains Entity
       description: Optional mains power entity used for this interval.

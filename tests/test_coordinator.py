@@ -5173,6 +5173,36 @@ async def test_nilm_label_interval_create_update_and_delete() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_label_interval_with_appliance_type_enters_review() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    interval = await coordinator.async_label_nilm_interval(
+        "mains",
+        label="Dishwasher",
+        start="2026-06-02T12:00:00+00:00",
+        end="2026-06-02T12:45:00+00:00",
+        appliance_id="dishwasher",
+        appliance_profile="dishwasher",
+    )
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert interval["assignment_id"] == assignment["assignment_id"]
+    assert assignment["appliance_profile"] == "dishwasher"
+    assert assignment["label_interval_ids"] == [interval["interval_id"]]
+    assert assignment["lifecycle_state"] == "needs_validation"
+
+
+@pytest.mark.asyncio
 async def test_nilm_label_intervals_are_bounded_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
@@ -6243,7 +6273,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
     )
 
     assert unpublished["publish_entities"] is False
-    assert unpublished["created_device"] is True
+    assert unpublished["created_device"] is False
     assert unpublished["lifecycle_state"] == "validated"
     assert hass.config_entries.reloaded == ["entry-1", "entry-1"]
 
@@ -6255,6 +6285,119 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
     assert retired["publish_entities"] is False
     assert retired["lifecycle_state"] == "retired"
     assert hass.config_entries.reloaded == ["entry-1", "entry-1", "entry-1"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_publish_waits_for_entities_added_after_reload() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloaded = 0
+
+        async def async_reload(self, _entry_id: str) -> None:
+            self.reloaded += 1
+
+    checks = 0
+
+    def async_all() -> list[SimpleNamespace]:
+        nonlocal checks
+        checks += 1
+        if checks == 1:
+            return []
+        return [
+            SimpleNamespace(
+                attributes={"assignment_id": "assignment-dishwasher"},
+            )
+        ]
+
+    hass = SimpleNamespace(
+        data={},
+        config_entries=FakeConfigEntries(),
+        states=SimpleNamespace(async_all=async_all),
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry.entry_id,
+        config_entry=entry,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "lifecycle_state": "validated",
+                        "publish_entities": False,
+                    }
+                ]
+            }
+        ),
+    )
+
+    assignment = await coordinator.async_publish_nilm_appliance_assignment(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert assignment["publish_entities"] is True
+    assert hass.config_entries.reloaded == 1
+    assert checks >= 2
+
+
+@pytest.mark.asyncio
+async def test_nilm_publish_rolls_back_without_home_assistant_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloaded = 0
+
+        async def async_reload(self, _entry_id: str) -> None:
+            self.reloaded += 1
+
+    hass = SimpleNamespace(
+        data={},
+        config_entries=FakeConfigEntries(),
+        states=SimpleNamespace(async_all=lambda: []),
+    )
+    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    coordinator = EnergyAnalyzerCoordinator(
+        hass,
+        entry_id=entry.entry_id,
+        config_entry=entry,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "lifecycle_state": "validated",
+                        "publish_entities": False,
+                    }
+                ]
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="did not create Home Assistant entities"):
+        await coordinator.async_publish_nilm_appliance_assignment(
+            "mains",
+            "assignment-dishwasher",
+        )
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["publish_entities"] is False
+    assert assignment["lifecycle_state"] == "validated"
+    assert hass.config_entries.reloaded == 2
 
 
 def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> None:
