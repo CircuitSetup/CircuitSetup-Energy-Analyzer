@@ -1356,7 +1356,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-graph-zoom",
         "data-nilm-graph-pan",
         "data-nilm-workspace-graph",
-        "data-nilm-graph-window",
+        "data-${prefix}-window",
         "_zoomNilmGraph",
         "_panNilmGraph",
             "_nilmWorkspaceGraphWindow",
@@ -1577,6 +1577,126 @@ if (html.includes("0.6 $")) {
 }
 """
     )
+
+
+def test_appliance_detail_renders_history_before_the_summary() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  history: {
+    entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+    default_hours: 168,
+    period_hours: [24, 168, 720],
+  },
+  detail: {
+    activity_state: "Running",
+    current_power_w: 128,
+    source_type: "direct_meter",
+    confidence: null,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: null,
+    daily_energy_kwh: 1.8,
+    runtime_today_seconds: 7200,
+    run_count_today: 3,
+    cost_today: 0.6,
+    recent_timeline: { items: [] },
+    today_vs_normal: [],
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: []
+  },
+  actions: {}
+};
+panel._applianceDetailHistorySeries = [[
+  { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
+]];
+panel._applianceDetailHistoryBounds = {
+  min: Date.parse("2026-07-10T00:00:00Z"),
+  max: Date.parse("2026-07-11T00:00:00Z"),
+};
+const html = panel._renderApplianceDetailBody();
+const graph = html.indexOf('class="chart"');
+const summary = html.indexOf('class="panel summary"');
+if (graph < 0 || graph > summary) {
+  throw new Error(`expected appliance history graph before summaries: ${html}`);
+}
+for (const expected of [
+  "Energy History",
+  'data-appliance-history-period',
+  'data-appliance-history-graph-zoom="0.5"',
+  'data-appliance-history-graph-pan="-0.5"',
+  "<title>Fridge Power: 128",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_history_requests_the_selected_period() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const requests = [];
+  const panel = new context.Panel();
+  context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+  context.window.location.search = "?appliance_detail=1&circuit_id=fridge";
+  panel._loadedRouteKey = "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=fridge";
+  panel._applianceDetail = {
+    history: {
+      entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+      default_hours: 168,
+      period_hours: [24, 168, 720],
+    },
+  };
+  panel._render = () => {};
+  panel._requestJson = async (apiPath, fetchPath) => {
+    requests.push({ apiPath, fetchPath });
+    return [[{ entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" }]];
+  };
+  await panel._loadApplianceDetailHistory(24);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].apiPath, /^history\/period\//);
+  assert.match(requests[0].apiPath, /filter_entity_id=sensor.fridge_power%2Csensor.fridge_energy/);
+  assert.equal(panel._applianceDetailHistoryHours, 24);
+  assert.equal(panel._applianceDetailHistorySeries.length, 1);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_suggested_settings_route_renders_the_notification_review() -> None:
+    _run_panel_node_script(
+        """
+context.window.location.search = "?review_suggested_settings=1&entry_id=entry-1";
+const panel = new context.Panel();
+panel._payload = {
+  status: "settings_recommendations",
+  setting_recommendations: [{
+    display_label: "Raise daily spike threshold",
+    status: "pending",
+    actions: { apply: {} },
+  }],
+};
+if (!panel._routeRequestsSuggestedSettings()) {
+  throw new Error("expected notification review route to be recognized");
+}
+const html = panel._renderSuggestedSettingsBody();
+for (const expected of ["Suggested Settings", "Raise daily spike threshold"]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
 
 def test_scoped_load_error_contracts() -> None:
     _run_panel_node_script(
@@ -3495,9 +3615,9 @@ def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
     body = """
 const panel = new context.Panel();
 const basePath = "/config/integrations/dashboard#config_entry=entry-hvac";
-const escapedBasePath = "/config/integrations/dashboard#config_entry=entry-hvac";
-const advancedHref = 'href="' + escapedBasePath
-  + "&amp;circuit_id=hvac&amp;options_step=advanced_settings" + '"';
+const escapedBasePath = basePath;
+const advancedPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
+const advancedHref = 'href="' + advancedPath + '"';
 const entityDetailHref = 'href="' + escapedBasePath
   + "&amp;options_step=entity_detail" + '"';
 panel._setupHealthLoading = false;
@@ -3530,7 +3650,7 @@ panel._setupHealth = {
       fix: "Configure breaker amps for HVAC",
       reason: "Capacity tracking needs the circuit breaker size.",
       affected_circuit_name: "HVAC",
-      open_path: `${basePath}&circuit_id=hvac&options_step=advanced_settings`,
+      open_path: advancedPath,
     },
   ],
 };
@@ -5778,7 +5898,7 @@ def test_readme_explains_notification_evidence_workflow() -> None:
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include one final Markdown link" in normalized_text
-    assert "link directly to **Configure > Review Suggested Settings**" in readme_text
+    assert "link directly to **Review Suggested Settings** in the evidence panel" in readme_text
     assert "visual comparison" in normalized_text
     assert "graph-first evidence" in normalized_text
     assert "focused inspector" in normalized_text

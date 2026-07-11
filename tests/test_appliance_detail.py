@@ -235,6 +235,20 @@ def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
     assert timeline["items"][0]["detail"] == "Observed start event."
 
 
+def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
+
+    assert payload["history"] == {
+        "entities": ["sensor.fridge_power", "sensor.fridge_energy"],
+        "default_hours": 168,
+        "period_hours": [24, 168, 720],
+    }
+
+
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

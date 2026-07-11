@@ -112,7 +112,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260710-6"
+PANEL_MODULE_VERSION = "20260711-1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -126,6 +126,8 @@ MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
 MAX_NILM_WORKSPACE_EDGES = 40
 MAX_NILM_WORKSPACE_SESSIONS = 20
 MAX_NILM_WORKSPACE_LABEL_INTERVALS = 40
+DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
+APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS = (24, 168, 720)
 
 _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
@@ -169,6 +171,10 @@ class AlertEvidenceView(HomeAssistantView):
             circuit_id=request.query.get("circuit_id"),
             feature=request.query.get("feature"),
             recommendation_id=request.query.get(ATTR_RECOMMENDATION_ID),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
+            review_suggested_settings=_truthy_query(
+                request.query.get("review_suggested_settings")
+            ),
             include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
         )
         return web.json_response(payload)
@@ -289,6 +295,8 @@ def alert_evidence_payload(
     circuit_id: str | None = None,
     feature: str | None = None,
     recommendation_id: str | None = None,
+    entry_id: str | None = None,
+    review_suggested_settings: bool = False,
     include_all_nilm: bool = False,
 ) -> dict[str, Any]:
     """Return the dynamic panel payload for an alert or circuit fallback."""
@@ -296,8 +304,26 @@ def alert_evidence_payload(
     requested_circuit_id = circuit_id or None
     requested_feature = str(feature or "").strip() or None
     requested_recommendation_id = str(recommendation_id or "").strip() or None
+    requested_entry_id = str(entry_id or "").strip() or None
     coordinators = tuple(coordinators)
     text = alert_evidence_panel_text()
+
+    if review_suggested_settings:
+        coordinator = _setup_health_coordinator(coordinators, requested_entry_id)
+        recommendations = (
+            _pending_setting_recommendations(coordinator)
+            if coordinator is not None
+            else []
+        )
+        return {
+            "status": "settings_recommendations",
+            "requested_entry_id": requested_entry_id,
+            "alert": None,
+            "circuit": None,
+            "actions": {},
+            "setting_recommendations": recommendations,
+            "text": text,
+        }
 
     if requested_alert_id:
         for coordinator in coordinators:
@@ -573,6 +599,7 @@ def _appliance_detail_payload(
         "requested_circuit_id": requested_circuit_id,
         "requested_assignment_id": requested_assignment_id,
         "detail": detail.as_dict(),
+        "history": _appliance_detail_history_payload(coordinator, detail),
         "actions": _appliance_detail_actions(coordinator, detail),
     }
 
@@ -618,6 +645,23 @@ def _appliance_detail_actions(
         )
     )
     return actions
+
+
+def _appliance_detail_history_payload(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> dict[str, Any]:
+    config = _config_for_circuit(coordinator, detail.circuit_id)
+    entities = (
+        _sensor_entity_ids(config)
+        if config is not None and detail.source_type != "nilm_estimate"
+        else []
+    )
+    return {
+        "entities": entities,
+        "default_hours": DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS,
+        "period_hours": list(APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS),
+    }
 
 
 def nilm_workspace_payload(
@@ -938,17 +982,8 @@ def _advanced_circuit_settings_path(
     coordinator: Any,
     config: CircuitConfig | None,
 ) -> str:
-    path = "/config/integrations/dashboard"
-    params: dict[str, str] = {}
-    entry_id = _coordinator_entry_id(coordinator)
-    if entry_id:
-        params["config_entry"] = entry_id
-    if config is not None:
-        params[ATTR_CIRCUIT_ID] = config.circuit_id
-        params["options_step"] = "advanced_settings"
-    if not params:
-        return path
-    return f"{path}#{urlencode(params)}"
+    del coordinator, config
+    return f"/config/integrations/integration/{DOMAIN}"
 
 
 def _coordinator_entry_id(coordinator: Any) -> str | None:
@@ -978,6 +1013,20 @@ def _setting_recommendations_for_circuit(
         _recommendation_payload(item, coordinator=coordinator)
         for item in _iter_items(recommendations)
     ]
+
+
+def _pending_setting_recommendations(coordinator: Any) -> list[dict[str, Any]]:
+    state = getattr(coordinator, "state", None)
+    by_circuit = getattr(state, "settings_recommendations_by_circuit", {})
+    if not isinstance(by_circuit, Mapping):
+        return []
+    pending = []
+    for recommendations in by_circuit.values():
+        for item in _iter_items(recommendations):
+            payload = _recommendation_payload(item, coordinator=coordinator)
+            if str(payload.get("status") or "pending") == "pending":
+                pending.append(payload)
+    return pending
 
 
 def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:

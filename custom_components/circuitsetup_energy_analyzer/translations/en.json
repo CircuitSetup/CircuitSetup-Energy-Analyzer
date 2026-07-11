@@ -865,8 +865,8 @@
       },
       "settings_recommendations": {
         "title": "CircuitSetup Energy Analyzer suggested settings",
-        "singular_message": "There is 1 suggested Advanced Circuit Setting to review via CircuitSetup Energy Analyzer > Configure > [Review Suggested Settings]({settings_url}).",
-        "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review via CircuitSetup Energy Analyzer > Configure > [Review Suggested Settings]({settings_url})."
+        "singular_message": "There is 1 suggested Advanced Circuit Setting to review: [Review Suggested Settings]({settings_url}).",
+        "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review: [Review Suggested Settings]({settings_url})."
       }
     },
     "dashboard": {
@@ -1114,6 +1114,8 @@
         "alert_evidence": "Alert Evidence",
         "appliance_detail": "Appliance Detail",
         "appliance_detail_message": "Appliance behavior summary.",
+        "suggested_settings": "Suggested Settings",
+        "suggested_settings_message": "Review pending analyzer setting recommendations.",
         "nilm_workspace": "NILM Workspace",
         "nilm_workspace_message": "Mains NILM graph and review.",
         "nilm_workspace_message_for_circuit": "Mains NILM graph and review for {name}."
@@ -1130,6 +1132,7 @@
         "load_nilm_workspace": "Could not load NILM workspace: {message}",
         "load_nilm_workspace_history": "Could not load NILM workspace history: {message}",
         "load_appliance_detail": "Could not load Appliance Detail from {path}: {message}",
+        "load_appliance_history": "Could not load appliance history from {path}: {message}",
         "run_service": "Could not run {service}: {message}",
         "alert_decision_required": "Choose a response before applying.",
         "nilm_decision_required": "Choose what this load represents before applying.",
@@ -1265,6 +1268,7 @@
         "energy": "Energy",
         "model": "Model",
         "energy_today": "Energy Today",
+        "energy_history": "Energy History",
         "runtime_today": "Runtime Today",
         "runs_today": "Runs Today",
         "cost_today": "Cost Today",
@@ -1285,10 +1289,17 @@
         "expected_prefix": "Expected: {expected}",
         "no_active_alerts": "No active appliance alerts were found.",
         "repeated_count": "Repeated {count} times.",
-        "no_actions": "No actions are available for this appliance right now."
+        "no_actions": "No actions are available for this appliance right now.",
+        "no_history": "No recorded appliance energy data is available.",
+        "time_period": "Time period",
+        "history_24_hours": "Past 24 hours",
+        "history_7_days": "Past 7 days",
+        "history_30_days": "Past 30 days",
+        "history_window": "Showing {start} to {end}."
       },
       "recommendations": {
         "suggested_settings": "Suggested Settings",
+        "no_suggested_settings": "No pending suggested settings are available.",
         "applied_suggested_settings": "Applied Suggested Settings",
         "suggested_setting": "Suggested setting",
         "not_pending": "This recommendation is no longer pending.",
