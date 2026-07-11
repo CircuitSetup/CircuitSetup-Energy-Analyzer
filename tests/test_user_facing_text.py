@@ -230,12 +230,6 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "budget_kwh": "Budget kWh",
     "budget_alert_ratio": "Budget Alert Ratio",
     "billing_min_elapsed_days": "Billing Minimum Elapsed Days",
-    "default_rate_per_kwh": "Default Rate Per kWh",
-    "tou_rate_per_kwh": "TOU Rate Per kWh",
-    "tou_start": "TOU Start",
-    "tou_end": "TOU End",
-    "tou_weekdays": "TOU Weekdays",
-    "tou_name": "TOU Name",
     "reset_demand_capacity_settings_to_defaults": (
         "Reset Demand And Capacity To Defaults"
     ),
@@ -563,13 +557,15 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
-    billing_descriptions = settings_step["sections"]["billing_cost_settings"][
-        "data_description"
-    ]
-    assert "time picker" in billing_descriptions["tou_start"].lower()
-    assert "time picker" in billing_descriptions["tou_end"].lower()
-    assert "choose" in billing_descriptions["tou_weekdays"].lower()
-    assert "comma-separated" not in billing_descriptions["tou_weekdays"].lower()
+    billing_fields = settings_step["sections"]["billing_cost_settings"]["data"]
+    assert not {
+        "default_rate_per_kwh",
+        "tou_rate_per_kwh",
+        "tou_start",
+        "tou_end",
+        "tou_weekdays",
+        "tou_name",
+    } & billing_fields.keys()
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:

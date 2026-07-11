@@ -555,9 +555,11 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 Billing and cost features estimate usage and cost from analyzer-retained data. When matching Opower or utility current-bill usage and cost sensors are configured, the analyzer divides cost by kWh and uses that shared rate for every appliance. The read-only global **Electricity Rate** sensor shows the active rate. Without matching Opower data, it shows the value from the editable global **Fallback Electricity Rate** number on the CircuitSetup Energy Analyzer device. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
-Configure per-circuit billing and Time-of-Use settings from:
+Configure per-circuit billing settings from:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+
+Configure the shared fallback rate and Time-of-Use rate, start/end times, weekdays, and label from the **CircuitSetup Energy Analyzer** device entities.
 
 Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 

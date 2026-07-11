@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import time as time_of_day
 from types import SimpleNamespace
 
 import pytest
@@ -131,7 +132,14 @@ class _FakeCoordinator:
                 "fridge": {"daily_goal_kwh": 4.5},
             },
             cost_settings_by_circuit={
-                "__global__": {"default_rate_per_kwh": 0.19},
+                "__global__": {
+                    "default_rate_per_kwh": 0.19,
+                    "tou_rate_per_kwh": 0.31,
+                    "tou_start": "16:00",
+                    "tou_end": "21:00",
+                    "tou_weekdays": "0,2,4",
+                    "tou_name": "Peak",
+                },
             },
         )
         self.calls: list[tuple[str, tuple[object, ...]]] = []
@@ -198,6 +206,22 @@ class _FakeCoordinator:
     async def async_set_global_cost_rate(self, rate_per_kwh: float) -> None:
         self.calls.append(("async_set_global_cost_rate", (rate_per_kwh,)))
 
+    async def async_set_global_tou_rate(self, rate_per_kwh: float) -> None:
+        self.calls.append(("async_set_global_tou_rate", (rate_per_kwh,)))
+
+    async def async_set_global_tou_time(
+        self,
+        field: str,
+        value: time_of_day,
+    ) -> None:
+        self.calls.append(("async_set_global_tou_time", (field, value)))
+
+    async def async_set_global_tou_name(self, value: str) -> None:
+        self.calls.append(("async_set_global_tou_name", (value,)))
+
+    async def async_set_global_tou_weekday(self, weekday: int, enabled: bool) -> None:
+        self.calls.append(("async_set_global_tou_weekday", (weekday, enabled)))
+
 
 def _hass_with(coordinator: _FakeCoordinator) -> SimpleNamespace:
     return SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -211,6 +235,8 @@ def test_platforms_include_daily_control_entities() -> None:
         "select",
         "number",
         "switch",
+        "text",
+        "time",
     }
 
 
@@ -514,8 +540,12 @@ async def test_switch_setup_entry_adds_maintenance_switch(
         added_entities.extend,
     )
 
-    assert len(added_entities) == 1
-    maintenance = added_entities[0]
+    assert len(added_entities) == 8
+    maintenance = next(
+        entity
+        for entity in added_entities
+        if entity.unique_id == "entry-1_fridge_maintenance"
+    )
     assert maintenance.unique_id == "entry-1_fridge_maintenance"
     assert maintenance.name == "Pause alerts"
     assert maintenance.suggested_object_id == "fridge_maintenance"
@@ -559,7 +589,9 @@ async def test_switch_setup_entry_filters_controls_through_catalog(
         added_entities.extend,
     )
 
-    assert added_entities == []
+    assert {entity.unique_id for entity in added_entities} == {
+        f"entry-1_tou_weekday_{weekday}" for weekday in range(7)
+    }
 
 
 @pytest.mark.asyncio
@@ -578,7 +610,11 @@ async def test_maintenance_switch_turns_on_and_off_idempotently(
         added_entities.extend,
     )
 
-    maintenance = added_entities[0]
+    maintenance = next(
+        entity
+        for entity in added_entities
+        if entity.unique_id == "entry-1_fridge_maintenance"
+    )
 
     assert maintenance.is_on is False
     await maintenance.async_turn_off()
@@ -636,6 +672,7 @@ async def test_maintenance_switch_skips_inapplicable_daily_control_circuits(
 
     assert {entity.unique_id for entity in added_entities} == {
         "entry-1_fridge_maintenance",
+        *(f"entry-1_tou_weekday_{weekday}" for weekday in range(7)),
     }
 
 
@@ -864,6 +901,7 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     by_unique_id = {entity.unique_id: entity for entity in added_entities}
     goal = by_unique_id["entry-1_fridge_daily_energy_goal"]
     rate = by_unique_id["entry-1_electricity_rate"]
+    tou_rate = by_unique_id["entry-1_tou_rate"]
     assert goal.unique_id == "entry-1_fridge_daily_energy_goal"
     assert goal.name == "Kitchen Fridge Daily Energy Goal"
     assert goal.suggested_object_id == "fridge_daily_energy_goal"
@@ -879,13 +917,60 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     assert rate.native_value == 0.19
     assert rate.native_unit_of_measurement == "$/kWh"
     assert rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
+    assert tou_rate.name == "CircuitSetup Energy Analyzer Time-Of-Use Rate"
+    assert tou_rate.native_value == 0.31
 
     await goal.async_set_native_value(6.25)
     await rate.async_set_native_value(0.31)
+    await tou_rate.async_set_native_value(0.42)
 
     assert coordinator.calls == [
         ("async_set_energy_goal_settings", ("fridge", 6.25, None)),
         ("async_set_global_cost_rate", (0.31,)),
+        ("async_set_global_tou_rate", (0.42,)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_global_tou_controls_live_on_the_analyzer_device() -> None:
+    from custom_components.circuitsetup_energy_analyzer.number import (
+        GlobalTimeOfUseRateNumber,
+    )
+    from custom_components.circuitsetup_energy_analyzer.switch import (
+        GlobalTimeOfUseWeekdaySwitch,
+    )
+    from custom_components.circuitsetup_energy_analyzer.text import (
+        GlobalTimeOfUseNameText,
+    )
+    from custom_components.circuitsetup_energy_analyzer.time import (
+        GlobalTimeOfUseTime,
+    )
+
+    coordinator = _FakeCoordinator()
+    rate = GlobalTimeOfUseRateNumber(coordinator, entry_id="entry-1")
+    start = GlobalTimeOfUseTime(coordinator, entry_id="entry-1", field="tou_start")
+    name = GlobalTimeOfUseNameText(coordinator, entry_id="entry-1")
+    monday = GlobalTimeOfUseWeekdaySwitch(
+        coordinator,
+        entry_id="entry-1",
+        weekday=0,
+    )
+
+    assert rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
+    assert start.native_value == time_of_day(16, 0)
+    assert name.native_value == "Peak"
+    assert monday.is_on is True
+
+    await rate.async_set_native_value(0.42)
+    await start.async_set_value(time_of_day(15, 30))
+    await name.async_set_value("Critical Peak")
+    await monday.async_turn_off()
+
+    assert coordinator.calls == [
+        ("async_set_global_tou_rate", (0.42,)),
+        ("async_set_global_tou_time", ("tou_start", time_of_day(15, 30))),
+        ("async_set_global_tou_name", ("Critical Peak",)),
+        ("async_set_global_tou_weekday", (0, False)),
     ]
 
 
@@ -929,7 +1014,8 @@ async def test_number_setup_entry_filters_controls_through_catalog(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_electricity_rate"
+        "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
 
 
@@ -951,7 +1037,8 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_electricity_rate"
+        "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
 
 
@@ -973,7 +1060,8 @@ async def test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_un
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_electricity_rate"
+        "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
 
 
@@ -1004,7 +1092,8 @@ async def test_number_setup_skips_stale_daily_goal_without_energy_source(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_electricity_rate"
+        "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
 
 
@@ -1044,7 +1133,8 @@ async def test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_electricity_rate"
+        "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
     assert desired_identifiers == {
         (DOMAIN, "entry-1"),
@@ -1073,6 +1163,7 @@ async def test_number_setup_keeps_goal_when_runtime_energy_evidence_exists(
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_garage_freezer_daily_energy_goal",
         "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
 
 
@@ -1116,10 +1207,12 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
     assert [entity.unique_id for entity in number_entities] == [
         "entry-1_dishwasher_daily_energy_goal",
         "entry-1_electricity_rate",
+        "entry-1_tou_rate",
     ]
-    assert [entity.unique_id for entity in switch_entities] == [
-        "entry-1_dishwasher_maintenance"
-    ]
+    assert {entity.unique_id for entity in switch_entities} == {
+        "entry-1_dishwasher_maintenance",
+        *(f"entry-1_tou_weekday_{weekday}" for weekday in range(7)),
+    }
     assert number_entities[0].native_value == 3.25
 
 

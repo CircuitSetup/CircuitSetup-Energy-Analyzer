@@ -16,6 +16,7 @@ from .entity import (
     supports_daily_circuit_controls,
 )
 from .entity_catalog import compact_descriptions_for_setup
+from .tariff import global_cost_settings
 
 try:
     from homeassistant.components.switch import SwitchEntity
@@ -49,6 +50,16 @@ CIRCUIT_SWITCH_DESCRIPTIONS: tuple[CircuitSwitchDescription, ...] = (
         has_entity_name=True,
         translation_key="maintenance",
     ),
+)
+
+_TOU_WEEKDAY_NAMES = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
 )
 
 
@@ -139,11 +150,96 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         )
 
 
+class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
+    """Switch entity for one analyzer-wide Time-of-Use weekday."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_icon = "mdi:calendar-week"
+
+    def __init__(self, coordinator: Any, *, entry_id: str, weekday: int) -> None:
+        self.coordinator = coordinator
+        self._entry_id = entry_id
+        self._weekday = weekday
+        self._attr_name = (
+            f"CircuitSetup Energy Analyzer Time-Of-Use {_TOU_WEEKDAY_NAMES[weekday]}"
+        )
+        self._attr_unique_id = f"{entry_id}_tou_weekday_{weekday}"
+        self._attr_suggested_object_id = (
+            f"circuitsetup_energy_analyzer_tou_{_TOU_WEEKDAY_NAMES[weekday].lower()}"
+        )
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name."""
+        return self._attr_name
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether this weekday uses the Time-of-Use rate."""
+        weekdays = str(global_cost_settings(self.coordinator).get("tou_weekdays") or "")
+        return str(self._weekday) in {value.strip() for value in weekdays.split(",")}
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group global tariff controls under the analyzer device."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "CircuitSetup Energy Analyzer",
+            "manufacturer": "CircuitSetup",
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return whether this weekday can be changed."""
+        return callable(getattr(self.coordinator, "async_set_global_tou_weekday", None))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable this Time-of-Use weekday."""
+        del kwargs
+        if not self.is_on:
+            await async_call_or_raise(
+                self.coordinator,
+                "async_set_global_tou_weekday",
+                "enable Time-of-Use weekday",
+                self._weekday,
+                True,
+            )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable this Time-of-Use weekday."""
+        del kwargs
+        if self.is_on:
+            await async_call_or_raise(
+                self.coordinator,
+                "async_set_global_tou_weekday",
+                "disable Time-of-Use weekday",
+                self._weekday,
+                False,
+            )
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up switch entities for daily circuit controls."""
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
-    entities: list[SwitchEntity] = []
+    entities: list[SwitchEntity] = [
+        GlobalTimeOfUseWeekdaySwitch(
+            coordinator,
+            entry_id=entry_id,
+            weekday=weekday,
+        )
+        for weekday in range(7)
+    ]
     circuit_device_identifiers: set[tuple[str, str]] = set()
 
     for raw_circuit in circuits_for_entities(entry, coordinator):

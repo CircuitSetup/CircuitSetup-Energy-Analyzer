@@ -15,6 +15,8 @@ except ModuleNotFoundError:
         SELECT = "select"
         NUMBER = "number"
         SWITCH = "switch"
+        TEXT = "text"
+        TIME = "time"
 
 
 DOMAIN = "circuitsetup_energy_analyzer"
@@ -27,6 +29,8 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.NUMBER,
     Platform.SWITCH,
+    Platform.TEXT,
+    Platform.TIME,
 ]
 
 CONF_CIRCUITS = "circuits"

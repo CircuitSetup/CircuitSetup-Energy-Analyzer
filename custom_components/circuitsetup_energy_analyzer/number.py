@@ -16,7 +16,7 @@ from .entity import (
 )
 from .entity_catalog import compact_descriptions_for_setup
 from .models import SensorRole
-from .utility_comparison import configured_electricity_rate
+from .tariff import configured_electricity_rate, global_cost_settings
 
 try:
     from homeassistant.components.number import NumberEntity
@@ -218,6 +218,42 @@ class GlobalElectricityRateNumber(NumberEntity):
         )
 
 
+class GlobalTimeOfUseRateNumber(GlobalElectricityRateNumber):
+    """Number entity for the analyzer-wide Time-of-Use rate."""
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id=entry_id)
+        self._attr_name = "CircuitSetup Energy Analyzer Time-Of-Use Rate"
+        self._attr_unique_id = f"{entry_id}_tou_rate"
+        self._attr_suggested_object_id = "circuitsetup_energy_analyzer_tou_rate"
+
+    @property
+    def native_value(self) -> float:
+        """Return the globally configured Time-of-Use rate."""
+        try:
+            value = global_cost_settings(self.coordinator).get(
+                "tou_rate_per_kwh",
+                0.0,
+            )
+            return max(float(value), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @property
+    def available(self) -> bool:
+        """Return whether the global Time-of-Use rate can be changed."""
+        return callable(getattr(self.coordinator, "async_set_global_tou_rate", None))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist the global Time-of-Use rate."""
+        await async_call_or_raise(
+            self.coordinator,
+            "async_set_global_tou_rate",
+            "set Time-of-Use rate",
+            float(value),
+        )
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up number entities for daily circuit controls."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -253,7 +289,12 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in descriptions
         )
 
-    entities.append(GlobalElectricityRateNumber(coordinator, entry_id=entry_id))
+    entities.extend(
+        (
+            GlobalElectricityRateNumber(coordinator, entry_id=entry_id),
+            GlobalTimeOfUseRateNumber(coordinator, entry_id=entry_id),
+        )
+    )
 
     prune_stale_entity_registry_entries(
         hass,

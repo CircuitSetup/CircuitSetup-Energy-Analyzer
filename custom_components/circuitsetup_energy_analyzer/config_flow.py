@@ -438,12 +438,6 @@ _ADVANCED_RESET_SETTING_KEYS = {
         FIELD_BUDGET_KWH,
         FIELD_BUDGET_ALERT_RATIO,
         "min_elapsed_days",
-        FIELD_DEFAULT_RATE_PER_KWH,
-        FIELD_TOU_RATE_PER_KWH,
-        FIELD_TOU_START,
-        FIELD_TOU_END,
-        FIELD_TOU_WEEKDAYS,
-        FIELD_TOU_NAME,
     ),
     "reset_demand_capacity_settings_to_defaults": (
         FIELD_WINDOW_MINUTES,
@@ -1956,30 +1950,6 @@ def _billing_cost_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
             FIELD_BILLING_MIN_ELAPSED_DAYS,
             default=int(settings.get("min_elapsed_days", 3)),
         ): _number_selector(minimum=1, maximum=31, step=1),
-        vol.Optional(
-            FIELD_DEFAULT_RATE_PER_KWH,
-            default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
-        ): _number_selector(minimum=0.0, step="any"),
-        vol.Optional(
-            FIELD_TOU_RATE_PER_KWH,
-            default=float(settings.get(FIELD_TOU_RATE_PER_KWH, 0.0)),
-        ): _number_selector(minimum=0.0, step="any"),
-        vol.Optional(
-            FIELD_TOU_START,
-            default=str(settings.get(FIELD_TOU_START) or ""),
-        ): _time_selector(),
-        vol.Optional(
-            FIELD_TOU_END,
-            default=str(settings.get(FIELD_TOU_END) or ""),
-        ): _time_selector(),
-        vol.Optional(
-            FIELD_TOU_WEEKDAYS,
-            default=_tou_weekday_selection(settings.get(FIELD_TOU_WEEKDAYS)),
-        ): _weekday_select_selector(),
-        vol.Optional(
-            FIELD_TOU_NAME,
-            default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
-        ): _text_selector(),
     }
 
 

@@ -88,10 +88,8 @@ from .nilm_virtual import (
 )
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
-from .utility_comparison import (
-    configured_electricity_rate,
-    effective_electricity_rate,
-)
+from .tariff import configured_electricity_rate
+from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
 try:

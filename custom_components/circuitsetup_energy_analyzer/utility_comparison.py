@@ -171,16 +171,6 @@ def utility_rate_per_kwh(
     return round(float(utility_cost) / float(utility_kwh), 4)
 
 
-def configured_electricity_rate(cost_settings_by_circuit: Any) -> float:
-    """Return the persisted analyzer-wide fallback electricity rate."""
-    if not isinstance(cost_settings_by_circuit, Mapping):
-        return 0.0
-    settings = cost_settings_by_circuit.get("__global__", {})
-    if not isinstance(settings, Mapping):
-        return 0.0
-    return _positive_electricity_rate(settings.get("default_rate_per_kwh"))
-
-
 def effective_electricity_rate(
     utility_cost_rate_by_circuit: Any,
     fallback_rate: Any = None,

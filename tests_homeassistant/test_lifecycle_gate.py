@@ -35,6 +35,8 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
         "select",
         "sensor",
         "switch",
+        "text",
+        "time",
     }
 )
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
@@ -45,6 +47,8 @@ EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
         "select",
         "sensor",
         "switch",
+        "text",
+        "time",
     }
 )
 EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS = frozenset(
@@ -53,6 +57,9 @@ EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS = frozenset(
         "number",
         "select",
         "sensor",
+        "switch",
+        "text",
+        "time",
     }
 )
 LIFECYCLE_LOG_BLOCKLIST = (

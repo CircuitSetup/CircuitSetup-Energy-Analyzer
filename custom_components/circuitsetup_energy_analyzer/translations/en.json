@@ -324,32 +324,20 @@
           },
           "billing_cost_settings": {
             "name": "Billing And Cost",
-            "description": "Billing-cycle budgets and time-of-use cost tracking.",
+            "description": "Billing-cycle budgets for this circuit.",
             "data": {
               "reset_billing_cost_settings_to_defaults": "Reset Billing Settings To Defaults",
               "cycle_start_day": "Cycle Start Day",
               "budget_kwh": "Budget kWh",
               "budget_alert_ratio": "Budget Alert Ratio",
-              "billing_min_elapsed_days": "Billing Minimum Elapsed Days",
-              "default_rate_per_kwh": "Default Rate Per kWh",
-              "tou_rate_per_kwh": "TOU Rate Per kWh",
-              "tou_start": "TOU Start",
-              "tou_end": "TOU End",
-              "tou_weekdays": "TOU Weekdays",
-              "tou_name": "TOU Name"
+              "billing_min_elapsed_days": "Billing Minimum Elapsed Days"
             },
             "data_description": {
-              "reset_billing_cost_settings_to_defaults": "Turn this on when saving to remove custom billing, budget, and time-of-use cost settings.",
+              "reset_billing_cost_settings_to_defaults": "Turn this on when saving to remove custom billing and budget settings.",
               "cycle_start_day": "Billing or cost cycle start day of the month.",
               "budget_kwh": "Optional billing-cycle kWh budget for this circuit.",
               "budget_alert_ratio": "Alert when projected cycle usage reaches this fraction of the budget.",
-              "billing_min_elapsed_days": "Minimum days into the billing cycle before projected-budget alerts can be raised.",
-              "default_rate_per_kwh": "Optional default utility rate for circuit cost tracking.",
-              "tou_rate_per_kwh": "Optional time-of-use rate for the configured peak window.",
-              "tou_start": "Optional peak-rate start time using the time picker.",
-              "tou_end": "Optional peak-rate end time using the time picker.",
-              "tou_weekdays": "Choose the weekdays where peak pricing applies.",
-              "tou_name": "Display name for the time-of-use rate window."
+              "billing_min_elapsed_days": "Minimum days into the billing cycle before projected-budget alerts can be raised."
             }
           },
           "demand_capacity_settings": {

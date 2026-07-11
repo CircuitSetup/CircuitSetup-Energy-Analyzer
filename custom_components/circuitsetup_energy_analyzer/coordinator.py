@@ -1119,6 +1119,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Persist the analyzer-wide electricity rate."""
         await self.settings_controller.async_set_global_cost_rate(rate_per_kwh)
 
+    async def async_set_global_tou_rate(
+        self: Self,
+        rate_per_kwh: Any,
+    ) -> None:
+        """Persist the analyzer-wide Time-of-Use rate."""
+        await self.settings_controller.async_set_global_tou_rate(rate_per_kwh)
+
+    async def async_set_global_tou_time(
+        self: Self,
+        field: str,
+        value: Any,
+    ) -> None:
+        """Persist one Time-of-Use boundary time."""
+        await self.settings_controller.async_set_global_tou_time(field, value)
+
+    async def async_set_global_tou_weekday(
+        self: Self,
+        weekday: int,
+        enabled: bool,
+    ) -> None:
+        """Persist one Time-of-Use weekday toggle."""
+        await self.settings_controller.async_set_global_tou_weekday(weekday, enabled)
+
+    async def async_set_global_tou_name(self: Self, value: str) -> None:
+        """Persist the analyzer-wide Time-of-Use label."""
+        await self.settings_controller.async_set_global_tou_name(value)
+
     async def async_set_demand_settings(
         self: Self,
         circuit_id: str,

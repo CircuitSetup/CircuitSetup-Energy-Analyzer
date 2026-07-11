@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
+from datetime import time as time_of_day
 from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings
@@ -68,6 +69,7 @@ from ..solar_flow import (
     SOLAR_SURPLUS_THRESHOLD_W,
 )
 from ..standby import StandbySettings
+from ..tariff import GLOBAL_COST_SETTINGS_KEY
 from ..usage import EnergyUsageSettings
 from ..utility_comparison import (
     DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT,
@@ -77,7 +79,6 @@ from ..utility_comparison import (
 from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
-GLOBAL_COST_SETTINGS_KEY = "__global__"
 
 
 class SettingsController:
@@ -940,6 +941,51 @@ class SettingsController:
         default_tou_end = config.tou_end if config is not None else None
         default_tou_weekdays = config.tou_weekdays if config is not None else ()
         default_tou_name = config.tou_name if config is not None else "Peak"
+        legacy_tou_rate = _optional_positive_float_value(
+            overrides.get("tou_rate_per_kwh"),
+            default=default_tou_rate,
+        )
+        legacy_tou_start = str(overrides.get("tou_start") or default_tou_start or "")
+        legacy_tou_end = str(overrides.get("tou_end") or default_tou_end or "")
+        legacy_tou_weekdays = _weekday_tuple_value(
+            overrides.get("tou_weekdays"),
+            default=default_tou_weekdays,
+        )
+        legacy_tou_name = str(overrides.get("tou_name") or default_tou_name or "Peak")
+        has_global_tou = any(
+            key in global_overrides
+            for key in (
+                "tou_rate_per_kwh",
+                "tou_start",
+                "tou_end",
+                "tou_weekdays",
+                "tou_name",
+            )
+        )
+        resolved_tou_rate = _optional_positive_float_value(
+            global_overrides.get("tou_rate_per_kwh"),
+            default=None,
+        ) if has_global_tou else legacy_tou_rate
+        resolved_tou_start = (
+            str(global_overrides.get("tou_start") or "")
+            if has_global_tou
+            else legacy_tou_start
+        )
+        resolved_tou_end = (
+            str(global_overrides.get("tou_end") or "")
+            if has_global_tou
+            else legacy_tou_end
+        )
+        resolved_tou_weekdays = (
+            _weekday_tuple_value(global_overrides.get("tou_weekdays"), default=())
+            if has_global_tou
+            else legacy_tou_weekdays
+        )
+        resolved_tou_name = (
+            str(global_overrides.get("tou_name") or "Peak")
+            if has_global_tou
+            else legacy_tou_name
+        )
         return CostSettings(
             cycle_start_day=_positive_int_value(
                 overrides.get("cycle_start_day"),
@@ -952,30 +998,89 @@ class SettingsController:
                     default=default_rate,
                 ),
             ),
-            tou_rate_per_kwh=_optional_positive_float_value(
-                overrides.get("tou_rate_per_kwh"),
-                default=default_tou_rate,
-            ),
-            tou_start=str(overrides.get("tou_start") or default_tou_start or ""),
-            tou_end=str(overrides.get("tou_end") or default_tou_end or ""),
-            tou_weekdays=_weekday_tuple_value(
-                overrides.get("tou_weekdays"),
-                default=default_tou_weekdays,
-            ),
-            tou_name=str(overrides.get("tou_name") or default_tou_name or "Peak"),
+            tou_rate_per_kwh=resolved_tou_rate,
+            tou_start=resolved_tou_start,
+            tou_end=resolved_tou_end,
+            tou_weekdays=resolved_tou_weekdays,
+            tou_name=resolved_tou_name,
         )
 
     async def async_set_global_cost_rate(self, rate_per_kwh: Any) -> None:
         """Persist one electricity rate shared by every appliance."""
-        coordinator = self._coordinator
         rate = _optional_positive_float_value(rate_per_kwh, default=None)
+        await self._async_update_global_cost_settings(
+            {"default_rate_per_kwh": rate},
+        )
+
+    async def async_set_global_tou_rate(self, rate_per_kwh: Any) -> None:
+        """Persist the analyzer-wide Time-of-Use rate."""
+        try:
+            rate = max(float(rate_per_kwh), 0.0)
+        except (TypeError, ValueError):
+            rate = 0.0
+        await self._async_update_global_cost_settings({"tou_rate_per_kwh": rate})
+
+    async def async_set_global_tou_time(self, field: str, value: Any) -> None:
+        """Persist one Time-of-Use boundary time."""
+        if field not in {"tou_start", "tou_end"}:
+            return
+        await self._async_update_global_cost_settings(
+            {field: _time_string_value(value)},
+        )
+
+    async def async_set_global_tou_weekday(
+        self,
+        weekday: Any,
+        enabled: bool,
+    ) -> None:
+        """Persist one Time-of-Use weekday toggle."""
+        try:
+            day = int(weekday)
+        except (TypeError, ValueError):
+            return
+        if day not in range(7):
+            return
+        settings = self._coordinator.store_data.cost_settings_by_circuit.get(
+            GLOBAL_COST_SETTINGS_KEY,
+            {},
+        )
+        weekdays = list(
+            _weekday_tuple_value(
+                settings.get("tou_weekdays") if isinstance(settings, Mapping) else (),
+            )
+        )
+        if enabled and day not in weekdays:
+            weekdays.append(day)
+        if not enabled and day in weekdays:
+            weekdays.remove(day)
+        await self._async_update_global_cost_settings(
+            {"tou_weekdays": _weekday_csv_value(weekdays)},
+        )
+
+    async def async_set_global_tou_name(self, value: Any) -> None:
+        """Persist the analyzer-wide Time-of-Use label."""
+        await self._async_update_global_cost_settings(
+            {"tou_name": str(value or "Peak").strip() or "Peak"},
+        )
+
+    async def _async_update_global_cost_settings(
+        self,
+        updates: Mapping[str, Any],
+    ) -> None:
+        """Persist global tariff settings and refresh every circuit rate."""
+        coordinator = self._coordinator
         settings_by_circuit = coordinator.store_data.cost_settings_by_circuit
-        if rate is None:
-            settings_by_circuit.pop(GLOBAL_COST_SETTINGS_KEY, None)
+        current = settings_by_circuit.get(GLOBAL_COST_SETTINGS_KEY, {})
+        global_settings = dict(current) if isinstance(current, Mapping) else {}
+        for key, value in updates.items():
+            if value is None:
+                global_settings.pop(key, None)
+            else:
+                global_settings[key] = value
+        if global_settings:
+            settings_by_circuit[GLOBAL_COST_SETTINGS_KEY] = global_settings
         else:
-            settings_by_circuit[GLOBAL_COST_SETTINGS_KEY] = {
-                "default_rate_per_kwh": rate,
-            }
+            settings_by_circuit.pop(GLOBAL_COST_SETTINGS_KEY, None)
 
         now = coordinator.current_time()
         for config in coordinator.circuit_configs:
@@ -2374,6 +2479,15 @@ def _weekday_tuple_value(
 
 def _weekday_csv_value(value: Any, *, default: tuple[int, ...] = ()) -> str:
     return ",".join(str(day) for day in _weekday_tuple_value(value, default=default))
+
+
+def _time_string_value(value: Any) -> str:
+    if isinstance(value, time_of_day):
+        return value.isoformat(timespec="minutes")
+    try:
+        return time_of_day.fromisoformat(str(value)).isoformat(timespec="minutes")
+    except (TypeError, ValueError):
+        return ""
 
 
 def _alert_policy_for_sensitivity(sensitivity: str) -> ConservativeAlertPolicy:

@@ -57,6 +57,7 @@ def _recommendation(**overrides: Any) -> SettingRecommendation:
 class _SettingsCoordinator:
     def __init__(self, recommendation: SettingRecommendation) -> None:
         self.state = SimpleNamespace(
+            cost_current_rate_by_circuit={},
             leg_imbalance_evidence_by_circuit={},
             metric_consistency_evidence_by_circuit={},
             balance_evidence_by_circuit={},
@@ -134,6 +135,13 @@ class _SettingsCoordinator:
                 mode=CircuitMode.SINGLE_PHASE,
                 power_flow=PowerFlowMode.LOAD,
                 daily_energy_spike_ratio=0.25,
+                cost_cycle_start_day=1,
+                default_rate_per_kwh=None,
+                tou_rate_per_kwh=None,
+                tou_start="",
+                tou_end="",
+                tou_weekdays=(),
+                tou_name="Peak",
             )
         ]
         self.circuit_registry = SimpleNamespace(
@@ -1149,10 +1157,74 @@ def test_global_cost_rate_overrides_circuit_cost_rates() -> None:
         tou_name="Peak",
     )
     coordinator.store_data.cost_settings_by_circuit = {
-        "fridge": {"default_rate_per_kwh": 0.22},
-        "__global__": {"default_rate_per_kwh": 0.31},
+        "fridge": {
+            "default_rate_per_kwh": 0.22,
+            "tou_rate_per_kwh": 0.24,
+            "tou_start": "10:00",
+            "tou_end": "14:00",
+            "tou_weekdays": "5,6",
+            "tou_name": "Legacy",
+        },
+        "__global__": {
+            "default_rate_per_kwh": 0.31,
+            "tou_rate_per_kwh": 0.42,
+            "tou_start": "16:00",
+            "tou_end": "21:00",
+            "tou_weekdays": "0,1,2,3,4",
+            "tou_name": "Peak",
+        },
     }
 
     cost = controller.cost_settings_for_config(config, "fridge")
 
     assert cost.default_rate_per_kwh == 0.31
+    assert cost.tou_rate_per_kwh == 0.42
+    assert cost.tou_start == "16:00"
+    assert cost.tou_end == "21:00"
+    assert cost.tou_weekdays == (0, 1, 2, 3, 4)
+    assert cost.tou_name == "Peak"
+
+
+def test_global_tou_does_not_mix_with_legacy_circuit_schedule() -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    controller = settings_controller.SettingsController(coordinator)
+    config = coordinator.circuit_configs[0]
+    coordinator.store_data.cost_settings_by_circuit = {
+        "fridge": {
+            "tou_rate_per_kwh": 0.24,
+            "tou_start": "10:00",
+            "tou_end": "14:00",
+            "tou_weekdays": "5,6",
+            "tou_name": "Legacy",
+        },
+        "__global__": {"tou_rate_per_kwh": 0.42},
+    }
+
+    cost = controller.cost_settings_for_config(config, "fridge")
+
+    assert cost.tou_rate_per_kwh == 0.42
+    assert cost.tou_start == ""
+    assert cost.tou_end == ""
+    assert cost.tou_weekdays == ()
+    assert cost.tou_name == "Peak"
+
+
+@pytest.mark.asyncio
+async def test_global_tou_controls_persist_one_shared_tariff() -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_global_tou_rate(0.42)
+    await controller.async_set_global_tou_time("tou_start", "16:00")
+    await controller.async_set_global_tou_time("tou_end", "21:00")
+    await controller.async_set_global_tou_weekday(0, True)
+    await controller.async_set_global_tou_weekday(2, True)
+    await controller.async_set_global_tou_name("Critical Peak")
+
+    assert coordinator.store_data.cost_settings_by_circuit["__global__"] == {
+        "tou_rate_per_kwh": 0.42,
+        "tou_start": "16:00",
+        "tou_end": "21:00",
+        "tou_weekdays": "0,2",
+        "tou_name": "Critical Peak",
+    }
