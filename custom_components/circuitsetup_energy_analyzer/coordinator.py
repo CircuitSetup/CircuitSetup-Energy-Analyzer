@@ -98,6 +98,7 @@ from .storage import (
     RETENTION_WINDOWS,
     FeatureStoreData,
 )
+from .utility_comparison import effective_electricity_rate
 from .ux import (
     canonicalize_sensitivity_config,
 )
@@ -522,13 +523,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._cost_processor = CostProcessor(
             settings_for_config=self.processor_runtime.cost_settings_for_config,
-            utility_rate_for_circuit=lambda _circuit_id: next(
-                (
-                    rate
-                    for rate in self.state.utility_cost_rate_by_circuit.values()
-                    if rate > 0.0
-                ),
-                None,
+            utility_rate_for_circuit=lambda _circuit_id: (
+                effective_electricity_rate(
+                    self.state.utility_cost_rate_by_circuit,
+                )
+                or None
             ),
         )
         self._demand_processor = DemandProcessor(

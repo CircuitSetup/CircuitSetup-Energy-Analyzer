@@ -29,6 +29,7 @@ from .sensor import (
     health_summary_attributes,
     health_summary_value,
 )
+from .utility_comparison import effective_electricity_rate
 
 SourceType = Literal["direct_meter", "nilm_estimate", "mixed", "mains", "unknown"]
 ExpectationStatus = Literal[
@@ -1092,26 +1093,11 @@ def _positive_state_number(state: Any, field: str, key: str) -> float | None:
 
 def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
     daily_kwh = _state_number(state, "daily_energy_usage_by_circuit", circuit_id)
-    rate = _global_utility_rate(state) or _positive_state_number(
-        state,
-        "cost_current_rate_by_circuit",
-        circuit_id,
+    rate = effective_electricity_rate(
+        getattr(state, "utility_cost_rate_by_circuit", {}),
+        _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id),
     )
-    return _estimated_cost(daily_kwh, rate)
-
-
-def _global_utility_rate(state: Any) -> float | None:
-    rates = getattr(state, "utility_cost_rate_by_circuit", {})
-    if not isinstance(rates, Mapping):
-        return None
-    for rate in rates.values():
-        try:
-            value = float(rate)
-        except (TypeError, ValueError):
-            continue
-        if value > 0.0:
-            return value
-    return None
+    return _estimated_cost(daily_kwh, rate or None)
 
 
 def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:

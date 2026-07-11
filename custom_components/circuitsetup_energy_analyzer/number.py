@@ -16,6 +16,7 @@ from .entity import (
 )
 from .entity_catalog import compact_descriptions_for_setup
 from .models import SensorRole
+from .utility_comparison import configured_electricity_rate
 
 try:
     from homeassistant.components.number import NumberEntity
@@ -159,7 +160,7 @@ class GlobalElectricityRateNumber(NumberEntity):
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Electricity Rate"
+        self._attr_name = "CircuitSetup Energy Analyzer Fallback Electricity Rate"
         self._attr_unique_id = f"{entry_id}_electricity_rate"
         self._attr_suggested_object_id = (
             "circuitsetup_energy_analyzer_electricity_rate"
@@ -183,7 +184,10 @@ class GlobalElectricityRateNumber(NumberEntity):
     @property
     def native_value(self) -> float:
         """Return the shared electricity rate, using zero when unconfigured."""
-        return _global_cost_rate_value(self.coordinator)
+        store_data = getattr(self.coordinator, "store_data", None)
+        return configured_electricity_rate(
+            getattr(store_data, "cost_settings_by_circuit", {}),
+        )
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -284,21 +288,6 @@ def _daily_energy_goal_value(coordinator: Any, circuit_id: str) -> float:
         except (TypeError, ValueError):
             return 0.0
     return 0.0
-
-
-def _global_cost_rate_value(coordinator: Any) -> float:
-    store_data = getattr(coordinator, "store_data", None)
-    settings_by_circuit = getattr(store_data, "cost_settings_by_circuit", {})
-    if not isinstance(settings_by_circuit, Mapping):
-        return 0.0
-    settings = settings_by_circuit.get("__global__", {})
-    if not isinstance(settings, Mapping):
-        return 0.0
-    try:
-        rate = float(settings.get("default_rate_per_kwh", 0.0))
-    except (TypeError, ValueError):
-        return 0.0
-    return rate if rate > 0.0 else 0.0
 
 
 def number_description_applies(

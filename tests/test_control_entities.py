@@ -874,7 +874,7 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     _assert_base_description_defaults(goal.entity_description)
     assert goal.entity_description.mode is None
 
-    assert rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert rate.name == "CircuitSetup Energy Analyzer Fallback Electricity Rate"
     assert rate.suggested_object_id == "circuitsetup_energy_analyzer_electricity_rate"
     assert rate.native_value == 0.19
     assert rate.native_unit_of_measurement == "$/kWh"
@@ -887,6 +887,24 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
         ("async_set_energy_goal_settings", ("fridge", 6.25, None)),
         ("async_set_global_cost_rate", (0.31,)),
     ]
+
+
+def test_effective_electricity_rate_sensor_prefers_opower_then_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        EffectiveElectricityRateSensor,
+    )
+
+    coordinator = _FakeCoordinator()
+    rate = EffectiveElectricityRateSensor(coordinator, entry_id="entry-1")
+
+    assert rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert rate.suggested_object_id == "circuitsetup_energy_analyzer_electricity_rate"
+    assert rate.native_unit_of_measurement == "$/kWh"
+    assert rate.native_value == 0.19
+
+    coordinator.data.utility_cost_rate_by_circuit["mains"] = 0.25
+
+    assert rate.native_value == 0.25
 
 
 @pytest.mark.asyncio

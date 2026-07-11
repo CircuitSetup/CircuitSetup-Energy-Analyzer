@@ -4165,6 +4165,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
 
     assert [entity.unique_id for entity in added_entities] == [
         "entry-1_setup_health",
+        "entry-1_electricity_rate",
         "entry-1_fridge_health_summary",
         "entry-1_fridge_activity_summary",
         "entry-1_fridge_electrical_health",
@@ -4182,11 +4183,15 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "Add a cumulative kWh sensor to Kitchen Fridge"
     )
     assert getattr(setup_health, "device_info", None) is None
-    assert added_entities[1].device_info["identifiers"] == {
+    effective_rate = added_entities[1]
+    assert effective_rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert effective_rate.native_value == 0.0
+    assert effective_rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
+    assert added_entities[2].device_info["identifiers"] == {
         (DOMAIN, "entry-1_fridge")
     }
-    assert not isinstance(added_entities[1].state, AnalyzerState)
-    assert added_entities[1].coordinator_state is coordinator.data
+    assert not isinstance(added_entities[2].state, AnalyzerState)
+    assert added_entities[2].coordinator_state is coordinator.data
 
 
 @pytest.mark.asyncio

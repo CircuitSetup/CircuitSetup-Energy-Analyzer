@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT = 10.0
 DEFAULT_UTILITY_SOURCE_TYPE = "auto"
@@ -167,6 +169,37 @@ def utility_rate_per_kwh(
     if utility_cost < 0.0:
         return None
     return round(float(utility_cost) / float(utility_kwh), 4)
+
+
+def configured_electricity_rate(cost_settings_by_circuit: Any) -> float:
+    """Return the persisted analyzer-wide fallback electricity rate."""
+    if not isinstance(cost_settings_by_circuit, Mapping):
+        return 0.0
+    settings = cost_settings_by_circuit.get("__global__", {})
+    if not isinstance(settings, Mapping):
+        return 0.0
+    return _positive_electricity_rate(settings.get("default_rate_per_kwh"))
+
+
+def effective_electricity_rate(
+    utility_cost_rate_by_circuit: Any,
+    fallback_rate: Any = None,
+) -> float:
+    """Return the Opower rate when available, otherwise the fallback rate."""
+    if isinstance(utility_cost_rate_by_circuit, Mapping):
+        for rate in utility_cost_rate_by_circuit.values():
+            value = _positive_electricity_rate(rate)
+            if value > 0.0:
+                return value
+    return _positive_electricity_rate(fallback_rate)
+
+
+def _positive_electricity_rate(value: Any) -> float:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return rate if rate > 0.0 else 0.0
 
 
 def select_latest_statistics_energy(
