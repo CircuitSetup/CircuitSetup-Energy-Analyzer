@@ -277,6 +277,7 @@ FIELD_CIRCUIT_RETENTION_MODE = "circuit_retention_mode"
 FIELD_ENABLE_UTILITY_COMPARISON = "enable_utility_comparison"
 FIELD_CIRCUIT_ID = "circuit_id"
 FIELD_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
+FIELD_UTILITY_COST_ENTITY = "utility_cost_entity"
 FIELD_UTILITY_STATISTIC_ID = "utility_statistic_id"
 FIELD_UTILITY_SOURCE_TYPE = "utility_source_type"
 FIELD_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
@@ -1705,6 +1706,10 @@ def _utility_schema(
                     or _first_or_empty(selectable_utility_entities)
                 ),
             ): _single_energy_kwh_entity_selector(selectable_utility_entities),
+            vol.Optional(
+                FIELD_UTILITY_COST_ENTITY,
+                default=str(settings.get(FIELD_UTILITY_COST_ENTITY) or ""),
+            ): _single_sensor_entity_selector(),
             vol.Optional(
                 FIELD_UTILITY_STATISTIC_ID,
                 default=str(
@@ -5451,10 +5456,15 @@ def _utility_settings_from_input(
     utility_statistic_id = str(
         user_input.get(FIELD_UTILITY_STATISTIC_ID) or ""
     ).strip()
+    utility_cost_entity = str(
+        user_input.get(FIELD_UTILITY_COST_ENTITY) or ""
+    ).strip()
     if utility_energy_entity:
         settings[FIELD_UTILITY_ENERGY_ENTITY] = utility_energy_entity
     if utility_statistic_id:
         settings[FIELD_UTILITY_STATISTIC_ID] = utility_statistic_id
+    if utility_cost_entity:
+        settings[FIELD_UTILITY_COST_ENTITY] = utility_cost_entity
     settings[FIELD_UTILITY_SOURCE_TYPE] = source_type
     settings[FIELD_UTILITY_STATISTIC_PERIOD] = statistic_period
     measured_entities = _strict_string_list(

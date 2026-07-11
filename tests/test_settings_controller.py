@@ -890,6 +890,7 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
         utility_statistic_period="day",
         measured_energy_entities=["sensor.panel_import_energy"],
         tolerance_percent=8.5,
+        utility_cost_entity="sensor.opower_current_bill_cost",
     )
 
     assert coordinator.store_data.billing_settings_by_circuit["fridge"] == {
@@ -908,6 +909,7 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
     }
     assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_cost_entity": "sensor.opower_current_bill_cost",
         "utility_statistic_id": "opower:utility_elec_consumption",
         "utility_source_type": "auto",
         "utility_statistic_period": "day",
@@ -1131,3 +1133,26 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
         "sensor.solar_energy",
     )
     assert utility.tolerance_percent == 8.5
+
+
+def test_global_cost_rate_overrides_circuit_cost_rates() -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    controller = settings_controller.SettingsController(coordinator)
+    config = SimpleNamespace(
+        cost_cycle_start_day=1,
+        default_rate_per_kwh=0.18,
+        tou_rate_per_kwh=None,
+        tou_start=None,
+        tou_end=None,
+        tou_weekdays=(),
+        tou_name="Peak",
+    )
+    coordinator.store_data.cost_settings_by_circuit = {
+        "fridge": {"default_rate_per_kwh": 0.22},
+        "__global__": {"default_rate_per_kwh": 0.31},
+    }
+
+    cost = controller.cost_settings_for_config(config, "fridge")
+
+    assert cost.default_rate_per_kwh == 0.31

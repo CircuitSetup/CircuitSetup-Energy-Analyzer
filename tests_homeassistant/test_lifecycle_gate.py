@@ -41,6 +41,7 @@ EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
     {
         "binary_sensor",
         "button",
+        "number",
         "select",
         "sensor",
         "switch",
@@ -49,6 +50,7 @@ EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
 EXPECTED_MAINS_WORKFLOW_PLATFORM_DOMAINS = frozenset(
     {
         "button",
+        "number",
         "select",
         "sensor",
     }
@@ -371,7 +373,7 @@ def _assert_appliance_workflow_payloads(
     assert appliance["status"] == "ok"
     assert appliance["detail"]["source_type"] == "direct_meter"
     assert appliance["detail"]["evidence_path"].endswith("circuit_id=fridge")
-    assert appliance["actions"]["open_evidence"]["type"] == "navigate"
+    assert "open_evidence" not in appliance["actions"]
     assert appliance["actions"]["relearn_baseline"]["data"] == {
         "circuit_id": "fridge"
     }
@@ -430,7 +432,7 @@ async def _assert_appliance_workflow_panel_views(
     )
     assert appliance["status"] == "ok"
     assert appliance["detail"]["source_type"] == "direct_meter"
-    assert appliance["actions"]["open_evidence"]["type"] == "navigate"
+    assert "open_evidence" not in appliance["actions"]
     assert appliance["actions"]["relearn_baseline"]["data"] == {
         "circuit_id": "fridge"
     }

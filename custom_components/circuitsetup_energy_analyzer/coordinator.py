@@ -255,6 +255,7 @@ class AnalyzerState:
     cost_cycle_forecast_by_circuit: dict[str, float] = field(default_factory=dict)
     cost_status_by_circuit: dict[str, str] = field(default_factory=dict)
     cost_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    utility_cost_rate_by_circuit: dict[str, float] = field(default_factory=dict)
     current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
@@ -521,6 +522,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._cost_processor = CostProcessor(
             settings_for_config=self.processor_runtime.cost_settings_for_config,
+            utility_rate_for_circuit=lambda _circuit_id: next(
+                (
+                    rate
+                    for rate in self.state.utility_cost_rate_by_circuit.values()
+                    if rate > 0.0
+                ),
+                None,
+            ),
         )
         self._demand_processor = DemandProcessor(
             settings_for_config=self.processor_runtime.demand_settings_for_config,
@@ -570,6 +579,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             load_energy_entity_ids_for_sum=(
                 self.utility_energy_sources.load_energy_entity_ids_for_sum
             ),
+            numeric_value_for_entity=self.context_builder.numeric_entity_value,
         )
         self._mains_balance_processor = MainsBalanceProcessor(
             settings_for_circuit=lambda circuit_id: (
@@ -1103,6 +1113,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             tou_name,
         )
 
+    async def async_set_global_cost_rate(
+        self: Self,
+        rate_per_kwh: Any,
+    ) -> None:
+        """Persist the analyzer-wide electricity rate."""
+        await self.settings_controller.async_set_global_cost_rate(rate_per_kwh)
+
     async def async_set_demand_settings(
         self: Self,
         circuit_id: str,
@@ -1209,6 +1226,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         utility_statistic_id: Any = None,
         utility_source_type: Any = None,
         utility_statistic_period: Any = None,
+        utility_cost_entity: Any = None,
     ) -> None:
         """Persist utility-vs-measured kWh comparison settings."""
         await self.settings_controller.async_set_utility_comparison_settings(
@@ -1219,6 +1237,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             utility_statistic_id,
             utility_source_type,
             utility_statistic_period,
+            utility_cost_entity,
         )
 
     async def async_start_maintenance(

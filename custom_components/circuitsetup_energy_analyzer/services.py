@@ -126,6 +126,7 @@ ATTR_WINDOW_HOURS = "window_hours"
 ATTR_STANDBY_THRESHOLD_W = "standby_threshold_w"
 ATTR_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 ATTR_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
+ATTR_UTILITY_COST_ENTITY = "utility_cost_entity"
 ATTR_UTILITY_STATISTIC_ID = "utility_statistic_id"
 ATTR_UTILITY_SOURCE_TYPE = "utility_source_type"
 ATTR_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
@@ -291,6 +292,7 @@ UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA = _schema(
         ATTR_CIRCUIT_ID,
         ATTR_ENTITY_ID,
         ATTR_UTILITY_ENERGY_ENTITY,
+        ATTR_UTILITY_COST_ENTITY,
         ATTR_UTILITY_STATISTIC_ID,
         ATTR_UTILITY_SOURCE_TYPE,
         ATTR_UTILITY_STATISTIC_PERIOD,
@@ -1124,6 +1126,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 data.get(ATTR_ALWAYS_ON_ALERT_W),
             )
         elif service == SERVICE_SET_UTILITY_COMPARISON_SETTINGS:
+            utility_cost_entity = data.get(ATTR_UTILITY_COST_ENTITY)
             await _call_if_present(
                 coordinator,
                 "async_set_utility_comparison_settings",
@@ -1134,6 +1137,11 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 data.get(ATTR_UTILITY_STATISTIC_ID),
                 data.get(ATTR_UTILITY_SOURCE_TYPE),
                 data.get(ATTR_UTILITY_STATISTIC_PERIOD),
+                **(
+                    {"utility_cost_entity": utility_cost_entity}
+                    if utility_cost_entity is not None
+                    else {}
+                ),
             )
         elif service == SERVICE_START_MAINTENANCE:
             await _call_if_present(

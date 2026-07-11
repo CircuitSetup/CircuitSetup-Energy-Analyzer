@@ -1560,6 +1560,13 @@ set_utility_comparison_settings:
       selector:
         entity:
           domain: sensor
+    utility_cost_entity:
+      name: Utility Cost Entity
+      description: Optional Opower or utility cost sensor for the same billing period. Its cost divided by the utility kWh source becomes the analyzer-wide electricity rate.
+      required: false
+      selector:
+        entity:
+          domain: sensor
     utility_statistic_id:
       name: Utility Statistic ID
       description: Optional Opower or utility statistic ID from Developer Tools Statistics.

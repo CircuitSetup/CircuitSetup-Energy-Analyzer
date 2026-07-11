@@ -189,6 +189,7 @@ EXPECTED_UTILITY_LABELS = {
     "enable_utility_comparison": "Enable Utility Comparison",
     "circuit_id": "Circuit",
     "utility_energy_entity": "Utility Energy Entity",
+    "utility_cost_entity": "Utility Cost Entity",
     "utility_statistic_id": "Utility Statistic ID",
     "utility_source_type": "Utility Source Type",
     "utility_statistic_period": "Utility Statistic Period",
@@ -344,6 +345,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "tou_weekdays": "TOU Weekdays",
     "tolerance_percent": "Tolerance Percent",
     "utility_energy_entity": "Utility Energy Entity",
+    "utility_cost_entity": "Utility Cost Entity",
     "utility_source_type": "Utility Source Type",
     "utility_statistic_id": "Utility Statistic ID",
     "utility_statistic_period": "Utility Statistic Period",
@@ -1577,6 +1579,74 @@ if (html.includes("0.6 $")) {
 }
 """
     )
+
+
+def test_appliance_detail_uses_icons_grids_timeline_and_alert_action_tiles() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  detail: {
+    activity_state: "Running",
+    current_power_w: 820,
+    source_type: "direct_meter",
+    confidence: 0.87,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: "Measured",
+    daily_energy_kwh: 2.4,
+    runtime_today_seconds: 7200,
+    run_count_today: 3,
+    cost_today: 0.6,
+    recent_timeline: { items: [{ timestamp: "2026-07-11T12:00:00Z", title: "Started", detail: "Compressor started." }] },
+    today_vs_normal: [{ metric_id: "current_power_w", label: "Current power", unit: "W", current_value: 820, normal_low: 300, normal_high: 600, status: "higher", confidence: 0.8, source: "baseline" }],
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: [{ message: "Power is above normal.", severity: "warning" }]
+  },
+  actions: {
+    open_evidence: { type: "navigate", path: "/evidence" },
+    mark_expected: { domain: "test", service: "expected" },
+    mark_unhelpful: { domain: "test", service: "unhelpful" },
+    relearn_baseline: { domain: "test", service: "relearn" }
+  }
+};
+const html = panel._renderApplianceDetailBody();
+for (const expected of [
+  'icon="mdi:play-circle-outline"',
+  'icon="mdi:flash-outline"',
+  'icon="mdi:transmission-tower"',
+  'icon="mdi:heart-pulse"',
+  'icon="mdi:lightning-bolt"',
+  'icon="mdi:chart-line"',
+  'icon="mdi:cpu-64-bit"',
+  'icon="mdi:calendar-today"',
+  'icon="mdi:timer-outline"',
+  'icon="mdi:counter"',
+  'icon="mdi:currency-usd"',
+  'class="appliance-timeline"',
+  'class="appliance-comparison-grid"',
+  'class="decision-tiles appliance-alert-actions"',
+]) {
+  if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
+}
+panel._applianceDetail.actions = { relearn_baseline: { domain: "test", service: "relearn" } };
+const noAlertActions = panel._renderApplianceActions(panel._applianceDetail.actions);
+for (const ambiguous of ["Open Evidence", "Mark Expected", "Not Helpful"]) {
+  if (noAlertActions.includes(ambiguous)) throw new Error(`unexpected ${ambiguous}: ${noAlertActions}`);
+}
+"""
+    )
+
+
+def test_alert_technical_details_keep_metric_boxes() -> None:
+    asset = (INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[data-evidence-technical] .metric" not in asset
 
 
 def test_appliance_detail_renders_history_before_the_summary() -> None:
@@ -4543,9 +4613,9 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
     for selector in (
         ".evidence-meta .metric",
         '[data-evidence-comparison] .metric',
-        '[data-evidence-technical] .metric',
     ):
         assert selector in scoped_style
+    assert '[data-evidence-technical] .metric' not in scoped_style
     for declaration in (
         "background: transparent;",
         "border: 0;",
@@ -5319,6 +5389,8 @@ def test_alert_evidence_render_contracts() -> None:
         [{ value_format: "number", value_unit: "W" }, 120, "120 W"],
         [{ value_format: "number", value_unit: "VAR" }, 42, "42 VAR"],
         [{ value_format: "number", value_unit: "VA" }, 128, "128 VA"],
+        [{ value_label: "Real power", value_format: "number", value_unit: "" }, 120, "120 W"],
+        [{ value_label: "Runtime today", value_format: "number", value_unit: "" }, 42, "42 min"],
       ]) assert.equal(panel._formatAlertMetricValue(alert, value), expected);
     }
 

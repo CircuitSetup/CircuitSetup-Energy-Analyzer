@@ -12,6 +12,7 @@ from ..utility_comparison import (
     UtilityComparisonResult,
     UtilityComparisonSettings,
     compare_utility_energy,
+    utility_rate_per_kwh,
 )
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
@@ -28,6 +29,7 @@ class _UtilityReading(Protocol):
 type UtilitySettingsProvider = Callable[[str], UtilityComparisonSettings]
 type UtilityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type EnergyEntityReader = Callable[[str, datetime], float | None]
+type NumericEntityReader = Callable[[str], float | None]
 type EnergyEntitySummer = Callable[
     [Iterable[str], datetime],
     tuple[float | None, tuple[str, ...]],
@@ -58,6 +60,7 @@ class UtilityComparisonProcessor:
         statistics_kwh_for_id: StatisticsReader | None,
         statistics_kwh_sum_for_entities: StatisticsEntitySummer | None,
         load_energy_entity_ids_for_sum: LoadEnergyEntityProvider,
+        numeric_value_for_entity: NumericEntityReader | None = None,
     ) -> None:
         self._settings_for_circuit = settings_for_circuit
         self._alert_policy_for_circuit = alert_policy_for_circuit
@@ -66,6 +69,9 @@ class UtilityComparisonProcessor:
         self._statistics_kwh_for_id = statistics_kwh_for_id
         self._statistics_kwh_sum_for_entities = statistics_kwh_sum_for_entities
         self._load_energy_entity_ids_for_sum = load_energy_entity_ids_for_sum
+        self._numeric_value_for_entity = numeric_value_for_entity or (
+            lambda _entity_id: None
+        )
 
     async def process(
         self,
@@ -107,10 +113,13 @@ class UtilityComparisonProcessor:
             period_end=_datetime_iso_or_none(utility_period_end),
             utility_data_lag_hours=utility_data_lag_hours,
         )
+        utility_cost = self._numeric_value_for_entity(settings.utility_cost_entity)
         feature_result = FeatureResult(
             state_updates=utility_comparison_state_updates(
                 circuit_config.circuit_id,
                 result,
+                utility_cost=utility_cost,
+                utility_cost_entity=settings.utility_cost_entity,
             ),
         )
         if result.status == "mismatch":
@@ -218,8 +227,12 @@ class UtilityComparisonProcessor:
 def utility_comparison_state_updates(
     circuit_id: str,
     result: UtilityComparisonResult,
+    *,
+    utility_cost: float | None = None,
+    utility_cost_entity: str = "",
 ) -> list[StateUpdate]:
     """Build analyzer state updates for one utility comparison result."""
+    rate_per_kwh = utility_rate_per_kwh(utility_cost, result.utility_kwh)
     return [
         StateUpdate(
             ("utility_comparison_difference_kwh_by_circuit", circuit_id),
@@ -235,7 +248,16 @@ def utility_comparison_state_updates(
         ),
         StateUpdate(
             ("utility_comparison_evidence_by_circuit", circuit_id),
-            utility_comparison_evidence_payload(result),
+            utility_comparison_evidence_payload(
+                result,
+                utility_cost=utility_cost,
+                rate_per_kwh=rate_per_kwh,
+                utility_cost_entity=utility_cost_entity,
+            ),
+        ),
+        StateUpdate(
+            ("utility_cost_rate_by_circuit", circuit_id),
+            rate_per_kwh or 0.0,
         ),
     ]
 
@@ -260,9 +282,13 @@ def utility_comparison_message(
 
 def utility_comparison_evidence_payload(
     result: UtilityComparisonResult,
+    *,
+    utility_cost: float | None = None,
+    rate_per_kwh: float | None = None,
+    utility_cost_entity: str = "",
 ) -> dict[str, Any]:
     """Build the analyzer state payload for utility comparison."""
-    return {
+    payload = {
         "status": result.status,
         "utility_energy_entity": result.utility_energy_entity,
         "utility_statistic_id": result.utility_statistic_id,
@@ -282,6 +308,15 @@ def utility_comparison_evidence_payload(
         "absolute_difference_percent": result.absolute_difference_percent,
         "tolerance_percent": result.tolerance_percent,
     }
+    if utility_cost_entity:
+        payload.update(
+            {
+                "utility_cost_entity": utility_cost_entity,
+                "utility_cost": utility_cost,
+                "rate_per_kwh": rate_per_kwh,
+            }
+        )
+    return payload
 
 
 def utility_source_type_for_settings(settings: UtilityComparisonSettings) -> str:

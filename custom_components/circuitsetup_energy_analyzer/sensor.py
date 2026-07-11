@@ -834,6 +834,15 @@ def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
 
 def cost_current_rate_value(state: Any, circuit_id: str) -> float:
     """Return the active cost rate for a circuit."""
+    utility_rates = getattr(state, "utility_cost_rate_by_circuit", {})
+    if isinstance(utility_rates, Mapping):
+        for rate in utility_rates.values():
+            try:
+                value = float(rate)
+            except (TypeError, ValueError):
+                continue
+            if value > 0.0:
+                return value
     return float(
         getattr(state, "cost_current_rate_by_circuit", {}).get(circuit_id, 0.0)
     )

@@ -1837,8 +1837,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           background: var(--error-color, #db4437);
         }
         .evidence-meta .metric,
-        [data-evidence-comparison] .metric,
-        [data-evidence-technical] .metric {
+        [data-evidence-comparison] .metric {
           background: transparent;
           border: 0;
           border-radius: 0;
@@ -1914,6 +1913,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           color: var(--secondary-text-color, #5f6b7a);
           line-height: 1.35;
         }
+        .appliance-alert-actions {
+          margin-top: 4px;
+        }
+        .appliance-alert-action {
+          background: var(--secondary-background-color, #f4f6f8);
+          color: var(--primary-text-color, #1f2933);
+          font: inherit;
+          grid-template-columns: auto minmax(0, 1fr);
+          text-align: left;
+        }
+        .appliance-alert-action:hover {
+          border-color: var(--primary-color, #0b6bcb);
+        }
+        .appliance-general-actions {
+          margin-top: 12px;
+        }
         .response-section > button {
           justify-self: start;
         }
@@ -1962,6 +1977,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           color: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
           margin-bottom: 4px;
+        }
+        .metric .metric-heading {
+          align-items: center;
+          display: flex;
+          gap: 6px;
+        }
+        .metric-heading ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+          height: 16px;
+          width: 16px;
         }
         .metric strong {
           font-size: 18px;
@@ -2130,6 +2155,79 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: grid;
           gap: 8px;
           margin-top: 10px;
+        }
+        .appliance-comparison-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .appliance-comparison {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          display: grid;
+          gap: 6px;
+          min-width: 0;
+          padding: 12px;
+        }
+        .appliance-comparison .comparison-label {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-comparison strong {
+          font-size: 20px;
+        }
+        .appliance-comparison .comparison-summary {
+          color: var(--secondary-text-color, #5f6b7a);
+          margin: 0;
+        }
+        .appliance-comparison p {
+          margin: 0;
+        }
+        .appliance-timeline {
+          list-style: none;
+          margin: 0;
+          padding: 2px 0 0;
+        }
+        .appliance-timeline-item {
+          display: grid;
+          gap: 4px;
+          min-height: 58px;
+          padding: 0 0 18px 30px;
+          position: relative;
+        }
+        .appliance-timeline-item::before {
+          background: var(--divider-color, #d8dde6);
+          bottom: 0;
+          content: "";
+          left: 8px;
+          position: absolute;
+          top: 12px;
+          width: 2px;
+        }
+        .appliance-timeline-item::after {
+          background: var(--primary-color, #0b6bcb);
+          border: 3px solid var(--card-background-color, #fff);
+          border-radius: 50%;
+          content: "";
+          height: 10px;
+          left: 1px;
+          position: absolute;
+          top: 4px;
+          width: 10px;
+        }
+        .appliance-timeline-item:last-child {
+          padding-bottom: 0;
+        }
+        .appliance-timeline-item:last-child::before {
+          display: none;
+        }
+        .appliance-timeline-item time {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-timeline-item p {
+          margin: 0;
         }
         code {
           background: var(--secondary-background-color, #f4f6f8);
@@ -2906,22 +3004,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       ${this._renderApplianceDetailHistory(payload.history)}
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state)}
-        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w))}
-        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type))}
-        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence)) : ""}
+        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
+        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
       </section>
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state)}
-        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state)}
-        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state)}
-        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"))}
+        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state, "mdi:lightning-bolt")}
+        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
       </section>
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh))}
-        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds))}
-        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today)}
-        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today))}
+        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
+        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
+        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:currency-usd")}
       </section>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
@@ -2999,13 +3097,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const title = timeline && timeline.latest_title ? timeline.latest_title : this._panelText("appliance_detail.no_recent_activity");
       return `<p class="muted">${this._escape(title)}</p>`;
     }
-    return `<div class="entity-list">${items.map((item) => `
-      <div class="metric">
-        <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
+    return `<ol class="appliance-timeline">${items.map((item) => `
+      <li class="appliance-timeline-item">
+        <time>${this._escape(this._formatDateTime(item.timestamp))}</time>
         <strong>${this._escape(item.title || this._friendlyFeature(item.kind || this._panelText("appliance_detail.activity")))}</strong>
-        <p class="muted">${this._escape(item.detail || "")}</p>
-      </div>
-    `).join("")}</div>`;
+        ${item.detail ? `<p class="muted">${this._escape(item.detail)}</p>` : ""}
+      </li>
+    `).join("")}</ol>`;
   }
 
   _renderApplianceComparisons(comparisons) {
@@ -3013,15 +3111,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!items.length) {
       return `<p class="muted">${this._escape(this._panelText("appliance_detail.learning_ranges"))}</p>`;
     }
-    return `<div class="entity-list">${items.map((item) => {
+    return `<div class="appliance-comparison-grid">${items.map((item) => {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
         : this._panelText("common.learning");
       return `
-        <div class="metric">
-          <span>${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
+        <div class="appliance-comparison">
+          <span class="comparison-label">${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
           <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
-          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
+          <p class="comparison-summary">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
           ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
           ${item.source ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.source_value", { source: this._friendlyFeature(item.source) }))}</p>` : ""}
         </div>
@@ -3063,16 +3161,36 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderApplianceActions(actions) {
     const available = actions || {};
+    const alertButtons = [
+      this._applianceAlertActionTile(available, "open_evidence", this._panelText("actions.labels.open_evidence"), "mdi:chart-line"),
+      this._applianceAlertActionTile(available, "mark_expected", this._panelText("actions.labels.mark_expected"), "mdi:check-decagram", this._panelText("actions.helpers.mark_expected")),
+      this._applianceAlertActionTile(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), "mdi:message-alert-outline", this._panelText("actions.helpers.mark_unhelpful")),
+    ].filter(Boolean);
     const buttons = [
-      this._applianceActionButton(available, "open_evidence", this._panelText("actions.labels.open_evidence")),
       this._applianceActionButton(available, "review_nilm_assignment", this._panelText("actions.labels.review_nilm_assignment"), true),
-      this._applianceActionButton(available, "mark_expected", this._panelText("actions.labels.mark_expected"), true),
-      this._applianceActionButton(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), true),
       this._applianceActionButton(available, "pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
       this._applianceActionButton(available, "relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
       this._applianceActionButton(available, "open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
     ].filter(Boolean);
-    return buttons.length ? `<div class="actions">${buttons.join("")}</div>` : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
+    if (!alertButtons.length && !buttons.length) {
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
+    }
+    return `
+      ${alertButtons.length ? `<div class="decision-tiles appliance-alert-actions">${alertButtons.join("")}</div>` : ""}
+      ${buttons.length ? `<div class="actions appliance-general-actions">${buttons.join("")}</div>` : ""}
+    `;
+  }
+
+  _applianceAlertActionTile(actions, actionKey, label, icon, helper = "") {
+    const action = actions && actions[actionKey];
+    if (!action) {
+      return "";
+    }
+    const busyKey = `appliance_detail_${actionKey}`;
+    const disabled = this._busyAction === busyKey || action.enabled === false ? "disabled" : "";
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    return `<button type="button" data-appliance-detail-action="${actionKey}" class="decision-tile appliance-alert-action"${title} ${disabled}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(action.label || label)}</strong>${helper ? `<small>${this._escape(helper)}</small>` : ""}</span></button>`;
   }
 
   _applianceActionButton(actions, actionKey, label, secondary = false) {
@@ -5164,8 +5282,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return this._panelText("status.not_found");
   }
 
-  _metric(label, value) {
-    return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
+  _metric(label, value, icon = "") {
+    const heading = icon
+      ? `<span class="metric-heading"><ha-icon icon="${this._escape(icon)}"></ha-icon>${this._escape(label)}</span>`
+      : `<span>${this._escape(label)}</span>`;
+    return `<div class="metric">${heading}<strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
   }
 
   _finiteMetricValue(value) {
@@ -5272,8 +5393,41 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       })}%`;
     }
     const formatted = number.toLocaleString(undefined, { maximumFractionDigits: 3 });
-    const unit = String(alert && alert.value_unit || "").trim();
+    const unit = this._alertMetricUnit(alert);
     return `${formatted}${unit ? ` ${unit}` : ""}`;
+  }
+
+  _alertMetricUnit(alert) {
+    const explicit = String(alert && alert.value_unit || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    const label = String(alert && (alert.value_label || alert.value_metric || alert.feature) || "").toLowerCase();
+    if (/factor/.test(label)) {
+      return "PF";
+    }
+    if (/ratio|percent/.test(label)) {
+      return "%";
+    }
+    if (/runtime|duration|active|idle|time/.test(label)) {
+      return "min";
+    }
+    if (/energy|usage/.test(label)) {
+      return "kWh";
+    }
+    if (/current/.test(label)) {
+      return "A";
+    }
+    if (/voltage/.test(label)) {
+      return "V";
+    }
+    if (/frequency/.test(label)) {
+      return "Hz";
+    }
+    if (/power|demand|watt/.test(label)) {
+      return "W";
+    }
+    return "";
   }
 
   _renderActionGroup(title, description, buttons) {

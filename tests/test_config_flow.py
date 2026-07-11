@@ -1739,6 +1739,7 @@ async def test_options_utility_step_saves_opower_comparison_settings() -> None:
             "enable_utility_comparison": True,
             "circuit_id": "mains",
             "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_cost_entity": "sensor.opower_current_bill_cost",
             "utility_statistic_id": "opower:utility_elec_consumption",
             "utility_source_type": "statistics",
             "utility_statistic_period": "day",
@@ -1751,6 +1752,7 @@ async def test_options_utility_step_saves_opower_comparison_settings() -> None:
     assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
         "mains": {
             "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_cost_entity": "sensor.opower_current_bill_cost",
             "utility_statistic_id": "opower:utility_elec_consumption",
             "utility_source_type": "statistics",
             "utility_statistic_period": "day",

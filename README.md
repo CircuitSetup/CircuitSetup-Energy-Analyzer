@@ -553,13 +553,13 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 ### Billing, cost, and Time-of-Use
 
-Billing and cost features estimate usage and cost from analyzer-retained data. They do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
+Billing and cost features estimate usage and cost from analyzer-retained data. When matching Opower or utility current-bill usage and cost sensors are configured, the analyzer divides cost by kWh and uses that shared rate for every appliance. Otherwise, set the global **Electricity Rate** number on the CircuitSetup Energy Analyzer device. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
-Configure billing-cycle and cost settings from:
+Configure per-circuit billing and Time-of-Use settings from:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
-Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
+Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
 Time-of-use settings use a time picker for the peak start/end times and a weekday selector for peak days, so normal setup does not require typing comma-separated weekday numbers.
 

@@ -15,6 +15,7 @@ class UtilityComparisonSettings:
     """Settings for comparing utility-reported kWh with measured kWh."""
 
     utility_energy_entity: str = ""
+    utility_cost_entity: str = ""
     utility_statistic_id: str = ""
     utility_source_type: str = DEFAULT_UTILITY_SOURCE_TYPE
     utility_statistic_period: str = DEFAULT_UTILITY_STATISTIC_PERIOD
@@ -154,6 +155,18 @@ def compare_utility_energy(
         utility_data_lag_hours=utility_data_lag_hours,
         features=features,
     )
+
+
+def utility_rate_per_kwh(
+    utility_cost: float | None,
+    utility_kwh: float | None,
+) -> float | None:
+    """Return an Opower-derived rate when matching cost and usage are present."""
+    if utility_cost is None or utility_kwh is None or utility_kwh <= 0.0:
+        return None
+    if utility_cost < 0.0:
+        return None
+    return round(float(utility_cost) / float(utility_kwh), 4)
 
 
 def select_latest_statistics_energy(

@@ -112,7 +112,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260711-1"
+PANEL_MODULE_VERSION = "20260711-2"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -609,13 +609,12 @@ def _appliance_detail_actions(
     detail: ApplianceDetail,
 ) -> dict[str, dict[str, Any]]:
     actions: dict[str, dict[str, Any]] = {}
-    if detail.evidence_path:
-        actions["open_evidence"] = {
-            "type": "navigate",
-            "path": detail.evidence_path,
-        }
-
     if detail.source_type == "nilm_estimate" and detail.assignment_id:
+        if detail.evidence_path:
+            actions["open_evidence"] = {
+                "type": "navigate",
+                "path": detail.evidence_path,
+            }
         review_query = urlencode(
             {
                 ATTR_CIRCUIT_ID: detail.circuit_id,
@@ -635,7 +634,16 @@ def _appliance_detail_actions(
 
     config = _config_for_circuit(coordinator, detail.circuit_id)
     latest_alert = _latest_alert_for_circuit(coordinator, detail.circuit_id)
-    alert_id = notification_id_for_alert(latest_alert) if latest_alert else None
+    alert_id = (
+        notification_id_for_alert(latest_alert)
+        if latest_alert
+        else (detail.active_alerts[0].alert_id if detail.active_alerts else None)
+    )
+    if alert_id and detail.evidence_path:
+        actions["open_evidence"] = {
+            "type": "navigate",
+            "path": detail.evidence_path,
+        }
     actions.update(
         _actions_for_context(
             coordinator,

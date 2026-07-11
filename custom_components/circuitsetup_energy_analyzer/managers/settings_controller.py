@@ -22,7 +22,7 @@ from ..const import (
     CONF_UTILITY_COMPARISON_SETTINGS,
     DEFAULT_SENSITIVITY,
 )
-from ..cost import CostSettings
+from ..cost import CostSettings, _active_rate
 from ..cycles import (
     MIN_CYCLE_BASELINE_CONFIDENCE,
     RUN_CYCLE_DURATION_FEATURE,
@@ -77,6 +77,7 @@ from ..utility_comparison import (
 from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
+GLOBAL_COST_SETTINGS_KEY = "__global__"
 
 
 class SettingsController:
@@ -928,6 +929,10 @@ class SettingsController:
             circuit_id,
             {},
         )
+        global_overrides = self._coordinator.store_data.cost_settings_by_circuit.get(
+            GLOBAL_COST_SETTINGS_KEY,
+            {},
+        )
         default_start_day = config.cost_cycle_start_day if config is not None else 1
         default_rate = config.default_rate_per_kwh if config is not None else None
         default_tou_rate = config.tou_rate_per_kwh if config is not None else None
@@ -941,8 +946,11 @@ class SettingsController:
                 default=default_start_day,
             ),
             default_rate_per_kwh=_optional_positive_float_value(
-                overrides.get("default_rate_per_kwh"),
-                default=default_rate,
+                global_overrides.get("default_rate_per_kwh"),
+                default=_optional_positive_float_value(
+                    overrides.get("default_rate_per_kwh"),
+                    default=default_rate,
+                ),
             ),
             tou_rate_per_kwh=_optional_positive_float_value(
                 overrides.get("tou_rate_per_kwh"),
@@ -956,6 +964,31 @@ class SettingsController:
             ),
             tou_name=str(overrides.get("tou_name") or default_tou_name or "Peak"),
         )
+
+    async def async_set_global_cost_rate(self, rate_per_kwh: Any) -> None:
+        """Persist one electricity rate shared by every appliance."""
+        coordinator = self._coordinator
+        rate = _optional_positive_float_value(rate_per_kwh, default=None)
+        settings_by_circuit = coordinator.store_data.cost_settings_by_circuit
+        if rate is None:
+            settings_by_circuit.pop(GLOBAL_COST_SETTINGS_KEY, None)
+        else:
+            settings_by_circuit[GLOBAL_COST_SETTINGS_KEY] = {
+                "default_rate_per_kwh": rate,
+            }
+
+        now = coordinator.current_time()
+        for config in coordinator.circuit_configs:
+            settings = self.cost_settings_for_config(config, config.circuit_id)
+            current_rate, _, _ = _active_rate(now, settings)
+            coordinator.state.cost_current_rate_by_circuit[config.circuit_id] = round(
+                current_rate or 0.0,
+                4,
+            )
+            coordinator.refresh_ux_state_for_circuit(config.circuit_id, now)
+        coordinator.store_persistence.mark_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        await coordinator.store_persistence.async_save_if_dirty(now)
 
     def demand_settings_for_config(
         self,
@@ -1047,6 +1080,7 @@ class SettingsController:
         )
         return UtilityComparisonSettings(
             utility_energy_entity=str(overrides.get("utility_energy_entity") or ""),
+            utility_cost_entity=str(overrides.get("utility_cost_entity") or ""),
             utility_statistic_id=str(overrides.get("utility_statistic_id") or ""),
             utility_source_type=str(overrides.get("utility_source_type") or "auto"),
             utility_statistic_period=_utility_statistic_period_value(
@@ -1392,6 +1426,7 @@ class SettingsController:
         utility_statistic_id: Any = None,
         utility_source_type: Any = None,
         utility_statistic_period: Any = None,
+        utility_cost_entity: Any = None,
     ) -> None:
         """Persist utility-vs-measured kWh comparison settings."""
         coordinator = self._coordinator
@@ -1416,6 +1451,11 @@ class SettingsController:
             if utility_statistic_period is None
             else str(utility_statistic_period).strip()
         )
+        utility_cost = (
+            current.utility_cost_entity
+            if utility_cost_entity is None
+            else str(utility_cost_entity).strip()
+        )
         measured_entities = _entity_id_tuple_value(
             measured_energy_entities,
             default=current.measured_energy_entities,
@@ -1430,6 +1470,8 @@ class SettingsController:
             settings["utility_energy_entity"] = utility_entity
         if utility_statistic:
             settings["utility_statistic_id"] = utility_statistic
+        if utility_cost:
+            settings["utility_cost_entity"] = utility_cost
         if source_type:
             settings["utility_source_type"] = source_type
         if statistic_period:

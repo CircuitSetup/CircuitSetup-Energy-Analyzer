@@ -145,6 +145,75 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
         )
 
 
+class GlobalElectricityRateNumber(NumberEntity):
+    """Number entity for the analyzer-wide electricity rate."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_icon = "mdi:currency-usd"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 100.0
+    _attr_native_step = 0.001
+    _attr_native_unit_of_measurement = "$/kWh"
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        self.coordinator = coordinator
+        self._entry_id = entry_id
+        self._attr_name = "CircuitSetup Energy Analyzer Electricity Rate"
+        self._attr_unique_id = f"{entry_id}_electricity_rate"
+        self._attr_suggested_object_id = (
+            "circuitsetup_energy_analyzer_electricity_rate"
+        )
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def native_value(self) -> float:
+        """Return the shared electricity rate, using zero when unconfigured."""
+        return _global_cost_rate_value(self.coordinator)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the currency-per-energy unit."""
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group the shared rate under the integration device."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "CircuitSetup Energy Analyzer",
+            "manufacturer": "CircuitSetup",
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return whether the shared rate can currently be changed."""
+        return callable(getattr(self.coordinator, "async_set_global_cost_rate", None))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist an analyzer-wide electricity rate."""
+        await async_call_or_raise(
+            self.coordinator,
+            "async_set_global_cost_rate",
+            "set electricity rate",
+            float(value),
+        )
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up number entities for daily circuit controls."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -180,6 +249,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             for description in descriptions
         )
 
+    entities.append(GlobalElectricityRateNumber(coordinator, entry_id=entry_id))
+
     prune_stale_entity_registry_entries(
         hass,
         entry_id=entry_id,
@@ -213,6 +284,21 @@ def _daily_energy_goal_value(coordinator: Any, circuit_id: str) -> float:
         except (TypeError, ValueError):
             return 0.0
     return 0.0
+
+
+def _global_cost_rate_value(coordinator: Any) -> float:
+    store_data = getattr(coordinator, "store_data", None)
+    settings_by_circuit = getattr(store_data, "cost_settings_by_circuit", {})
+    if not isinstance(settings_by_circuit, Mapping):
+        return 0.0
+    settings = settings_by_circuit.get("__global__", {})
+    if not isinstance(settings, Mapping):
+        return 0.0
+    try:
+        rate = float(settings.get("default_rate_per_kwh", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return rate if rate > 0.0 else 0.0
 
 
 def number_description_applies(

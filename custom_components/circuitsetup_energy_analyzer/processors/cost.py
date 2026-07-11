@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from ..cost import CostSettings, record_cost_sample
@@ -11,6 +12,7 @@ from ..normalize import NormalizedCircuitSample
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 type CostSettingsProvider = Callable[[CircuitConfig | None, str], CostSettings]
+type UtilityRateProvider = Callable[[str], float | None]
 
 
 class CostProcessor:
@@ -22,8 +24,12 @@ class CostProcessor:
         self,
         *,
         settings_for_config: CostSettingsProvider,
+        utility_rate_for_circuit: UtilityRateProvider | None = None,
     ) -> None:
         self._settings_for_config = settings_for_config
+        self._utility_rate_for_circuit = utility_rate_for_circuit or (
+            lambda _circuit_id: None
+        )
 
     def process(
         self,
@@ -33,12 +39,20 @@ class CostProcessor:
     ) -> FeatureResult:
         """Record cost usage and return state updates."""
         circuit_id = circuit_config.circuit_id
+        settings = self._settings_for_config(circuit_config, circuit_id)
+        utility_rate = self._utility_rate_for_circuit(circuit_id)
+        if utility_rate is not None and utility_rate > 0.0:
+            settings = replace(
+                settings,
+                default_rate_per_kwh=utility_rate,
+                tou_rate_per_kwh=None,
+            )
         result = record_cost_sample(
             context.store_data.cost_by_circuit.setdefault(circuit_id, {}),
             circuit_id=circuit_id,
             timestamp=context.now,
             energy_kwh=sample.energy,
-            settings=self._settings_for_config(circuit_config, circuit_id),
+            settings=settings,
         )
         if result is None:
             return FeatureResult()

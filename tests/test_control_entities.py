@@ -129,7 +129,10 @@ class _FakeCoordinator:
         self.store_data = SimpleNamespace(
             energy_goal_settings_by_circuit={
                 "fridge": {"daily_goal_kwh": 4.5},
-            }
+            },
+            cost_settings_by_circuit={
+                "__global__": {"default_rate_per_kwh": 0.19},
+            },
         )
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
@@ -191,6 +194,9 @@ class _FakeCoordinator:
         self.calls.append(
             ("async_set_energy_goal_settings", (circuit_id, daily_goal_kwh, None))
         )
+
+    async def async_set_global_cost_rate(self, rate_per_kwh: float) -> None:
+        self.calls.append(("async_set_global_cost_rate", (rate_per_kwh,)))
 
 
 def _hass_with(coordinator: _FakeCoordinator) -> SimpleNamespace:
@@ -855,8 +861,9 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
         added_entities.extend,
     )
 
-    assert len(added_entities) == 1
-    goal = added_entities[0]
+    by_unique_id = {entity.unique_id: entity for entity in added_entities}
+    goal = by_unique_id["entry-1_fridge_daily_energy_goal"]
+    rate = by_unique_id["entry-1_electricity_rate"]
     assert goal.unique_id == "entry-1_fridge_daily_energy_goal"
     assert goal.name == "Kitchen Fridge Daily Energy Goal"
     assert goal.suggested_object_id == "fridge_daily_energy_goal"
@@ -867,10 +874,18 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     _assert_base_description_defaults(goal.entity_description)
     assert goal.entity_description.mode is None
 
+    assert rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert rate.suggested_object_id == "circuitsetup_energy_analyzer_electricity_rate"
+    assert rate.native_value == 0.19
+    assert rate.native_unit_of_measurement == "$/kWh"
+    assert rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
+
     await goal.async_set_native_value(6.25)
+    await rate.async_set_native_value(0.31)
 
     assert coordinator.calls == [
-        ("async_set_energy_goal_settings", ("fridge", 6.25, None))
+        ("async_set_energy_goal_settings", ("fridge", 6.25, None)),
+        ("async_set_global_cost_rate", (0.31,)),
     ]
 
 
@@ -895,7 +910,9 @@ async def test_number_setup_entry_filters_controls_through_catalog(
         added_entities.extend,
     )
 
-    assert added_entities == []
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_electricity_rate"
+    ]
 
 
 @pytest.mark.asyncio
@@ -915,7 +932,9 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
         added_entities.extend,
     )
 
-    assert added_entities == []
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_electricity_rate"
+    ]
 
 
 @pytest.mark.asyncio
@@ -935,7 +954,9 @@ async def test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_un
         added_entities.extend,
     )
 
-    assert added_entities == []
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_electricity_rate"
+    ]
 
 
 @pytest.mark.asyncio
@@ -964,7 +985,9 @@ async def test_number_setup_skips_stale_daily_goal_without_energy_source(
         added_entities.extend,
     )
 
-    assert added_entities == []
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_electricity_rate"
+    ]
 
 
 @pytest.mark.asyncio
@@ -1002,8 +1025,13 @@ async def test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed(
         added_entities.extend,
     )
 
-    assert added_entities == []
-    assert desired_identifiers == {(DOMAIN, "entry-1_garage_freezer")}
+    assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_electricity_rate"
+    ]
+    assert desired_identifiers == {
+        (DOMAIN, "entry-1"),
+        (DOMAIN, "entry-1_garage_freezer"),
+    }
 
 
 @pytest.mark.asyncio
@@ -1025,7 +1053,8 @@ async def test_number_setup_keeps_goal_when_runtime_energy_evidence_exists(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
-        "entry-1_garage_freezer_daily_energy_goal"
+        "entry-1_garage_freezer_daily_energy_goal",
+        "entry-1_electricity_rate",
     ]
 
 
@@ -1067,7 +1096,8 @@ async def test_control_entities_apply_to_dict_circuits_from_entry_data(
         "entry-1_dishwasher_relearn_baseline",
     }
     assert [entity.unique_id for entity in number_entities] == [
-        "entry-1_dishwasher_daily_energy_goal"
+        "entry-1_dishwasher_daily_energy_goal",
+        "entry-1_electricity_rate",
     ]
     assert [entity.unique_id for entity in switch_entities] == [
         "entry-1_dishwasher_maintenance"
