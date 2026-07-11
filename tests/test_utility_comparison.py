@@ -5,9 +5,22 @@ from datetime import UTC, datetime
 from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
     UtilityComparisonSettings,
     compare_utility_energy,
+    effective_electricity_rate,
     select_latest_statistics_energy,
     select_statistics_energy_for_period,
+    utility_rate_per_kwh,
 )
+
+
+def test_utility_rate_uses_matching_opower_cost_and_usage() -> None:
+    assert utility_rate_per_kwh(42.75, 171.0) == 0.25
+    assert utility_rate_per_kwh(42.75, 0.0) is None
+    assert utility_rate_per_kwh(None, 171.0) is None
+
+
+def test_effective_electricity_rate_prefers_opower_then_fallback() -> None:
+    assert effective_electricity_rate({"mains": 0.25}, 0.19) == 0.25
+    assert effective_electricity_rate({}, 0.19) == 0.19
 
 
 def test_compare_utility_energy_flags_mismatch_above_tolerance() -> None:

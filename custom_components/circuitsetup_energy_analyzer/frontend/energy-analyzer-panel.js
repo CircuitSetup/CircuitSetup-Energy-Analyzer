@@ -13,6 +13,7 @@ const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
 const SETUP_HEALTH_QUERY_PARAM = "setup_health";
+const REVIEW_SUGGESTED_SETTINGS_QUERY_PARAM = "review_suggested_settings";
 const LAST_ACTION_MESSAGE_STORAGE_KEY = "circuitsetupEnergyAnalyzerLastActionMessage";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
@@ -109,6 +110,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historySeries = [];
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._applianceDetailHistorySeries = [];
+    this._applianceDetailHistoryHours = 0;
+    this._applianceDetailHistoryBounds = null;
+    this._applianceDetailHistoryWindow = null;
     this._setupHealth = null;
     this._nilmWorkspaceHistorySeries = [];
     this._loading = true;
@@ -116,6 +121,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceLoading = false;
     this._nilmWorkspaceHistoryLoading = false;
     this._applianceDetailLoading = false;
+    this._applianceDetailHistoryLoading = false;
     this._setupHealthLoading = false;
     this._error = "";
     this._historyError = "";
@@ -123,6 +129,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
+    this._applianceDetailHistoryError = "";
     this._setupHealthError = "";
     this._busyAction = "";
     this._lastActionMessage = "";
@@ -226,11 +233,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryLoading = false;
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._applianceDetailHistorySeries = [];
+    this._applianceDetailHistoryHours = 0;
+    this._applianceDetailHistoryBounds = null;
+    this._applianceDetailHistoryWindow = null;
     this._setupHealth = null;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
+    this._applianceDetailHistoryError = "";
+    this._applianceDetailHistoryLoading = false;
     this._setupHealthError = "";
     this._setupHealthLoading = false;
     this._nilmWorkspaceHistorySeries = [];
@@ -380,6 +393,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._applianceDetail = detail;
+      await this._loadApplianceDetailHistory(undefined, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -388,6 +402,57 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._applianceDetailLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _loadApplianceDetailHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    const history = this._applianceDetail && this._applianceDetail.history;
+    const entities = Array.isArray(history && history.entities) ? history.entities.filter(Boolean) : [];
+    if (!entities.length) {
+      return;
+    }
+    const periods = Array.isArray(history.period_hours) ? history.period_hours.map(Number).filter(Number.isFinite) : [];
+    const defaultHours = Number(history.default_hours);
+    const requestedHours = periods.includes(Number(hours))
+      ? Number(hours)
+      : periods.includes(defaultHours)
+        ? defaultHours
+        : periods[0];
+    if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
+      return;
+    }
+    const end = Date.now();
+    const start = end - requestedHours * 60 * 60 * 1000;
+    this._applianceDetailHistoryHours = requestedHours;
+    this._applianceDetailHistoryBounds = { min: start, max: end };
+    this._applianceDetailHistoryWindow = null;
+    this._applianceDetailHistoryLoading = true;
+    this._applianceDetailHistoryError = "";
+    this._applianceDetailHistorySeries = [];
+    this._render();
+
+    const apiPath = this._historyApiPathForEntities(
+      entities,
+      new Date(start).toISOString(),
+      new Date(end).toISOString(),
+    );
+    const fetchPath = `/api/${apiPath}`;
+    try {
+      const historyRows = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceDetailHistorySeries = Array.isArray(historyRows) ? historyRows : [];
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceDetailHistoryError = this._panelTextFormat("errors.load_appliance_history", { path: fetchPath, message: error.message });
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._applianceDetailHistoryLoading = false;
         this._render();
       }
     }
@@ -1383,6 +1448,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return routeUrl.searchParams.get(SETUP_HEALTH_QUERY_PARAM) === "1";
   }
 
+  _routeRequestsSuggestedSettings(routeKey = this._routeKey()) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    return routeUrl.searchParams.get(REVIEW_SUGGESTED_SETTINGS_QUERY_PARAM) === "1";
+  }
+
   _actionRefreshRouteKey(actionKey) {
     const routeUrl = new URL(this._routeKey(), window.location.origin);
     const alert = this._payload && this._payload.alert;
@@ -1601,9 +1671,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
     const applianceDetailRoute = this._routeRequestsApplianceDetail();
     const setupHealthRoute = this._routeRequestsSetupHealth();
+    const suggestedSettingsRoute = this._routeRequestsSuggestedSettings();
     const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
     const statusText = setupHealthRoute
       ? this._setupHealthText("heading")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings")
       : applianceDetailRoute
       ? this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
@@ -1611,6 +1684,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : this._statusText(payload && payload.status);
     const headerTitle = setupHealthRoute
       ? this._setupHealthText("heading")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.display_name) || this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
@@ -1618,6 +1693,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : (circuit && circuit.name) || (alert && alert.circuit_id) || this._panelText("headers.alert_evidence");
     const headerMessage = setupHealthRoute
       ? this._setupHealthText("header_message")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings_message")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
       : nilmWorkspaceRoute
@@ -1760,8 +1837,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           background: var(--error-color, #db4437);
         }
         .evidence-meta .metric,
-        [data-evidence-comparison] .metric,
-        [data-evidence-technical] .metric {
+        [data-evidence-comparison] .metric {
           background: transparent;
           border: 0;
           border-radius: 0;
@@ -1837,6 +1913,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           color: var(--secondary-text-color, #5f6b7a);
           line-height: 1.35;
         }
+        .appliance-alert-actions {
+          margin-top: 4px;
+        }
+        .appliance-alert-action {
+          background: var(--secondary-background-color, #f4f6f8);
+          color: var(--primary-text-color, #1f2933);
+          font: inherit;
+          grid-template-columns: auto minmax(0, 1fr);
+          text-align: left;
+        }
+        .appliance-alert-action:hover {
+          border-color: var(--primary-color, #0b6bcb);
+        }
+        .appliance-general-actions {
+          margin-top: 12px;
+        }
         .response-section > button {
           justify-self: start;
         }
@@ -1885,6 +1977,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           color: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
           margin-bottom: 4px;
+        }
+        .metric .metric-heading {
+          align-items: center;
+          display: flex;
+          gap: 6px;
+        }
+        .metric-heading ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+          height: 16px;
+          width: 16px;
         }
         .metric strong {
           font-size: 18px;
@@ -2053,6 +2155,79 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           display: grid;
           gap: 8px;
           margin-top: 10px;
+        }
+        .appliance-comparison-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .appliance-comparison {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          display: grid;
+          gap: 6px;
+          min-width: 0;
+          padding: 12px;
+        }
+        .appliance-comparison .comparison-label {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-comparison strong {
+          font-size: 20px;
+        }
+        .appliance-comparison .comparison-summary {
+          color: var(--secondary-text-color, #5f6b7a);
+          margin: 0;
+        }
+        .appliance-comparison p {
+          margin: 0;
+        }
+        .appliance-timeline {
+          list-style: none;
+          margin: 0;
+          padding: 2px 0 0;
+        }
+        .appliance-timeline-item {
+          display: grid;
+          gap: 4px;
+          min-height: 58px;
+          padding: 0 0 18px 30px;
+          position: relative;
+        }
+        .appliance-timeline-item::before {
+          background: var(--divider-color, #d8dde6);
+          bottom: 0;
+          content: "";
+          left: 8px;
+          position: absolute;
+          top: 12px;
+          width: 2px;
+        }
+        .appliance-timeline-item::after {
+          background: var(--primary-color, #0b6bcb);
+          border: 3px solid var(--card-background-color, #fff);
+          border-radius: 50%;
+          content: "";
+          height: 10px;
+          left: 1px;
+          position: absolute;
+          top: 4px;
+          width: 10px;
+        }
+        .appliance-timeline-item:last-child {
+          padding-bottom: 0;
+        }
+        .appliance-timeline-item:last-child::before {
+          display: none;
+        }
+        .appliance-timeline-item time {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-timeline-item p {
+          margin: 0;
         }
         code {
           background: var(--secondary-background-color, #f4f6f8);
@@ -2392,13 +2567,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
-          ${!setupHealthRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
+          ${!setupHealthRoute && !suggestedSettingsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
         </section>
       ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
-      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))}
+      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit))))}
       </main>
     `;
 
@@ -2409,6 +2584,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ? this._loadHistory(alert, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
         : undefined;
     });
+    this._listen("[data-retry-appliance-history]", () => (
+      this._loadApplianceDetailHistory(
+        this._applianceDetailHistoryHours,
+        this._evidenceRequestId,
+        this._loadedRouteKey || this._routeKey(),
+      )
+    ));
+    for (const select of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
+      select.addEventListener("change", () => {
+        this._loadApplianceDetailHistory(
+          Number(select.value),
+          this._evidenceRequestId,
+          this._loadedRouteKey || this._routeKey(),
+        );
+      });
+    }
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
@@ -2571,6 +2762,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-pan]")) {
       button.addEventListener("click", () => this._panNilmGraph(Number(button.dataset.nilmGraphPan)));
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-graph-zoom]")) {
+      button.addEventListener("click", () => this._zoomApplianceHistoryGraph(Number(button.dataset.applianceHistoryGraphZoom)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-graph-pan]")) {
+      button.addEventListener("click", () => this._panApplianceHistoryGraph(Number(button.dataset.applianceHistoryGraphPan)));
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmIndex, 10);
@@ -2626,6 +2823,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderApplianceDetailBody() {
     return `${this._renderApplianceDetail()}${this._renderRecommendations()}`;
+  }
+
+  _renderSuggestedSettingsBody() {
+    return this._renderRecommendations() || `<section class="panel"><p class="muted">${this._escape(this._panelText("recommendations.no_suggested_settings"))}</p></section>`;
   }
 
   _renderSetupHealthBody() {
@@ -2801,23 +3002,24 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       `;
     }
     return `
+      ${this._renderApplianceDetailHistory(payload.history)}
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state)}
-        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w))}
-        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type))}
-        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence)) : ""}
+        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
+        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
       </section>
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state)}
-        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state)}
-        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state)}
-        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"))}
+        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state, "mdi:lightning-bolt")}
+        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
       </section>
       <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh))}
-        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds))}
-        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today)}
-        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today))}
+        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
+        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
+        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:currency-usd")}
       </section>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
@@ -2846,19 +3048,62 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     `;
   }
 
+  _renderApplianceDetailHistory(history) {
+    const entities = Array.isArray(history && history.entities) ? history.entities : [];
+    if (!entities.length) {
+      return "";
+    }
+    const periodHours = Array.isArray(history.period_hours) ? history.period_hours.map(Number).filter(Number.isFinite) : [];
+    const window = this._applianceDetailHistoryGraphWindow();
+    const series = window ? this._visibleChartSeries(this._applianceDetailHistorySeries, window) : [];
+    const graph = this._applianceDetailHistoryLoading
+      ? `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div>`
+      : this._applianceDetailHistoryError
+        ? `<div data-appliance-history-error><p class="muted">${this._escape(this._applianceDetailHistoryError)}</p><button type="button" class="secondary" data-retry-appliance-history>${this._escape(this._panelText("common.retry"))}</button></div>`
+        : window && series.length
+          ? this._chartSvg(series, {
+            graph_window_start: new Date(window.start).toISOString(),
+            graph_window_end: new Date(window.end).toISOString(),
+          })
+          : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_history"))}</p>`;
+    return `
+      <section class="panel" data-appliance-detail-history>
+        <div class="actions">
+          <label>${this._escape(this._panelText("appliance_detail.time_period"))}
+            <select data-appliance-history-period>
+              ${periodHours.map((hours) => `<option value="${hours}" ${hours === this._applianceDetailHistoryHours ? "selected" : ""}>${this._escape(this._applianceHistoryPeriodLabel(hours))}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        ${this._renderApplianceHistoryGraphControls(window)}
+        <h2>${this._escape(this._panelText("appliance_detail.energy_history"))}</h2>
+        ${graph}
+      </section>
+    `;
+  }
+
+  _applianceHistoryPeriodLabel(hours) {
+    const labels = {
+      24: "appliance_detail.history_24_hours",
+      168: "appliance_detail.history_7_days",
+      720: "appliance_detail.history_30_days",
+    };
+    return this._panelText(labels[hours] || "appliance_detail.history_7_days");
+  }
+
   _renderApplianceTimeline(timeline) {
     const items = Array.isArray(timeline && timeline.items) ? timeline.items : [];
     if (!items.length) {
       const title = timeline && timeline.latest_title ? timeline.latest_title : this._panelText("appliance_detail.no_recent_activity");
       return `<p class="muted">${this._escape(title)}</p>`;
     }
-    return `<div class="entity-list">${items.map((item) => `
-      <div class="metric">
-        <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
+    return `<ol class="appliance-timeline">${items.map((item) => `
+      <li class="appliance-timeline-item">
+        <time>${this._escape(this._formatDateTime(item.timestamp))}</time>
         <strong>${this._escape(item.title || this._friendlyFeature(item.kind || this._panelText("appliance_detail.activity")))}</strong>
-        <p class="muted">${this._escape(item.detail || "")}</p>
-      </div>
-    `).join("")}</div>`;
+        ${item.detail ? `<p class="muted">${this._escape(item.detail)}</p>` : ""}
+      </li>
+    `).join("")}</ol>`;
   }
 
   _renderApplianceComparisons(comparisons) {
@@ -2866,15 +3111,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!items.length) {
       return `<p class="muted">${this._escape(this._panelText("appliance_detail.learning_ranges"))}</p>`;
     }
-    return `<div class="entity-list">${items.map((item) => {
+    return `<div class="appliance-comparison-grid">${items.map((item) => {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
         : this._panelText("common.learning");
       return `
-        <div class="metric">
-          <span>${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
+        <div class="appliance-comparison">
+          <span class="comparison-label">${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
           <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
-          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
+          <p class="comparison-summary">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
           ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
           ${item.source ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.source_value", { source: this._friendlyFeature(item.source) }))}</p>` : ""}
         </div>
@@ -2916,16 +3161,36 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderApplianceActions(actions) {
     const available = actions || {};
+    const alertButtons = [
+      this._applianceAlertActionTile(available, "open_evidence", this._panelText("actions.labels.open_evidence"), "mdi:chart-line"),
+      this._applianceAlertActionTile(available, "mark_expected", this._panelText("actions.labels.mark_expected"), "mdi:check-decagram", this._panelText("actions.helpers.mark_expected")),
+      this._applianceAlertActionTile(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), "mdi:message-alert-outline", this._panelText("actions.helpers.mark_unhelpful")),
+    ].filter(Boolean);
     const buttons = [
-      this._applianceActionButton(available, "open_evidence", this._panelText("actions.labels.open_evidence")),
       this._applianceActionButton(available, "review_nilm_assignment", this._panelText("actions.labels.review_nilm_assignment"), true),
-      this._applianceActionButton(available, "mark_expected", this._panelText("actions.labels.mark_expected"), true),
-      this._applianceActionButton(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), true),
       this._applianceActionButton(available, "pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
       this._applianceActionButton(available, "relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
       this._applianceActionButton(available, "open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
     ].filter(Boolean);
-    return buttons.length ? `<div class="actions">${buttons.join("")}</div>` : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
+    if (!alertButtons.length && !buttons.length) {
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
+    }
+    return `
+      ${alertButtons.length ? `<div class="decision-tiles appliance-alert-actions">${alertButtons.join("")}</div>` : ""}
+      ${buttons.length ? `<div class="actions appliance-general-actions">${buttons.join("")}</div>` : ""}
+    `;
+  }
+
+  _applianceAlertActionTile(actions, actionKey, label, icon, helper = "") {
+    const action = actions && actions[actionKey];
+    if (!action) {
+      return "";
+    }
+    const busyKey = `appliance_detail_${actionKey}`;
+    const disabled = this._busyAction === busyKey || action.enabled === false ? "disabled" : "";
+    const reason = action.unavailable_label || action.unavailable_reason || "";
+    const title = reason ? ` title="${this._escape(reason)}"` : "";
+    return `<button type="button" data-appliance-detail-action="${actionKey}" class="decision-tile appliance-alert-action"${title} ${disabled}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(action.label || label)}</strong>${helper ? `<small>${this._escape(helper)}</small>` : ""}</span></button>`;
   }
 
   _applianceActionButton(actions, actionKey, label, secondary = false) {
@@ -3546,27 +3811,55 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _zoomNilmGraph(factor) {
     const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
+    this._zoomGraphWindow(window, factor, (next) => { this._nilmGraphWindow = next; });
+  }
+
+  _panNilmGraph(direction) {
+    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
+    this._panGraphWindow(window, direction, (next) => { this._nilmGraphWindow = next; });
+  }
+
+  _setNilmGraphWindow(start, end, bounds) {
+    this._setGraphWindow(start, end, bounds, (next) => { this._nilmGraphWindow = next; });
+  }
+
+  _zoomApplianceHistoryGraph(factor) {
+    this._zoomGraphWindow(
+      this._applianceDetailHistoryGraphWindow(),
+      factor,
+      (next) => { this._applianceDetailHistoryWindow = next; },
+    );
+  }
+
+  _panApplianceHistoryGraph(direction) {
+    this._panGraphWindow(
+      this._applianceDetailHistoryGraphWindow(),
+      direction,
+      (next) => { this._applianceDetailHistoryWindow = next; },
+    );
+  }
+
+  _zoomGraphWindow(window, factor, setWindow) {
     if (!window || !Number.isFinite(factor) || factor <= 0) {
       return;
     }
     const span = window.end - window.start;
     const nextSpan = Math.max(15 * 60 * 1000, Math.min(window.max - window.min, span * factor));
     const center = (window.start + window.end) / 2;
-    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
-    this._setNilmGraphWindow(center - nextSpan / 2, center + nextSpan / 2, window);
+    this._setGraphWindow(center - nextSpan / 2, center + nextSpan / 2, window, setWindow);
   }
 
-  _panNilmGraph(direction) {
-    const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
+  _panGraphWindow(window, direction, setWindow) {
     if (!window || !Number.isFinite(direction)) {
       return;
     }
     const shift = (window.end - window.start) * direction;
-    this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
-    this._setNilmGraphWindow(window.start + shift, window.end + shift, window);
+    this._setGraphWindow(window.start + shift, window.end + shift, window, setWindow);
   }
 
-  _setNilmGraphWindow(start, end, bounds) {
+  _setGraphWindow(start, end, bounds, setWindow) {
     if (start < bounds.min) {
       end += bounds.min - start;
       start = bounds.min;
@@ -3575,10 +3868,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       start -= end - bounds.max;
       end = bounds.max;
     }
-    this._nilmGraphWindow = {
+    setWindow({
       start: Math.max(bounds.min, start),
       end: Math.min(bounds.max, end),
-    };
+    });
     this._render();
   }
 
@@ -4763,6 +5056,30 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!window) {
       return "";
     }
+    return this._renderHistoryGraphControls(
+      window,
+      "nilm-graph",
+      "data-nilm-workspace-graph",
+      this._panelTextFormat("nilm_workspace.graph_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
+    );
+  }
+
+  _renderApplianceHistoryGraphControls(window) {
+    if (!window) {
+      return "";
+    }
+    return this._renderHistoryGraphControls(
+      window,
+      "appliance-history-graph",
+      "data-appliance-history-graph",
+      this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
+    );
+  }
+
+  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText) {
+    if (!window) {
+      return "";
+    }
     const span = window.end - window.start;
     const fullSpan = window.max - window.min;
     const minSpan = 15 * 60 * 1000;
@@ -4774,26 +5091,40 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const zoomOutLabel = this._panelText("actions.labels.zoom_out");
     const panEarlierLabel = this._panelText("actions.labels.pan_earlier");
     const panLaterLabel = this._panelText("actions.labels.pan_later");
-    return `<div data-nilm-workspace-graph>
+    return `<div ${containerAttribute}>
       <div class="actions nilm-graph-controls">
-        <button type="button" class="secondary icon-button" data-nilm-graph-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-nilm-graph-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-nilm-graph-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-nilm-graph-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
       </div>
-      <p class="muted" data-nilm-graph-window>${this._escape(this._panelTextFormat("nilm_workspace.graph_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }))}</p>
+      <p class="muted" data-${prefix}-window>${this._escape(windowText)}</p>
     </div>`;
   }
 
   _nilmWorkspaceGraphWindow(workspace) {
     const history = (workspace && workspace.history) || {};
-    const min = Date.parse(history.start || "");
-    const max = Date.parse(history.end || "");
+    return this._historyGraphWindow({
+      min: Date.parse(history.start || ""),
+      max: Date.parse(history.end || ""),
+    }, this._nilmGraphWindow);
+  }
+
+  _applianceDetailHistoryGraphWindow() {
+    return this._historyGraphWindow(
+      this._applianceDetailHistoryBounds,
+      this._applianceDetailHistoryWindow,
+    );
+  }
+
+  _historyGraphWindow(bounds, savedWindow) {
+    const min = Number(bounds && bounds.min);
+    const max = Number(bounds && bounds.max);
     if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
       return null;
     }
-    const start = Math.max(min, Math.min(max - 1, this._nilmGraphWindow ? this._nilmGraphWindow.start : min));
-    const end = Math.max(start + 1, Math.min(max, this._nilmGraphWindow ? this._nilmGraphWindow.end : max));
+    const start = Math.max(min, Math.min(max - 1, savedWindow ? savedWindow.start : min));
+    const end = Math.max(start + 1, Math.min(max, savedWindow ? savedWindow.end : max));
     return { start, end, min, max };
   }
 
@@ -4826,14 +5157,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   _visibleNilmWorkspaceSeries(workspace, graphWindow) {
     const knownIds = new Set((workspace.known_load_overlays || []).flatMap((item) => item.entity_ids || []));
     const solarIds = new Set((workspace.solar_overlays || []).flatMap((item) => item.entity_ids || []));
-    return this._chartSeries(this._nilmWorkspaceHistorySeries).map((item) => {
-      if (!graphWindow) {
-        return item;
-      }
-      return Object.assign({}, item, {
-        points: item.points.filter((point) => point.time >= graphWindow.start && point.time <= graphWindow.end),
-      });
-    }).filter((item) => item.points.length).filter((item) => {
+    return this._visibleChartSeries(this._nilmWorkspaceHistorySeries, graphWindow).filter((item) => {
       if (!this._nilmOverlayVisibility.known_load && knownIds.has(item.entity_id)) {
         return false;
       }
@@ -4842,6 +5166,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       return true;
     });
+  }
+
+  _visibleChartSeries(historySeries, graphWindow) {
+    return this._chartSeries(historySeries).map((item) => {
+      if (!graphWindow) {
+        return item;
+      }
+      return Object.assign({}, item, {
+        points: item.points.filter((point) => point.time >= graphWindow.start && point.time <= graphWindow.end),
+      });
+    }).filter((item) => item.points.length);
   }
 
   _boundedChartPoints(points) {
@@ -4865,12 +5200,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _historyApiPath(alert) {
-    const entities = alert.graph_entities || [];
     const start = alert.graph_window_start || new Date(Date.now() - 86400000).toISOString();
+    return this._historyApiPathForEntities(
+      alert.graph_entities || [],
+      start,
+      alert.graph_window_end,
+    );
+  }
+
+  _historyApiPathForEntities(entities, start, end) {
     const params = new URLSearchParams();
     params.set("filter_entity_id", entities.join(","));
-    if (alert.graph_window_end) {
-      params.set("end_time", alert.graph_window_end);
+    if (end) {
+      params.set("end_time", end);
     }
     params.set("minimal_response", "1");
     params.set("no_attributes", "1");
@@ -4940,8 +5282,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return this._panelText("status.not_found");
   }
 
-  _metric(label, value) {
-    return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
+  _metric(label, value, icon = "") {
+    const heading = icon
+      ? `<span class="metric-heading"><ha-icon icon="${this._escape(icon)}"></ha-icon>${this._escape(label)}</span>`
+      : `<span>${this._escape(label)}</span>`;
+    return `<div class="metric">${heading}<strong>${this._escape(this._formatMetricValue(value))}</strong></div>`;
   }
 
   _finiteMetricValue(value) {
@@ -5048,8 +5393,41 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       })}%`;
     }
     const formatted = number.toLocaleString(undefined, { maximumFractionDigits: 3 });
-    const unit = String(alert && alert.value_unit || "").trim();
+    const unit = this._alertMetricUnit(alert);
     return `${formatted}${unit ? ` ${unit}` : ""}`;
+  }
+
+  _alertMetricUnit(alert) {
+    const explicit = String(alert && alert.value_unit || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    const label = String(alert && (alert.value_label || alert.value_metric || alert.feature) || "").toLowerCase();
+    if (/factor/.test(label)) {
+      return "PF";
+    }
+    if (/ratio|percent/.test(label)) {
+      return "%";
+    }
+    if (/runtime|duration|active|idle|time/.test(label)) {
+      return "min";
+    }
+    if (/energy|usage/.test(label)) {
+      return "kWh";
+    }
+    if (/current/.test(label)) {
+      return "A";
+    }
+    if (/voltage/.test(label)) {
+      return "V";
+    }
+    if (/frequency/.test(label)) {
+      return "Hz";
+    }
+    if (/power|demand|watt/.test(label)) {
+      return "W";
+    }
+    return "";
   }
 
   _renderActionGroup(title, description, buttons) {

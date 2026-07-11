@@ -277,6 +277,7 @@ FIELD_CIRCUIT_RETENTION_MODE = "circuit_retention_mode"
 FIELD_ENABLE_UTILITY_COMPARISON = "enable_utility_comparison"
 FIELD_CIRCUIT_ID = "circuit_id"
 FIELD_UTILITY_ENERGY_ENTITY = "utility_energy_entity"
+FIELD_UTILITY_COST_ENTITY = "utility_cost_entity"
 FIELD_UTILITY_STATISTIC_ID = "utility_statistic_id"
 FIELD_UTILITY_SOURCE_TYPE = "utility_source_type"
 FIELD_UTILITY_STATISTIC_PERIOD = "utility_statistic_period"
@@ -437,12 +438,6 @@ _ADVANCED_RESET_SETTING_KEYS = {
         FIELD_BUDGET_KWH,
         FIELD_BUDGET_ALERT_RATIO,
         "min_elapsed_days",
-        FIELD_DEFAULT_RATE_PER_KWH,
-        FIELD_TOU_RATE_PER_KWH,
-        FIELD_TOU_START,
-        FIELD_TOU_END,
-        FIELD_TOU_WEEKDAYS,
-        FIELD_TOU_NAME,
     ),
     "reset_demand_capacity_settings_to_defaults": (
         FIELD_WINDOW_MINUTES,
@@ -1706,6 +1701,10 @@ def _utility_schema(
                 ),
             ): _single_energy_kwh_entity_selector(selectable_utility_entities),
             vol.Optional(
+                FIELD_UTILITY_COST_ENTITY,
+                default=str(settings.get(FIELD_UTILITY_COST_ENTITY) or ""),
+            ): _single_sensor_entity_selector(),
+            vol.Optional(
                 FIELD_UTILITY_STATISTIC_ID,
                 default=str(
                     settings.get(FIELD_UTILITY_STATISTIC_ID)
@@ -1951,30 +1950,6 @@ def _billing_cost_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
             FIELD_BILLING_MIN_ELAPSED_DAYS,
             default=int(settings.get("min_elapsed_days", 3)),
         ): _number_selector(minimum=1, maximum=31, step=1),
-        vol.Optional(
-            FIELD_DEFAULT_RATE_PER_KWH,
-            default=float(settings.get(FIELD_DEFAULT_RATE_PER_KWH, 0.0)),
-        ): _number_selector(minimum=0.0, step="any"),
-        vol.Optional(
-            FIELD_TOU_RATE_PER_KWH,
-            default=float(settings.get(FIELD_TOU_RATE_PER_KWH, 0.0)),
-        ): _number_selector(minimum=0.0, step="any"),
-        vol.Optional(
-            FIELD_TOU_START,
-            default=str(settings.get(FIELD_TOU_START) or ""),
-        ): _time_selector(),
-        vol.Optional(
-            FIELD_TOU_END,
-            default=str(settings.get(FIELD_TOU_END) or ""),
-        ): _time_selector(),
-        vol.Optional(
-            FIELD_TOU_WEEKDAYS,
-            default=_tou_weekday_selection(settings.get(FIELD_TOU_WEEKDAYS)),
-        ): _weekday_select_selector(),
-        vol.Optional(
-            FIELD_TOU_NAME,
-            default=str(settings.get(FIELD_TOU_NAME) or "Peak"),
-        ): _text_selector(),
     }
 
 
@@ -5451,10 +5426,15 @@ def _utility_settings_from_input(
     utility_statistic_id = str(
         user_input.get(FIELD_UTILITY_STATISTIC_ID) or ""
     ).strip()
+    utility_cost_entity = str(
+        user_input.get(FIELD_UTILITY_COST_ENTITY) or ""
+    ).strip()
     if utility_energy_entity:
         settings[FIELD_UTILITY_ENERGY_ENTITY] = utility_energy_entity
     if utility_statistic_id:
         settings[FIELD_UTILITY_STATISTIC_ID] = utility_statistic_id
+    if utility_cost_entity:
+        settings[FIELD_UTILITY_COST_ENTITY] = utility_cost_entity
     settings[FIELD_UTILITY_SOURCE_TYPE] = source_type
     settings[FIELD_UTILITY_STATISTIC_PERIOD] = statistic_period
     measured_entities = _strict_string_list(

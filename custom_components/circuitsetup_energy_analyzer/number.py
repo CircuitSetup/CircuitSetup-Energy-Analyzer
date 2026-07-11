@@ -16,6 +16,7 @@ from .entity import (
 )
 from .entity_catalog import compact_descriptions_for_setup
 from .models import SensorRole
+from .tariff import configured_electricity_rate, global_cost_settings
 
 try:
     from homeassistant.components.number import NumberEntity
@@ -145,6 +146,114 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
         )
 
 
+class GlobalElectricityRateNumber(NumberEntity):
+    """Number entity for the analyzer-wide electricity rate."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_icon = "mdi:currency-usd"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 100.0
+    _attr_native_step = 0.001
+    _attr_native_unit_of_measurement = "$/kWh"
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        self.coordinator = coordinator
+        self._entry_id = entry_id
+        self._attr_name = "CircuitSetup Energy Analyzer Fallback Electricity Rate"
+        self._attr_unique_id = f"{entry_id}_electricity_rate"
+        self._attr_suggested_object_id = (
+            "circuitsetup_energy_analyzer_electricity_rate"
+        )
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name for fallback tests."""
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def native_value(self) -> float:
+        """Return the shared electricity rate, using zero when unconfigured."""
+        store_data = getattr(self.coordinator, "store_data", None)
+        return configured_electricity_rate(
+            getattr(store_data, "cost_settings_by_circuit", {}),
+        )
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the currency-per-energy unit."""
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group the shared rate under the integration device."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "CircuitSetup Energy Analyzer",
+            "manufacturer": "CircuitSetup",
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return whether the shared rate can currently be changed."""
+        return callable(getattr(self.coordinator, "async_set_global_cost_rate", None))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist an analyzer-wide electricity rate."""
+        await async_call_or_raise(
+            self.coordinator,
+            "async_set_global_cost_rate",
+            "set electricity rate",
+            float(value),
+        )
+
+
+class GlobalTimeOfUseRateNumber(GlobalElectricityRateNumber):
+    """Number entity for the analyzer-wide Time-of-Use rate."""
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id=entry_id)
+        self._attr_name = "CircuitSetup Energy Analyzer Time-Of-Use Rate"
+        self._attr_unique_id = f"{entry_id}_tou_rate"
+        self._attr_suggested_object_id = "circuitsetup_energy_analyzer_tou_rate"
+
+    @property
+    def native_value(self) -> float:
+        """Return the globally configured Time-of-Use rate."""
+        try:
+            value = global_cost_settings(self.coordinator).get(
+                "tou_rate_per_kwh",
+                0.0,
+            )
+            return max(float(value), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @property
+    def available(self) -> bool:
+        """Return whether the global Time-of-Use rate can be changed."""
+        return callable(getattr(self.coordinator, "async_set_global_tou_rate", None))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist the global Time-of-Use rate."""
+        await async_call_or_raise(
+            self.coordinator,
+            "async_set_global_tou_rate",
+            "set Time-of-Use rate",
+            float(value),
+        )
+
+
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up number entities for daily circuit controls."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -179,6 +288,13 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             )
             for description in descriptions
         )
+
+    entities.extend(
+        (
+            GlobalElectricityRateNumber(coordinator, entry_id=entry_id),
+            GlobalTimeOfUseRateNumber(coordinator, entry_id=entry_id),
+        )
+    )
 
     prune_stale_entity_registry_entries(
         hass,

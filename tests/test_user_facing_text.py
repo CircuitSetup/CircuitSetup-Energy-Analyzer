@@ -189,6 +189,7 @@ EXPECTED_UTILITY_LABELS = {
     "enable_utility_comparison": "Enable Utility Comparison",
     "circuit_id": "Circuit",
     "utility_energy_entity": "Utility Energy Entity",
+    "utility_cost_entity": "Utility Cost Entity",
     "utility_statistic_id": "Utility Statistic ID",
     "utility_source_type": "Utility Source Type",
     "utility_statistic_period": "Utility Statistic Period",
@@ -229,12 +230,6 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "budget_kwh": "Budget kWh",
     "budget_alert_ratio": "Budget Alert Ratio",
     "billing_min_elapsed_days": "Billing Minimum Elapsed Days",
-    "default_rate_per_kwh": "Default Rate Per kWh",
-    "tou_rate_per_kwh": "TOU Rate Per kWh",
-    "tou_start": "TOU Start",
-    "tou_end": "TOU End",
-    "tou_weekdays": "TOU Weekdays",
-    "tou_name": "TOU Name",
     "reset_demand_capacity_settings_to_defaults": (
         "Reset Demand And Capacity To Defaults"
     ),
@@ -344,6 +339,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "tou_weekdays": "TOU Weekdays",
     "tolerance_percent": "Tolerance Percent",
     "utility_energy_entity": "Utility Energy Entity",
+    "utility_cost_entity": "Utility Cost Entity",
     "utility_source_type": "Utility Source Type",
     "utility_statistic_id": "Utility Statistic ID",
     "utility_statistic_period": "Utility Statistic Period",
@@ -561,13 +557,15 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert "only the sections that apply" in settings_step["description"].lower()
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
-    billing_descriptions = settings_step["sections"]["billing_cost_settings"][
-        "data_description"
-    ]
-    assert "time picker" in billing_descriptions["tou_start"].lower()
-    assert "time picker" in billing_descriptions["tou_end"].lower()
-    assert "choose" in billing_descriptions["tou_weekdays"].lower()
-    assert "comma-separated" not in billing_descriptions["tou_weekdays"].lower()
+    billing_fields = settings_step["sections"]["billing_cost_settings"]["data"]
+    assert not {
+        "default_rate_per_kwh",
+        "tou_rate_per_kwh",
+        "tou_start",
+        "tou_end",
+        "tou_weekdays",
+        "tou_name",
+    } & billing_fields.keys()
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
@@ -1356,7 +1354,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-graph-zoom",
         "data-nilm-graph-pan",
         "data-nilm-workspace-graph",
-        "data-nilm-graph-window",
+        "data-${prefix}-window",
         "_zoomNilmGraph",
         "_panNilmGraph",
             "_nilmWorkspaceGraphWindow",
@@ -1577,6 +1575,194 @@ if (html.includes("0.6 $")) {
 }
 """
     )
+
+
+def test_appliance_detail_uses_icons_grids_timeline_and_alert_action_tiles() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  detail: {
+    activity_state: "Running",
+    current_power_w: 820,
+    source_type: "direct_meter",
+    confidence: 0.87,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: "Measured",
+    daily_energy_kwh: 2.4,
+    runtime_today_seconds: 7200,
+    run_count_today: 3,
+    cost_today: 0.6,
+    recent_timeline: { items: [{ timestamp: "2026-07-11T12:00:00Z", title: "Started", detail: "Compressor started." }] },
+    today_vs_normal: [{ metric_id: "current_power_w", label: "Current power", unit: "W", current_value: 820, normal_low: 300, normal_high: 600, status: "higher", confidence: 0.8, source: "baseline" }],
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: [{ message: "Power is above normal.", severity: "warning" }]
+  },
+  actions: {
+    open_evidence: { type: "navigate", path: "/evidence" },
+    mark_expected: { domain: "test", service: "expected" },
+    mark_unhelpful: { domain: "test", service: "unhelpful" },
+    relearn_baseline: { domain: "test", service: "relearn" }
+  }
+};
+const html = panel._renderApplianceDetailBody();
+for (const expected of [
+  'icon="mdi:play-circle-outline"',
+  'icon="mdi:flash-outline"',
+  'icon="mdi:transmission-tower"',
+  'icon="mdi:heart-pulse"',
+  'icon="mdi:lightning-bolt"',
+  'icon="mdi:chart-line"',
+  'icon="mdi:cpu-64-bit"',
+  'icon="mdi:calendar-today"',
+  'icon="mdi:timer-outline"',
+  'icon="mdi:counter"',
+  'icon="mdi:currency-usd"',
+  'class="appliance-timeline"',
+  'class="appliance-comparison-grid"',
+  'class="decision-tiles appliance-alert-actions"',
+]) {
+  if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
+}
+panel._applianceDetail.actions = { relearn_baseline: { domain: "test", service: "relearn" } };
+const noAlertActions = panel._renderApplianceActions(panel._applianceDetail.actions);
+for (const ambiguous of ["Open Evidence", "Mark Expected", "Not Helpful"]) {
+  if (noAlertActions.includes(ambiguous)) throw new Error(`unexpected ${ambiguous}: ${noAlertActions}`);
+}
+"""
+    )
+
+
+def test_alert_technical_details_keep_metric_boxes() -> None:
+    asset = (INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[data-evidence-technical] .metric" not in asset
+
+
+def test_appliance_detail_renders_history_before_the_summary() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  history: {
+    entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+    default_hours: 168,
+    period_hours: [24, 168, 720],
+  },
+  detail: {
+    activity_state: "Running",
+    current_power_w: 128,
+    source_type: "direct_meter",
+    confidence: null,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: null,
+    daily_energy_kwh: 1.8,
+    runtime_today_seconds: 7200,
+    run_count_today: 3,
+    cost_today: 0.6,
+    recent_timeline: { items: [] },
+    today_vs_normal: [],
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: []
+  },
+  actions: {}
+};
+panel._applianceDetailHistorySeries = [[
+  { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
+]];
+panel._applianceDetailHistoryBounds = {
+  min: Date.parse("2026-07-10T00:00:00Z"),
+  max: Date.parse("2026-07-11T00:00:00Z"),
+};
+const html = panel._renderApplianceDetailBody();
+const graph = html.indexOf('class="chart"');
+const summary = html.indexOf('class="panel summary"');
+if (graph < 0 || graph > summary) {
+  throw new Error(`expected appliance history graph before summaries: ${html}`);
+}
+for (const expected of [
+  "Energy History",
+  'data-appliance-history-period',
+  'data-appliance-history-graph-zoom="0.5"',
+  'data-appliance-history-graph-pan="-0.5"',
+  "<title>Fridge Power: 128",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_history_requests_the_selected_period() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const requests = [];
+  const panel = new context.Panel();
+  context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+  context.window.location.search = "?appliance_detail=1&circuit_id=fridge";
+  panel._loadedRouteKey = "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=fridge";
+  panel._applianceDetail = {
+    history: {
+      entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+      default_hours: 168,
+      period_hours: [24, 168, 720],
+    },
+  };
+  panel._render = () => {};
+  panel._requestJson = async (apiPath, fetchPath) => {
+    requests.push({ apiPath, fetchPath });
+    return [[{ entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" }]];
+  };
+  await panel._loadApplianceDetailHistory(24);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].apiPath, /^history\/period\//);
+  assert.match(requests[0].apiPath, /filter_entity_id=sensor.fridge_power%2Csensor.fridge_energy/);
+  assert.equal(panel._applianceDetailHistoryHours, 24);
+  assert.equal(panel._applianceDetailHistorySeries.length, 1);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_suggested_settings_route_renders_the_notification_review() -> None:
+    _run_panel_node_script(
+        """
+context.window.location.search = "?review_suggested_settings=1&entry_id=entry-1";
+const panel = new context.Panel();
+panel._payload = {
+  status: "settings_recommendations",
+  setting_recommendations: [{
+    display_label: "Raise daily spike threshold",
+    status: "pending",
+    actions: { apply: {} },
+  }],
+};
+if (!panel._routeRequestsSuggestedSettings()) {
+  throw new Error("expected notification review route to be recognized");
+}
+const html = panel._renderSuggestedSettingsBody();
+for (const expected of ["Suggested Settings", "Raise daily spike threshold"]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
 
 def test_scoped_load_error_contracts() -> None:
     _run_panel_node_script(
@@ -3495,9 +3681,9 @@ def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
     body = """
 const panel = new context.Panel();
 const basePath = "/config/integrations/dashboard#config_entry=entry-hvac";
-const escapedBasePath = "/config/integrations/dashboard#config_entry=entry-hvac";
-const advancedHref = 'href="' + escapedBasePath
-  + "&amp;circuit_id=hvac&amp;options_step=advanced_settings" + '"';
+const escapedBasePath = basePath;
+const advancedPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
+const advancedHref = 'href="' + advancedPath + '"';
 const entityDetailHref = 'href="' + escapedBasePath
   + "&amp;options_step=entity_detail" + '"';
 panel._setupHealthLoading = false;
@@ -3530,7 +3716,7 @@ panel._setupHealth = {
       fix: "Configure breaker amps for HVAC",
       reason: "Capacity tracking needs the circuit breaker size.",
       affected_circuit_name: "HVAC",
-      open_path: `${basePath}&circuit_id=hvac&options_step=advanced_settings`,
+      open_path: advancedPath,
     },
   ],
 };
@@ -4423,9 +4609,9 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
     for selector in (
         ".evidence-meta .metric",
         '[data-evidence-comparison] .metric',
-        '[data-evidence-technical] .metric',
     ):
         assert selector in scoped_style
+    assert '[data-evidence-technical] .metric' not in scoped_style
     for declaration in (
         "background: transparent;",
         "border: 0;",
@@ -5199,6 +5385,8 @@ def test_alert_evidence_render_contracts() -> None:
         [{ value_format: "number", value_unit: "W" }, 120, "120 W"],
         [{ value_format: "number", value_unit: "VAR" }, 42, "42 VAR"],
         [{ value_format: "number", value_unit: "VA" }, 128, "128 VA"],
+        [{ value_label: "Real power", value_format: "number", value_unit: "" }, 120, "120 W"],
+        [{ value_label: "Runtime today", value_format: "number", value_unit: "" }, 42, "42 min"],
       ]) assert.equal(panel._formatAlertMetricValue(alert, value), expected);
     }
 
@@ -5778,7 +5966,7 @@ def test_readme_explains_notification_evidence_workflow() -> None:
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include one final Markdown link" in normalized_text
-    assert "link directly to **Configure > Review Suggested Settings**" in readme_text
+    assert "link directly to **Review Suggested Settings** in the evidence panel" in readme_text
     assert "visual comparison" in normalized_text
     assert "graph-first evidence" in normalized_text
     assert "focused inspector" in normalized_text

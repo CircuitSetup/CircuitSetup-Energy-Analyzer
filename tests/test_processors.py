@@ -2302,6 +2302,45 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
 
 
+def test_cost_processor_prefers_the_derived_utility_rate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            default_rate_per_kwh=0.20,
+        ),
+        utility_rate_for_circuit=lambda _circuit_id: 0.31,
+    )
+
+    result = processor.process(_energy_sample(115.0), config, context)
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.31
+
+
 def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -4541,6 +4580,7 @@ async def test_utility_comparison_processor_updates_state_and_returns_alert() ->
     processor = processors.UtilityComparisonProcessor(
         settings_for_circuit=lambda _circuit_id: UtilityComparisonSettings(
             utility_energy_entity="sensor.opower_current_bill_usage",
+            utility_cost_entity="sensor.opower_current_bill_cost",
             measured_energy_entities=("sensor.panel_import_energy",),
             tolerance_percent=10.0,
         ),
@@ -4555,12 +4595,15 @@ async def test_utility_comparison_processor_updates_state_and_returns_alert() ->
         statistics_kwh_for_id=None,
         statistics_kwh_sum_for_entities=None,
         load_energy_entity_ids_for_sum=lambda _circuit_id: (),
+        numeric_value_for_entity=lambda entity_id: {
+            "sensor.opower_current_bill_cost": 30.0,
+        }.get(entity_id),
     )
 
     result = await processor.process(config, context)
 
     assert result.store_dirty is False
-    assert len(result.state_updates) == 4
+    assert len(result.state_updates) == 5
     assert len(result.alerts) == 1
     assert result.notifications == result.alerts
     assert policy.observations[0].feature == "utility_energy_mismatch"
@@ -4577,6 +4620,7 @@ async def test_utility_comparison_processor_updates_state_and_returns_alert() ->
     assert updates[("utility_comparison_evidence_by_circuit", "mains")] == {
         "status": "mismatch",
         "utility_energy_entity": "sensor.opower_current_bill_usage",
+        "utility_cost_entity": "sensor.opower_current_bill_cost",
         "utility_statistic_id": "",
         "utility_source_id": "sensor.opower_current_bill_usage",
         "utility_source_type": "entity",
@@ -4588,9 +4632,12 @@ async def test_utility_comparison_processor_updates_state_and_returns_alert() ->
         "period_end": None,
         "utility_data_lag_hours": None,
         "utility_kwh": 120.0,
+        "utility_cost": 30.0,
+        "rate_per_kwh": 0.25,
         "measured_kwh": 135.0,
         "difference_kwh": 15.0,
         "difference_percent": 12.5,
         "absolute_difference_percent": 12.5,
         "tolerance_percent": 10.0,
     }
+    assert updates[("utility_cost_rate_by_circuit", "mains")] == 0.25

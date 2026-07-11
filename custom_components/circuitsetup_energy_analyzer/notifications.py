@@ -193,10 +193,10 @@ def _settings_recommendation_message(total_pending: int, entry_id: str) -> str:
 
 
 def _settings_recommendations_options_path(entry_id: str) -> str:
-    return (
-        "/config/integrations/dashboard#"
-        f"{urlencode({'config_entry': entry_id, 'options_step': 'recommendations'})}"
+    query = urlencode(
+        {"review_suggested_settings": "1", "entry_id": entry_id}
     )
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}"
 
 
 def _comparison_value_label(alert: AlertEvidence) -> str:

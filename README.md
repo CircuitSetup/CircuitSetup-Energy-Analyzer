@@ -325,10 +325,11 @@ A good dashboard order is:
 When a single appliance needs review, use this pattern:
 
 1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Daily Energy Usage.
-2. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
-3. **Energy tracking**: Daily Energy Usage, Energy Usage Status, goals, billing, and cost where those features are enabled.
-4. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
-5. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
+2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover a point for its value and timestamp, and use the graph controls to zoom or pan.
+3. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
+4. **Energy tracking**: Daily Energy Usage, Energy Usage Status, goals, billing, and cost where those features are enabled.
+5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
+6. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
 
 ## Let the analyzer learn
 
@@ -552,13 +553,15 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 ### Billing, cost, and Time-of-Use
 
-Billing and cost features estimate usage and cost from analyzer-retained data. They do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
+Billing and cost features estimate usage and cost from analyzer-retained data. When matching Opower or utility current-bill usage and cost sensors are configured, the analyzer divides cost by kWh and uses that shared rate for every appliance. The read-only global **Electricity Rate** sensor shows the active rate. Without matching Opower data, it shows the value from the editable global **Fallback Electricity Rate** number on the CircuitSetup Energy Analyzer device. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
-Configure billing-cycle and cost settings from:
+Configure per-circuit billing settings from:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
-Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
+Configure the shared fallback rate and Time-of-Use rate, start/end times, weekdays, and label from the **CircuitSetup Energy Analyzer** device entities.
+
+Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
 Time-of-use settings use a time picker for the peak start/end times and a weekday selector for peak days, so normal setup does not require typing comma-separated weekday numbers.
 
@@ -733,7 +736,7 @@ Persistent notifications include one final Markdown link to **Open evidence** wh
 
 The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. It presents a visual comparison before graph-first evidence and the explanation, then keeps the three response choices together behind one **Apply** action. Companion App notifications can use the same target through `clickAction`.
 
-The analyzer can also notify when suggested Advanced Circuit Settings are ready for review. Those notifications link directly to **Configure > Review Suggested Settings**.
+The analyzer can also notify when suggested Advanced Circuit Settings are ready for review. Those notifications link directly to **Review Suggested Settings** in the evidence panel.
 
 For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
 

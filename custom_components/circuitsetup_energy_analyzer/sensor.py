@@ -88,6 +88,8 @@ from .nilm_virtual import (
 )
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
+from .tariff import configured_electricity_rate
+from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
 try:
@@ -834,8 +836,13 @@ def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
 
 def cost_current_rate_value(state: Any, circuit_id: str) -> float:
     """Return the active cost rate for a circuit."""
-    return float(
-        getattr(state, "cost_current_rate_by_circuit", {}).get(circuit_id, 0.0)
+    cost_rates = getattr(state, "cost_current_rate_by_circuit", {})
+    fallback_rate = (
+        cost_rates.get(circuit_id, 0.0) if isinstance(cost_rates, Mapping) else 0.0
+    )
+    return effective_electricity_rate(
+        getattr(state, "utility_cost_rate_by_circuit", {}),
+        fallback_rate,
     )
 
 
@@ -2225,6 +2232,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="cost_current_rate",
         name_suffix="Cost Current Rate",
         value_fn=cost_current_rate_value,
+        native_unit_of_measurement="$/kWh",
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
@@ -2944,6 +2952,67 @@ class SetupHealthSensor(CoordinatorEntity, SensorEntity):
         return setup_health_attributes(self.coordinator)
 
 
+class EffectiveElectricityRateSensor(CoordinatorEntity, SensorEntity):
+    """Read-only electricity rate selected from Opower or the fallback setting."""
+
+    _attr_has_entity_name = False
+    _attr_entity_category = None
+    _attr_icon = "mdi:currency-usd"
+    _attr_native_unit_of_measurement = "$/kWh"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: Any, *, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._attr_name = "CircuitSetup Energy Analyzer Electricity Rate"
+        self._attr_unique_id = f"{entry_id}_electricity_rate"
+        self._attr_suggested_object_id = (
+            "circuitsetup_energy_analyzer_electricity_rate"
+        )
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for fallback tests."""
+        return self._attr_unique_id
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Return the stable suggested object ID for fallback tests."""
+        return self._attr_suggested_object_id
+
+    @property
+    def name(self) -> str:
+        """Return the visible entity name."""
+        return self._attr_name
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Group the effective rate under the integration device."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "CircuitSetup Energy Analyzer",
+            "manufacturer": "CircuitSetup",
+        }
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the currency-per-energy unit."""
+        return self._attr_native_unit_of_measurement
+
+    @property
+    def native_value(self) -> float:
+        """Return the currently applicable rate."""
+        store_data = getattr(self.coordinator, "store_data", None)
+        fallback_rate = configured_electricity_rate(
+            getattr(store_data, "cost_settings_by_circuit", {}),
+        )
+        state = getattr(self.coordinator, "data", None)
+        return effective_electricity_rate(
+            getattr(state, "utility_cost_rate_by_circuit", {}),
+            fallback_rate,
+        )
+
+
 class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     """Sensor exposing one analyzed value for a configured circuit."""
 
@@ -3351,6 +3420,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     configured_circuits = tuple(circuits_for_entities(entry, coordinator))
     entities: list[SensorEntity] = [
         SetupHealthSensor(coordinator, entry_id=entry_id),
+        EffectiveElectricityRateSensor(coordinator, entry_id=entry_id),
     ]
 
     for raw_circuit in configured_circuits:

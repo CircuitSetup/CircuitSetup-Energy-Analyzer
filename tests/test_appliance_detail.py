@@ -201,6 +201,36 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
 
 
+def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.active_alerts_by_circuit["fridge"] = []
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    assert "open_evidence" not in payload["actions"]
+    assert "mark_expected" not in payload["actions"]
+    assert "mark_unhelpful" not in payload["actions"]
+    assert "relearn_baseline" in payload["actions"]
+
+
+def test_direct_appliance_detail_uses_the_global_opower_rate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
+        appliance_detail_for_circuit,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.30
+
+    detail = appliance_detail_for_circuit(coordinator, "fridge")
+
+    assert detail is not None
+    assert detail.cost_today == 0.55
+
+
 def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
@@ -233,6 +263,20 @@ def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
     assert timeline["status"] == "activity"
     assert timeline["latest_title"] == "Start"
     assert timeline["items"][0]["detail"] == "Observed start event."
+
+
+def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
+
+    assert payload["history"] == {
+        "entities": ["sensor.fridge_power", "sensor.fridge_energy"],
+        "default_hours": 168,
+        "period_hours": [24, 168, 720],
+    }
 
 
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:

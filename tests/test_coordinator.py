@@ -12632,10 +12632,9 @@ async def test_settings_recommendation_notification_creates_persistent_notificat
         {
             "hass": SimpleNamespace(),
             "message": (
-                "There are 2 suggested Advanced Circuit Settings to review via "
-                "CircuitSetup Energy Analyzer > Configure > "
-                "[Review Suggested Settings](/config/integrations/dashboard#"
-                "config_entry=entry-1&options_step=recommendations)."
+                "There are 2 suggested Advanced Circuit Settings to review: "
+                "[Review Suggested Settings](/circuitsetup-energy-analyzer-evidence?"
+                "review_suggested_settings=1&entry_id=entry-1)."
             ),
             "title": "CircuitSetup Energy Analyzer suggested settings",
             "notification_id": f"{DOMAIN}_settings_recommendations_entry_1",

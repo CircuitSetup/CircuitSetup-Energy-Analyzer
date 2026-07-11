@@ -1739,6 +1739,7 @@ async def test_options_utility_step_saves_opower_comparison_settings() -> None:
             "enable_utility_comparison": True,
             "circuit_id": "mains",
             "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_cost_entity": "sensor.opower_current_bill_cost",
             "utility_statistic_id": "opower:utility_elec_consumption",
             "utility_source_type": "statistics",
             "utility_statistic_period": "day",
@@ -1751,6 +1752,7 @@ async def test_options_utility_step_saves_opower_comparison_settings() -> None:
     assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
         "mains": {
             "utility_energy_entity": "sensor.opower_current_bill_usage",
+            "utility_cost_entity": "sensor.opower_current_bill_cost",
             "utility_statistic_id": "opower:utility_elec_consumption",
             "utility_source_type": "statistics",
             "utility_statistic_period": "day",
@@ -4297,8 +4299,12 @@ def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     assert _schema_default(schema, "max_active_minutes") == 0
     assert _schema_default(schema, "max_idle_minutes") == 0
     assert _schema_default(schema, "budget_kwh") == 0.0
-    assert _schema_default(schema, "default_rate_per_kwh") == 0.0
-    assert _schema_default(schema, "tou_rate_per_kwh") == 0.0
+    assert "default_rate_per_kwh" not in _schema_keys(schema)
+    assert "tou_rate_per_kwh" not in _schema_keys(schema)
+    assert "tou_start" not in _schema_keys(schema)
+    assert "tou_end" not in _schema_keys(schema)
+    assert "tou_weekdays" not in _schema_keys(schema)
+    assert "tou_name" not in _schema_keys(schema)
     assert _schema_default(schema, "demand_limit_w") == 0.0
     assert _schema_default(schema, "breaker_amps") == 0.0
     assert _schema_default(schema, "always_on_alert_w") == 0.0
@@ -4468,10 +4474,8 @@ def test_advanced_settings_schema_exposes_section_reset_controls() -> None:
         assert "reset_analysis_settings_to_defaults" not in _schema_keys(schema)
 
 
-def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None:
+def test_advanced_settings_schema_excludes_global_tou_controls() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-
-    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
 
     schema = config_flow._advanced_settings_schema(
         {"tou_start": "16:00", "tou_end": "21:00", "tou_weekdays": "0,2,4"},
@@ -4484,64 +4488,14 @@ def test_advanced_settings_schema_uses_guided_tou_selectors(monkeypatch) -> None
         },
     )
 
-    assert _schema_default(schema, "tou_start") == "16:00"
-    assert _schema_default(schema, "tou_end") == "21:00"
-    assert _schema_default(schema, "tou_weekdays") == ["0", "2", "4"]
-    assert _schema_validator(schema, "tou_start") == {"time": {}}
-    assert _schema_validator(schema, "tou_end") == {"time": {}}
-    assert _schema_validator(schema, "tou_weekdays") == {
-        "select": {
-            "multiple": True,
-            "mode": "dropdown",
-            "options": [
-                {"value": "0", "label": "Monday"},
-                {"value": "1", "label": "Tuesday"},
-                {"value": "2", "label": "Wednesday"},
-                {"value": "3", "label": "Thursday"},
-                {"value": "4", "label": "Friday"},
-                {"value": "5", "label": "Saturday"},
-                {"value": "6", "label": "Sunday"},
-            ],
-        }
-    }
-
-
-def test_advanced_settings_schema_accepts_blank_optional_tou_times(
-    monkeypatch,
-) -> None:
-    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-
-    class StrictTimeSelector:
-        def __init__(self, config: dict[str, object]) -> None:
-            self._config = config
-
-        def __call__(self, value):
-            if "time" in self._config and value == "":
-                raise vol.Invalid("Invalid time specified")
-            return value
-
-        def serialize(self) -> dict[str, object]:
-            return self._config
-
-    monkeypatch.setattr(config_flow, "ha_selector", StrictTimeSelector)
-
-    schema = config_flow._advanced_settings_schema(
-        {},
-        {
-            "circuit_id": "mains",
-            "name": "Mains",
-            "appliance_profile": config_flow.ApplianceProfile.MAINS_NILM.value,
-            "mode": config_flow.CircuitMode.MAINS_NILM.value,
-            "power_flow": "mains_net",
-        },
-    )
-
-    validated = schema({"billing_cost_settings": {"tou_start": "", "tou_end": ""}})
-
-    settings = config_flow._advanced_settings_from_input(validated)
-
-    assert "tou_start" not in settings
-    assert "tou_end" not in settings
+    assert not {
+        "default_rate_per_kwh",
+        "tou_rate_per_kwh",
+        "tou_start",
+        "tou_end",
+        "tou_weekdays",
+        "tou_name",
+    } & _schema_keys(schema)
 
 
 def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> None:

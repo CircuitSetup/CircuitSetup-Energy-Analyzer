@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT = 10.0
 DEFAULT_UTILITY_SOURCE_TYPE = "auto"
@@ -15,6 +17,7 @@ class UtilityComparisonSettings:
     """Settings for comparing utility-reported kWh with measured kWh."""
 
     utility_energy_entity: str = ""
+    utility_cost_entity: str = ""
     utility_statistic_id: str = ""
     utility_source_type: str = DEFAULT_UTILITY_SOURCE_TYPE
     utility_statistic_period: str = DEFAULT_UTILITY_STATISTIC_PERIOD
@@ -154,6 +157,39 @@ def compare_utility_energy(
         utility_data_lag_hours=utility_data_lag_hours,
         features=features,
     )
+
+
+def utility_rate_per_kwh(
+    utility_cost: float | None,
+    utility_kwh: float | None,
+) -> float | None:
+    """Return an Opower-derived rate when matching cost and usage are present."""
+    if utility_cost is None or utility_kwh is None or utility_kwh <= 0.0:
+        return None
+    if utility_cost < 0.0:
+        return None
+    return round(float(utility_cost) / float(utility_kwh), 4)
+
+
+def effective_electricity_rate(
+    utility_cost_rate_by_circuit: Any,
+    fallback_rate: Any = None,
+) -> float:
+    """Return the Opower rate when available, otherwise the fallback rate."""
+    if isinstance(utility_cost_rate_by_circuit, Mapping):
+        for rate in utility_cost_rate_by_circuit.values():
+            value = _positive_electricity_rate(rate)
+            if value > 0.0:
+                return value
+    return _positive_electricity_rate(fallback_rate)
+
+
+def _positive_electricity_rate(value: Any) -> float:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return rate if rate > 0.0 else 0.0
 
 
 def select_latest_statistics_energy(

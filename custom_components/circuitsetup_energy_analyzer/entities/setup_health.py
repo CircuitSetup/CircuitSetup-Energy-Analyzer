@@ -520,6 +520,8 @@ def _setup_health_options_path(
 ) -> str | None:
     if not options_step:
         return None
+    if options_step == "advanced_settings":
+        return SETUP_HEALTH_OPEN_PATH
     entry_id = getattr(coordinator, "entry_id", None)
     if not isinstance(entry_id, str) or not entry_id:
         return None

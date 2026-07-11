@@ -215,12 +215,9 @@ def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit()
     )
 
     action = payload["actions"]["open_advanced_circuit_settings"]
-    parsed = urlparse(action["path"])
-    params = parse_qs(parsed.fragment)
-    assert parsed.path == "/config/integrations/dashboard"
-    assert params["config_entry"] == ["entry-car-charger"]
-    assert params["circuit_id"] == ["car_charger"]
-    assert params["options_step"] == ["advanced_settings"]
+    assert action["path"] == (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+    )
     assert action["entry_id"] == "entry-car-charger"
     assert action["circuit_id"] == "car_charger"
     assert action["options_step"] == "advanced_settings"
@@ -2865,6 +2862,36 @@ def test_alert_evidence_payload_exposes_panel_text() -> None:
     )
 
 
+def test_suggested_settings_payload_lists_pending_recommendations_for_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    coordinator = _coordinator()
+    coordinator.entry_id = "entry-1"
+    coordinator.state.settings_recommendations_by_circuit = {
+        "hvac": [
+            {
+                "recommendation_id": "hvac:daily_spike_ratio:v1",
+                "title": "Raise daily spike threshold",
+                "status": "pending",
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        entry_id="entry-1",
+        review_suggested_settings=True,
+    )
+
+    assert payload["status"] == "settings_recommendations"
+    assert payload["requested_entry_id"] == "entry-1"
+    assert [item["display_label"] for item in payload["setting_recommendations"]] == [
+        "Raise daily spike threshold"
+    ]
+
+
 def test_alert_evidence_payload_keeps_requested_circuit_after_stale_alert_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
@@ -2953,12 +2980,9 @@ def test_setup_health_payload_links_checklist_actions_to_option_steps() -> None:
         for item in payload["issues"]
         if item["issue"] == "missing_capacity_setting"
     )
-    parsed = urlparse(capacity_issue["open_path"])
-    params = parse_qs(parsed.fragment)
-    assert parsed.path == "/config/integrations/dashboard"
-    assert params["config_entry"] == ["entry-hvac"]
-    assert params["circuit_id"] == ["hvac"]
-    assert params["options_step"] == ["advanced_settings"]
+    assert capacity_issue["open_path"] == (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+    )
 
     checklist = {item["item_id"]: item for item in payload["checklist"]}
     entity_detail = urlparse(checklist["entity_detail_level_selected"]["open_path"])

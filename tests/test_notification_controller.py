@@ -93,6 +93,15 @@ def test_notification_controller_owns_episode_key_compaction() -> None:
     assert len(key[2][1]) == 64
 
 
+def test_settings_recommendation_notification_opens_panel_review() -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    assert notifications._settings_recommendations_options_path("entry-1") == (
+        "/circuitsetup-energy-analyzer-evidence?"
+        "review_suggested_settings=1&entry_id=entry-1"
+    )
+
+
 @pytest.mark.asyncio
 async def test_notification_controller_uses_pause_controller_before_suppressing(
     monkeypatch,
