@@ -203,6 +203,33 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     assert "Confidence: 82%." not in direct_message
 
 
+def test_power_quality_notification_labels_values_and_limits_interpretation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="water_heater",
+        severity=Severity.WARNING,
+        message=(
+            "Possible issue: reactive power changed while real power stayed near "
+            "its learned baseline across recent observations."
+        ),
+        feature="reactive_shift_under_stable_real_power",
+        value_metric="reactive_to_real_ratio",
+        observed_value=0.14248837235748318,
+        baseline_value=0.10285714285714286,
+        repeated_count=3,
+    )
+
+    message = alert_notification_message(alert)
+
+    assert "Observed value (Reactive-to-real power ratio): 14.249%" in message
+    assert "Baseline value (Reactive-to-real power ratio): 10.286%" in message
+    assert "not an electrical safety diagnosis" in message
+
+
 def test_alert_notification_message_ignores_non_finite_nilm_confidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
