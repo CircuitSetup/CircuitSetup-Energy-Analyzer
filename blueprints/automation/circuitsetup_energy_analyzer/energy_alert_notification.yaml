@@ -148,7 +148,13 @@ condition:
          | map('replace', ' ', '_')
          | map('replace', '-', '_')
          | list %}
-      {{ trigger.to_state is not none and alert_state_normalized in selected_states }}
+      {{ trigger.to_state is not none
+         and alert_state_normalized in selected_states
+         and (
+           alert_state_normalized != 'possible_power_quality_change'
+           or trigger.to_state.attributes.power_quality_alert_confirmed
+              | default(false)
+         ) }}
 
 action:
   - choose:

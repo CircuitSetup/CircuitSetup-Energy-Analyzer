@@ -26,6 +26,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
     CircuitEvent,
@@ -1920,6 +1921,9 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
     assert electrical_health_attributes(power_quality_only_state, "pump")[
         "status_explanation"
     ] == "Power-quality evidence has changed from the learned baseline."
+    assert electrical_health_attributes(power_quality_only_state, "pump")[
+        "power_quality_alert_confirmed"
+    ] is False
 
     score_only_state = AnalyzerState(
         metric_consistency_status_by_circuit={"mixed": "missing_metrics"},
@@ -1933,6 +1937,33 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
     assert energy_summary_attributes(power_only_state, "pump")[
         "summary_explanation"
     ] == "No cumulative kWh evidence is available for this circuit."
+
+
+def test_electrical_health_marks_confirmed_power_quality_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        electrical_health_attributes,
+    )
+
+    state = AnalyzerState(
+        power_quality_evidence_by_circuit={
+            "pump": "Possible issue: reactive power changed from baseline"
+        },
+        active_alerts_by_circuit={
+            "pump": [
+                AlertEvidence(
+                    timestamp=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+                    circuit_id="pump",
+                    severity=Severity.WARNING,
+                    message="Possible issue: reactive power changed from baseline",
+                    feature="reactive_shift_under_stable_real_power",
+                )
+            ]
+        },
+    )
+
+    assert electrical_health_attributes(state, "pump")[
+        "power_quality_alert_confirmed"
+    ] is True
 
 
 def test_activity_summary_prefers_operating_state_lane() -> None:
